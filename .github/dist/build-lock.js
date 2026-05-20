@@ -8,7 +8,7 @@ const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
 const SCHEMA_VERSION = 1;
 
 function input(name, fallback = "") {
-  const key = `INPUT_${name.replace(/-/g, "_").toUpperCase()}`;
+  const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
   const value = process.env[key];
   return value === undefined || value === "" ? fallback : value;
 }
