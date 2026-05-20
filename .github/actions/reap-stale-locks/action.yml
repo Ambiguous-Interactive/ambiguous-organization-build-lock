@@ -1,0 +1,22 @@
+name: Reap stale build locks
+description: Clear stale holders and completed queue entries from a build lock.
+inputs:
+  lock-name:
+    description: Lock name to inspect.
+    required: true
+  lock-repository:
+    description: Repository that stores lock state.
+    required: false
+    default: Ambiguous-Interactive/ambiguous-organization-build-lock
+  state-branch:
+    description: Branch that stores lock state JSON files.
+    required: false
+    default: lock-state
+outputs:
+  reaped:
+    description: "true when stale state was removed."
+  state-sha:
+    description: Lock-state file SHA after reaping.
+runs:
+  using: node20
+  main: ../../dist/reap.js

@@ -1,0 +1,29 @@
+name: Reap stale build locks
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: build-lock-reaper
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reap:
+    name: Reap stale Unity lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Reap stale wallstop organization build lock
+        uses: ./.github/actions/reap-stale-locks
+        with:
+          lock-name: wallstop-organization-builds
+        env:
+          BUILD_LOCK_TOKEN: ${{ secrets.ORG_BUILD_LOCK_TOKEN }}

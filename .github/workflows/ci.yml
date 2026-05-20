@@ -1,0 +1,27 @@
+name: Build lock CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate lock action files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check .github/dist/build-lock.js
+          node --check .github/dist/acquire.js
+          node --check .github/dist/release.js
+          node --check .github/dist/reap.js
+

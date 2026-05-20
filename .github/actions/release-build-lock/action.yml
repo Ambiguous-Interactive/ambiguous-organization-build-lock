@@ -1,0 +1,30 @@
+name: Release build lock
+description: Release a central organization build lock after licensed work.
+inputs:
+  lock-name:
+    description: Lock name. Use wallstop-organization-builds for Unity.
+    required: true
+  holder-id-suffix:
+    description: Extra identity for matrix cells inside the same workflow job.
+    required: false
+    default: default
+  lock-repository:
+    description: Repository that stores lock state.
+    required: false
+    default: Ambiguous-Interactive/ambiguous-organization-build-lock
+  state-branch:
+    description: Branch that stores lock state JSON files.
+    required: false
+    default: lock-state
+outputs:
+  released:
+    description: "true when this action released a held lock."
+  lock-name:
+    description: Released lock name.
+  holder-id:
+    description: Unique holder identity for this run.
+  state-sha:
+    description: Lock-state file SHA after release.
+runs:
+  using: node20
+  main: ../../dist/release.js
