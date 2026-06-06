@@ -31,6 +31,13 @@ Before consumer workflows can use the actions here:
 The included `Build lock CI` workflow checks the action JavaScript syntax on
 pull requests and pushes to `main`.
 
+## Automated Releases
+
+The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
+It uses conventional commits to determine semantic version bumps, creates
+GitHub releases/tags only when there are changes since the previous release, and
+force-updates the `v1` major alias when publishing a new `v1.x.y` release.
+
 ## Consumer Workflow Pattern
 
 Validate local secret shape first, acquire immediately before the licensed Unity
