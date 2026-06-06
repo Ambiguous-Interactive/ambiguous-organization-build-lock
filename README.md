@@ -15,6 +15,10 @@ Minimum token access:
 - `actions: read` on repositories whose workflow runs should be checked for
   stale-holder recovery
 
+Missing `actions: read` is treated as a configuration error. The lock actions
+only fall back to lease-based recovery when a workflow run cannot be found; they
+do not hide permission failures as unknown status.
+
 Do not use a broad personal token unless no narrower GitHub App or fine-grained
 token is available.
 
@@ -83,3 +87,12 @@ The `Reap stale build locks` workflow runs every 5 minutes. It clears a holder
 when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
+
+## Dependabot Auto-Merge
+
+The Dependabot auto-merge workflow only acts on same-repository Dependabot PRs.
+It checks the exact PR head SHA against the `Build lock CI` workflow before
+enabling auto-merge, and it also listens for successful `Build lock CI`
+`workflow_run` completions so a later CI rerun can enable auto-merge without a
+new PR event. Actions API failures are not swallowed; `GITHUB_TOKEN` must include
+`actions: read` in addition to the write scopes used to enable auto-merge.

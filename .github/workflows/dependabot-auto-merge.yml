@@ -3,44 +3,148 @@ name: Dependabot auto-merge
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: [Build lock CI]
+    types: [completed]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
 
 jobs:
   dependabot:
     name: Enable auto-merge for Dependabot PRs
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+        github.event.pull_request.user.login == 'dependabot[bot]' &&
+        !github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
-      group: dependabot-automerge-${{ github.event.pull_request.number }}
+      group: dependabot-automerge-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.run_id }}
       cancel-in-progress: true
     permissions:
+      actions: read
       contents: write
       pull-requests: write
     steps:
+      - name: Resolve Dependabot PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || '' }}
+          WORKFLOW_RUN_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name || '' }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+        run: |
+          set -euo pipefail
+
+          skip() {
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "$1"
+          }
+
+          if [[ "${EVENT_NAME}" == "pull_request_target" ]]; then
+            pr_json="$(gh api "repos/${REPOSITORY}/pulls/${EVENT_PR_NUMBER}")"
+          elif [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            if [[ "${WORKFLOW_RUN_HEAD_REPOSITORY}" != "${REPOSITORY}" ]]; then
+              skip "Skipping workflow_run from ${WORKFLOW_RUN_HEAD_REPOSITORY}; Dependabot auto-merge only handles same-repository PRs."
+              exit 0
+            fi
+
+            head_owner="${WORKFLOW_RUN_HEAD_REPOSITORY%%/*}"
+            prs_json="$(gh api -X GET "repos/${REPOSITORY}/pulls" \
+              -f state=open \
+              -f per_page=100 \
+              -f head="${head_owner}:${WORKFLOW_RUN_HEAD_BRANCH}")"
+            pr_json="$(jq -c \
+              --arg repository "${REPOSITORY}" \
+              --arg head_sha "${WORKFLOW_RUN_HEAD_SHA}" \
+              '[.[] | select(.head.repo.full_name == $repository and .head.sha == $head_sha)] | sort_by(.number) | last // empty' \
+              <<< "${prs_json}")"
+
+            if [[ -z "${pr_json}" ]]; then
+              skip "No open same-repository PR found for CI head SHA ${WORKFLOW_RUN_HEAD_SHA}."
+              exit 0
+            fi
+          else
+            echo "Unsupported event: ${EVENT_NAME}" >&2
+            exit 1
+          fi
+
+          pr_number="$(jq -r '.number' <<< "${pr_json}")"
+          pr_url="$(jq -r '.html_url' <<< "${pr_json}")"
+          pr_author="$(jq -r '.user.login' <<< "${pr_json}")"
+          pr_draft="$(jq -r '.draft' <<< "${pr_json}")"
+          pr_head_repository="$(jq -r '.head.repo.full_name' <<< "${pr_json}")"
+          pr_head_sha="$(jq -r '.head.sha' <<< "${pr_json}")"
+
+          if [[ "${pr_author}" != "dependabot[bot]" ]]; then
+            skip "Skipping PR #${pr_number}; author is ${pr_author}, not dependabot[bot]."
+            exit 0
+          fi
+
+          if [[ "${pr_draft}" == "true" ]]; then
+            skip "Skipping PR #${pr_number}; Dependabot PR is still a draft."
+            exit 0
+          fi
+
+          if [[ "${pr_head_repository}" != "${REPOSITORY}" ]]; then
+            skip "Skipping PR #${pr_number}; head repository ${pr_head_repository} is not ${REPOSITORY}."
+            exit 0
+          fi
+
+          {
+            echo "enabled=true"
+            echo "number=${pr_number}"
+            echo "url=${pr_url}"
+            echo "head-sha=${pr_head_sha}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Resolved Dependabot PR #${pr_number} at ${pr_head_sha}."
+
       - name: Wait for CI workflow to succeed
+        if: steps.pr.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
           CI_WORKFLOW_FILE: ci.yml
         run: |
           set -euo pipefail
           # Poll for up to ~13.3 minutes, leaving headroom under the 15 minute job timeout.
+          ci_workflow_id="$(gh api "repos/${REPOSITORY}/actions/workflows/${CI_WORKFLOW_FILE}" --jq '.id')"
+          echo "Waiting for workflow ${CI_WORKFLOW_FILE} (id ${ci_workflow_id}) on head SHA ${PR_HEAD_SHA}."
 
           for attempt in {1..80}; do
-            run_state="$(gh api "repos/${REPOSITORY}/actions/workflows/${CI_WORKFLOW_FILE}/runs?head_sha=${PR_HEAD_SHA}&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
+            latest_run="$(gh api -X GET "repos/${REPOSITORY}/actions/runs" \
+              -f head_sha="${PR_HEAD_SHA}" \
+              -f per_page=100 \
+              --jq ".workflow_runs
+                | map(select(.workflow_id == ${ci_workflow_id} and .event == \"pull_request\"))
+                | sort_by(.run_started_at // .created_at, .run_attempt, .id)
+                | last
+                | if . == null then empty else {id, status, conclusion: (.conclusion // \"\"), run_attempt, html_url} end")"
 
-            if [[ -z "${run_state}" ]]; then
+            if [[ -z "${latest_run}" ]]; then
+              echo "Attempt ${attempt}/80: no ${CI_WORKFLOW_FILE} run found for ${PR_HEAD_SHA} yet."
               sleep 10
               continue
             fi
 
-            run_status="${run_state%% *}"
-            run_conclusion="${run_state#* }"
+            run_id="$(jq -r '.id' <<< "${latest_run}")"
+            run_status="$(jq -r '.status' <<< "${latest_run}")"
+            run_conclusion="$(jq -r '.conclusion' <<< "${latest_run}")"
+            run_attempt="$(jq -r '.run_attempt' <<< "${latest_run}")"
+            run_url="$(jq -r '.html_url' <<< "${latest_run}")"
+            echo "Attempt ${attempt}/80: run ${run_id} attempt ${run_attempt} is ${run_status}/${run_conclusion:-none} (${run_url})."
 
             if [[ "${run_status}" != "completed" ]]; then
               sleep 10
@@ -59,7 +163,40 @@ jobs:
           exit 1
 
       - name: Enable auto-merge once checks are green
+        if: steps.pr.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+
+          pr_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"
+          pr_state="$(jq -r '.state' <<< "${pr_json}")"
+          pr_draft="$(jq -r '.draft' <<< "${pr_json}")"
+          current_head_sha="$(jq -r '.head.sha' <<< "${pr_json}")"
+          auto_merge_enabled="$(jq -r '.auto_merge != null' <<< "${pr_json}")"
+
+          if [[ "${pr_state}" != "open" ]]; then
+            echo "PR #${PR_NUMBER} is ${pr_state}; no auto-merge update needed."
+            exit 0
+          fi
+
+          if [[ "${pr_draft}" == "true" ]]; then
+            echo "PR #${PR_NUMBER} became a draft; no auto-merge update needed."
+            exit 0
+          fi
+
+          if [[ "${current_head_sha}" != "${PR_HEAD_SHA}" ]]; then
+            echo "PR #${PR_NUMBER} moved from ${PR_HEAD_SHA} to ${current_head_sha}; refusing to enable auto-merge for stale CI."
+            exit 1
+          fi
+
+          if [[ "${auto_merge_enabled}" == "true" ]]; then
+            echo "Auto-merge is already enabled for PR #${PR_NUMBER}."
+            exit 0
+          fi
+
+          gh pr merge --auto --squash "${PR_URL}"
