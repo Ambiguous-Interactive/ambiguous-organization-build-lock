@@ -5,6 +5,7 @@ const {
   acquire,
   api,
   emptyState,
+  evaluateStale,
   isRetryableResponse,
   release,
   writeState
@@ -509,4 +510,98 @@ test("release is idempotent when this run is not the holder", async () => {
     });
     }
   );
+});
+
+test("stale evaluation fails fast when run status cannot be read due to missing actions permission", async () => {
+  const holder = {
+    holderId: "owner/repo:123:perf-benchmarks:playmode",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(403, { message: "Resource not accessible by integration" });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => evaluateStale(holder, "token"),
+      /Ensure BUILD_LOCK_TOKEN has actions: read access/
+    );
+  });
+});
+
+test("stale evaluation keeps lease fallback only for missing workflow runs", async () => {
+  const holder = {
+    holderId: "owner/repo:123:perf-benchmarks:playmode",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+  const calls = [];
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    calls.push(parsed.pathname);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(404, { message: "Not Found" });
+    }
+    if (parsed.pathname === "/repos/owner/repo") {
+      return jsonResponse(200, { full_name: "owner/repo" });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.deepEqual(await evaluateStale(holder, "token"), {
+      stale: false,
+      reason: "holder status unavailable before lease expiry"
+    });
+  });
+
+  assert.deepEqual(calls, ["/repos/owner/repo/actions/runs/123", "/repos/owner/repo"]);
+});
+
+test("stale evaluation rejects lease fallback when the repository cannot be read", async () => {
+  const holder = {
+    holderId: "owner/private-repo:123:perf-benchmarks:playmode",
+    repository: "owner/private-repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/private-repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2026-06-06T01:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/private-repo/actions/runs/123") {
+      return jsonResponse(404, { message: "Not Found" });
+    }
+    if (parsed.pathname === "/repos/owner/private-repo") {
+      return jsonResponse(404, { message: "Not Found" });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => evaluateStale(holder, "token"),
+      /Ensure BUILD_LOCK_TOKEN can read this repository and has actions: read access/
+    );
+  });
 });
