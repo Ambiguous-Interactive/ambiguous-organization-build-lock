@@ -6,6 +6,9 @@ const fs = require("fs");
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
 const SCHEMA_VERSION = 1;
+const DEFAULT_API_MAX_ATTEMPTS = 5;
+const DEFAULT_API_RETRY_BASE_MS = 1000;
+const DEFAULT_API_RETRY_MAX_MS = 10000;
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -71,6 +74,33 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function integerEnvironment(name, fallback, minimum = 0) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+  if (!/^[0-9]+$/.test(raw)) {
+    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+    return fallback;
+  }
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < minimum) {
+    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+    return fallback;
+  }
+  return value;
+}
+
+function apiRetryOptions(overrides = {}) {
+  return {
+    maxAttempts: integerEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS", DEFAULT_API_MAX_ATTEMPTS, 1),
+    baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
+    maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    sleep,
+    ...overrides
+  };
+}
+
 function jitter(ms) {
   return ms + Math.floor(Math.random() * Math.max(250, Math.floor(ms / 3)));
 }
@@ -99,7 +129,83 @@ function appendSummary(line) {
   fs.appendFileSync(summaryPath, `${line}\n`, "utf8");
 }
 
-async function api(method, path, body, authToken) {
+function header(response, name) {
+  return response && response.headers && typeof response.headers.get === "function"
+    ? response.headers.get(name)
+    : null;
+}
+
+function oneLine(value) {
+  return String(value || "").replace(/[\r\n]+/g, " ").trim();
+}
+
+function retryAfterMs(response) {
+  const value = header(response, "retry-after");
+  if (!value) {
+    return null;
+  }
+  const seconds = Number.parseFloat(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, Math.ceil(seconds * 1000));
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+}
+
+function isRateLimitResponse(response, data) {
+  const message = String((data && data.message) || "").toLowerCase();
+  return (
+    header(response, "retry-after") !== null ||
+    header(response, "x-ratelimit-remaining") === "0" ||
+    message.includes("rate limit") ||
+    message.includes("secondary rate limit")
+  );
+}
+
+function isRetryableResponse(response, data) {
+  if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    return true;
+  }
+  return response.status === 403 && isRateLimitResponse(response, data);
+}
+
+function retryDelayMs(response, attempt, options) {
+  const retryAfter = retryAfterMs(response);
+  if (retryAfter !== null) {
+    return Math.min(retryAfter, options.maxDelayMs);
+  }
+  const exponential = options.baseDelayMs * 2 ** (attempt - 1);
+  return Math.min(jitter(exponential), options.maxDelayMs);
+}
+
+function responseDetails(response, data, fallbackText = "") {
+  const details = [];
+  const message = oneLine(data && data.message ? data.message : fallbackText);
+  if (message) {
+    details.push(message);
+  }
+  const requestId = oneLine(header(response, "x-github-request-id"));
+  if (requestId) {
+    details.push(`request-id=${requestId}`);
+  }
+  const retryAfter = oneLine(header(response, "retry-after"));
+  if (retryAfter) {
+    details.push(`retry-after=${retryAfter}`);
+  }
+  return details.length ? details.join("; ") : "empty response body";
+}
+
+function httpError(method, path, response, data, text) {
+  const error = new Error(
+    `${method} ${path} failed with HTTP ${response.status}: ${responseDetails(response, data, text)}`
+  );
+  error.status = response.status;
+  error.data = data;
+  error.requestId = header(response, "x-github-request-id") || "";
+  return error;
+}
+
+async function fetchApi(method, path, body, authToken) {
   const response = await fetch(`${API_ROOT}${path}`, {
     method,
     headers: {
@@ -121,16 +227,43 @@ async function api(method, path, body, authToken) {
     }
   }
 
-  if (!response.ok) {
-    const error = new Error(
-      `${method} ${path} failed with HTTP ${response.status}: ${data && data.message ? data.message : text}`
-    );
-    error.status = response.status;
-    error.data = data;
-    throw error;
+  return { response, data, text };
+}
+
+async function api(method, path, body, authToken, options = {}) {
+  const retry = apiRetryOptions(options);
+  for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
+    try {
+      const { response, data, text } = await fetchApi(method, path, body, authToken);
+      if (response.ok) {
+        return data;
+      }
+
+      if (attempt < retry.maxAttempts && isRetryableResponse(response, data)) {
+        const delay = retryDelayMs(response, attempt, retry);
+        console.log(
+          `::warning::${method} ${path} returned HTTP ${response.status}; retrying in ${delay} ms ` +
+            `(attempt ${attempt + 1}/${retry.maxAttempts}; ${responseDetails(response, data, text)}).`
+        );
+        await retry.sleep(delay);
+        continue;
+      }
+
+      throw httpError(method, path, response, data, text);
+    } catch (error) {
+      if (error.status || attempt >= retry.maxAttempts) {
+        throw error;
+      }
+      const delay = retryDelayMs(null, attempt, retry);
+      console.log(
+        `::warning::${method} ${path} failed before receiving a response; retrying in ${delay} ms ` +
+          `(attempt ${attempt + 1}/${retry.maxAttempts}; ${oneLine(error.message)}).`
+      );
+      await retry.sleep(delay);
+    }
   }
 
-  return data;
+  throw new Error(`${method} ${path} failed after ${retry.maxAttempts} attempts.`);
 }
 
 async function ensureStateBranch(config) {
@@ -434,6 +567,24 @@ async function acquire(config) {
     const { state, sha } = await readState(config);
     const stale = await evaluateStale(state.holder, config.token);
     let changed = false;
+    if (state.holder && state.holder.holderId === identity.holderId && !stale.stale) {
+      const waitMs = Date.now() - started;
+      const position = queuePosition(state, identity.holderId);
+      console.log(
+        `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${stale.reason}`
+      );
+      writeOutput("acquired", "true");
+      writeOutput("lock-name", config.lockName);
+      writeOutput("holder-id", identity.holderId);
+      writeOutput("state-sha", sha || "");
+      writeOutput("wait-ms", String(waitMs));
+      writeOutput("attempts", String(attempts));
+      writeOutput("stale-recovered", String(staleRecovered));
+      appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
+      console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
+      console.log("::endgroup::");
+      return;
+    }
 
     const dedupedQueue = state.queue.filter((entry, index, queue) => {
       return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
@@ -639,7 +790,7 @@ function config() {
   };
 }
 
-(async () => {
+async function run() {
   try {
     const cfg = config();
     if (MODE === "acquire") {
@@ -657,4 +808,23 @@ function config() {
     appendSummary(`Build lock action failed: ${error.message}`);
     process.exit(1);
   }
-})();
+}
+
+if (require.main === module) {
+  run();
+}
+
+module.exports = {
+  acquire,
+  api,
+  config,
+  emptyState,
+  evaluateStale,
+  isRetryableResponse,
+  normalizeState,
+  readState,
+  release,
+  reap,
+  run,
+  writeState
+};

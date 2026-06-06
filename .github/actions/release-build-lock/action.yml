@@ -26,5 +26,5 @@ outputs:
   state-sha:
     description: Lock-state file SHA after release.
 runs:
-  using: node20
+  using: node24
   main: ../../dist/release.js
