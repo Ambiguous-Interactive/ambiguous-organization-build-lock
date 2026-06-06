@@ -18,10 +18,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       - name: Check JavaScript syntax
         run: |
           node --check .github/dist/build-lock.js
           node --check .github/dist/acquire.js
           node --check .github/dist/release.js
           node --check .github/dist/reap.js
+          for test_file in test/*.test.js; do
+            node --check "${test_file}"
+          done
 
+      - name: Run fast action tests
+        run: node --test test/*.test.js
