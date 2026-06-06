@@ -26,11 +26,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_WORKFLOW_FILE: ci.yml
         run: |
           set -euo pipefail
+          # Poll for up to ~13 minutes, leaving headroom under the 15 minute job timeout.
 
           for _ in {1..80}; do
-            run_state="$(gh api "repos/${REPOSITORY}/actions/runs?event=pull_request&head_sha=${PR_HEAD_SHA}&per_page=100" --jq '[.workflow_runs[] | select(.name == "Build lock CI")] | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
+            run_state="$(gh api "repos/${REPOSITORY}/actions/workflows/${CI_WORKFLOW_FILE}/runs?event=pull_request&head_sha=${PR_HEAD_SHA}&per_page=20" --jq '[.workflow_runs[]] | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
 
             if [[ -z "${run_state}" || "${run_state}" == "null" ]]; then
               sleep 10
