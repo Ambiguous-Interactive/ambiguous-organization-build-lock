@@ -15,8 +15,8 @@ test("all JavaScript actions target the supported GitHub Actions runtime", async
   for (const manifest of actionManifests) {
     await t.test(path.relative(process.cwd(), manifest), () => {
       const text = fs.readFileSync(manifest, "utf8");
-      assert.match(text, /^\s*using:\s*node24\s*$/m);
-      assert.doesNotMatch(text, /^\s*using:\s*node20\s*$/m);
+      assert.match(text, /^\s*using:\s*['"]?node24['"]?\s*$/m);
+      assert.doesNotMatch(text, /^\s*using:\s*['"]?node20['"]?\s*$/m);
     });
   }
 });
