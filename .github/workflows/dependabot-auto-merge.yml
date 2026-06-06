@@ -1,0 +1,63 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dependabot:
+    name: Enable auto-merge for Dependabot PRs
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: dependabot-automerge-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Wait for Build lock CI to succeed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          for _ in {1..90}; do
+            run_state="$(gh api "repos/${REPOSITORY}/actions/runs?event=pull_request&head_sha=${PR_HEAD_SHA}&per_page=20" --jq '[.workflow_runs[] | select(.name == "Build lock CI")] | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
+
+            if [[ -z "${run_state}" || "${run_state}" == "null" ]]; then
+              sleep 10
+              continue
+            fi
+
+            run_status="${run_state%% *}"
+            run_conclusion="${run_state#* }"
+
+            if [[ "${run_status}" != "completed" ]]; then
+              sleep 10
+              continue
+            fi
+
+            if [[ "${run_conclusion}" == "success" ]]; then
+              exit 0
+            fi
+
+            echo "Build lock CI finished with conclusion: ${run_conclusion}"
+            exit 1
+          done
+
+          echo "Timed out waiting for Build lock CI to complete."
+          exit 1
+
+      - name: Enable auto-merge once checks are green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
