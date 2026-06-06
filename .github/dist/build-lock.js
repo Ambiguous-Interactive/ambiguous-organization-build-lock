@@ -500,8 +500,23 @@ async function getRunStatus(repository, runId, authToken) {
       conclusion: run.conclusion || ""
     };
   } catch (error) {
-    if (error.status === 403 || error.status === 404) {
+    if (error.status === 404) {
+      try {
+        await api("GET", `/repos/${parsed.owner}/${parsed.repo}`, undefined, authToken);
+      } catch (repoError) {
+        if (repoError.status === 403 || repoError.status === 404) {
+          throw new Error(
+            `Unable to verify repository access for ${repository}. Ensure BUILD_LOCK_TOKEN can read this repository and has actions: read access. ${repoError.message}`
+          );
+        }
+        throw repoError;
+      }
       return { known: false, status: "", conclusion: "" };
+    }
+    if (error.status === 403) {
+      throw new Error(
+        `Unable to read workflow run ${repository}/${runId}. Ensure BUILD_LOCK_TOKEN has actions: read access. ${error.message}`
+      );
     }
     throw error;
   }

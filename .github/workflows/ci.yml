@@ -33,5 +33,10 @@ jobs:
             node --check "${test_file}"
           done
 
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
       - name: Run fast action tests
         run: node --test test/*.test.js
