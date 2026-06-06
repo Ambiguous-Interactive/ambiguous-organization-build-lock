@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const workflowPath = path.join(__dirname, "..", ".github", "workflows", "auto-release.yml");
 const releaseConfigPath = path.join(__dirname, "..", ".releaserc.json");
+const credentialedGitHubTokenUser = new RegExp("x-access-" + "token");
 
 test("auto release workflow is scheduled and uses semantic-release", () => {
   const text = fs.readFileSync(workflowPath, "utf8");
@@ -13,12 +14,17 @@ test("auto release workflow is scheduled and uses semantic-release", () => {
   assert.match(text, /^\s*-\s*cron:\s*"0 9 \* \* 1"\s*$/m);
   assert.match(text, /^\s*workflow_dispatch:\s*$/m);
   assert.match(text, /^\s*uses:\s*cycjimmy\/semantic-release-action@v5\s*$/m);
+  assert.match(text, /^\s*contents:\s*write\s*$/m);
+  assert.match(text, /^\s*issues:\s*write\s*$/m);
+  assert.match(text, /^\s*pull-requests:\s*write\s*$/m);
   assert.match(text, /new_release_published\s*==\s*'true'/);
   assert.match(text, /new_release_major_version\s*==\s*'1'/);
   assert.match(text, /git config user\.name "github-actions\[bot\]"/);
   assert.match(text, /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/);
   assert.match(text, /git tag -fa v1/m);
-  assert.match(text, /x-access-token:\$\{\{ secrets\.GITHUB_TOKEN \}\}@github\.com\/\$\{\{ github\.repository \}\}\.git/);
+  assert.match(text, /git push --force origin refs\/tags\/v1:refs\/tags\/v1/);
+  assert.doesNotMatch(text, credentialedGitHubTokenUser);
+  assert.doesNotMatch(text, /https:\/\/[^\n]*\$\{\{\s*secrets\./);
 });
 
 test("semantic-release is configured without npm publishing", () => {

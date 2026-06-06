@@ -41,6 +41,12 @@ The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
 It uses conventional commits to determine semantic version bumps, creates
 GitHub releases/tags only when there are changes since the previous release, and
 force-updates the `v1` major alias when publishing a new `v1.x.y` release.
+Because `@semantic-release/github` publishes GitHub releases and performs its
+default issue/PR updates, the workflow grants `contents: write`, `issues: write`,
+and `pull-requests: write`. The `v1` alias is pushed through the authenticated
+`origin` configured by `actions/checkout`; workflow policy tests reject
+credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
+`${{ github.token }}` interpolation in shell scripts.
 
 ## Consumer Workflow Pattern
 
