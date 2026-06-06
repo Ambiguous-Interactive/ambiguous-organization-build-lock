@@ -29,8 +29,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          for _ in {1..90}; do
-            run_state="$(gh api "repos/${REPOSITORY}/actions/runs?event=pull_request&head_sha=${PR_HEAD_SHA}&per_page=20" --jq '[.workflow_runs[] | select(.name == "Build lock CI")] | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
+          for _ in {1..80}; do
+            run_state="$(gh api "repos/${REPOSITORY}/actions/runs?event=pull_request&head_sha=${PR_HEAD_SHA}&per_page=100" --jq '[.workflow_runs[] | select(.name == "Build lock CI")] | sort_by(.created_at) | last | "\(.status) \(.conclusion // "")"' || true)"
 
             if [[ -z "${run_state}" || "${run_state}" == "null" ]]; then
               sleep 10
