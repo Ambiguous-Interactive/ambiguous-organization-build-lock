@@ -5,7 +5,7 @@ const test = require("node:test");
 
 const workflowPath = path.join(__dirname, "..", ".github", "workflows", "auto-release.yml");
 const releaseConfigPath = path.join(__dirname, "..", ".releaserc.json");
-const credentialedGitHubTokenUser = new RegExp("x-access-" + "token");
+const credentialedGitHubTokenUser = new RegExp("x-access-" + "token", "i");
 
 test("auto release workflow is scheduled and uses semantic-release", () => {
   const text = fs.readFileSync(workflowPath, "utf8");
