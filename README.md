@@ -35,6 +35,22 @@ Before consumer workflows can use the actions here:
 The included `Build lock CI` workflow checks the action JavaScript syntax on
 pull requests and pushes to `main`.
 
+## Automated Releases
+
+The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
+It uses conventional commits to determine semantic version bumps, creates
+GitHub releases/tags only when there are changes since the previous release, and
+force-updates the `v1` major alias when publishing a new `v1.x.y` release.
+The workflow has a stable `auto-release` concurrency group with
+`cancel-in-progress: false`, so scheduled and manual release runs queue instead
+of racing or canceling an active publish/tag update.
+Because `@semantic-release/github` publishes GitHub releases and performs its
+default issue/PR updates, the workflow grants `contents: write`, `issues: write`,
+and `pull-requests: write`. The `v1` alias is pushed through the authenticated
+`origin` configured by `actions/checkout`; workflow policy tests reject
+credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
+`${{ github.token }}` interpolation in shell scripts.
+
 ## Consumer Workflow Pattern
 
 Validate local secret shape first, acquire immediately before the licensed Unity
@@ -94,5 +110,12 @@ The Dependabot auto-merge workflow only acts on same-repository Dependabot PRs.
 It checks the exact PR head SHA against the `Build lock CI` workflow before
 enabling auto-merge, and it also listens for successful `Build lock CI`
 `workflow_run` completions so a later CI rerun can enable auto-merge without a
-new PR event. Actions API failures are not swallowed; `GITHUB_TOKEN` must include
+new PR event. PR and CI-completion triggers share one per-head-SHA concurrency
+key, so duplicate automation for the same Dependabot commit is deduplicated by
+canceling older same-SHA runs while stale CI completions for older commits
+cannot cancel newer PR automation.
+Pull request events also recheck the event head SHA against the freshly fetched
+PR before emitting outputs, so delayed older events do not operate on newer
+commits.
+Actions API failures are not swallowed; `GITHUB_TOKEN` must include
 `actions: read` in addition to the write scopes used to enable auto-merge.

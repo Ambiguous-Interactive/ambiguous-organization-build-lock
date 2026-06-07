@@ -1,0 +1,42 @@
+name: Auto release
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Create semantic release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Publish release from conventional commits
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v5
+        with:
+          branches: |
+            ["main"]
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update v1 major tag alias
+        if: steps.semantic.outputs.new_release_published == 'true' && steps.semantic.outputs.new_release_major_version == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa v1 -m "Update v1 alias to v${{ steps.semantic.outputs.new_release_version }}"
+          git push --force origin refs/tags/v1:refs/tags/v1
