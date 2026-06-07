@@ -13,6 +13,7 @@ test("auto release workflow is scheduled and uses semantic-release", () => {
   assert.match(text, /^\s*name:\s*Auto release\s*$/m);
   assert.match(text, /^\s*-\s*cron:\s*"0 9 \* \* 1"\s*$/m);
   assert.match(text, /^\s*workflow_dispatch:\s*$/m);
+  assert.match(text, /^concurrency:\s*\n  group:\s*auto-release\s*\n  cancel-in-progress:\s*false\s*$/m);
   assert.match(text, /^\s*uses:\s*cycjimmy\/semantic-release-action@v5\s*$/m);
   assert.match(text, /^\s*contents:\s*write\s*$/m);
   assert.match(text, /^\s*issues:\s*write\s*$/m);

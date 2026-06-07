@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
-      group: dependabot-automerge-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.run_id }}
+      group: dependabot-automerge-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.run_id }}
       cancel-in-progress: true
     permissions:
       actions: read
@@ -41,6 +41,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          EVENT_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || '' }}
           WORKFLOW_RUN_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name || '' }}
           WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
@@ -99,6 +100,11 @@ jobs:
 
           if [[ "${pr_head_repository}" != "${REPOSITORY}" ]]; then
             skip "Skipping PR #${pr_number}; head repository ${pr_head_repository} is not ${REPOSITORY}."
+            exit 0
+          fi
+
+          if [[ "${EVENT_NAME}" == "pull_request_target" && "${pr_head_sha}" != "${EVENT_PR_HEAD_SHA}" ]]; then
+            skip "Skipping PR #${pr_number}; event head ${EVENT_PR_HEAD_SHA} is stale because the current head is ${pr_head_sha}."
             exit 0
           fi
 
@@ -190,8 +196,8 @@ jobs:
           fi
 
           if [[ "${current_head_sha}" != "${PR_HEAD_SHA}" ]]; then
-            echo "PR #${PR_NUMBER} moved from ${PR_HEAD_SHA} to ${current_head_sha}; refusing to enable auto-merge for stale CI."
-            exit 1
+            echo "PR #${PR_NUMBER} moved from ${PR_HEAD_SHA} to ${current_head_sha}; skipping stale auto-merge attempt."
+            exit 0
           fi
 
           if [[ "${auto_merge_enabled}" == "true" ]]; then
