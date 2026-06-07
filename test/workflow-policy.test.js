@@ -251,11 +251,11 @@ function flowBalance(value) {
   return depth;
 }
 
-function collectFlowNodeText(lines, startIndex, _endIndex, firstValue) {
+function collectFlowNodeText(lines, startIndex, endIndex, firstValue) {
   const collected = [firstValue];
   let depth = flowBalance(stripYamlFlowComments(collected.join("\n")));
 
-  for (let index = startIndex + 1; depth > 0 && index < lines.length; index += 1) {
+  for (let index = startIndex + 1; depth > 0 && index < lines.length && index < endIndex; index += 1) {
     const line = lines[index];
     collected.push(line);
     depth = flowBalance(stripYamlFlowComments(collected.join("\n")));
