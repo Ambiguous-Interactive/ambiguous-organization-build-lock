@@ -19,12 +19,20 @@ inputs:
 outputs:
   released:
     description: "true when this action released a held lock."
+  queue-cleaned:
+    description: "true when this action removed this run from the wait queue."
+  cleanup-result:
+    description: "released, queue-cleaned, or noop."
   lock-name:
-    description: Released lock name.
+    description: Target lock name.
   holder-id:
     description: Unique holder identity for this run.
   state-sha:
-    description: Lock-state file SHA after release.
+    description: Observed or written lock-state file SHA after cleanup.
+  held-by:
+    description: Holder identity when another run still holds the lock.
+  held-by-run-url:
+    description: Holder workflow run URL when another run still holds the lock.
 runs:
   using: node24
   main: ../../dist/release.js

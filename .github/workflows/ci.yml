@@ -25,10 +25,9 @@ jobs:
 
       - name: Check JavaScript syntax
         run: |
-          node --check .github/dist/build-lock.js
-          node --check .github/dist/acquire.js
-          node --check .github/dist/release.js
-          node --check .github/dist/reap.js
+          for action_file in .github/dist/*.js; do
+            node --check "${action_file}"
+          done
           for test_file in test/*.test.js; do
             node --check "${test_file}"
           done

@@ -1,4 +1,8 @@
 const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -6,8 +10,11 @@ const {
   api,
   emptyState,
   evaluateStale,
+  installAcquireSignalCleanup,
   isRetryableResponse,
+  postCleanup,
   release,
+  runCancellationCleanup,
   writeState
 } = require("../.github/dist/build-lock.js");
 
@@ -28,7 +35,9 @@ const actionEnvNames = [
   "GITHUB_WORKFLOW",
   "GITHUB_JOB",
   "GITHUB_OUTPUT",
-  "GITHUB_STEP_SUMMARY"
+  "GITHUB_STEP_SUMMARY",
+  "GITHUB_STATE",
+  "STATE_build_lock_cleanup"
 ];
 
 async function withActionEnv(values, callback) {
@@ -61,6 +70,30 @@ async function withImmediateTimers(callback) {
   } finally {
     global.setTimeout = previousSetTimeout;
   }
+}
+
+async function withTempFile(callback) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "build-lock-test-"));
+  const file = path.join(directory, "env-file");
+  fs.writeFileSync(file, "", "utf8");
+  try {
+    return await callback(file);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function readEnvironmentFile(file) {
+  return Object.fromEntries(
+    fs
+      .readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const equals = line.indexOf("=");
+        return [line.slice(0, equals), line.slice(equals + 1)];
+      })
+  );
 }
 
 async function withMockedFetch(fetchImplementation, callback) {
@@ -240,6 +273,143 @@ test("api honors Retry-After for retryable responses", async () => {
       assert.deepEqual(delays, [2000]);
     }
   );
+});
+
+test("api forwards AbortSignal to fetch", async () => {
+  const controller = new AbortController();
+  await withMockedFetch(
+    async (_url, options = {}) => {
+      assert.equal(options.signal, controller.signal);
+      return jsonResponse(200, { ok: true });
+    },
+    async () => {
+      assert.deepEqual(await api("GET", "/repos/o/r", undefined, "token", { signal: controller.signal }), { ok: true });
+    }
+  );
+});
+
+test("signal cleanup handler marks cancellation and aborts acquire work", () => {
+  const previousLog = console.log;
+  const cancellation = {
+    requested: false,
+    signalName: "",
+    exitCode: 0,
+    abortController: new AbortController(),
+    cleanupAbortController: null
+  };
+  const remove = installAcquireSignalCleanup(cancellation);
+  console.log = () => {};
+
+  try {
+    process.emit("SIGINT", "SIGINT");
+
+    assert.equal(cancellation.requested, true);
+    assert.equal(cancellation.signalName, "SIGINT");
+    assert.equal(cancellation.exitCode, 130);
+    assert.equal(cancellation.abortController.signal.aborted, true);
+  } finally {
+    console.log = previousLog;
+    remove();
+  }
+});
+
+test("second signal during cancellation cleanup aborts cleanup and exits with the new signal code", () => {
+  const previousExit = process.exit;
+  let exitCode = null;
+  const cancellation = {
+    requested: true,
+    signalName: "SIGINT",
+    exitCode: 130,
+    abortController: new AbortController(),
+    cleanupAbortController: new AbortController()
+  };
+  const remove = installAcquireSignalCleanup(cancellation);
+  process.exit = (code) => {
+    exitCode = code;
+  };
+
+  try {
+    process.emit("SIGTERM", "SIGTERM");
+
+    assert.equal(cancellation.cleanupAbortController.signal.aborted, true);
+    assert.equal(exitCode, 143);
+  } finally {
+    process.exit = previousExit;
+    remove();
+  }
+});
+
+test("cancellation cleanup removes this run queue entry with a fresh cleanup path", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+
+  await withActionEnv(
+    {
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_WORKFLOW: "Perf",
+      GITHUB_JOB: "perf-benchmarks"
+    },
+    async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        assert.ok(options.signal, "cancellation cleanup should use its own abort signal");
+        if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
+          }
+          return jsonResponse(200, {
+            content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+            sha: "state-before-cleanup"
+          });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        await runCancellationCleanup(
+          {
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          },
+          {
+            holderId: "owner/repo:123:perf-benchmarks:playmode"
+          },
+          {
+            requested: true,
+            signalName: "SIGINT",
+            exitCode: 130,
+            abortController: new AbortController(),
+            cleanupAbortController: null
+          }
+        );
+
+        assert.match(logs.join("\n"), /Build-lock cleanup after signal SIGINT: queue-cleaned/);
+        assert.match(logs.join("\n"), /No build-lock cleanup needed after signal SIGINT second pass/);
+      });
+    }
+  );
+
+  assert.deepEqual(state.queue, []);
 });
 
 test("api treats rate-limited 403 responses as retryable but not ordinary forbidden responses", () => {
@@ -453,6 +623,344 @@ test("acquire recovers when a successful lock write is reported as a transient f
   );
 });
 
+test("acquire records post cleanup state only when opt-in cleanup is enabled", async () => {
+  let holderState = null;
+
+  await withTempFile(async (stateFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_STATE: stateFile
+      },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              holderState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(holderState || emptyState("wallstop-organization-builds")), "utf8").toString(
+                "base64"
+              ),
+              sha: holderState ? "state-after-acquire" : "state-before-acquire"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await acquire({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json",
+            timeoutMinutes: 1,
+            leaseMinutes: 240,
+            pollSeconds: 1,
+            registerPostCleanup: true
+          });
+        });
+      }
+    );
+
+    assert.equal(readEnvironmentFile(stateFile).build_lock_cleanup, "enabled");
+  });
+
+  assert.equal(holderState.holder.holderId, "owner/repo:123:perf-benchmarks:playmode");
+});
+
+test("legacy acquire does not record post cleanup state", async () => {
+  let holderState = null;
+
+  await withTempFile(async (stateFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_STATE: stateFile
+      },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              holderState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(holderState || emptyState("wallstop-organization-builds")), "utf8").toString(
+                "base64"
+              ),
+              sha: holderState ? "state-after-acquire" : "state-before-acquire"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await acquire({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json",
+            timeoutMinutes: 1,
+            leaseMinutes: 240,
+            pollSeconds: 1
+          });
+        });
+      }
+    );
+
+    assert.deepEqual(readEnvironmentFile(stateFile), {});
+  });
+});
+
+test("opt-in acquire does not record post cleanup state before lock state mutation", async () => {
+  await withTempFile(async (stateFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_STATE: stateFile
+      },
+      async () => {
+        await withMockedFetch(async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(401, { message: "Bad credentials" });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () =>
+              acquire({
+                token: "token",
+                lockName: "wallstop-organization-builds",
+                holderIdSuffix: "playmode",
+                lockRepository: "o/r",
+                lockRepo: { owner: "o", repo: "r" },
+                stateBranch: "lock-state",
+                statePath: "locks/wallstop-organization-builds.json",
+                timeoutMinutes: 1,
+                leaseMinutes: 240,
+                pollSeconds: 1,
+                registerPostCleanup: true
+              }),
+            /Bad credentials/
+          );
+        });
+      }
+    );
+
+    assert.deepEqual(readEnvironmentFile(stateFile), {});
+  });
+});
+
+test("opt-in acquire records post cleanup state when this run is already queued", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (stateFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_STATE: stateFile
+        },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-read"
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+                return jsonResponse(200, { status: "in_progress", conclusion: null });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  acquire({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    timeoutMinutes: 1,
+                    leaseMinutes: 240,
+                    pollSeconds: 1,
+                    registerPostCleanup: true
+                  }),
+                /Timed out waiting for build lock/
+              );
+            });
+          });
+        }
+      );
+
+      assert.equal(readEnvironmentFile(stateFile).build_lock_cleanup, "enabled");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("acquire timeout includes holder context and cleans this run queue entry", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks"
+      },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                const body = JSON.parse(options.body);
+                state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "state-after-write" } });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: "state-before-read"
+              });
+            }
+            if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+              return jsonResponse(200, { status: "in_progress", conclusion: null });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await assert.rejects(
+              () =>
+                acquire({
+                  token: "token",
+                  lockName: "wallstop-organization-builds",
+                  holderIdSuffix: "playmode",
+                  lockRepository: "o/r",
+                  lockRepo: { owner: "o", repo: "r" },
+                  stateBranch: "lock-state",
+                  statePath: "locks/wallstop-organization-builds.json",
+                  timeoutMinutes: 1,
+                  leaseMinutes: 240,
+                  pollSeconds: 1
+                }),
+              /holder=other\/repo:999:perf-benchmarks:editmode.*queue-position=1.*reason=holder run is in_progress/
+            );
+
+            assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
+          });
+        });
+      }
+    );
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.deepEqual(state.queue, []);
+  assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
+});
+
 test("release is idempotent when this run is not the holder", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -510,6 +1018,306 @@ test("release is idempotent when this run is not the holder", async () => {
     });
     }
   );
+});
+
+test("release reports released when this run holds the lock", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let writtenState = null;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              writtenState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+              sha: "state-before-release"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["queue-cleaned"], "false");
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs["held-by"], "");
+  });
+
+  assert.equal(writtenState.holder, null);
+});
+
+test("release reports queue-cleaned when this run never acquired the lock", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+  let writtenState = null;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              writtenState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+              sha: "state-before-release"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async (logs) => {
+          await release({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          });
+
+          assert.match(logs.join("\n"), /Removed queued request/);
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.released, "false");
+    assert.equal(outputs["queue-cleaned"], "true");
+    assert.equal(outputs["cleanup-result"], "queue-cleaned");
+    assert.equal(outputs["held-by"], "other/repo:999:perf-benchmarks:editmode");
+    assert.equal(outputs["held-by-run-url"], "https://github.com/other/repo/actions/runs/999");
+  });
+
+  assert.equal(writtenState.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
+  assert.deepEqual(writtenState.queue, []);
+});
+
+test("release reports noop with holder context when this run has no state to clean", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let wrote = false;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              wrote = true;
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+              sha: "state-sha"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.released, "false");
+    assert.equal(outputs["queue-cleaned"], "false");
+    assert.equal(outputs["cleanup-result"], "noop");
+    assert.equal(outputs["held-by"], "other/repo:999:perf-benchmarks:editmode");
+  });
+
+  assert.equal(wrote, false);
+});
+
+test("post cleanup noops without saved action state", async () => {
+  let calls = 0;
+
+  await withActionEnv({}, async () => {
+    await withMockedFetch(async () => {
+      calls++;
+      return jsonResponse(500, { message: "should not be called" });
+    }, async (logs) => {
+      await postCleanup({
+        token: "token",
+        lockName: "wallstop-organization-builds",
+        holderIdSuffix: "playmode",
+        lockRepository: "o/r",
+        lockRepo: { owner: "o", repo: "r" },
+        stateBranch: "lock-state",
+        statePath: "locks/wallstop-organization-builds.json"
+      });
+
+      assert.match(logs.join("\n"), /No build-lock post cleanup state recorded/);
+    });
+  });
+
+  assert.equal(calls, 0);
+});
+
+test("post cleanup warns instead of throwing when cleanup cannot contact lock state", async () => {
+  await withActionEnv(
+    {
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_WORKFLOW: "Perf",
+      GITHUB_JOB: "perf-benchmarks",
+      STATE_build_lock_cleanup: "enabled"
+    },
+    async () => {
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(401, { message: "Bad credentials" });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        await postCleanup({
+          token: "token",
+          lockName: "wallstop-organization-builds",
+          holderIdSuffix: "playmode",
+          lockRepository: "o/r",
+          lockRepo: { owner: "o", repo: "r" },
+          stateBranch: "lock-state",
+          statePath: "locks/wallstop-organization-builds.json"
+        });
+
+        assert.match(logs.join("\n"), /::warning::Post cleanup for wallstop-organization-builds failed/);
+      });
+    }
+  );
+});
+
+test("post cleanup wrapper exits successfully when saved state exists but token is missing", () => {
+  const result = childProcess.spawnSync(process.execPath, [path.join(__dirname, "..", ".github", "dist", "post-cleanup.js")], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BUILD_LOCK_TOKEN: "",
+      "INPUT_LOCK-NAME": "wallstop-organization-builds",
+      STATE_build_lock_cleanup: "enabled"
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /::warning::Build lock post cleanup could not start: BUILD_LOCK_TOKEN is required\./);
+  assert.equal(result.stderr, "");
 });
 
 test("stale evaluation fails fast when run status cannot be read due to missing actions permission", async () => {

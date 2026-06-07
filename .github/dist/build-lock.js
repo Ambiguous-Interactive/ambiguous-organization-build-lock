@@ -9,6 +9,7 @@ const SCHEMA_VERSION = 1;
 const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
+const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -70,8 +71,26 @@ function parseTime(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, options = {}) {
+  const signal = options.signal;
+  if (signal && signal.aborted) {
+    return Promise.reject(signal.reason || new Error("Sleep aborted."));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason || new Error("Sleep aborted."));
+    };
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
 }
 
 function integerEnvironment(name, fallback, minimum = 0) {
@@ -92,12 +111,14 @@ function integerEnvironment(name, fallback, minimum = 0) {
 }
 
 function apiRetryOptions(overrides = {}) {
+  const retrySleep = overrides.sleep || sleep;
+  const signal = overrides.signal;
   return {
     maxAttempts: integerEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS", DEFAULT_API_MAX_ATTEMPTS, 1),
     baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
     maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
-    sleep,
-    ...overrides
+    ...overrides,
+    sleep: (ms) => retrySleep(ms, { signal })
   };
 }
 
@@ -119,6 +140,14 @@ function writeOutput(name, value) {
     return;
   }
   fs.appendFileSync(outputPath, `${name}=${String(value)}\n`, "utf8");
+}
+
+function writeActionState(name, value) {
+  const statePath = process.env.GITHUB_STATE;
+  if (!statePath) {
+    return;
+  }
+  fs.appendFileSync(statePath, `${name}=${String(value)}\n`, "utf8");
 }
 
 function appendSummary(line) {
@@ -205,7 +234,7 @@ function httpError(method, path, response, data, text) {
   return error;
 }
 
-async function fetchApi(method, path, body, authToken) {
+async function fetchApi(method, path, body, authToken, options = {}) {
   const response = await fetch(`${API_ROOT}${path}`, {
     method,
     headers: {
@@ -214,7 +243,8 @@ async function fetchApi(method, path, body, authToken) {
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28"
     },
-    body: body === undefined ? undefined : JSON.stringify(body)
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: options.signal
   });
 
   const text = await response.text();
@@ -234,7 +264,7 @@ async function api(method, path, body, authToken, options = {}) {
   const retry = apiRetryOptions(options);
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
-      const { response, data, text } = await fetchApi(method, path, body, authToken);
+      const { response, data, text } = await fetchApi(method, path, body, authToken, retry);
       if (response.ok) {
         return data;
       }
@@ -266,10 +296,10 @@ async function api(method, path, body, authToken, options = {}) {
   throw new Error(`${method} ${path} failed after ${retry.maxAttempts} attempts.`);
 }
 
-async function ensureStateBranch(config) {
+async function ensureStateBranch(config, options = {}) {
   const { owner, repo } = config.lockRepo;
   try {
-    await api("GET", `/repos/${owner}/${repo}/git/ref/heads/${config.stateBranch}`, undefined, config.token);
+    await api("GET", `/repos/${owner}/${repo}/git/ref/heads/${config.stateBranch}`, undefined, config.token, options.apiOptions);
     return;
   } catch (error) {
     if (error.status !== 404) {
@@ -277,13 +307,14 @@ async function ensureStateBranch(config) {
     }
   }
 
-  const repoInfo = await api("GET", `/repos/${owner}/${repo}`, undefined, config.token);
+  const repoInfo = await api("GET", `/repos/${owner}/${repo}`, undefined, config.token, options.apiOptions);
   const defaultBranch = repoInfo.default_branch || "main";
   const defaultRef = await api(
     "GET",
     `/repos/${owner}/${repo}/git/ref/heads/${defaultBranch}`,
     undefined,
-    config.token
+    config.token,
+    options.apiOptions
   );
 
   try {
@@ -294,7 +325,8 @@ async function ensureStateBranch(config) {
         ref: `refs/heads/${config.stateBranch}`,
         sha: defaultRef.object.sha
       },
-      config.token
+      config.token,
+      options.apiOptions
     );
   } catch (error) {
     if (error.status !== 422) {
@@ -395,7 +427,7 @@ function stringifyState(state) {
   return `${JSON.stringify(stableState(state), null, 2)}\n`;
 }
 
-async function readState(config) {
+async function readState(config, options = {}) {
   const { owner, repo } = config.lockRepo;
   const encodedPath = config.statePath
     .split("/")
@@ -406,7 +438,8 @@ async function readState(config) {
       "GET",
       `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(config.stateBranch)}`,
       undefined,
-      config.token
+      config.token,
+      options.apiOptions
     );
     const text = base64Decode(data.content);
     let parsed;
@@ -424,7 +457,7 @@ async function readState(config) {
   }
 }
 
-async function writeState(config, previousSha, state, message) {
+async function writeState(config, previousSha, state, message, options = {}) {
   const { owner, repo } = config.lockRepo;
   const encodedPath = config.statePath
     .split("/")
@@ -444,7 +477,8 @@ async function writeState(config, previousSha, state, message) {
       "PUT",
       `/repos/${owner}/${repo}/contents/${encodedPath}`,
       body,
-      config.token
+      config.token,
+      options.apiOptions
     );
     return { conflict: false, sha: data.content && data.content.sha ? data.content.sha : "" };
   } catch (error) {
@@ -485,14 +519,19 @@ function holderFromIdentity(identity, leaseMinutes) {
   };
 }
 
-async function getRunStatus(repository, runId, authToken) {
+function isActiveRunStatus(status) {
+  return ACTIVE_RUN_STATUSES.has(status || "");
+}
+
+async function getRunStatus(repository, runId, authToken, options = {}) {
   const parsed = parseRepository(repository);
   try {
     const run = await api(
       "GET",
       `/repos/${parsed.owner}/${parsed.repo}/actions/runs/${encodeURIComponent(runId)}`,
       undefined,
-      authToken
+      authToken,
+      options.apiOptions
     );
     return {
       known: true,
@@ -502,7 +541,7 @@ async function getRunStatus(repository, runId, authToken) {
   } catch (error) {
     if (error.status === 404) {
       try {
-        await api("GET", `/repos/${parsed.owner}/${parsed.repo}`, undefined, authToken);
+        await api("GET", `/repos/${parsed.owner}/${parsed.repo}`, undefined, authToken, options.apiOptions);
       } catch (repoError) {
         if (repoError.status === 403 || repoError.status === 404) {
           throw new Error(
@@ -522,19 +561,13 @@ async function getRunStatus(repository, runId, authToken) {
   }
 }
 
-async function evaluateStale(holder, authToken) {
+async function evaluateStale(holder, authToken, options = {}) {
   if (!holder) {
     return { stale: true, reason: "no holder" };
   }
-  const status = await getRunStatus(holder.repository, holder.runId, authToken);
+  const status = await getRunStatus(holder.repository, holder.runId, authToken, options);
   if (status.known) {
-    if (
-      status.status === "queued" ||
-      status.status === "in_progress" ||
-      status.status === "requested" ||
-      status.status === "waiting" ||
-      status.status === "pending"
-    ) {
+    if (isActiveRunStatus(status.status)) {
       return { stale: false, reason: `holder run is ${status.status}` };
     }
     return { stale: true, reason: `holder run is ${status.status || "unknown"}` };
@@ -545,18 +578,12 @@ async function evaluateStale(holder, authToken) {
   return { stale: false, reason: "holder status unavailable before lease expiry" };
 }
 
-async function queueEntryIsFinished(entry, authToken) {
-  const status = await getRunStatus(entry.repository, entry.runId, authToken);
+async function queueEntryIsFinished(entry, authToken, options = {}) {
+  const status = await getRunStatus(entry.repository, entry.runId, authToken, options);
   if (!status.known) {
     return false;
   }
-  return !(
-    status.status === "queued" ||
-    status.status === "in_progress" ||
-    status.status === "requested" ||
-    status.status === "waiting" ||
-    status.status === "pending"
-  );
+  return !isActiveRunStatus(status.status);
 }
 
 function queuePosition(state, holderId) {
@@ -564,120 +591,368 @@ function queuePosition(state, holderId) {
   return index === -1 ? 0 : index + 1;
 }
 
+function cleanupResultName(result) {
+  if (result.released) {
+    return "released";
+  }
+  if (result.queueCleaned) {
+    return "queue-cleaned";
+  }
+  return "noop";
+}
+
+function writeReleaseOutputs(config, identity, result) {
+  writeOutput("released", String(result.released));
+  writeOutput("queue-cleaned", String(result.queueCleaned));
+  writeOutput("cleanup-result", cleanupResultName(result));
+  writeOutput("lock-name", config.lockName);
+  writeOutput("holder-id", identity.holderId);
+  writeOutput("state-sha", result.sha || "");
+  writeOutput("held-by", result.heldBy || "");
+  writeOutput("held-by-run-url", result.heldByRunUrl || "");
+}
+
+async function cleanupIdentity(config, identity, options = {}) {
+  const maxAttempts = options.maxAttempts || 10;
+  const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
+
+  for (let attempts = 1; attempts <= maxAttempts; attempts++) {
+    const { state, sha } = await readState(config, options);
+    const queueCleaned = state.queue.some((entry) => entry.holderId === identity.holderId);
+    const originalHolder = state.holder;
+    state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
+    let released = false;
+    let heldBy = "";
+    let heldByRunUrl = "";
+
+    if (state.holder && state.holder.holderId === identity.holderId) {
+      state.holder = null;
+      released = true;
+    } else if (state.holder) {
+      heldBy = state.holder.holderId;
+      heldByRunUrl = state.holder.runUrl;
+    }
+
+    const changed = released || queueCleaned;
+    if (!changed) {
+      return {
+        released: false,
+        queueCleaned: false,
+        sha: sha || "",
+        heldBy,
+        heldByRunUrl
+      };
+    }
+
+    const write = await writeState(config, sha, state, `Release ${config.lockName}`, options);
+    if (write.conflict) {
+      await sleep(jitter(conflictDelayMs), { signal: options.apiOptions && options.apiOptions.signal });
+      continue;
+    }
+
+    return {
+      released,
+      queueCleaned,
+      sha: write.sha,
+      heldBy: released && originalHolder ? "" : heldBy,
+      heldByRunUrl: released && originalHolder ? "" : heldByRunUrl
+    };
+  }
+
+  throw new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
+}
+
+function observationText(config, observation, attempts, elapsedMs) {
+  const details = [`attempts=${attempts}`, `elapsed-ms=${elapsedMs}`];
+  if (observation && observation.holderId) {
+    details.push(`holder=${observation.holderId}`);
+    if (observation.holderRunUrl) {
+      details.push(`holder-run=${observation.holderRunUrl}`);
+    }
+    details.push(`queue-position=${observation.queuePosition}`);
+    details.push(`reason=${observation.reason}`);
+  } else if (observation) {
+    details.push(`holder=<none>`);
+    details.push(`queue-position=${observation.queuePosition}`);
+  }
+  return `${config.lockName} wait state: ${details.join("; ")}.`;
+}
+
+async function cleanupAfterAcquireFailure(config, identity, reason, options = {}) {
+  try {
+    const result = await cleanupIdentity(config, identity, options);
+    const name = cleanupResultName(result);
+    if (name === "noop") {
+      console.log(`::notice::No build-lock cleanup needed after ${reason}.`);
+    } else {
+      console.log(`::notice::Build-lock cleanup after ${reason}: ${name}.`);
+    }
+  } catch (error) {
+    console.log(`::warning::Unable to clean up build-lock state after ${reason}: ${oneLine(error.message)}.`);
+  }
+}
+
+function installAcquireSignalCleanup(cancellation) {
+  const handler = (signal) => {
+    const exitCode = signal === "SIGINT" ? 130 : 143;
+    if (cancellation.cleanupAbortController) {
+      cancellation.cleanupAbortController.abort(new Error(`Build lock cleanup interrupted by ${signal}`));
+      process.exit(exitCode);
+      return;
+    }
+    cancellation.requested = true;
+    cancellation.signalName = signal;
+    cancellation.exitCode = exitCode;
+    cancellation.abortController.abort(new Error(`Build lock acquire cancelled by ${signal}`));
+    console.log(`::warning::Received ${signal}; stopping acquire before build-lock cleanup.`);
+  };
+
+  process.once("SIGINT", handler);
+  process.once("SIGTERM", handler);
+  return () => {
+    process.off("SIGINT", handler);
+    process.off("SIGTERM", handler);
+  };
+}
+
+function createPostCleanupRecorder(config) {
+  let recorded = false;
+  return () => {
+    if (recorded || !config.registerPostCleanup) {
+      return;
+    }
+    writeActionState("build_lock_cleanup", "enabled");
+    recorded = true;
+  };
+}
+
+function cancellationApiOptions(cancellation) {
+  return { signal: cancellation.abortController.signal };
+}
+
+function isCancellationError(error, cancellation) {
+  return cancellation.requested || (error && error.name === "AbortError");
+}
+
+function throwIfCancellation(cancellation) {
+  if (!cancellation.requested) {
+    return;
+  }
+  const error = new Error(`Build lock acquire cancelled by ${cancellation.signalName || "signal"}.`);
+  error.cancelled = true;
+  throw error;
+}
+
+async function runCancellationCleanup(config, identity, cancellation) {
+  const cleanupBudgetMs = cancellation.signalName === "SIGTERM" ? 1500 : 5000;
+  const cleanupAbortController = new AbortController();
+  cancellation.cleanupAbortController = cleanupAbortController;
+  const timeout = setTimeout(() => {
+    cleanupAbortController.abort(new Error("Build lock cancellation cleanup timed out."));
+  }, cleanupBudgetMs);
+  const cleanupOptions = {
+    maxAttempts: 2,
+    conflictDelayMs: 250,
+    apiOptions: {
+      maxAttempts: 1,
+      baseDelayMs: 0,
+      maxDelayMs: 0,
+      signal: cleanupAbortController.signal
+    }
+  };
+
+  try {
+    await cleanupAfterAcquireFailure(config, identity, `signal ${cancellation.signalName}`, cleanupOptions);
+    await sleep(250, { signal: cleanupAbortController.signal });
+    await cleanupAfterAcquireFailure(config, identity, `signal ${cancellation.signalName} second pass`, cleanupOptions);
+  } catch (error) {
+    console.log(`::warning::Build-lock cancellation cleanup stopped: ${oneLine(error.message)}.`);
+  } finally {
+    clearTimeout(timeout);
+    cancellation.cleanupAbortController = null;
+  }
+}
+
 async function acquire(config) {
   validateLockName(config.lockName);
-  await ensureStateBranch(config);
   const identity = currentIdentity(config);
+  const cancellation = {
+    requested: false,
+    signalName: "",
+    exitCode: 0,
+    abortController: new AbortController(),
+    cleanupAbortController: null
+  };
+  const apiOptions = cancellationApiOptions(cancellation);
+  const removeSignalCleanup = installAcquireSignalCleanup(cancellation);
+  const recordPostCleanupNeeded = createPostCleanupRecorder(config);
+
+  try {
+    await ensureStateBranch(config, { apiOptions });
+  } catch (error) {
+    if (isCancellationError(error, cancellation)) {
+      await runCancellationCleanup(config, identity, cancellation);
+      process.exit(cancellation.exitCode || 143);
+    }
+    throw error;
+  }
   const started = Date.now();
   const deadline = started + config.timeoutMinutes * 60 * 1000;
   let attempts = 0;
   let staleRecovered = false;
+  let lastObservation = null;
 
   console.log(`::group::Acquire build lock ${config.lockName}`);
   console.log(`Lock repository: ${config.lockRepository}`);
   console.log(`Holder: ${identity.holderId}`);
 
-  while (Date.now() < deadline) {
-    attempts++;
-    const { state, sha } = await readState(config);
-    const stale = await evaluateStale(state.holder, config.token);
-    let changed = false;
-    if (state.holder && state.holder.holderId === identity.holderId && !stale.stale) {
-      const waitMs = Date.now() - started;
-      const position = queuePosition(state, identity.holderId);
-      console.log(
-        `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${stale.reason}`
-      );
-      writeOutput("acquired", "true");
-      writeOutput("lock-name", config.lockName);
-      writeOutput("holder-id", identity.holderId);
-      writeOutput("state-sha", sha || "");
-      writeOutput("wait-ms", String(waitMs));
-      writeOutput("attempts", String(attempts));
-      writeOutput("stale-recovered", String(staleRecovered));
-      appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
-      console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
-      console.log("::endgroup::");
-      return;
-    }
-
-    const dedupedQueue = state.queue.filter((entry, index, queue) => {
-      return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
-    });
-    state.queue = [];
-    for (const entry of dedupedQueue) {
-      if (entry.holderId !== identity.holderId && (await queueEntryIsFinished(entry, config.token))) {
-        console.log(`Dropping completed queue entry ${entry.holderId}.`);
-        changed = true;
-      } else {
-        state.queue.push(entry);
-      }
-    }
-
-    if (!state.queue.some((entry) => entry.holderId === identity.holderId)) {
-      state.queue.push(identity);
-      changed = true;
-    }
-
-    const position = queuePosition(state, identity.holderId);
-    if (state.holder) {
-      console.log(
-        `Attempt ${attempts}: holder=${state.holder.holderId} run=${state.holder.runUrl} queue-position=${position} reason=${stale.reason}`
-      );
-    } else {
-      console.log(`Attempt ${attempts}: lock is free queue-position=${position}`);
-    }
-
-    if ((!state.holder || stale.stale) && state.queue[0] && state.queue[0].holderId === identity.holderId) {
-      if (state.holder && stale.stale) {
-        staleRecovered = true;
-        console.log(`Recovering stale holder: ${stale.reason}`);
-      }
-      state.holder = holderFromIdentity(identity, config.leaseMinutes);
-      state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
-      changed = true;
-    }
-
-    if (state.holder && state.holder.holderId === identity.holderId) {
-      if (changed) {
-        const write = await writeState(config, sha, state, `Acquire ${config.lockName}`);
-        if (write.conflict) {
-          await sleep(jitter(1000));
-          continue;
-        }
-        const verified = await readState(config);
-        if (!verified.state.holder || verified.state.holder.holderId !== identity.holderId) {
-          await sleep(jitter(1000));
-          continue;
-        }
+  try {
+    while (Date.now() < deadline) {
+      throwIfCancellation(cancellation);
+      attempts++;
+      const { state, sha } = await readState(config, { apiOptions });
+      throwIfCancellation(cancellation);
+      const stale = await evaluateStale(state.holder, config.token, { apiOptions });
+      throwIfCancellation(cancellation);
+      let changed = false;
+      if (state.holder && state.holder.holderId === identity.holderId && !stale.stale) {
+        recordPostCleanupNeeded();
         const waitMs = Date.now() - started;
+        const position = queuePosition(state, identity.holderId);
+        console.log(
+          `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${stale.reason}`
+        );
         writeOutput("acquired", "true");
         writeOutput("lock-name", config.lockName);
         writeOutput("holder-id", identity.holderId);
-        writeOutput("state-sha", write.sha);
+        writeOutput("state-sha", sha || "");
         writeOutput("wait-ms", String(waitMs));
         writeOutput("attempts", String(attempts));
         writeOutput("stale-recovered", String(staleRecovered));
         appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
-        console.log(`Acquired ${config.lockName}.`);
+        console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
         console.log("::endgroup::");
         return;
       }
-    }
 
-    if (changed) {
-      const write = await writeState(config, sha, state, `Queue for ${config.lockName}`);
-      if (write.conflict) {
-        await sleep(jitter(1000));
-        continue;
+      const dedupedQueue = state.queue.filter((entry, index, queue) => {
+        return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
+      });
+      state.queue = [];
+      for (const entry of dedupedQueue) {
+        if (entry.holderId !== identity.holderId && (await queueEntryIsFinished(entry, config.token, { apiOptions }))) {
+          throwIfCancellation(cancellation);
+          console.log(`Dropping completed queue entry ${entry.holderId}.`);
+          changed = true;
+        } else {
+          state.queue.push(entry);
+        }
       }
+
+      if (!state.queue.some((entry) => entry.holderId === identity.holderId)) {
+        state.queue.push(identity);
+        changed = true;
+      } else {
+        recordPostCleanupNeeded();
+      }
+
+      const position = queuePosition(state, identity.holderId);
+      if (state.holder) {
+        lastObservation = {
+          holderId: state.holder.holderId,
+          holderRunUrl: state.holder.runUrl,
+          queuePosition: position,
+          reason: stale.reason
+        };
+        console.log(
+          `Attempt ${attempts}: holder=${state.holder.holderId} run=${state.holder.runUrl} queue-position=${position} reason=${stale.reason}`
+        );
+      } else {
+        lastObservation = {
+          holderId: "",
+          holderRunUrl: "",
+          queuePosition: position,
+          reason: "lock is free"
+        };
+        console.log(`Attempt ${attempts}: lock is free queue-position=${position}`);
+      }
+
+      if ((!state.holder || stale.stale) && state.queue[0] && state.queue[0].holderId === identity.holderId) {
+        if (state.holder && stale.stale) {
+          staleRecovered = true;
+          console.log(`Recovering stale holder: ${stale.reason}`);
+        }
+        state.holder = holderFromIdentity(identity, config.leaseMinutes);
+        state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
+        changed = true;
+      }
+
+      if (state.holder && state.holder.holderId === identity.holderId) {
+        if (changed) {
+          throwIfCancellation(cancellation);
+          const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
+          if (write.conflict) {
+            await sleep(jitter(1000), { signal: apiOptions.signal });
+            continue;
+          }
+          recordPostCleanupNeeded();
+          throwIfCancellation(cancellation);
+          const verified = await readState(config, { apiOptions });
+          if (!verified.state.holder || verified.state.holder.holderId !== identity.holderId) {
+            await sleep(jitter(1000), { signal: apiOptions.signal });
+            continue;
+          }
+          const waitMs = Date.now() - started;
+          writeOutput("acquired", "true");
+          writeOutput("lock-name", config.lockName);
+          writeOutput("holder-id", identity.holderId);
+          writeOutput("state-sha", write.sha);
+          writeOutput("wait-ms", String(waitMs));
+          writeOutput("attempts", String(attempts));
+          writeOutput("stale-recovered", String(staleRecovered));
+          appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
+          console.log(`Acquired ${config.lockName}.`);
+          console.log("::endgroup::");
+          return;
+        }
+      }
+
+      if (changed) {
+        throwIfCancellation(cancellation);
+        const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
+        if (write.conflict) {
+          await sleep(jitter(1000), { signal: apiOptions.signal });
+          continue;
+        }
+        recordPostCleanupNeeded();
+      }
+
+      await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
     }
 
-    await sleep(jitter(config.pollSeconds * 1000));
+    const waitMs = Date.now() - started;
+    const details = observationText(config, lastObservation, attempts, waitMs);
+    writeOutput("acquired", "false");
+    writeOutput("lock-name", config.lockName);
+    writeOutput("holder-id", identity.holderId);
+    writeOutput("wait-ms", String(waitMs));
+    writeOutput("attempts", String(attempts));
+    appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
+    await cleanupAfterAcquireFailure(config, identity, "timeout", {
+      maxAttempts: 3,
+      conflictDelayMs: 500,
+      apiOptions: { signal: apiOptions.signal }
+    });
+    throw new Error(`Timed out waiting for build lock ${config.lockName}. ${details}`);
+  } catch (error) {
+    if (isCancellationError(error, cancellation)) {
+      await runCancellationCleanup(config, identity, cancellation);
+      process.exit(cancellation.exitCode || 143);
+    }
+    throw error;
+  } finally {
+    removeSignalCleanup();
   }
-
-  appendSummary(`Timed out waiting for ${config.lockName}.`);
-  throw new Error(`Timed out waiting for build lock ${config.lockName}.`);
 }
 
 async function release(config) {
@@ -686,48 +961,81 @@ async function release(config) {
   const identity = currentIdentity(config);
   console.log(`::group::Release build lock ${config.lockName}`);
 
-  for (let attempts = 1; attempts <= 10; attempts++) {
-    const { state, sha } = await readState(config);
-    const originalQueueLength = state.queue.length;
-    state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
-    let released = false;
+  const result = await cleanupIdentity(config, identity);
+  writeReleaseOutputs(config, identity, result);
+  const cleanupResult = cleanupResultName(result);
+  if (result.heldBy) {
+    console.log(`Lock is held by ${result.heldBy}; this run is ${identity.holderId}.`);
+  } else if (cleanupResult === "noop") {
+    console.log("Lock is already free.");
+  }
 
-    if (state.holder && state.holder.holderId === identity.holderId) {
-      state.holder = null;
-      released = true;
-    } else if (state.holder) {
-      console.log(`Lock is held by ${state.holder.holderId}; this run is ${identity.holderId}.`);
-    } else {
-      console.log("Lock is already free.");
-    }
+  if (cleanupResult === "queue-cleaned") {
+    console.log(
+      `::notice::Removed queued request for ${config.lockName}; this run did not hold the lock. ` +
+        "Guard licensed work with the acquire action's acquired output."
+    );
+  }
 
-    const changed = released || state.queue.length !== originalQueueLength;
-    if (!changed) {
-      writeOutput("released", "false");
-      writeOutput("lock-name", config.lockName);
-      writeOutput("holder-id", identity.holderId);
-      appendSummary(`No release needed for ${config.lockName}.`);
-      console.log("::endgroup::");
-      return;
-    }
+  appendSummary(
+    cleanupResult === "released"
+      ? `Released ${config.lockName}.`
+      : cleanupResult === "queue-cleaned"
+        ? `Cleaned queued request for ${config.lockName}.`
+        : `No release needed for ${config.lockName}.`
+  );
+  console.log(
+    cleanupResult === "released"
+      ? `Released ${config.lockName}.`
+      : cleanupResult === "queue-cleaned"
+        ? `Cleaned queued request for ${config.lockName}.`
+        : `No release needed for ${config.lockName}.`
+  );
+  console.log("::endgroup::");
+}
 
-    const write = await writeState(config, sha, state, `Release ${config.lockName}`);
-    if (write.conflict) {
-      await sleep(jitter(1000));
-      continue;
-    }
-
-    writeOutput("released", String(released));
-    writeOutput("lock-name", config.lockName);
-    writeOutput("holder-id", identity.holderId);
-    writeOutput("state-sha", write.sha);
-    appendSummary(`${released ? "Released" : "Cleaned queue entry for"} ${config.lockName}.`);
-    console.log(`${released ? "Released" : "Cleaned queue entry for"} ${config.lockName}.`);
-    console.log("::endgroup::");
+async function postCleanup(config) {
+  if (process.env.STATE_build_lock_cleanup !== "enabled") {
+    console.log("No build-lock post cleanup state recorded; nothing to do.");
     return;
   }
 
-  throw new Error(`Failed to release ${config.lockName} after repeated CAS conflicts.`);
+  validateLockName(config.lockName);
+  const identity = currentIdentity(config);
+  console.log(`::group::Post cleanup build lock ${config.lockName}`);
+  try {
+    await ensureStateBranch(config);
+    const result = await cleanupIdentity(config, identity, {
+      maxAttempts: 3,
+      conflictDelayMs: 500
+    });
+    const cleanupResult = cleanupResultName(result);
+    if (cleanupResult === "noop") {
+      console.log(`No post cleanup needed for ${config.lockName}.`);
+      appendSummary(`No post cleanup needed for ${config.lockName}.`);
+    } else {
+      console.log(`::notice::Post cleanup for ${config.lockName}: ${cleanupResult}.`);
+      appendSummary(`Post cleanup for ${config.lockName}: ${cleanupResult}.`);
+    }
+  } catch (error) {
+    console.log(`::warning::Post cleanup for ${config.lockName} failed: ${oneLine(error.message)}.`);
+    appendSummary(`Build lock post cleanup failed: ${oneLine(error.message)}`);
+  }
+  console.log("::endgroup::");
+}
+
+async function runPostCleanup() {
+  if (process.env.STATE_build_lock_cleanup !== "enabled") {
+    console.log("No build-lock post cleanup state recorded; nothing to do.");
+    return;
+  }
+
+  try {
+    await postCleanup(config());
+  } catch (error) {
+    console.log(`::warning::Build lock post cleanup could not start: ${oneLine(error.message)}.`);
+    appendSummary(`Build lock post cleanup could not start: ${oneLine(error.message)}`);
+  }
 }
 
 async function reap(config) {
@@ -801,12 +1109,18 @@ function config() {
     statePath: `locks/${lockName}.json`,
     timeoutMinutes: integerInput("timeout-minutes", 180),
     leaseMinutes: integerInput("lease-minutes", 240),
-    pollSeconds: integerInput("poll-seconds", 15)
+    pollSeconds: integerInput("poll-seconds", 15),
+    registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
 }
 
 async function run() {
   try {
+    if (MODE === "post-cleanup") {
+      await runPostCleanup();
+      return;
+    }
+
     const cfg = config();
     if (MODE === "acquire") {
       await acquire(cfg);
@@ -832,14 +1146,19 @@ if (require.main === module) {
 module.exports = {
   acquire,
   api,
+  cleanupIdentity,
   config,
   emptyState,
   evaluateStale,
+  installAcquireSignalCleanup,
   isRetryableResponse,
   normalizeState,
+  postCleanup,
   readState,
   release,
   reap,
   run,
+  runCancellationCleanup,
+  runPostCleanup,
   writeState
 };

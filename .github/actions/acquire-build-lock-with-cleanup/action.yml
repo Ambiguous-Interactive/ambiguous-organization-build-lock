@@ -1,0 +1,49 @@
+name: Acquire build lock with post cleanup
+description: Acquire a central organization build lock and register best-effort post cleanup.
+inputs:
+  lock-name:
+    description: Lock name. Use wallstop-organization-builds for Unity.
+    required: true
+  holder-id-suffix:
+    description: Extra identity for matrix cells inside the same workflow job.
+    required: false
+    default: default
+  lock-repository:
+    description: Repository that stores lock state.
+    required: false
+    default: Ambiguous-Interactive/ambiguous-organization-build-lock
+  state-branch:
+    description: Branch that stores lock state JSON files.
+    required: false
+    default: lock-state
+  timeout-minutes:
+    description: Maximum time to wait for the lock.
+    required: false
+    default: "180"
+  lease-minutes:
+    description: Stale-holder lease duration.
+    required: false
+    default: "240"
+  poll-seconds:
+    description: Base polling delay while queued.
+    required: false
+    default: "15"
+outputs:
+  acquired:
+    description: "true when this action acquired the lock."
+  lock-name:
+    description: Acquired lock name.
+  holder-id:
+    description: Unique holder identity for this run.
+  state-sha:
+    description: Lock-state file SHA after acquire.
+  wait-ms:
+    description: Milliseconds waited before acquiring.
+  attempts:
+    description: CAS attempts.
+  stale-recovered:
+    description: "true when a stale holder was replaced."
+runs:
+  using: node24
+  main: ../../dist/acquire-with-cleanup.js
+  post: ../../dist/post-cleanup.js
