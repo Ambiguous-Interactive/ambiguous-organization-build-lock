@@ -67,6 +67,16 @@ function yamlScalarValue(value) {
   return stripOptionalYamlQuotes(stripYamlNodeDecorators(stripYamlComment(value)));
 }
 
+function yamlExplicitNodeValue(value) {
+  const stripped = stripYamlNodeDecorators(stripYamlComment(value));
+  const explicitNode = /^[?:][ \t]+(.+)$/.exec(stripped);
+  return explicitNode ? stripYamlNodeDecorators(stripYamlComment(explicitNode[1])) : stripped;
+}
+
+function yamlMappingKeyValue(value) {
+  return stripOptionalYamlQuotes(yamlExplicitNodeValue(value));
+}
+
 function stripYamlNodeDecorators(value) {
   let rest = value.trim();
 
@@ -255,8 +265,12 @@ function collectFlowNodeText(lines, startIndex, endIndex, firstValue) {
   const collected = [firstValue];
   let depth = flowBalance(stripYamlFlowComments(collected.join("\n")));
 
-  for (let index = startIndex + 1; depth > 0 && index < lines.length && index < endIndex; index += 1) {
+  for (let index = startIndex + 1; depth > 0 && index < lines.length; index += 1) {
     const line = lines[index];
+    if (index >= endIndex && !/^[}\]]/.test(stripYamlFlowComments(line).trimStart())) {
+      break;
+    }
+
     collected.push(line);
     depth = flowBalance(stripYamlFlowComments(collected.join("\n")));
   }
@@ -308,6 +322,9 @@ function stripYamlFlowComments(value) {
 
 function parseFlowSequence(value) {
   const trimmed = stripYamlNodeDecorators(stripYamlFlowComments(value));
+  if (flowBalance(trimmed) !== 0) {
+    return null;
+  }
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
     return null;
   }
@@ -319,27 +336,46 @@ function parseFlowSequence(value) {
   return splitTopLevel(body);
 }
 
-function parseFlowMap(value) {
+function parseFlowMapEntries(value) {
   const trimmed = stripYamlNodeDecorators(stripYamlFlowComments(value));
+  if (flowBalance(trimmed) !== 0) {
+    return null;
+  }
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     return null;
   }
 
   const body = trimmed.slice(1, -1).trim();
-  const mapping = {};
   if (!body) {
-    return mapping;
+    return [];
   }
 
+  const entries = [];
   for (const part of splitTopLevel(body)) {
     const colon = findTopLevelColon(part);
     if (colon === -1) {
       return null;
     }
 
-    const key = yamlScalarValue(part.slice(0, colon).trim());
-    const entryValue = part.slice(colon + 1).trim();
-    mapping[key] = entryValue;
+    const rawKey = part.slice(0, colon).trim();
+    entries.push({
+      rawKey,
+      key: yamlMappingKeyValue(rawKey),
+      value: part.slice(colon + 1).trim()
+    });
+  }
+  return entries;
+}
+
+function parseFlowMap(value) {
+  const entries = parseFlowMapEntries(value);
+  if (!entries) {
+    return null;
+  }
+
+  const mapping = {};
+  for (const entry of entries) {
+    mapping[entry.key] = entry.value;
   }
   return mapping;
 }
@@ -350,15 +386,71 @@ function normalizeYamlScalarMapValues(mapping) {
 
 function parseYamlKeyText(text) {
   const normalizedText = stripYamlNodeDecorators(text);
-  const entry = /^(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_.-]+)):[ \t]*(.*)$/.exec(normalizedText);
+  if (normalizedText.startsWith("?")) {
+    const body = normalizedText.slice(1).trimStart();
+    const colon = findTopLevelColon(body);
+    if (colon === -1) {
+      const rawKey = `? ${body}`;
+      return {
+        rawKey,
+        key: yamlMappingKeyValue(rawKey),
+        value: "",
+        explicit: true,
+        explicitValueMissing: true
+      };
+    }
+
+    const rawKey = `? ${body.slice(0, colon).trim()}`;
+    return {
+      rawKey,
+      key: yamlMappingKeyValue(rawKey),
+      value: yamlNodeValue(stripYamlComment(body.slice(colon + 1))),
+      explicit: true,
+      explicitValueMissing: false
+    };
+  }
+
+  const entry = /^((?:"(?:[^"\\]|\\.)*"|'[^']*'|\*[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+)):[ \t]*(.*)$/.exec(normalizedText);
   if (!entry) {
     return null;
   }
 
   return {
-    key: entry[1] || entry[2] || entry[3],
-    value: yamlNodeValue(stripYamlComment(entry[4]))
+    rawKey: entry[1],
+    key: yamlScalarValue(entry[1]),
+    value: yamlNodeValue(stripYamlComment(entry[2]))
   };
+}
+
+function explicitMappingValue(lines, startIndex, endIndex, parentIndent) {
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const line = lines[index];
+    if (isBlankOrComment(line)) {
+      continue;
+    }
+
+    const indent = lineIndent(line);
+    if (indent < parentIndent) {
+      return null;
+    }
+
+    const value = yamlNodeValue(stripYamlComment(line.slice(indent)));
+    const entry = /^:[ \t]*(.*)$/.exec(value);
+    return entry ? { index, indent, value: yamlNodeValue(stripYamlComment(entry[1])) } : null;
+  }
+  return null;
+}
+
+function explicitMappingValueAfterLine(lines, index, endIndex, parentIndent) {
+  const inlineEntry = /^:[ \t]*(.*)$/.exec(yamlNodeValue(stripYamlComment(lines[index].slice(lineIndent(lines[index])))));
+  if (inlineEntry) {
+    return {
+      index,
+      indent: lineIndent(lines[index]),
+      value: yamlNodeValue(stripYamlComment(inlineEntry[1]))
+    };
+  }
+  return explicitMappingValue(lines, index + 1, endIndex, parentIndent);
 }
 
 function parseYamlKeyLine(line) {
@@ -414,7 +506,17 @@ function directMappingEntries(lines, startIndex, endIndex, parentIndent) {
   for (let index = startIndex; index < endIndex; index += 1) {
     const entry = parseYamlKeyLine(lines[index]);
     if (entry && entry.indent === childIndent) {
-      entries.push({ ...entry, index });
+      const explicitValue =
+        entry.explicit && entry.explicitValueMissing
+          ? explicitMappingValue(lines, index + 1, endIndex, entry.indent)
+          : null;
+      entries.push({
+        ...entry,
+        index,
+        value: explicitValue ? explicitValue.value : entry.value,
+        valueIndex: explicitValue ? explicitValue.index : index,
+        valueIndent: explicitValue ? explicitValue.indent : entry.indent
+      });
     }
   }
   return entries;
@@ -493,7 +595,7 @@ function isFlowLike(value) {
 }
 
 function isYamlAlias(value) {
-  return /^\*[A-Za-z0-9_.-]+$/.test(stripYamlNodeDecorators(stripYamlComment(value)));
+  return /^\*[A-Za-z0-9_.-]+$/.test(yamlExplicitNodeValue(value));
 }
 
 function findTopLevelMappingEntry(lines, key) {
@@ -504,10 +606,30 @@ function findTopLevelMappingEntry(lines, key) {
 
     const entry = parseYamlKeyLine(lines[index]);
     if (entry && entry.key === key) {
-      return { ...entry, index };
+      const explicitValue =
+        entry.explicit && entry.explicitValueMissing ? explicitMappingValue(lines, index + 1, lines.length, entry.indent) : null;
+      return {
+        ...entry,
+        index,
+        value: explicitValue ? explicitValue.value : entry.value,
+        valueIndex: explicitValue ? explicitValue.index : index,
+        valueIndent: explicitValue ? explicitValue.indent : entry.indent
+      };
     }
   }
   return null;
+}
+
+function mappingValueBlock(lines, entry) {
+  const valueIndex = entry.valueIndex ?? entry.index;
+  const valueIndent = entry.valueIndent ?? entry.indent;
+  const childStart = valueIndex === entry.index ? entry.index + 1 : valueIndex + 1;
+  const childIndent = valueIndex === entry.index ? entry.indent : valueIndent;
+  return {
+    end: findMappingBlockEnd(lines, childStart, childIndent),
+    indent: childIndent,
+    start: childStart
+  };
 }
 
 function permissionsFromFlowMap(value) {
@@ -538,7 +660,15 @@ function permissionsFromBlock(text, indent) {
   for (const [index, line] of lines.entries()) {
     const entry = parseYamlKeyLine(line);
     if (entry && entry.indent === indent && entry.key === "permissions") {
-      declaration = { ...entry, index };
+      const explicitValue =
+        entry.explicit && entry.explicitValueMissing ? explicitMappingValue(lines, index + 1, lines.length, entry.indent) : null;
+      declaration = {
+        ...entry,
+        index,
+        value: explicitValue ? explicitValue.value : entry.value,
+        valueIndex: explicitValue ? explicitValue.index : index,
+        valueIndent: explicitValue ? explicitValue.indent : entry.indent
+      };
       break;
     }
   }
@@ -561,14 +691,15 @@ function permissionsFromBlock(text, indent) {
     return flowMap || new Map();
   }
 
-  const blockEnd = findMappingBlockEnd(lines, declaration.index + 1, indent);
-  const child = directChildValue(lines, declaration.index + 1, blockEnd, indent);
+  const block = mappingValueBlock(lines, declaration);
+  const blockEnd = block.end;
+  const child = directChildValue(lines, block.start, blockEnd, block.indent);
   if (child && isFlowMapLike(child.value)) {
     const flowText = collectFlowNodeText(lines, child.index, blockEnd, child.value);
     return permissionsFromFlowMap(flowText) || new Map();
   }
 
-  const entries = directMappingEntries(lines, declaration.index + 1, blockEnd, indent);
+  const entries = directMappingEntries(lines, block.start, blockEnd, block.indent);
   if (entries.length === 0) {
     return new Map();
   }
@@ -613,8 +744,10 @@ function workflowHasTrigger(text, trigger) {
   }
 
   if (onEntry.value) {
-    const onEnd = findMappingBlockEnd(lines, onEntry.index + 1, onEntry.indent);
-    const onValue = isFlowLike(onEntry.value) ? collectFlowNodeText(lines, onEntry.index, onEnd, onEntry.value) : onEntry.value;
+    const valueIndex = onEntry.valueIndex ?? onEntry.index;
+    const valueIndent = onEntry.valueIndent ?? onEntry.indent;
+    const onEnd = findMappingBlockEnd(lines, valueIndex + 1, valueIndent);
+    const onValue = isFlowLike(onEntry.value) ? collectFlowNodeText(lines, valueIndex, onEnd, onEntry.value) : onEntry.value;
     const flowMap = parseFlowMap(onValue);
     if (flowMap) {
       return Object.prototype.hasOwnProperty.call(flowMap, trigger);
@@ -628,9 +761,10 @@ function workflowHasTrigger(text, trigger) {
     return yamlScalarValue(onValue) === trigger;
   }
 
-  const onEnd = findMappingBlockEnd(lines, onEntry.index + 1, onEntry.indent);
-  const mappingEntries = directMappingEntries(lines, onEntry.index + 1, onEnd, onEntry.indent);
-  const sequenceItems = directSequenceItems(lines, onEntry.index + 1, onEnd, onEntry.indent);
+  const onBlock = mappingValueBlock(lines, onEntry);
+  const onEnd = onBlock.end;
+  const mappingEntries = directMappingEntries(lines, onBlock.start, onEnd, onBlock.indent);
+  const sequenceItems = directSequenceItems(lines, onBlock.start, onEnd, onBlock.indent);
   if (mappingEntries.length > 0 || sequenceItems.length > 0) {
     return (
       mappingEntries.some((entry) => entry.key === trigger) ||
@@ -638,7 +772,7 @@ function workflowHasTrigger(text, trigger) {
     );
   }
 
-  const child = directChildValue(lines, onEntry.index + 1, onEnd, onEntry.indent);
+  const child = directChildValue(lines, onBlock.start, onEnd, onBlock.indent);
   if (!child) {
     return false;
   }
@@ -665,24 +799,27 @@ function workflowConcurrency(text) {
   }
 
   if (concurrencyEntry.value) {
-    const end = findMappingBlockEnd(lines, concurrencyEntry.index + 1, concurrencyEntry.indent);
+    const valueIndex = concurrencyEntry.valueIndex ?? concurrencyEntry.index;
+    const valueIndent = concurrencyEntry.valueIndent ?? concurrencyEntry.indent;
+    const end = findMappingBlockEnd(lines, valueIndex + 1, valueIndent);
     const value = isFlowLike(concurrencyEntry.value)
-      ? collectFlowNodeText(lines, concurrencyEntry.index, end, concurrencyEntry.value)
+      ? collectFlowNodeText(lines, valueIndex, end, concurrencyEntry.value)
       : concurrencyEntry.value;
     const flowMap = parseFlowMap(value);
     return flowMap ? normalizeYamlScalarMapValues(flowMap) : { group: value };
   }
 
   const concurrency = {};
-  const end = findMappingBlockEnd(lines, concurrencyEntry.index + 1, concurrencyEntry.indent);
-  for (const entry of directMappingEntries(lines, concurrencyEntry.index + 1, end, concurrencyEntry.indent)) {
+  const concurrencyBlock = mappingValueBlock(lines, concurrencyEntry);
+  const end = concurrencyBlock.end;
+  for (const entry of directMappingEntries(lines, concurrencyBlock.start, end, concurrencyBlock.indent)) {
     concurrency[entry.key] = yamlScalarValue(entry.value);
   }
   if (Object.keys(concurrency).length > 0) {
     return concurrency;
   }
 
-  const child = directChildValue(lines, concurrencyEntry.index + 1, end, concurrencyEntry.indent);
+  const child = directChildValue(lines, concurrencyBlock.start, end, concurrencyBlock.indent);
   if (!child) {
     return concurrency;
   }
@@ -706,15 +843,18 @@ function jobSections(text) {
     return [];
   }
   if (jobsEntry.value) {
-    const jobsEnd = findMappingBlockEnd(lines, jobsEntry.index + 1, jobsEntry.indent);
-    const value = isFlowMapLike(jobsEntry.value) ? collectFlowNodeText(lines, jobsEntry.index, jobsEnd, jobsEntry.value) : jobsEntry.value;
+    const valueIndex = jobsEntry.valueIndex ?? jobsEntry.index;
+    const valueIndent = jobsEntry.valueIndent ?? jobsEntry.indent;
+    const jobsEnd = findMappingBlockEnd(lines, valueIndex + 1, valueIndent);
+    const value = isFlowMapLike(jobsEntry.value) ? collectFlowNodeText(lines, valueIndex, jobsEnd, jobsEntry.value) : jobsEntry.value;
     return [{ name: unparsedJobsName, text: `${unparsedJobsName}\n${value}` }];
   }
 
-  const jobsEnd = findMappingBlockEnd(lines, jobsEntry.index + 1, jobsEntry.indent);
-  const starts = directMappingEntries(lines, jobsEntry.index + 1, jobsEnd, jobsEntry.indent);
+  const jobsBlock = mappingValueBlock(lines, jobsEntry);
+  const jobsEnd = jobsBlock.end;
+  const starts = directMappingEntries(lines, jobsBlock.start, jobsEnd, jobsBlock.indent);
   if (starts.length === 0) {
-    const child = directChildValue(lines, jobsEntry.index + 1, jobsEnd, jobsEntry.indent);
+    const child = directChildValue(lines, jobsBlock.start, jobsEnd, jobsBlock.indent);
     return child ? [{ name: unparsedJobsName, text: `${unparsedJobsName}\n${blockText(lines, child.index, jobsEnd)}` }] : [];
   }
   if (starts.length === 1 && isFlowMapLike(starts[0].value)) {
@@ -795,7 +935,16 @@ function collectRunScriptFromStepItem(lines, item, stepEnd, sections) {
   if (inlineEntry) {
     const inlineEntryIndent = item.indent + 2;
     if (inlineEntry.key === "run") {
-      const result = collectRunScript(lines, item.index, inlineEntryIndent, inlineEntry.value);
+      const explicitValue =
+        inlineEntry.explicit && inlineEntry.explicitValueMissing
+          ? explicitMappingValue(lines, item.index + 1, stepEnd, item.indent)
+          : null;
+      const result = collectRunScript(
+        lines,
+        explicitValue ? explicitValue.index : item.index,
+        explicitValue ? explicitValue.indent : inlineEntryIndent,
+        explicitValue ? explicitValue.value : inlineEntry.value
+      );
       sections.push(result.section);
       return;
     }
@@ -810,7 +959,7 @@ function collectRunScriptFromStepItem(lines, item, stepEnd, sections) {
       continue;
     }
 
-    const result = collectRunScript(lines, entry.index, entry.indent, entry.value);
+    const result = collectRunScript(lines, entry.valueIndex ?? entry.index, entry.valueIndent ?? entry.indent, entry.value);
     sections.push(result.section);
   }
 }
@@ -831,15 +980,18 @@ function runScriptSections(text) {
     return sections;
   }
   if (jobsEntry.value) {
-    const jobsEnd = findMappingBlockEnd(lines, jobsEntry.index + 1, jobsEntry.indent);
-    const value = isFlowMapLike(jobsEntry.value) ? collectFlowNodeText(lines, jobsEntry.index, jobsEnd, jobsEntry.value) : jobsEntry.value;
-    return [{ line: jobsEntry.index + 1, text: value }];
+    const valueIndex = jobsEntry.valueIndex ?? jobsEntry.index;
+    const valueIndent = jobsEntry.valueIndent ?? jobsEntry.indent;
+    const jobsEnd = findMappingBlockEnd(lines, valueIndex + 1, valueIndent);
+    const value = isFlowMapLike(jobsEntry.value) ? collectFlowNodeText(lines, valueIndex, jobsEnd, jobsEntry.value) : jobsEntry.value;
+    return [{ line: valueIndex + 1, text: value }];
   }
 
-  const jobsEnd = findMappingBlockEnd(lines, jobsEntry.index + 1, jobsEntry.indent);
-  const jobEntries = directMappingEntries(lines, jobsEntry.index + 1, jobsEnd, jobsEntry.indent);
+  const jobsBlock = mappingValueBlock(lines, jobsEntry);
+  const jobsEnd = jobsBlock.end;
+  const jobEntries = directMappingEntries(lines, jobsBlock.start, jobsEnd, jobsBlock.indent);
   if (jobEntries.length === 0) {
-    const child = directChildValue(lines, jobsEntry.index + 1, jobsEnd, jobsEntry.indent);
+    const child = directChildValue(lines, jobsBlock.start, jobsEnd, jobsBlock.indent);
     return child ? [{ line: child.index + 1, text: blockText(lines, child.index, jobsEnd) }] : sections;
   }
   if (jobEntries.length === 1 && isFlowMapLike(jobEntries[0].value)) {
@@ -900,15 +1052,16 @@ function policySensitiveAliasLines(text) {
   const lines = text.split(/\r?\n/);
   const aliases = [];
   let pendingStepsIndent = null;
+  let blockScalarParentIndent = null;
 
   function flowValueHasPolicyAlias(value) {
     if (isYamlAlias(value)) {
       return true;
     }
 
-    const flowMap = parseFlowMap(value);
-    if (flowMap) {
-      return Object.values(flowMap).some((entryValue) => flowValueHasPolicyAlias(entryValue));
+    const flowMapEntries = parseFlowMapEntries(value);
+    if (flowMapEntries) {
+      return flowMapEntries.some((entry) => isYamlAlias(entry.rawKey) || flowValueHasPolicyAlias(entry.value));
     }
 
     const flowItems = parseFlowSequence(value) || [];
@@ -916,12 +1069,19 @@ function policySensitiveAliasLines(text) {
   }
 
   for (const [index, line] of lines.entries()) {
+    const indent = lineIndent(line);
+    if (blockScalarParentIndent !== null) {
+      if (isBlankLine(line) || indent > blockScalarParentIndent) {
+        continue;
+      }
+      blockScalarParentIndent = null;
+    }
+
     const stripped = stripYamlComment(line);
     if (!stripped) {
       continue;
     }
 
-    const indent = lineIndent(line);
     if (pendingStepsIndent !== null && indent > pendingStepsIndent && /^\s*\*[A-Za-z0-9_.-]+\s*$/.test(stripped)) {
       aliases.push(index + 1);
     }
@@ -929,7 +1089,31 @@ function policySensitiveAliasLines(text) {
       pendingStepsIndent = null;
     }
 
-    const key = parseYamlKeyLine(line);
+    const explicitValueLine = /^:[ \t]*/.test(stripped);
+    const explicitLineValue = explicitValueLine
+      ? explicitMappingValueAfterLine(lines, index, lines.length, indent)
+      : null;
+    if (explicitLineValue && isYamlBlockScalar(explicitLineValue.value)) {
+      blockScalarParentIndent = explicitLineValue.indent;
+      continue;
+    }
+
+    const parsedKey = parseYamlKeyLine(line);
+    const explicitKeyValue =
+      parsedKey && parsedKey.explicit && parsedKey.explicitValueMissing
+        ? explicitMappingValue(lines, index + 1, lines.length, parsedKey.indent)
+        : null;
+    const key = parsedKey
+      ? {
+          ...parsedKey,
+          value: explicitKeyValue ? explicitKeyValue.value : parsedKey.value,
+          valueIndex: explicitKeyValue ? explicitKeyValue.index : index,
+          valueIndent: explicitKeyValue ? explicitKeyValue.indent : parsedKey.indent
+        }
+      : null;
+    if (key && isYamlAlias(key.rawKey)) {
+      aliases.push(index + 1);
+    }
     if (key && ["run", "steps", "uses"].includes(key.key) && isYamlAlias(key.value)) {
       aliases.push(index + 1);
     }
@@ -937,7 +1121,7 @@ function policySensitiveAliasLines(text) {
       aliases.push(index + 1);
     }
     if (key && isFlowLike(key.value)) {
-      const flowText = collectFlowNodeText(lines, index, lines.length, key.value);
+      const flowText = collectFlowNodeText(lines, index, findMappingBlockEnd(lines, index + 1, key.indent), key.value);
       if (flowValueHasPolicyAlias(flowText)) {
         aliases.push(index + 1);
       }
@@ -949,7 +1133,10 @@ function policySensitiveAliasLines(text) {
     }
 
     const sequenceKey = sequence && parseYamlKeyText(sequence.value);
-    if (sequenceKey && ["run", "steps", "uses"].includes(sequenceKey.key) && isYamlAlias(sequenceKey.value)) {
+    if (sequenceKey && isYamlAlias(sequenceKey.rawKey)) {
+      aliases.push(index + 1);
+    }
+    if (sequenceKey && isYamlAlias(sequenceKey.value)) {
       aliases.push(index + 1);
     }
 
@@ -957,7 +1144,7 @@ function policySensitiveAliasLines(text) {
       aliases.push(index + 1);
     }
     if (sequence && isFlowLike(sequence.value)) {
-      const flowText = collectFlowNodeText(lines, index, lines.length, sequence.value);
+      const flowText = collectFlowNodeText(lines, index, findMappingBlockEnd(lines, index + 1, sequence.indent), sequence.value);
       if (flowValueHasPolicyAlias(flowText)) {
         aliases.push(index + 1);
       }
@@ -967,7 +1154,7 @@ function policySensitiveAliasLines(text) {
       aliases.push(index + 1);
     }
     if (isFlowLike(stripped)) {
-      const flowText = collectFlowNodeText(lines, index, lines.length, stripped);
+      const flowText = collectFlowNodeText(lines, index, findMappingBlockEnd(lines, index + 1, indent), stripped);
       if (flowValueHasPolicyAlias(flowText)) {
         aliases.push(index + 1);
       }
@@ -975,6 +1162,18 @@ function policySensitiveAliasLines(text) {
 
     if (key && key.key === "steps" && !key.value) {
       pendingStepsIndent = key.indent;
+    }
+    if (key && isYamlBlockScalar(key.value)) {
+      const keyValueIndent = key.valueIndent ?? key.indent;
+      blockScalarParentIndent = keyValueIndent;
+    } else if (sequenceKey && isYamlBlockScalar(sequenceKey.value)) {
+      const explicitValue =
+        sequenceKey.explicit && sequenceKey.explicitValueMissing
+          ? explicitMappingValue(lines, sequence.index + 1, lines.length, sequence.indent)
+          : null;
+      blockScalarParentIndent = explicitValue ? explicitValue.indent : sequence.indent + 2;
+    } else if (sequence && isYamlBlockScalar(sequence.value)) {
+      blockScalarParentIndent = sequence.indent;
     }
   }
 
@@ -1128,13 +1327,17 @@ test("workflow run scripts pass secrets through env instead of expression interp
   }
 });
 
-test("workflow policy rejects aliases in run scripts, steps, and action uses", () => {
+test("workflow policy rejects YAML aliases in workflow values", () => {
   const aliased = `
 dangerous_run: &dangerous_run echo \${{ secrets.FOO }}
 dangerous_steps: &dangerous_steps
   - uses: cycjimmy/semantic-release-action@v5
 dangerous_step: &dangerous_step
   run: echo \${{ github.token }}
+dangerous_env: &dangerous_env
+  TOKEN: \${{ secrets.FOO }}
+dangerous_permission: &dangerous_permission write
+dangerous_key: &dangerous_key run
 jobs:
   run-alias:
     steps:
@@ -1165,13 +1368,51 @@ jobs:
   steps-child-alias:
     steps:
       *dangerous_steps
+  env-alias:
+    env: *dangerous_env
+    steps:
+      - run: echo safe
+  permission-flow-alias:
+    permissions: { contents: *dangerous_permission }
+    steps:
+      - run: echo safe
+  block-alias-key:
+    *dangerous_key: echo \${{ secrets.FOO }}
+    steps:
+      - run: echo safe
+  sequence-inline-alias-key:
+    steps:
+      - *dangerous_key: echo \${{ secrets.FOO }}
+  sequence-inline-value-alias:
+    steps:
+      - env: *dangerous_env
+        run: echo safe
+  flow-alias-key:
+    steps: [{ *dangerous_key: echo \${{ secrets.FOO }} }]
+  explicit-block-alias-key:
+    ? *dangerous_key
+    : echo \${{ secrets.FOO }}
+    steps:
+      - run: echo safe
+  explicit-block-alias-value:
+    ? run
+    : *dangerous_run
+    steps:
+      - run: echo safe
+  explicit-flow-alias-key:
+    steps: [{ ? *dangerous_key : echo \${{ secrets.FOO }} }]
+  explicit-flow-alias-value:
+    steps: [{ ? run : *dangerous_run }]
 `;
 
-  assert.deepEqual(policySensitiveAliasLines(aliased), [10, 11, 12, 13, 14, 15, 17, 19, 21, 23, 25, 27, 30, 33, 36]);
+  assert.deepEqual(
+    policySensitiveAliasLines(aliased),
+    [14, 15, 16, 17, 18, 19, 21, 23, 25, 27, 29, 31, 34, 37, 40, 42, 46, 50, 55, 58, 61, 63, 68, 69, 73, 75]
+  );
 
   for (const workflow of listWorkflows()) {
     const aliases = policySensitiveAliasLines(readWorkflow(workflow));
-    assert.deepEqual(aliases, [], `${workflow} must not use YAML aliases for run, steps, or uses fields`);
+    assert.deepEqual(aliases, [], `${workflow} must not use YAML aliases in workflow YAML`);
   }
 });
 
@@ -1183,6 +1424,14 @@ jobs:
   release:
     steps:
       - run: '*also_not_an_alias'
+  quoted-key:
+    steps:
+      - "*not_an_alias": echo ignored
+      - { "*also_not_an_alias": echo ignored }
+  quoted-explicit-key:
+    steps:
+      - ? "*not_an_alias"
+        : echo ignored
 `;
 
   assert.deepEqual(policySensitiveAliasLines(workflow), []);
@@ -1190,6 +1439,38 @@ jobs:
     runScriptSections(workflow).map((section) => section.text),
     ["*not_an_alias", "*also_not_an_alias"]
   );
+});
+
+test("workflow policy ignores alias-looking text inside block scalars", () => {
+  const workflow = `
+jobs:
+  example:
+    steps:
+      - run: |
+          ? *not_yaml_alias_key
+          : *not_yaml_alias_value
+`;
+
+  assert.deepEqual(policySensitiveAliasLines(workflow), []);
+});
+
+test("workflow policy ignores alias-looking text inside explicit block scalars", () => {
+  const workflow = `
+jobs:
+  example:
+    steps:
+      - ? run
+        : |
+          *not_yaml_alias
+  env-block:
+    ? env
+    : |
+      *not_yaml_alias
+    steps:
+      - run: echo safe
+`;
+
+  assert.deepEqual(policySensitiveAliasLines(workflow), []);
 });
 
 test("workflow run script parser handles chomped block scalars", () => {
@@ -1314,6 +1595,35 @@ jobs:
   assert.deepEqual(
     sections.map((section) => section.text.trim()),
     ["echo nested-dash", "echo block-mapping", "echo tagged-sequence", "echo flow-one", "echo flow-two"]
+  );
+});
+
+test("workflow run script parser handles explicit flow mapping keys", () => {
+  const sections = runScriptSections(`
+jobs:
+  explicit-flow:
+    steps: [{ ? run : "echo explicit flow" }]
+`);
+
+  assert.deepEqual(
+    sections.map((section) => section.text.trim()),
+    ["echo explicit flow"]
+  );
+});
+
+test("workflow run script parser handles explicit block mapping keys", () => {
+  const sections = runScriptSections(`
+jobs:
+  explicit-block:
+    steps:
+      - ? run
+        : echo explicit block
+      - ? run : echo explicit inline
+`);
+
+  assert.deepEqual(
+    sections.map((section) => section.text.trim()),
+    ["echo explicit block", "echo explicit inline"]
   );
 });
 
@@ -1571,6 +1881,43 @@ jobs: !!map {
   ]);
 });
 
+test("workflow policy scanners do not consume sibling keys after unclosed flow-style jobs", () => {
+  const workflow = `
+jobs: !!map {
+  release: {
+    runs-on: ubuntu-latest,
+    steps: [{ run: "echo \${{ secrets.FOO }}" }]
+  }
+on: [workflow_dispatch]
+`;
+
+  const jobs = jobSections(workflow);
+  assert.equal(jobs.length, 1);
+  assert.match(jobs[0].text, /^<unparsed-flow-jobs>\n/);
+  assert.doesNotMatch(jobs[0].text, /workflow_dispatch/);
+  assert.equal(workflowHasTrigger(workflow, "workflow_dispatch"), true);
+  assert.deepEqual(runScriptSections(workflow), [
+    {
+      line: 2,
+      text: '{\n  release: {\n    runs-on: ubuntu-latest,\n    steps: [{ run: "echo ${{ secrets.FOO }}" }]\n  }'
+    }
+  ]);
+});
+
+test("workflow flow parsers fail closed on unclosed flow maps", () => {
+  const workflow = `
+on: { workflow_dispatch: {}
+concurrency: { group: auto-release, cancel-in-progress: false }
+jobs: {}
+`;
+
+  assert.equal(workflowHasTrigger(workflow, "workflow_dispatch"), false);
+  assert.deepEqual(workflowConcurrency(workflow), {
+    group: "auto-release",
+    "cancel-in-progress": "false"
+  });
+});
+
 test("permission policy fails closed on flow-style jobs", () => {
   const workflow = `
 permissions: { contents: write, issues: write, pull-requests: write }
@@ -1732,6 +2079,24 @@ concurrency: !!map {
 }
 jobs: {}
 `;
+  const explicitFlowKeys = `
+on: { ? workflow_dispatch : {}, ? schedule : [{ cron: "17 3 * * *" }] }
+concurrency: { ? group : auto-release, ? cancel-in-progress : false }
+jobs: {}
+`;
+  const explicitBlockKeys = `
+on:
+  ? workflow_dispatch
+  : {}
+  ? schedule
+  : [{ cron: "17 3 * * *" }]
+concurrency:
+  ? group
+  : auto-release
+  ? cancel-in-progress
+  : false
+jobs: {}
+`;
 
   assert.equal(workflowHasTrigger(compactBlock, "workflow_dispatch"), true);
   assert.equal(workflowHasTrigger(compactBlock, "schedule"), true);
@@ -1784,6 +2149,55 @@ jobs: {}
     group: "auto-release",
     "cancel-in-progress": "false"
   });
+
+  assert.equal(workflowHasTrigger(explicitFlowKeys, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(explicitFlowKeys, "schedule"), true);
+  assert.equal(workflowHasTrigger(explicitFlowKeys, "pull_request"), false);
+  assert.deepEqual(workflowConcurrency(explicitFlowKeys), {
+    group: "auto-release",
+    "cancel-in-progress": "false"
+  });
+
+  assert.equal(workflowHasTrigger(explicitBlockKeys, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(explicitBlockKeys, "schedule"), true);
+  assert.equal(workflowHasTrigger(explicitBlockKeys, "pull_request"), false);
+  assert.deepEqual(workflowConcurrency(explicitBlockKeys), {
+    group: "auto-release",
+    "cancel-in-progress": "false"
+  });
+});
+
+test("workflow policy scanners handle top-level explicit mappings", () => {
+  const workflow = `
+? "on"
+: [workflow_dispatch, schedule]
+? permissions
+:
+  contents: read
+? concurrency
+: { group: "\${{ github.ref }}", cancel-in-progress: false }
+? jobs
+:
+  release:
+    permissions:
+      contents: write
+    steps:
+      - run: echo \${{ secrets.FOO }}
+`;
+  const jobs = jobSections(workflow);
+
+  assert.equal(workflowHasTrigger(workflow, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(workflow, "schedule"), true);
+  assert.deepEqual(workflowConcurrency(workflow), {
+    group: "${{ github.ref }}",
+    "cancel-in-progress": "false"
+  });
+  assert.deepEqual(jobs.map((job) => job.name), ["release"]);
+  assert.deepEqual(
+    runScriptSections(workflow).map((section) => section.text.trim()),
+    ["echo ${{ secrets.FOO }}"]
+  );
+  assert.equal(hasEffectivePermission(workflow, jobs[0].text, "contents", "write"), true);
 });
 
 test("scheduled manual workflows declare stable concurrency", () => {
