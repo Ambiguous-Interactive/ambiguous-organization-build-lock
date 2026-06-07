@@ -63,6 +63,10 @@ function stripOptionalYamlQuotes(value) {
   return quoted ? quoted[2] : trimmed;
 }
 
+function yamlScalarValue(value) {
+  return stripOptionalYamlQuotes(stripYamlNodeDecorators(stripYamlComment(value)));
+}
+
 function stripYamlNodeDecorators(value) {
   let rest = value.trim();
 
@@ -163,9 +167,17 @@ function splitTopLevel(value) {
 function findTopLevelColon(value) {
   let depth = 0;
   let quote = null;
+  let tag = false;
 
   for (let index = 0; index < value.length; index += 1) {
     const char = value[index];
+
+    if (tag) {
+      if (char === ">") {
+        tag = false;
+      }
+      continue;
+    }
 
     if (quote) {
       if (quote === "\"" && char === "\\") {
@@ -178,6 +190,12 @@ function findTopLevelColon(value) {
 
     if (char === "\"" || char === "'") {
       quote = char;
+      continue;
+    }
+
+    if (char === "!" && value[index + 1] === "<") {
+      tag = true;
+      index += 1;
       continue;
     }
 
@@ -298,7 +316,7 @@ function parseFlowSequence(value) {
   if (!body) {
     return [];
   }
-  return splitTopLevel(body).map((part) => stripOptionalYamlQuotes(part));
+  return splitTopLevel(body);
 }
 
 function parseFlowMap(value) {
@@ -319,15 +337,20 @@ function parseFlowMap(value) {
       return null;
     }
 
-    const key = stripOptionalYamlQuotes(part.slice(0, colon).trim());
+    const key = yamlScalarValue(part.slice(0, colon).trim());
     const entryValue = part.slice(colon + 1).trim();
     mapping[key] = entryValue;
   }
   return mapping;
 }
 
+function normalizeYamlScalarMapValues(mapping) {
+  return Object.fromEntries(Object.entries(mapping).map(([key, value]) => [key, yamlScalarValue(value)]));
+}
+
 function parseYamlKeyText(text) {
-  const entry = /^(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_.-]+)):[ \t]*(.*)$/.exec(text);
+  const normalizedText = stripYamlNodeDecorators(text);
+  const entry = /^(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_.-]+)):[ \t]*(.*)$/.exec(normalizedText);
   if (!entry) {
     return null;
   }
@@ -495,27 +518,42 @@ function permissionsFromFlowMap(value) {
 
   const permissions = new Map();
   for (const [name, level] of Object.entries(flowMap)) {
-    if (!/^(?:read|write|none)$/.test(level)) {
+    const permissionLevel = permissionLevelFromScalar(level);
+    if (!permissionLevel) {
       return new Map();
     }
-    permissions.set(name, level);
+    permissions.set(name, permissionLevel);
   }
   return permissions;
 }
 
+function permissionLevelFromScalar(value) {
+  const level = yamlScalarValue(value);
+  return /^(?:read|write|none)$/.test(level) ? level : null;
+}
+
 function permissionsFromBlock(text, indent) {
-  const declarationPattern = new RegExp(`^ {${indent}}permissions:[ \\t]*([^\\n]*)$`, "m");
-  const declaration = declarationPattern.exec(text);
+  const lines = text.split(/\r?\n/);
+  let declaration = null;
+  for (const [index, line] of lines.entries()) {
+    const entry = parseYamlKeyLine(line);
+    if (entry && entry.indent === indent && entry.key === "permissions") {
+      declaration = { ...entry, index };
+      break;
+    }
+  }
+
   if (!declaration) {
     return null;
   }
 
-  const value = stripYamlComment(declaration[1]);
+  const value = declaration.value;
   if (value) {
-    if (value === "write-all") {
+    const scalar = yamlScalarValue(value);
+    if (scalar === "write-all") {
       return new Map([["*", "write"]]);
     }
-    if (value === "read-all") {
+    if (scalar === "read-all") {
       return new Map([["*", "read"]]);
     }
 
@@ -523,18 +561,25 @@ function permissionsFromBlock(text, indent) {
     return flowMap || new Map();
   }
 
-  const blockPattern = new RegExp(`^ {${indent}}permissions:[ \\t]*(?:#.*)?\\r?\\n((?: {${indent + 2},}[^\\n]*\\n?)*)`, "m");
-  const block = blockPattern.exec(text);
-  if (!block) {
+  const blockEnd = findMappingBlockEnd(lines, declaration.index + 1, indent);
+  const child = directChildValue(lines, declaration.index + 1, blockEnd, indent);
+  if (child && isFlowMapLike(child.value)) {
+    const flowText = collectFlowNodeText(lines, child.index, blockEnd, child.value);
+    return permissionsFromFlowMap(flowText) || new Map();
+  }
+
+  const entries = directMappingEntries(lines, declaration.index + 1, blockEnd, indent);
+  if (entries.length === 0) {
     return new Map();
   }
 
   const permissions = new Map();
-  for (const line of block[1].split(/\r?\n/)) {
-    const entry = new RegExp(`^ {${indent + 2}}([A-Za-z-]+):[ \\t]*(read|write|none)[ \\t]*(?:#.*)?$`).exec(line);
-    if (entry) {
-      permissions.set(entry[1], entry[2]);
+  for (const entry of entries) {
+    const permissionLevel = permissionLevelFromScalar(entry.value);
+    if (!permissionLevel) {
+      return new Map();
     }
+    permissions.set(entry.key, permissionLevel);
   }
   return permissions;
 }
@@ -577,10 +622,10 @@ function workflowHasTrigger(text, trigger) {
 
     const flowSequence = parseFlowSequence(onValue);
     if (flowSequence) {
-      return flowSequence.includes(trigger);
+      return flowSequence.some((item) => yamlScalarValue(item) === trigger);
     }
 
-    return stripOptionalYamlQuotes(onValue) === trigger;
+    return yamlScalarValue(onValue) === trigger;
   }
 
   const onEnd = findMappingBlockEnd(lines, onEntry.index + 1, onEntry.indent);
@@ -589,7 +634,7 @@ function workflowHasTrigger(text, trigger) {
   if (mappingEntries.length > 0 || sequenceItems.length > 0) {
     return (
       mappingEntries.some((entry) => entry.key === trigger) ||
-      sequenceItems.some((item) => stripOptionalYamlQuotes(item.value) === trigger)
+      sequenceItems.some((item) => yamlScalarValue(item.value) === trigger)
     );
   }
 
@@ -606,7 +651,7 @@ function workflowHasTrigger(text, trigger) {
 
   const flowSequence = parseFlowSequence(childText);
   if (flowSequence) {
-    return flowSequence.includes(trigger);
+    return flowSequence.some((item) => yamlScalarValue(item) === trigger);
   }
 
   return true;
@@ -624,20 +669,25 @@ function workflowConcurrency(text) {
     const value = isFlowLike(concurrencyEntry.value)
       ? collectFlowNodeText(lines, concurrencyEntry.index, end, concurrencyEntry.value)
       : concurrencyEntry.value;
-    return parseFlowMap(value) || { group: value };
+    const flowMap = parseFlowMap(value);
+    return flowMap ? normalizeYamlScalarMapValues(flowMap) : { group: value };
   }
 
   const concurrency = {};
   const end = findMappingBlockEnd(lines, concurrencyEntry.index + 1, concurrencyEntry.indent);
   for (const entry of directMappingEntries(lines, concurrencyEntry.index + 1, end, concurrencyEntry.indent)) {
-    concurrency[entry.key] = entry.value;
+    concurrency[entry.key] = yamlScalarValue(entry.value);
   }
   if (Object.keys(concurrency).length > 0) {
     return concurrency;
   }
 
   const child = directChildValue(lines, concurrencyEntry.index + 1, end, concurrencyEntry.indent);
-  return child ? parseFlowMap(blockText(lines, child.index, end)) || {} : concurrency;
+  if (!child) {
+    return concurrency;
+  }
+  const flowMap = parseFlowMap(blockText(lines, child.index, end));
+  return flowMap ? normalizeYamlScalarMapValues(flowMap) : {};
 }
 
 function hasStableConcurrencyGroup(concurrency) {
@@ -645,7 +695,7 @@ function hasStableConcurrencyGroup(concurrency) {
     return false;
   }
 
-  const group = stripOptionalYamlQuotes(concurrency.group);
+  const group = yamlScalarValue(concurrency.group);
   return /^[A-Za-z0-9_.-]+$/.test(group) || /^\$\{\{\s*github\.workflow\s*\}\}$/.test(group);
 }
 
@@ -720,7 +770,7 @@ function collectRunScriptsFromFlowSteps(value, line, sections, fallbackText = va
 
     const flowStep = parseFlowMap(item);
     if (flowStep && Object.prototype.hasOwnProperty.call(flowStep, "run")) {
-      sections.push({ line, text: isYamlAlias(flowStep.run) ? value : stripOptionalYamlQuotes(flowStep.run) });
+      sections.push({ line, text: isYamlAlias(flowStep.run) ? value : yamlScalarValue(flowStep.run) });
     }
   }
   return true;
@@ -736,7 +786,7 @@ function collectRunScriptFromStepItem(lines, item, stepEnd, sections) {
   const inlineFlowStep = parseFlowMap(item.value);
   if (inlineFlowStep) {
     if (Object.prototype.hasOwnProperty.call(inlineFlowStep, "run")) {
-      sections.push({ line: item.index + 1, text: stripOptionalYamlQuotes(inlineFlowStep.run) });
+      sections.push({ line: item.index + 1, text: yamlScalarValue(inlineFlowStep.run) });
     }
     return;
   }
@@ -989,6 +1039,80 @@ jobs: # workflow jobs
   assert.equal(hasEffectivePermission(workflow, jobs.commented.text, "pull-requests", "write"), true);
 });
 
+test("permission parser normalizes quoted and decorated YAML scalars", () => {
+  const workflow = `
+permissions: !!str "read-all"
+jobs:
+  inherited:
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  flow:
+    permissions: { "contents": "write", issues: !!str 'write', pull-requests: &flow_pr write }
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  block:
+    permissions:
+      !!str contents: "write" # valid decorated key and quoted scalar with a trailing comment
+      "issues": !!str write
+
+      # Blank lines and comments inside the map must not stop permission parsing.
+      pull-requests: &block_pr 'write'
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  decorated-block:
+    permissions: &decorated_permissions
+      contents: write
+      issues: !!str "write"
+      pull-requests: 'write'
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  decorated-child-flow:
+    permissions: !!map
+      {
+        contents: "write",
+        issues: write,
+        pull-requests: !!str write
+      }
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  invalid-flow:
+    permissions: { contents: "write", issues: admin, pull-requests: write }
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+  invalid-block:
+    permissions:
+      contents: write
+      issues: admin
+      pull-requests: write
+    steps:
+      - uses: cycjimmy/semantic-release-action@v5
+`;
+  const jobs = Object.fromEntries(jobSections(workflow).map((job) => [job.name, job]));
+
+  assert.equal(hasEffectivePermission(workflow, jobs.inherited.text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(workflow, jobs.inherited.text, "contents", "write"), false);
+
+  for (const jobName of ["flow", "block", "decorated-block", "decorated-child-flow"]) {
+    assert.equal(hasEffectivePermission(workflow, jobs[jobName].text, "contents", "write"), true, `${jobName} contents`);
+    assert.equal(hasEffectivePermission(workflow, jobs[jobName].text, "issues", "write"), true, `${jobName} issues`);
+    assert.equal(
+      hasEffectivePermission(workflow, jobs[jobName].text, "pull-requests", "write"),
+      true,
+      `${jobName} pull requests`
+    );
+  }
+
+  for (const jobName of ["invalid-flow", "invalid-block"]) {
+    assert.equal(hasEffectivePermission(workflow, jobs[jobName].text, "contents", "write"), false, `${jobName} contents`);
+    assert.equal(hasEffectivePermission(workflow, jobs[jobName].text, "issues", "write"), false, `${jobName} issues`);
+    assert.equal(
+      hasEffectivePermission(workflow, jobs[jobName].text, "pull-requests", "write"),
+      false,
+      `${jobName} pull requests`
+    );
+  }
+});
+
 test("workflow run scripts pass secrets through env instead of expression interpolation", () => {
   const tokenExpression = /\$\{\{\s*(?:secrets\.[A-Za-z0-9_]+|github\.token)\s*\}\}/i;
 
@@ -1049,6 +1173,23 @@ jobs:
     const aliases = policySensitiveAliasLines(readWorkflow(workflow));
     assert.deepEqual(aliases, [], `${workflow} must not use YAML aliases for run, steps, or uses fields`);
   }
+});
+
+test("workflow policy allows quoted alias-looking scalars", () => {
+  const workflow = `
+jobs:
+  validate:
+    steps: [{ run: "*not_an_alias" }]
+  release:
+    steps:
+      - run: '*also_not_an_alias'
+`;
+
+  assert.deepEqual(policySensitiveAliasLines(workflow), []);
+  assert.deepEqual(
+    runScriptSections(workflow).map((section) => section.text),
+    ["*not_an_alias", "*also_not_an_alias"]
+  );
 });
 
 test("workflow run script parser handles chomped block scalars", () => {
@@ -1527,6 +1668,7 @@ test("repository text files do not contain token-bearing GitHub HTTPS URLs", () 
 test("scheduled manual concurrency groups reject event-specific expressions", () => {
   assert.equal(hasStableConcurrencyGroup({ group: "auto-release" }), true);
   assert.equal(hasStableConcurrencyGroup({ group: "'auto-release'" }), true);
+  assert.equal(hasStableConcurrencyGroup({ group: "!!str auto-release" }), true);
   assert.equal(hasStableConcurrencyGroup({ group: '"${{ github.workflow }}"' }), true);
   assert.equal(hasStableConcurrencyGroup({ group: "${{ github.workflow }}" }), true);
   assert.equal(hasStableConcurrencyGroup({ group: "${{ github.ref }}" }), false);
@@ -1537,16 +1679,21 @@ test("scheduled manual concurrency groups reject event-specific expressions", ()
 test("workflow trigger and concurrency parsers handle compact forms", () => {
   const compactBlock = `
 on:
-  workflow_dispatch: {}
+  !!str workflow_dispatch: {}
   schedule: [{ cron: "17 3 * * *" }]
 concurrency: { group: auto-release, cancel-in-progress: false }
 jobs: {}
 `;
   const flowOn = `
-on: { workflow_dispatch: {}, schedule: [{ cron: "17 3 * * *" }] }
+on: { !!str workflow_dispatch: {}, schedule: [{ cron: "17 3 * * *" }] }
 concurrency:
     group: \${{ github.workflow }}
     cancel-in-progress: false
+jobs: {}
+`;
+  const flowSequenceOn = `
+on: [!!str workflow_dispatch, schedule]
+concurrency: !!map { group: !!str auto-release, cancel-in-progress: !!bool false }
 jobs: {}
 `;
   const childFlowOn = `
@@ -1576,12 +1723,12 @@ jobs: {}
 `;
   const sameLineOpenMultilineFlow = `
 on: !!map {
-  workflow_dispatch: {}, # keep parsing after comments
+  !!str workflow_dispatch: {}, # keep parsing after comments
   schedule: [{ cron: "17 3 * * *" }]
 }
 concurrency: !!map {
-  group: auto-release, # keep parsing after comments
-  cancel-in-progress: false
+  group: !!str auto-release, # keep parsing after comments
+  cancel-in-progress: !!bool false
 }
 jobs: {}
 `;
@@ -1597,6 +1744,14 @@ jobs: {}
   assert.equal(workflowHasTrigger(flowOn, "schedule"), true);
   assert.deepEqual(workflowConcurrency(flowOn), {
     group: "${{ github.workflow }}",
+    "cancel-in-progress": "false"
+  });
+
+  assert.equal(workflowHasTrigger(flowSequenceOn, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(flowSequenceOn, "schedule"), true);
+  assert.equal(workflowHasTrigger(flowSequenceOn, "pull_request"), false);
+  assert.deepEqual(workflowConcurrency(flowSequenceOn), {
+    group: "auto-release",
     "cancel-in-progress": "false"
   });
 
