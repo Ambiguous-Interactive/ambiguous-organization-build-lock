@@ -3,38 +3,8 @@
 This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
-
-## Required Secret
-
-Create an organization or repository secret named `ORG_BUILD_LOCK_TOKEN` in each
-consumer repository.
-
-Minimum token access:
-
-- `contents: read/write` on `Ambiguous-Interactive/ambiguous-organization-build-lock`
-- `actions: read` on repositories whose workflow runs should be checked for
-  stale-holder recovery
-
-Missing `actions: read` is treated as a configuration error. The lock actions
-only fall back to lease-based recovery when a workflow run cannot be found; they
-do not hide permission failures as unknown status.
-
-Do not use a broad personal token unless no narrower GitHub App or fine-grained
-token is available.
-
-## Publish This Repository
-
-Before consumer workflows can use the actions here:
-
-1. Create `Ambiguous-Interactive/ambiguous-organization-build-lock`.
-2. Push this folder's contents to that repository.
-3. Create and push a `v1` tag.
-4. If the repository is private, enable private action access for the consumer
-   repositories that call these actions.
-
-The included `Build lock CI` workflow checks the action JavaScript syntax on
-pull requests and pushes to `main`.
-
+> [!NOTE]
+> Consumer workflows must provide `ORG_BUILD_LOCK_TOKEN` (passed as `BUILD_LOCK_TOKEN`) with `contents: read/write` on this repository; stale-holder recovery also requires `actions: read` on consumer repositories.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
