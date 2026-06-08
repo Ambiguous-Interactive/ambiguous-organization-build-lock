@@ -226,6 +226,10 @@ function isRetryableResponse(response, data) {
   return response.status === 403 && isRateLimitResponse(response, data);
 }
 
+function isUnknownOutcomeMutationResponse(response) {
+  return response.status === 408 || response.status >= 500;
+}
+
 function retryDelayMs(response, attempt, options) {
   const retryAfter = retryAfterMs(response);
   if (retryAfter !== null) {
@@ -290,6 +294,8 @@ async function fetchApi(method, path, body, authToken, options = {}) {
 
 async function api(method, path, body, authToken, options = {}) {
   const retry = apiRetryOptions(options);
+  const mutationMethod = method === "PUT";
+  let unknownOutcomeMutationFailure = false;
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
       throwIfAborted(retry.signal);
@@ -299,6 +305,9 @@ async function api(method, path, body, authToken, options = {}) {
       }
 
       if (attempt < retry.maxAttempts && isRetryableResponse(response, data)) {
+        if (mutationMethod && isUnknownOutcomeMutationResponse(response)) {
+          unknownOutcomeMutationFailure = true;
+        }
         const delay = retryDelayMs(response, attempt, retry);
         throwIfAborted(retry.signal);
         console.log(
@@ -309,13 +318,20 @@ async function api(method, path, body, authToken, options = {}) {
         continue;
       }
 
-      throw httpError(method, path, response, data, text);
+      const error = httpError(method, path, response, data, text);
+      if (unknownOutcomeMutationFailure && (response.status === 409 || response.status === 422)) {
+        error.acceptedWriteAmbiguous = true;
+      }
+      throw error;
     } catch (error) {
       if (isAbortError(error, retry.signal)) {
         throw retry.signal && retry.signal.aborted ? abortReason(retry.signal) : error;
       }
       if (error.status || attempt >= retry.maxAttempts) {
         throw error;
+      }
+      if (mutationMethod) {
+        unknownOutcomeMutationFailure = true;
       }
       const delay = retryDelayMs(null, attempt, retry);
       throwIfAborted(retry.signal);
@@ -497,9 +513,10 @@ async function writeState(config, previousSha, state, message, options = {}) {
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
+  const nextState = { ...state, updatedAt: nowIso() };
   const body = {
     message,
-    content: base64Encode(stringifyState({ ...state, updatedAt: nowIso() })),
+    content: base64Encode(stringifyState(nextState)),
     branch: config.stateBranch
   };
   if (previousSha) {
@@ -517,7 +534,7 @@ async function writeState(config, previousSha, state, message, options = {}) {
     return { conflict: false, sha: data.content && data.content.sha ? data.content.sha : "" };
   } catch (error) {
     if (error.status === 409 || error.status === 422) {
-      return { conflict: true, sha: "" };
+      return { conflict: true, sha: "", ambiguous: Boolean(error.acceptedWriteAmbiguous) };
     }
     throw error;
   }
@@ -649,6 +666,7 @@ function writeReleaseOutputs(config, identity, result) {
 async function cleanupIdentity(config, identity, options = {}) {
   const maxAttempts = options.maxAttempts || 10;
   const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
+  let ambiguousCleanup = null;
 
   for (let attempts = 1; attempts <= maxAttempts; attempts++) {
     const { state, sha } = await readState(config, options);
@@ -669,6 +687,9 @@ async function cleanupIdentity(config, identity, options = {}) {
 
     const changed = released || queueCleaned;
     if (!changed) {
+      if (ambiguousCleanup) {
+        return { ...ambiguousCleanup, sha: sha || "", heldBy, heldByRunUrl };
+      }
       return {
         released: false,
         queueCleaned: false,
@@ -680,6 +701,15 @@ async function cleanupIdentity(config, identity, options = {}) {
 
     const write = await writeState(config, sha, state, `Release ${config.lockName}`, options);
     if (write.conflict) {
+      if (write.ambiguous) {
+        ambiguousCleanup = {
+          released,
+          queueCleaned,
+          sha: "",
+          heldBy: released && originalHolder ? "" : heldBy,
+          heldByRunUrl: released && originalHolder ? "" : heldByRunUrl
+        };
+      }
       await sleep(jitter(conflictDelayMs), { signal: options.apiOptions && options.apiOptions.signal });
       continue;
     }
@@ -857,6 +887,7 @@ async function acquire(config) {
     while (Date.now() < deadline) {
       throwIfCancellation(cancellation);
       attempts++;
+      let recoveringStaleHolder = false;
       const { state, sha } = await readState(config, { apiOptions });
       throwIfCancellation(cancellation);
       const stale = await evaluateStale(state.holder, config.token, { apiOptions });
@@ -928,7 +959,7 @@ async function acquire(config) {
 
       if ((!state.holder || stale.stale) && state.queue[0] && state.queue[0].holderId === identity.holderId) {
         if (state.holder && stale.stale) {
-          staleRecovered = true;
+          recoveringStaleHolder = true;
           console.log(`Recovering stale holder: ${stale.reason}`);
         }
         state.holder = holderFromIdentity(identity, config.leaseMinutes);
@@ -941,8 +972,15 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
           if (write.conflict) {
+            if (recoveringStaleHolder && write.ambiguous) {
+              staleRecovered = true;
+              recordPostCleanupNeeded();
+            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
+          }
+          if (recoveringStaleHolder) {
+            staleRecovered = true;
           }
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
@@ -989,7 +1027,7 @@ async function acquire(config) {
       holderId: identity.holderId,
       waitMs,
       attempts,
-      staleRecovered: false
+      staleRecovered
     });
     appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
     await cleanupAfterAcquireFailure(config, identity, "timeout", {
@@ -1096,6 +1134,7 @@ async function reap(config) {
   validateLockName(config.lockName);
   await ensureStateBranch(config);
   console.log(`::group::Reap stale build lock ${config.lockName}`);
+  let ambiguousReap = false;
 
   for (let attempts = 1; attempts <= 10; attempts++) {
     const { state, sha } = await readState(config);
@@ -1124,14 +1163,19 @@ async function reap(config) {
 
     const changed = holderReaped || beforeQueue !== state.queue.length;
     if (!changed) {
-      writeReapOutputs({ reaped: false, stateSha: sha || "" });
-      appendSummary(`No stale state found for ${config.lockName}.`);
+      writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
+      appendSummary(
+        ambiguousReap ? `Reaped stale state for ${config.lockName}.` : `No stale state found for ${config.lockName}.`
+      );
       console.log("::endgroup::");
       return;
     }
 
     const write = await writeState(config, sha, state, `Reap stale ${config.lockName}`);
     if (write.conflict) {
+      if (write.ambiguous) {
+        ambiguousReap = true;
+      }
       await sleep(jitter(1000));
       continue;
     }

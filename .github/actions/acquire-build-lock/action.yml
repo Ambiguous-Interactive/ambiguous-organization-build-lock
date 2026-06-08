@@ -42,7 +42,7 @@ outputs:
   attempts:
     description: CAS attempts.
   stale-recovered:
-    description: "true when a stale holder was replaced."
+    description: "true when this acquire accepted a stale-holder replacement write."
 runs:
   using: node24
   main: ../../dist/acquire.js

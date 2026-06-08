@@ -108,14 +108,17 @@ async function withTempFile(callback) {
 }
 
 function readEnvironmentFile(file) {
-  const entries = fs
-    .readFileSync(file, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const equals = line.indexOf("=");
-      return [line.slice(0, equals), line.slice(equals + 1)];
-    });
+  const entries = [];
+  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (line === "") {
+      return;
+    }
+    const equals = line.indexOf("=");
+    assert.notEqual(equals, -1, `${file}:${index + 1} must be NAME=VALUE, got ${JSON.stringify(line)}`);
+    assert.notEqual(equals, 0, `${file}:${index + 1} must use a non-empty name, got ${JSON.stringify(line)}`);
+    entries.push([line.slice(0, equals), line.slice(equals + 1)]);
+  });
   const names = entries.map(([name]) => name);
   assert.equal(new Set(names).size, names.length, `environment file must not contain duplicate names: ${names.join(", ")}`);
   return Object.fromEntries(entries);
@@ -124,6 +127,28 @@ function readEnvironmentFile(file) {
 function assertOutputContract(outputs, names) {
   assert.deepEqual(Object.keys(outputs).sort(), [...names].sort());
 }
+
+test("environment file parser fails closed on malformed output lines", async () => {
+  await withTempFile(async (file) => {
+    fs.writeFileSync(file, "valid=value\nmissing-equals\n", "utf8");
+
+    assert.throws(
+      () => readEnvironmentFile(file),
+      new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:2 must be NAME=VALUE`)
+    );
+  });
+});
+
+test("environment file parser rejects empty names", async () => {
+  await withTempFile(async (file) => {
+    fs.writeFileSync(file, "=value\n", "utf8");
+
+    assert.throws(
+      () => readEnvironmentFile(file),
+      new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:1 must use a non-empty name`)
+    );
+  });
+});
 
 async function withMockedFetch(fetchImplementation, callback) {
   const previousFetch = global.fetch;
@@ -865,7 +890,7 @@ test("api treats rate-limited 403 responses as retryable but not ordinary forbid
   }), false);
 });
 
-test("writeState preserves CAS conflict handling after a transient retry", async () => {
+test("writeState marks CAS conflicts after a retryable mutation failure as ambiguous", async () => {
   let calls = 0;
   const previousBase = process.env.BUILD_LOCK_API_RETRY_BASE_MS;
   const previousMax = process.env.BUILD_LOCK_API_RETRY_MAX_MS;
@@ -892,9 +917,90 @@ test("writeState preserves CAS conflict handling after a transient retry", async
       "Acquire x"
     );
 
-    assert.deepEqual(result, { conflict: true, sha: "" });
+    assert.deepEqual(result, { conflict: true, sha: "", ambiguous: true });
     assert.equal(calls, 2);
     });
+  } finally {
+    if (previousBase === undefined) {
+      delete process.env.BUILD_LOCK_API_RETRY_BASE_MS;
+    } else {
+      process.env.BUILD_LOCK_API_RETRY_BASE_MS = previousBase;
+    }
+    if (previousMax === undefined) {
+      delete process.env.BUILD_LOCK_API_RETRY_MAX_MS;
+    } else {
+      process.env.BUILD_LOCK_API_RETRY_MAX_MS = previousMax;
+    }
+  }
+});
+
+test("writeState preserves unambiguous CAS conflict handling", async () => {
+  let calls = 0;
+
+  await withMockedFetch(async () => {
+    calls++;
+    return jsonResponse(409, { message: "sha does not match" });
+  }, async () => {
+    const result = await writeState(
+      {
+        lockRepo: { owner: "o", repo: "r" },
+        statePath: "locks/x.json",
+        stateBranch: "lock-state",
+        token: "token"
+      },
+      "previous-sha",
+      emptyState("x"),
+      "Acquire x"
+    );
+
+    assert.deepEqual(result, { conflict: true, sha: "", ambiguous: false });
+    assert.equal(calls, 1);
+  });
+});
+
+test("writeState does not mark rate-limit rejections as ambiguous writes", async (t) => {
+  const previousBase = process.env.BUILD_LOCK_API_RETRY_BASE_MS;
+  const previousMax = process.env.BUILD_LOCK_API_RETRY_MAX_MS;
+  process.env.BUILD_LOCK_API_RETRY_BASE_MS = "0";
+  process.env.BUILD_LOCK_API_RETRY_MAX_MS = "0";
+
+  try {
+    for (const testCase of [
+      {
+        name: "HTTP 429",
+        response: () => jsonResponse(429, { message: "secondary rate limit" })
+      },
+      {
+        name: "rate-limited HTTP 403",
+        response: () => jsonResponse(403, { message: "You have exceeded a secondary rate limit." })
+      }
+    ]) {
+      await t.test(testCase.name, async () => {
+        let calls = 0;
+        await withMockedFetch(async () => {
+          calls++;
+          if (calls === 1) {
+            return testCase.response();
+          }
+          return jsonResponse(409, { message: "sha does not match" });
+        }, async () => {
+          const result = await writeState(
+            {
+              lockRepo: { owner: "o", repo: "r" },
+              statePath: "locks/x.json",
+              stateBranch: "lock-state",
+              token: "token"
+            },
+            "previous-sha",
+            emptyState("x"),
+            "Acquire x"
+          );
+
+          assert.deepEqual(result, { conflict: true, sha: "", ambiguous: false });
+          assert.equal(calls, 2);
+        });
+      });
+    }
   } finally {
     if (previousBase === undefined) {
       delete process.env.BUILD_LOCK_API_RETRY_BASE_MS;
@@ -1068,6 +1174,116 @@ test("acquire recovers when a successful lock write is reported as a transient f
     [
       "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
+      "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
+      "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
+      "GET /repos/owner/repo/actions/runs/123"
+    ]
+  );
+});
+
+test("acquire preserves stale recovery when an accepted stale replacement is reported as a transient failure", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let putCalls = 0;
+  const calls = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            calls.push({ method: options.method || "GET", path: parsed.pathname });
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                putCalls++;
+                const body = JSON.parse(options.body);
+                const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                if (putCalls === 1) {
+                  state = written;
+                  return jsonResponse(500, { message: "accepted but response failed" });
+                }
+                return jsonResponse(409, { message: "sha does not match" });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: state.holder.holderId === "owner/repo:123:perf-benchmarks:playmode"
+                  ? "state-sha-after-put"
+                  : "state-sha-before-put"
+              });
+            }
+            if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+              return jsonResponse(200, { status: "completed", conclusion: "success" });
+            }
+            if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+              return jsonResponse(200, { status: "in_progress", conclusion: null });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await acquire({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json",
+              timeoutMinutes: 1,
+              leaseMinutes: 240,
+              pollSeconds: 1
+            });
+
+            assert.equal(putCalls, 2);
+            assert.equal(state.holder.holderId, "owner/repo:123:perf-benchmarks:playmode");
+            assert.match(logs.join("\n"), /Recovering stale holder: holder run is completed/);
+            assert.match(logs.join("\n"), /HTTP 500; retrying/);
+            assert.match(logs.join("\n"), /Already holds wallstop-organization-builds/);
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
+    assert.equal(outputs.acquired, "true");
+    assert.equal(outputs["lock-name"], "wallstop-organization-builds");
+    assert.equal(outputs["holder-id"], "owner/repo:123:perf-benchmarks:playmode");
+    assert.equal(outputs["state-sha"], "state-sha-after-put");
+    assert.equal(outputs.attempts, "2");
+    assert.equal(outputs["stale-recovered"], "true");
+  });
+
+  assert.deepEqual(
+    calls.map((call) => `${call.method} ${call.path}`),
+    [
+      "GET /repos/o/r/git/ref/heads/lock-state",
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
+      "GET /repos/other/repo/actions/runs/999",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -1437,6 +1653,474 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
   assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
 });
 
+test("acquire timeout preserves stale recovery output after a raced stale replacement", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let readCount = 0;
+  let staleReplacementWrites = 0;
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2026-06-06T01:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+  const competingHolder = {
+    holderId: "other/repo:456:perf-benchmarks:editmode",
+    repository: "other/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "456",
+    runAttempt: "1",
+    runUrl: "https://github.com/other/repo/actions/runs/456",
+    queuedAt: "2026-06-06T00:01:00.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  if (written.holder && written.holder.holderId === "owner/repo:123:perf-benchmarks:playmode") {
+                    staleReplacementWrites++;
+                    state = {
+                      ...written,
+                      holder: competingHolder,
+                      queue: []
+                    };
+                  } else {
+                    state = written;
+                  }
+                  return jsonResponse(200, { content: { sha: `state-after-write-${staleReplacementWrites}` } });
+                }
+                readCount++;
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: `state-read-${readCount}`
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+                return jsonResponse(200, { status: "completed", conclusion: "success" });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  acquire({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    timeoutMinutes: 1,
+                    leaseMinutes: 240,
+                    pollSeconds: 1
+                  }),
+                /Timed out waiting for build lock/
+              );
+            });
+          });
+        }
+      );
+
+      assert.equal(staleReplacementWrites, 1);
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "false");
+      assert.equal(outputs["stale-recovered"], "true");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("acquire timeout preserves stale recovery after an ambiguous stale replacement sees another holder", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let readCount = 0;
+  let acquirePutCalls = 0;
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  const competingHolder = {
+    holderId: "other/repo:456:perf-benchmarks:editmode",
+    repository: "other/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "456",
+    runAttempt: "1",
+    runUrl: "https://github.com/other/repo/actions/runs/456",
+    queuedAt: "2026-06-06T00:01:00.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  Date.now = () => {
+    now += 10000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  if (body.message === "Acquire wallstop-organization-builds") {
+                    acquirePutCalls++;
+                    if (acquirePutCalls === 1) {
+                      state = {
+                        ...written,
+                        holder: competingHolder,
+                        queue: [written.holder]
+                      };
+                      return jsonResponse(500, { message: "accepted but response failed" });
+                    }
+                    return jsonResponse(409, { message: "sha does not match" });
+                  }
+                  state = written;
+                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
+                }
+                readCount++;
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: `state-read-${readCount}`
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+                return jsonResponse(200, { status: "completed", conclusion: "success" });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/456") {
+                return jsonResponse(200, { status: "in_progress", conclusion: null });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  acquire({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    timeoutMinutes: 1,
+                    leaseMinutes: 240,
+                    pollSeconds: 1
+                  }),
+                /holder=other\/repo:456:perf-benchmarks:editmode.*queue-position=1.*reason=holder run is in_progress/
+              );
+            });
+          });
+        }
+      );
+
+      assert.equal(acquirePutCalls, 2);
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "false");
+      assert.equal(outputs["stale-recovered"], "true");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.equal(state.holder.holderId, "other/repo:456:perf-benchmarks:editmode");
+  assert.deepEqual(state.queue, []);
+});
+
+test("opt-in acquire records post cleanup after an ambiguous stale recovery write", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let acquirePutCalls = 0;
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2026-06-06T01:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (stateFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_STATE: stateFile
+        },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  if (body.message === "Acquire wallstop-organization-builds") {
+                    acquirePutCalls++;
+                    if (acquirePutCalls === 1) {
+                      state = written;
+                      return jsonResponse(500, { message: "accepted but response failed" });
+                    }
+                    return jsonResponse(409, { message: "sha does not match" });
+                  }
+                  state = written;
+                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: state.holder && state.holder.holderId === "owner/repo:123:perf-benchmarks:playmode"
+                    ? "state-after-ambiguous-acquire"
+                    : "state-before-acquire"
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+                return jsonResponse(200, { status: "completed", conclusion: "success" });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  acquire({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    timeoutMinutes: 1,
+                    leaseMinutes: 240,
+                    pollSeconds: 1,
+                    registerPostCleanup: true
+                  }),
+                /Timed out waiting for build lock/
+              );
+            });
+          });
+        }
+      );
+
+      assert.equal(acquirePutCalls, 2);
+      assert.equal(readEnvironmentFile(stateFile).build_lock_cleanup, "enabled");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("acquire timeout does not mark stale recovery after an unrecovered stale CAS conflict", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let staleRecoveryConflicts = 0;
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2026-06-06T01:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  if (body.message === "Acquire wallstop-organization-builds") {
+                    staleRecoveryConflicts++;
+                  }
+                  return jsonResponse(409, { message: "sha does not match" });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-read"
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+                return jsonResponse(200, { status: "completed", conclusion: "success" });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  acquire({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    timeoutMinutes: 1,
+                    leaseMinutes: 240,
+                    pollSeconds: 1
+                  }),
+                /Timed out waiting for build lock/
+              );
+            });
+          });
+        }
+      );
+
+      assert.equal(staleRecoveryConflicts, 1);
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "false");
+      assert.equal(outputs["stale-recovered"], "false");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test("release is idempotent when this run is not the holder", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -1571,6 +2255,185 @@ test("release reports released when this run holds the lock", async () => {
   assert.equal(writtenState.holder, null);
 });
 
+test("release reports released after an accepted cleanup write returns retryable failure then conflict", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let releasePutCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                releasePutCalls++;
+                const body = JSON.parse(options.body);
+                state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                if (releasePutCalls === 1) {
+                  return jsonResponse(500, { message: "accepted but response failed" });
+                }
+                return jsonResponse(409, { message: "sha does not match" });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: state.holder ? "state-before-release" : "state-after-release"
+              });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await release({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json"
+            });
+
+            assert.match(logs.join("\n"), /Released wallstop-organization-builds/);
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["queue-cleaned"], "false");
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs["state-sha"], "state-after-release");
+    assert.equal(outputs["held-by"], "");
+    assert.equal(outputs["held-by-run-url"], "");
+  });
+
+  assert.equal(releasePutCalls, 2);
+  assert.equal(state.holder, null);
+});
+
+test("release preserves fresh holder context after an ambiguous accepted cleanup write", async () => {
+  const nextHolder = {
+    holderId: "other/repo:456:perf-benchmarks:editmode",
+    repository: "other/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "456",
+    runAttempt: "1",
+    runUrl: "https://github.com/other/repo/actions/runs/456",
+    queuedAt: "2026-06-06T00:01:00.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let releasePutCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                releasePutCalls++;
+                const body = JSON.parse(options.body);
+                if (releasePutCalls === 1) {
+                  state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  state = { ...state, holder: nextHolder };
+                  return jsonResponse(500, { message: "accepted but response failed" });
+                }
+                return jsonResponse(409, { message: "sha does not match" });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: state.holder && state.holder.holderId === nextHolder.holderId
+                  ? "state-after-next-acquire"
+                  : "state-before-release"
+              });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await release({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json"
+            });
+
+            assert.match(logs.join("\n"), /Lock is held by other\/repo:456:perf-benchmarks:editmode/);
+            assert.match(logs.join("\n"), /Released wallstop-organization-builds/);
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["queue-cleaned"], "false");
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs["state-sha"], "state-after-next-acquire");
+    assert.equal(outputs["held-by"], "other/repo:456:perf-benchmarks:editmode");
+    assert.equal(outputs["held-by-run-url"], "https://github.com/other/repo/actions/runs/456");
+  });
+
+  assert.equal(releasePutCalls, 2);
+});
+
 test("release reports queue-cleaned when this run never acquired the lock", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -1659,6 +2522,101 @@ test("release reports queue-cleaned when this run never acquired the lock", asyn
 
   assert.equal(writtenState.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
   assert.deepEqual(writtenState.queue, []);
+});
+
+test("release reports queue-cleaned after an accepted cleanup write returns retryable failure then conflict", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "other/repo:999:perf-benchmarks:editmode",
+      repository: "other/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "999",
+      runAttempt: "1",
+      runUrl: "https://github.com/other/repo/actions/runs/999",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    },
+    queue: [
+      {
+        holderId: "owner/repo:123:perf-benchmarks:playmode",
+        repository: "owner/repo",
+        workflow: "Perf",
+        job: "perf-benchmarks",
+        runId: "123",
+        runAttempt: "1",
+        runUrl: "https://github.com/owner/repo/actions/runs/123",
+        queuedAt: "2026-06-06T00:00:00.000Z"
+      }
+    ]
+  };
+  let releasePutCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      {
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "1",
+        GITHUB_WORKFLOW: "Perf",
+        GITHUB_JOB: "perf-benchmarks",
+        GITHUB_OUTPUT: outputFile
+      },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                releasePutCalls++;
+                const body = JSON.parse(options.body);
+                state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                if (releasePutCalls === 1) {
+                  return jsonResponse(500, { message: "accepted but response failed" });
+                }
+                return jsonResponse(409, { message: "sha does not match" });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: state.queue.length ? "state-before-release" : "state-after-release"
+              });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await release({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json"
+            });
+
+            assert.match(logs.join("\n"), /Removed queued request/);
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs.released, "false");
+    assert.equal(outputs["queue-cleaned"], "true");
+    assert.equal(outputs["cleanup-result"], "queue-cleaned");
+    assert.equal(outputs["state-sha"], "state-after-release");
+    assert.equal(outputs["held-by"], "other/repo:999:perf-benchmarks:editmode");
+    assert.equal(outputs["held-by-run-url"], "https://github.com/other/repo/actions/runs/999");
+  });
+
+  assert.equal(releasePutCalls, 2);
+  assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
+  assert.deepEqual(state.queue, []);
 });
 
 test("release reports noop with holder context when this run has no state to clean", async () => {
@@ -1836,6 +2794,74 @@ test("reap writes full output contract when a stale holder is removed", async ()
   assert.equal(state.holder, null);
 });
 
+test("reap reports reaped after an accepted write returns retryable failure then conflict", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let reapPutCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              reapPutCalls++;
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              if (reapPutCalls === 1) {
+                return jsonResponse(500, { message: "accepted but response failed" });
+              }
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+              sha: state.holder ? "state-before-reap" : "state-after-reap"
+            });
+          }
+          if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+            return jsonResponse(200, { status: "completed", conclusion: "success" });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await reap({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          });
+        });
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, reapOutputNames);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-reap");
+  });
+
+  assert.equal(reapPutCalls, 2);
+  assert.equal(state.holder, null);
+});
+
 test("reap writes full output contract when only completed queue entries are removed", async () => {
   let state = {
     ...emptyState("wallstop-organization-builds"),
@@ -1953,6 +2979,77 @@ test("post cleanup warns instead of throwing when cleanup cannot contact lock st
       });
     }
   );
+});
+
+test("post cleanup reports cleanup after an accepted write returns retryable failure then conflict", async () => {
+  let state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let cleanupPutCalls = 0;
+
+  await withActionEnv(
+    {
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_WORKFLOW: "Perf",
+      GITHUB_JOB: "perf-benchmarks",
+      STATE_build_lock_cleanup: "enabled"
+    },
+    async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            if (options.method === "PUT") {
+              cleanupPutCalls++;
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              if (cleanupPutCalls === 1) {
+                return jsonResponse(500, { message: "accepted but response failed" });
+              }
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            return jsonResponse(200, {
+              content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+              sha: state.holder ? "state-before-cleanup" : "state-after-cleanup"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async (logs) => {
+          await postCleanup({
+            token: "token",
+            lockName: "wallstop-organization-builds",
+            holderIdSuffix: "playmode",
+            lockRepository: "o/r",
+            lockRepo: { owner: "o", repo: "r" },
+            stateBranch: "lock-state",
+            statePath: "locks/wallstop-organization-builds.json"
+          });
+
+          assert.match(logs.join("\n"), /Post cleanup for wallstop-organization-builds: released/);
+        });
+      });
+    }
+  );
+
+  assert.equal(cleanupPutCalls, 2);
+  assert.equal(state.holder, null);
 });
 
 test("post cleanup wrapper exits successfully when saved state exists but token is missing", () => {

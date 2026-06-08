@@ -120,6 +120,11 @@ when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
 
+The acquire actions set `stale-recovered=true` after GitHub accepts a
+stale-holder replacement write. If a race prevents the action from verifying and
+using that replacement before timeout, `acquired=false` remains authoritative for
+guarding licensed work while `stale-recovered=true` preserves the diagnostic.
+
 ## Dependabot Auto-Merge
 
 The Dependabot auto-merge workflow only acts on same-repository Dependabot PRs.
