@@ -695,20 +695,26 @@ async function cleanupAfterAcquireFailure(config, identity, reason, options = {}
 function installAcquireSignalCleanup(cancellation) {
   const handler = (signal) => {
     const exitCode = signal === "SIGINT" ? 130 : 143;
+    cancellation.signalName = signal;
+    cancellation.exitCode = exitCode;
+
     if (cancellation.cleanupAbortController) {
       cancellation.cleanupAbortController.abort(new Error(`Build lock cleanup interrupted by ${signal}`));
       process.exit(exitCode);
       return;
     }
+
+    if (cancellation.requested) {
+      return;
+    }
+
     cancellation.requested = true;
-    cancellation.signalName = signal;
-    cancellation.exitCode = exitCode;
     cancellation.abortController.abort(new Error(`Build lock acquire cancelled by ${signal}`));
     console.log(`::warning::Received ${signal}; stopping acquire before build-lock cleanup.`);
   };
 
-  process.once("SIGINT", handler);
-  process.once("SIGTERM", handler);
+  process.on("SIGINT", handler);
+  process.on("SIGTERM", handler);
   return () => {
     process.off("SIGINT", handler);
     process.off("SIGTERM", handler);
@@ -789,24 +795,16 @@ async function acquire(config) {
 
   try {
     await ensureStateBranch(config, { apiOptions });
-  } catch (error) {
-    if (isCancellationError(error, cancellation)) {
-      await runCancellationCleanup(config, identity, cancellation);
-      process.exit(cancellation.exitCode || 143);
-    }
-    throw error;
-  }
-  const started = Date.now();
-  const deadline = started + config.timeoutMinutes * 60 * 1000;
-  let attempts = 0;
-  let staleRecovered = false;
-  let lastObservation = null;
+    const started = Date.now();
+    const deadline = started + config.timeoutMinutes * 60 * 1000;
+    let attempts = 0;
+    let staleRecovered = false;
+    let lastObservation = null;
 
-  console.log(`::group::Acquire build lock ${config.lockName}`);
-  console.log(`Lock repository: ${config.lockRepository}`);
-  console.log(`Holder: ${identity.holderId}`);
+    console.log(`::group::Acquire build lock ${config.lockName}`);
+    console.log(`Lock repository: ${config.lockRepository}`);
+    console.log(`Holder: ${identity.holderId}`);
 
-  try {
     while (Date.now() < deadline) {
       throwIfCancellation(cancellation);
       attempts++;

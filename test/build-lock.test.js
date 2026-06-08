@@ -290,6 +290,8 @@ test("api forwards AbortSignal to fetch", async () => {
 
 test("signal cleanup handler marks cancellation and aborts acquire work", () => {
   const previousLog = console.log;
+  const initialSigintListeners = process.listenerCount("SIGINT");
+  const initialSigtermListeners = process.listenerCount("SIGTERM");
   const cancellation = {
     requested: false,
     signalName: "",
@@ -301,6 +303,9 @@ test("signal cleanup handler marks cancellation and aborts acquire work", () => 
   console.log = () => {};
 
   try {
+    assert.equal(process.listenerCount("SIGINT"), initialSigintListeners + 1);
+    assert.equal(process.listenerCount("SIGTERM"), initialSigtermListeners + 1);
+
     process.emit("SIGINT", "SIGINT");
 
     assert.equal(cancellation.requested, true);
@@ -310,10 +315,81 @@ test("signal cleanup handler marks cancellation and aborts acquire work", () => 
   } finally {
     console.log = previousLog;
     remove();
+    remove();
+    assert.equal(process.listenerCount("SIGINT"), initialSigintListeners);
+    assert.equal(process.listenerCount("SIGTERM"), initialSigtermListeners);
   }
 });
 
-test("second signal during cancellation cleanup aborts cleanup and exits with the new signal code", () => {
+test("repeated pre-cleanup signals update exit code without repeating first-cancel work", () => {
+  const previousLog = console.log;
+  const logs = [];
+  const cancellation = {
+    requested: false,
+    signalName: "",
+    exitCode: 0,
+    abortController: new AbortController(),
+    cleanupAbortController: null
+  };
+  const remove = installAcquireSignalCleanup(cancellation);
+  console.log = (line) => {
+    logs.push(String(line));
+  };
+
+  try {
+    process.emit("SIGINT", "SIGINT");
+    process.emit("SIGTERM", "SIGTERM");
+
+    assert.equal(cancellation.requested, true);
+    assert.equal(cancellation.signalName, "SIGTERM");
+    assert.equal(cancellation.exitCode, 143);
+    assert.equal(cancellation.abortController.signal.aborted, true);
+    assert.equal(logs.length, 1);
+  } finally {
+    console.log = previousLog;
+    remove();
+  }
+});
+
+for (const testCase of [
+  { firstSignal: "SIGINT", secondSignal: "SIGINT", exitCode: 130 },
+  { firstSignal: "SIGTERM", secondSignal: "SIGTERM", exitCode: 143 },
+  { firstSignal: "SIGINT", secondSignal: "SIGTERM", exitCode: 143 },
+  { firstSignal: "SIGTERM", secondSignal: "SIGINT", exitCode: 130 }
+]) {
+  test(`second ${testCase.secondSignal} during ${testCase.firstSignal} cancellation cleanup aborts cleanup`, () => {
+    const previousExit = process.exit;
+    const previousLog = console.log;
+    let exitCode = null;
+    const cancellation = {
+      requested: false,
+      signalName: "",
+      exitCode: 0,
+      abortController: new AbortController(),
+      cleanupAbortController: null
+    };
+    const remove = installAcquireSignalCleanup(cancellation);
+    process.exit = (code) => {
+      exitCode = code;
+    };
+    console.log = () => {};
+
+    try {
+      process.emit(testCase.firstSignal, testCase.firstSignal);
+      cancellation.cleanupAbortController = new AbortController();
+      process.emit(testCase.secondSignal, testCase.secondSignal);
+
+      assert.equal(cancellation.cleanupAbortController.signal.aborted, true);
+      assert.equal(exitCode, testCase.exitCode);
+    } finally {
+      console.log = previousLog;
+      process.exit = previousExit;
+      remove();
+    }
+  });
+}
+
+test("second signal during cancellation cleanup exits with the new signal code", () => {
   const previousExit = process.exit;
   let exitCode = null;
   const cancellation = {
@@ -337,6 +413,50 @@ test("second signal during cancellation cleanup aborts cleanup and exits with th
     process.exit = previousExit;
     remove();
   }
+});
+
+test("acquire removes signal cleanup listeners when setup fails", async () => {
+  const initialSigintListeners = process.listenerCount("SIGINT");
+  const initialSigtermListeners = process.listenerCount("SIGTERM");
+
+  await withActionEnv(
+    {
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_WORKFLOW: "Perf",
+      GITHUB_JOB: "perf-benchmarks"
+    },
+    async () => {
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(401, { message: "Bad credentials" });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () =>
+            acquire({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json",
+              timeoutMinutes: 1,
+              leaseMinutes: 240,
+              pollSeconds: 1
+            }),
+          /Bad credentials/
+        );
+      });
+    }
+  );
+
+  assert.equal(process.listenerCount("SIGINT"), initialSigintListeners);
+  assert.equal(process.listenerCount("SIGTERM"), initialSigtermListeners);
 });
 
 test("cancellation cleanup removes this run queue entry with a fresh cleanup path", async () => {
