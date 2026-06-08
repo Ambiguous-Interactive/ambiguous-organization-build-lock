@@ -3,7 +3,8 @@
 This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
-
+> [!NOTE]
+> Consumer workflows must provide `ORG_BUILD_LOCK_TOKEN` (passed as `BUILD_LOCK_TOKEN`) with `contents: read/write` on this repository; stale-holder recovery also requires `actions: read` on consumer repositories.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
