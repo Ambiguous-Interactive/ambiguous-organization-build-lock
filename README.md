@@ -54,13 +54,15 @@ credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
 ## Consumer Workflow Pattern
 
 Validate local secret shape first, acquire immediately before the licensed Unity
-section, and release with `if: always()`:
+section, guard every licensed step on the acquire output, and release with
+`if: always()`:
 
 ```yaml
 - name: Validate Unity license secrets
   uses: ./.github/actions/validate-unity-license
 
 - name: Acquire organization Unity lock
+  id: acquire-build-lock
   uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@v1
   with:
     lock-name: wallstop-organization-builds
@@ -70,6 +72,7 @@ section, and release with `if: always()`:
     BUILD_LOCK_TOKEN: ${{ secrets.ORG_BUILD_LOCK_TOKEN }}
 
 - name: Run Unity Test Runner
+  if: ${{ steps.acquire-build-lock.outputs.acquired == 'true' }}
   uses: game-ci/unity-test-runner@v4
 
 - name: Release organization Unity lock
@@ -81,6 +84,19 @@ section, and release with `if: always()`:
   env:
     BUILD_LOCK_TOKEN: ${{ secrets.ORG_BUILD_LOCK_TOKEN }}
 ```
+
+The release action is intentionally safe to run even when acquire never reached
+the front of the queue. It reports `cleanup-result=released`,
+`cleanup-result=queue-cleaned`, or `cleanup-result=noop`; `queue-cleaned` means
+the current run was waiting but never held the lock, so no licensed work should
+have run. Do not gate the release step on `acquired == 'true'`; release also
+cleans queue entries for runs that were interrupted while waiting.
+
+Consumers that want an additional cancellation backstop can replace
+`acquire-build-lock` with `acquire-build-lock-with-cleanup`. Keep the explicit
+release step. The post cleanup is best-effort and only exists to remove this
+run's held lock or queued request if later workflow steps are interrupted before
+the explicit release action can run.
 
 Keep `runs-on` broad enough for all eligible Unity runners. The lock serializes
 only the licensed section; it should not be replaced with a single-runner label.
@@ -103,6 +119,11 @@ The `Reap stale build locks` workflow runs every 5 minutes. It clears a holder
 when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
+
+The acquire actions set `stale-recovered=true` after GitHub accepts a
+stale-holder replacement write. If a race prevents the action from verifying and
+using that replacement before timeout, `acquired=false` remains authoritative for
+guarding licensed work while `stale-recovered=true` preserves the diagnostic.
 
 ## Dependabot Auto-Merge
 

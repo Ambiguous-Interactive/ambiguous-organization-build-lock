@@ -1,5 +1,5 @@
-name: Acquire build lock
-description: Acquire a central organization build lock before licensed work.
+name: Acquire build lock with post cleanup
+description: Acquire a central organization build lock and register best-effort post cleanup.
 inputs:
   lock-name:
     description: Lock name. Use wallstop-organization-builds for Unity.
@@ -45,4 +45,5 @@ outputs:
     description: "true when this acquire accepted a stale-holder replacement write."
 runs:
   using: node24
-  main: ../../dist/acquire.js
+  main: ../../dist/acquire-with-cleanup.js
+  post: ../../dist/post-cleanup.js

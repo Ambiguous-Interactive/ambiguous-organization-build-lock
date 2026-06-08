@@ -8,6 +8,28 @@ const repoRoot = path.join(__dirname, "..");
 const workflowsRoot = path.join(repoRoot, ".github", "workflows");
 const policyTextExtensions = new Set([".js", ".json", ".md", ".yml", ".yaml"]);
 const unparsedJobsName = "<unparsed-flow-jobs>";
+const expectedWorkflowJobs = new Map([
+  ["auto-release.yml", ["release"]],
+  ["ci.yml", ["validate"]],
+  ["dependabot-auto-merge.yml", ["dependabot"]],
+  ["reap-stale-locks.yml", ["reap"]]
+]);
+const expectedWorkflowRunScriptSignatures = new Map([
+  [
+    "auto-release.yml",
+    ['git config user.name "github-actions[bot]"\ngit config user.email "41898282+github-actions[bot]@users.noreply.github.com"']
+  ],
+  ["ci.yml", ['for action_file in .github/dist/*.js; do\nnode --check "${action_file}"', "node --test test/*.test.js"]],
+  [
+    "dependabot-auto-merge.yml",
+    [
+      "set -euo pipefail\nskip() {",
+      "set -euo pipefail\n# Poll for up to ~13.3 minutes, leaving headroom under the 15 minute job timeout.",
+      'set -euo pipefail\npr_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"'
+    ]
+  ],
+  ["reap-stale-locks.yml", []]
+]);
 
 function readWorkflow(name) {
   return fs.readFileSync(path.join(workflowsRoot, name), "utf8");
@@ -1044,9 +1066,123 @@ function runScriptSections(text) {
   return sections;
 }
 
+function nestedScalarMap(lines, entry, endIndex) {
+  if (entry.value) {
+    const flowMap = parseFlowMap(entry.value);
+    return flowMap ? normalizeYamlScalarMapValues(flowMap) : {};
+  }
+
+  const block = mappingValueBlock(lines, entry);
+  const nestedEnd = Math.min(block.end, endIndex);
+  const values = {};
+  for (const child of directMappingEntries(lines, block.start, nestedEnd, block.indent)) {
+    values[child.key] = yamlScalarValue(child.value);
+  }
+  return values;
+}
+
+function workflowStepProperty(lines, entry, stepEnd) {
+  if (entry.key === "with" || entry.key === "env") {
+    return nestedScalarMap(lines, entry, stepEnd);
+  }
+  return entry.value ? yamlScalarValue(entry.value) : nestedScalarMap(lines, entry, stepEnd);
+}
+
+function workflowStepMap(lines, item, stepEnd) {
+  const step = { line: item.index + 1 };
+  const inlineFlowStep = parseFlowMap(item.value);
+  if (inlineFlowStep) {
+    return { ...step, ...normalizeYamlScalarMapValues(inlineFlowStep) };
+  }
+
+  const inlineEntry = parseYamlKeyText(item.value);
+  if (inlineEntry) {
+    step[inlineEntry.key] = yamlScalarValue(inlineEntry.value);
+  }
+
+  for (const entry of directMappingEntries(lines, item.index + 1, stepEnd, item.indent)) {
+    step[entry.key] = workflowStepProperty(lines, entry, stepEnd);
+  }
+  return step;
+}
+
+function workflowJobStepMaps(text, jobName) {
+  const lines = text.split(/\r?\n/);
+  const jobsEntry = findTopLevelMappingEntry(lines, "jobs");
+  assert.ok(jobsEntry, "workflow must define a top-level jobs block");
+
+  const jobsBlock = mappingValueBlock(lines, jobsEntry);
+  const jobEntries = directMappingEntries(lines, jobsBlock.start, jobsBlock.end, jobsBlock.indent);
+  const jobIndex = jobEntries.findIndex((entry) => entry.key === jobName);
+  assert.notEqual(jobIndex, -1, `workflow must define job ${jobName}`);
+
+  const job = jobEntries[jobIndex];
+  const jobEnd = jobEntries[jobIndex + 1] ? jobEntries[jobIndex + 1].index : jobsBlock.end;
+  const stepsEntry = directMappingEntries(lines, job.index + 1, jobEnd, job.indent).find((entry) => entry.key === "steps");
+  assert.ok(stepsEntry, `job ${jobName} must define steps`);
+
+  const stepsEnd = Math.min(findMappingBlockEnd(lines, stepsEntry.index + 1, stepsEntry.indent), jobEnd);
+  const stepItems = directSequenceItems(lines, stepsEntry.index + 1, stepsEnd, stepsEntry.indent);
+  return stepItems.map((item, index) => workflowStepMap(lines, item, stepItems[index + 1]?.index || stepsEnd));
+}
+
 function isGithubReleasePlugin(plugin) {
   return plugin === "@semantic-release/github" || (Array.isArray(plugin) && plugin[0] === "@semantic-release/github");
 }
+
+test("all checked GitHub workflows expose expected parsable jobs", () => {
+  assert.deepEqual(listWorkflows().sort(), [...expectedWorkflowJobs.keys()].sort());
+
+  for (const [workflow, expectedJobs] of expectedWorkflowJobs) {
+    assert.deepEqual(
+      jobSections(readWorkflow(workflow)).map((job) => job.name),
+      expectedJobs,
+      `${workflow} must keep expected job structure visible to repository policy tests`
+    );
+  }
+});
+
+function runScriptSignature(section) {
+  return section.text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("\n");
+}
+
+test("workflow run script scanner covers every expected workflow run step", () => {
+  assert.deepEqual(listWorkflows().sort(), [...expectedWorkflowRunScriptSignatures.keys()].sort());
+
+  for (const [workflow, expectedSignatures] of expectedWorkflowRunScriptSignatures) {
+    assert.deepEqual(
+      runScriptSections(readWorkflow(workflow)).map(runScriptSignature),
+      expectedSignatures,
+      `${workflow} run-script policy coverage must stay aligned with checked workflow run steps`
+    );
+  }
+});
+
+test("workflow step parser handles compact with and env maps", () => {
+  const workflow = `
+jobs:
+  reap:
+    steps:
+      - uses: ./.github/actions/reap-stale-locks
+        with: { lock-name: wallstop-organization-builds }
+        env: { BUILD_LOCK_TOKEN: "\${{ secrets.ORG_BUILD_LOCK_TOKEN }}" }
+`;
+
+  assert.deepEqual(workflowJobStepMaps(workflow, "reap"), [
+    {
+      line: 5,
+      uses: "./.github/actions/reap-stale-locks",
+      with: { "lock-name": "wallstop-organization-builds" },
+      env: { BUILD_LOCK_TOKEN: "${{ secrets.ORG_BUILD_LOCK_TOKEN }}" }
+    }
+  ]);
+});
 
 function policySensitiveAliasLines(text) {
   const lines = text.split(/\r?\n/);
@@ -1181,6 +1317,8 @@ function policySensitiveAliasLines(text) {
 }
 
 test("workflows that query Actions REST APIs declare actions read permission", () => {
+  const checkedJobs = [];
+
   for (const workflow of listWorkflows()) {
     const text = readWorkflow(workflow);
 
@@ -1189,12 +1327,15 @@ test("workflows that query Actions REST APIs declare actions read permission", (
         continue;
       }
 
+      checkedJobs.push(`${workflow}:${job.name}`);
       assert.ok(
         hasEffectivePermission(text, job.text, "actions", "read"),
         `${workflow} job ${job.name} must grant actions: read/write in its effective permissions`
       );
     }
   }
+
+  assert.deepEqual(checkedJobs, ["dependabot-auto-merge.yml:dependabot"]);
 });
 
 test("permission parser handles flow maps and fails closed on narrowed job overrides", () => {
@@ -2201,17 +2342,41 @@ test("workflow policy scanners handle top-level explicit mappings", () => {
 });
 
 test("scheduled manual workflows declare stable concurrency", () => {
+  const checkedWorkflows = [];
+
   for (const workflow of listWorkflows()) {
     const text = readWorkflow(workflow);
     if (!workflowHasTrigger(text, "schedule") || !workflowHasTrigger(text, "workflow_dispatch")) {
       continue;
     }
 
+    checkedWorkflows.push(workflow);
     assert.ok(
       hasStableConcurrencyGroup(workflowConcurrency(text)),
       `${workflow} must declare a workflow-level concurrency group that is stable across scheduled and manual runs`
     );
   }
+
+  assert.deepEqual(checkedWorkflows.sort(), ["auto-release.yml", "reap-stale-locks.yml"]);
+});
+
+test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
+  const text = readWorkflow("reap-stale-locks.yml");
+  const concurrency = workflowConcurrency(text);
+  const reapSteps = workflowJobStepMaps(text, "reap");
+  const reapActionStep = reapSteps.find((step) => step.uses === "./.github/actions/reap-stale-locks");
+
+  assert.equal(workflowHasTrigger(text, "schedule"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.deepEqual(
+    jobSections(text).map((job) => job.name),
+    ["reap"]
+  );
+  assert.equal(concurrency.group, "build-lock-reaper");
+  assert.equal(concurrency["cancel-in-progress"], "true");
+  assert.ok(reapActionStep, "reap job must call the local reap-stale-locks action");
+  assert.equal(reapActionStep.with["lock-name"], "wallstop-organization-builds");
+  assert.equal(reapActionStep.env.BUILD_LOCK_TOKEN, "${{ secrets.ORG_BUILD_LOCK_TOKEN }}");
 });
 
 test("semantic-release GitHub workflows declare required token permissions", () => {
@@ -2223,6 +2388,8 @@ test("semantic-release GitHub workflows declare required token permissions", () 
     return;
   }
 
+  const checkedJobs = [];
+
   for (const workflow of listWorkflows()) {
     const text = readWorkflow(workflow);
     for (const job of jobSections(text)) {
@@ -2230,6 +2397,7 @@ test("semantic-release GitHub workflows declare required token permissions", () 
         continue;
       }
 
+      checkedJobs.push(`${workflow}:${job.name}`);
       assert.ok(
         hasEffectivePermission(text, job.text, "contents", "write"),
         `${workflow} job ${job.name} must grant contents: write so @semantic-release/github can publish releases and tags`
@@ -2244,15 +2412,20 @@ test("semantic-release GitHub workflows declare required token permissions", () 
       );
     }
   }
+
+  assert.deepEqual(checkedJobs, ["auto-release.yml:release"]);
 });
 
 test("semantic-release workflows serialize releases without canceling active publishes", () => {
+  const checkedWorkflows = [];
+
   for (const workflow of listWorkflows()) {
     const text = readWorkflow(workflow);
     if (!jobSections(text).some((job) => /semantic-release/.test(job.text))) {
       continue;
     }
 
+    checkedWorkflows.push(workflow);
     const concurrency = workflowConcurrency(text);
     assert.ok(
       hasStableConcurrencyGroup(concurrency),
@@ -2264,6 +2437,8 @@ test("semantic-release workflows serialize releases without canceling active pub
       `${workflow} release concurrency must queue behind an active publish instead of canceling it mid-release`
     );
   }
+
+  assert.deepEqual(checkedWorkflows, ["auto-release.yml"]);
 });
 
 test("Dependabot auto-merge handles successful CI reruns", () => {
