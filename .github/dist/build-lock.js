@@ -74,7 +74,7 @@ function parseTime(value) {
 function sleep(ms, options = {}) {
   const signal = options.signal;
   if (signal && signal.aborted) {
-    return Promise.reject(signal.reason || new Error("Sleep aborted."));
+    return Promise.reject(abortReason(signal));
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -85,12 +85,40 @@ function sleep(ms, options = {}) {
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(signal.reason || new Error("Sleep aborted."));
+      reject(abortReason(signal));
     };
     if (signal) {
       signal.addEventListener("abort", onAbort, { once: true });
     }
   });
+}
+
+function abortReason(signal) {
+  if (signal && signal.reason) {
+    const reason = signal.reason;
+    if (typeof reason === "object" && typeof reason.message === "string") {
+      return reason;
+    }
+    const error = new Error(String(reason));
+    error.name = "AbortError";
+    return error;
+  }
+  const error = new Error("Operation aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal && signal.aborted) {
+    throw abortReason(signal);
+  }
+}
+
+function isAbortError(error, signal) {
+  return Boolean(
+    (signal && signal.aborted) ||
+      (error && (error.name === "AbortError" || error.name === "TimeoutError" || error.code === "ABORT_ERR"))
+  );
 }
 
 function integerEnvironment(name, fallback, minimum = 0) {
@@ -264,6 +292,7 @@ async function api(method, path, body, authToken, options = {}) {
   const retry = apiRetryOptions(options);
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
+      throwIfAborted(retry.signal);
       const { response, data, text } = await fetchApi(method, path, body, authToken, retry);
       if (response.ok) {
         return data;
@@ -271,6 +300,7 @@ async function api(method, path, body, authToken, options = {}) {
 
       if (attempt < retry.maxAttempts && isRetryableResponse(response, data)) {
         const delay = retryDelayMs(response, attempt, retry);
+        throwIfAborted(retry.signal);
         console.log(
           `::warning::${method} ${path} returned HTTP ${response.status}; retrying in ${delay} ms ` +
             `(attempt ${attempt + 1}/${retry.maxAttempts}; ${responseDetails(response, data, text)}).`
@@ -281,10 +311,14 @@ async function api(method, path, body, authToken, options = {}) {
 
       throw httpError(method, path, response, data, text);
     } catch (error) {
+      if (isAbortError(error, retry.signal)) {
+        throw retry.signal && retry.signal.aborted ? abortReason(retry.signal) : error;
+      }
       if (error.status || attempt >= retry.maxAttempts) {
         throw error;
       }
       const delay = retryDelayMs(null, attempt, retry);
+      throwIfAborted(retry.signal);
       console.log(
         `::warning::${method} ${path} failed before receiving a response; retrying in ${delay} ms ` +
           `(attempt ${attempt + 1}/${retry.maxAttempts}; ${oneLine(error.message)}).`
@@ -737,7 +771,7 @@ function cancellationApiOptions(cancellation) {
 }
 
 function isCancellationError(error, cancellation) {
-  return cancellation.requested || (error && error.name === "AbortError");
+  return cancellation.requested || isAbortError(error, cancellation.abortController.signal);
 }
 
 function throwIfCancellation(cancellation) {
@@ -777,6 +811,21 @@ async function runCancellationCleanup(config, identity, cancellation) {
     clearTimeout(timeout);
     cancellation.cleanupAbortController = null;
   }
+}
+
+function writeAcquireOutputs({ acquired, lockName, holderId, stateSha = "", waitMs, attempts, staleRecovered = false }) {
+  writeOutput("acquired", acquired ? "true" : "false");
+  writeOutput("lock-name", lockName);
+  writeOutput("holder-id", holderId);
+  writeOutput("state-sha", stateSha);
+  writeOutput("wait-ms", String(waitMs));
+  writeOutput("attempts", String(attempts));
+  writeOutput("stale-recovered", String(staleRecovered));
+}
+
+function writeReapOutputs({ reaped, stateSha = "" }) {
+  writeOutput("reaped", String(reaped));
+  writeOutput("state-sha", stateSha);
 }
 
 async function acquire(config) {
@@ -820,13 +869,15 @@ async function acquire(config) {
         console.log(
           `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${stale.reason}`
         );
-        writeOutput("acquired", "true");
-        writeOutput("lock-name", config.lockName);
-        writeOutput("holder-id", identity.holderId);
-        writeOutput("state-sha", sha || "");
-        writeOutput("wait-ms", String(waitMs));
-        writeOutput("attempts", String(attempts));
-        writeOutput("stale-recovered", String(staleRecovered));
+        writeAcquireOutputs({
+          acquired: true,
+          lockName: config.lockName,
+          holderId: identity.holderId,
+          stateSha: sha || "",
+          waitMs,
+          attempts,
+          staleRecovered
+        });
         appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
         console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
         console.log("::endgroup::");
@@ -901,13 +952,15 @@ async function acquire(config) {
             continue;
           }
           const waitMs = Date.now() - started;
-          writeOutput("acquired", "true");
-          writeOutput("lock-name", config.lockName);
-          writeOutput("holder-id", identity.holderId);
-          writeOutput("state-sha", write.sha);
-          writeOutput("wait-ms", String(waitMs));
-          writeOutput("attempts", String(attempts));
-          writeOutput("stale-recovered", String(staleRecovered));
+          writeAcquireOutputs({
+            acquired: true,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            stateSha: write.sha,
+            waitMs,
+            attempts,
+            staleRecovered
+          });
           appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
           console.log(`Acquired ${config.lockName}.`);
           console.log("::endgroup::");
@@ -930,11 +983,14 @@ async function acquire(config) {
 
     const waitMs = Date.now() - started;
     const details = observationText(config, lastObservation, attempts, waitMs);
-    writeOutput("acquired", "false");
-    writeOutput("lock-name", config.lockName);
-    writeOutput("holder-id", identity.holderId);
-    writeOutput("wait-ms", String(waitMs));
-    writeOutput("attempts", String(attempts));
+    writeAcquireOutputs({
+      acquired: false,
+      lockName: config.lockName,
+      holderId: identity.holderId,
+      waitMs,
+      attempts,
+      staleRecovered: false
+    });
     appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
     await cleanupAfterAcquireFailure(config, identity, "timeout", {
       maxAttempts: 3,
@@ -1054,21 +1110,21 @@ async function reap(config) {
     }
     state.queue = keptQueue;
 
-    let reaped = false;
+    let holderReaped = false;
     if (state.holder) {
       const stale = await evaluateStale(state.holder, config.token);
       if (stale.stale) {
         console.log(`Reaping holder ${state.holder.holderId}: ${stale.reason}.`);
         state.holder = null;
-        reaped = true;
+        holderReaped = true;
       } else {
         console.log(`Keeping holder ${state.holder.holderId}: ${stale.reason}.`);
       }
     }
 
-    const changed = reaped || beforeQueue !== state.queue.length;
+    const changed = holderReaped || beforeQueue !== state.queue.length;
     if (!changed) {
-      writeOutput("reaped", "false");
+      writeReapOutputs({ reaped: false, stateSha: sha || "" });
       appendSummary(`No stale state found for ${config.lockName}.`);
       console.log("::endgroup::");
       return;
@@ -1080,8 +1136,7 @@ async function reap(config) {
       continue;
     }
 
-    writeOutput("reaped", String(reaped));
-    writeOutput("state-sha", write.sha);
+    writeReapOutputs({ reaped: true, stateSha: write.sha });
     appendSummary(`Reaped stale state for ${config.lockName}.`);
     console.log("::endgroup::");
     return;
