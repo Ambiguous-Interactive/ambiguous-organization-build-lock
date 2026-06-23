@@ -3162,3 +3162,70 @@ test("stale evaluation rejects lease fallback when the repository cannot be read
     );
   });
 });
+
+test("stale evaluation keeps waiting when the run-status poll returns 401 before lease expiry", async () => {
+  const holder = {
+    holderId: "owner/repo:123:perf-benchmarks:playmode",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(
+    async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(401, { message: "Bad credentials" }, { "x-github-request-id": "REQID" });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    },
+    async (logs) => {
+      // A transient/expired-credential 401 on the read-only holder poll must NOT abort the
+      // wait: report status unknown and let the lease govern (keep waiting until it expires).
+      assert.deepEqual(await evaluateStale(holder, "token"), {
+        stale: false,
+        reason: "holder status unavailable before lease expiry"
+      });
+      assert.match(logs.join("\n"), /HTTP 401/);
+    }
+  );
+});
+
+test("stale evaluation reclaims when the run-status poll returns 401 after lease expiry", async () => {
+  const holder = {
+    holderId: "owner/repo:123:perf-benchmarks:playmode",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2026-06-06T01:00:00.000Z"
+  };
+
+  await withMockedFetch(
+    async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(401, { message: "Bad credentials" });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    },
+    async () => {
+      // Once the lease has expired, an unknown (401) status means the holder is presumed dead
+      // and the lock is reclaimable -- the lease, not the poll, is the liveness backstop.
+      assert.deepEqual(await evaluateStale(holder, "token"), {
+        stale: true,
+        reason: "holder lease expired and run status is unavailable"
+      });
+    }
+  );
+});

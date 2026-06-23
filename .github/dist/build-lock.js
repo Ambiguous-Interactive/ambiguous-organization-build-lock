@@ -608,6 +608,21 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
         `Unable to read workflow run ${repository}/${runId}. Ensure BUILD_LOCK_TOKEN has actions: read access. ${error.message}`
       );
     }
+    // A 401 on this READ-ONLY holder-status poll is almost always transient: a brief GitHub
+    // auth blip, or the polling token reaching its TTL during a long wait (the central lock
+    // serializes every build, so a queued run can poll for longer than an installation token
+    // lives). Aborting here nukes an otherwise-healthy wait and drops the queue slot. Report
+    // the status as UNKNOWN so evaluateStale's lease-governed path keeps waiting and only
+    // reclaims once the holder's lease actually expires; a genuinely dead token still fails
+    // fast on the next CAS write (acquire/reclaim), where it cannot be worked around.
+    if (error.status === 401) {
+      console.log(
+        `::warning::Holder-status poll for ${repository}/${runId} returned HTTP 401 ` +
+          `(${oneLine(error.message)}); treating holder status as unknown and continuing to wait ` +
+          `under the existing lease. Verify BUILD_LOCK_TOKEN lifetime/scope if this persists.`
+      );
+      return { known: false, status: "", conclusion: "" };
+    }
     throw error;
   }
 }
