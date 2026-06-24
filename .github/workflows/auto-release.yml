@@ -26,7 +26,7 @@ jobs:
 
       - name: Publish release from conventional commits
         id: semantic
-        uses: cycjimmy/semantic-release-action@v5
+        uses: cycjimmy/semantic-release-action@v6
         with:
           branches: |
             ["main"]
