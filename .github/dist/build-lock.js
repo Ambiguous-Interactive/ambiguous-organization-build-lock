@@ -5,10 +5,17 @@ const fs = require("fs");
 
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
-const SCHEMA_VERSION = 1;
+// Schema 2 replaces the single `holder` with a `holders` array so a lock can act as a
+// counting semaphore. A legacy `holder` mirror (the first slot) is still written so
+// pre-semaphore clients keep waiting conservatively instead of seeing a free lock.
+const SCHEMA_VERSION = 2;
+const DEFAULT_MAX_HOLDERS = 1;
+const MAX_HOLDERS_CAP = 64;
+const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
+const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 
 function input(name, fallback = "") {
@@ -223,6 +230,12 @@ function isRetryableResponse(response, data) {
   if (response.status === 408 || response.status === 429 || response.status >= 500) {
     return true;
   }
+  // GitHub intermittently rejects valid tokens with 401 "Bad credentials" (auth replica
+  // lag); GitHub's guidance is to retry after a short delay. A 401 is rejected before the
+  // request is processed, so retrying is also safe for mutations and cannot double-write.
+  if (response.status === 401) {
+    return true;
+  }
   return response.status === 403 && isRateLimitResponse(response, data);
 }
 
@@ -389,7 +402,7 @@ function emptyState(lockName) {
   return {
     schemaVersion: SCHEMA_VERSION,
     lock: lockName,
-    holder: null,
+    holders: [],
     queue: [],
     updatedAt: nowIso()
   };
@@ -428,37 +441,58 @@ function normalizeState(raw, lockName) {
   if (state.lock && state.lock !== lockName) {
     throw new Error(`State file lock mismatch: expected ${lockName}, found ${state.lock}`);
   }
+  const schemaVersion = Number(state.schemaVersion);
+  if (Number.isFinite(schemaVersion) && schemaVersion > SCHEMA_VERSION) {
+    throw new Error(
+      `State file schema ${schemaVersion} for ${lockName} is newer than supported schema ${SCHEMA_VERSION}; ` +
+        "update the build-lock actions before touching this lock."
+    );
+  }
   const queue = Array.isArray(state.queue)
     ? state.queue.map(normalizeEntry).filter((entry) => entry && entry.holderId)
     : [];
-  const holder = normalizeHolder(state.holder);
+  // Merge the schema-2 holders array with the legacy/mirrored single holder and dedupe;
+  // schema-1 files carry only `holder`, schema-2 files mirror holders[0] into `holder`.
+  const seenHolderIds = new Set();
+  const holders = [...(Array.isArray(state.holders) ? state.holders : []), state.holder]
+    .map(normalizeHolder)
+    .filter((holder) => holder && holder.holderId)
+    .filter((holder) => {
+      if (seenHolderIds.has(holder.holderId)) {
+        return false;
+      }
+      seenHolderIds.add(holder.holderId);
+      return true;
+    });
   return {
     schemaVersion: SCHEMA_VERSION,
     lock: lockName,
-    holder: holder && holder.holderId ? holder : null,
+    holders,
     queue,
     updatedAt: String(state.updatedAt || nowIso())
   };
 }
 
 function stableState(state) {
+  const holders = state.holders.map((holder) => ({
+    holderId: holder.holderId,
+    repository: holder.repository,
+    workflow: holder.workflow,
+    job: holder.job,
+    runId: holder.runId,
+    runAttempt: holder.runAttempt,
+    runUrl: holder.runUrl,
+    queuedAt: holder.queuedAt,
+    acquiredAt: holder.acquiredAt,
+    expiresAt: holder.expiresAt
+  }));
   return {
     schemaVersion: SCHEMA_VERSION,
     lock: state.lock,
-    holder: state.holder
-      ? {
-          holderId: state.holder.holderId,
-          repository: state.holder.repository,
-          workflow: state.holder.workflow,
-          job: state.holder.job,
-          runId: state.holder.runId,
-          runAttempt: state.holder.runAttempt,
-          runUrl: state.holder.runUrl,
-          queuedAt: state.holder.queuedAt,
-          acquiredAt: state.holder.acquiredAt,
-          expiresAt: state.holder.expiresAt
-        }
-      : null,
+    // Legacy mirror: pre-semaphore clients read `holder` and wait while it is set. They
+    // can only under-admit, never over-admit; see the max-holders rollout note in README.
+    holder: holders[0] || null,
+    holders,
     queue: state.queue.map((entry) => ({
       holderId: entry.holderId,
       repository: entry.repository,
@@ -538,6 +572,76 @@ async function writeState(config, previousSha, state, message, options = {}) {
     }
     throw error;
   }
+}
+
+function normalizeMaxHolders(raw, sourcePath) {
+  if (raw === undefined || raw === null) {
+    return DEFAULT_MAX_HOLDERS;
+  }
+  const value =
+    typeof raw === "string" && /^[0-9]+$/.test(raw.trim()) ? Number.parseInt(raw.trim(), 10) : raw;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_HOLDERS_CAP) {
+    console.log(
+      `::warning::Ignoring invalid maxHolders=${JSON.stringify(raw)} in ${sourcePath}; ` +
+        `expected an integer between 1 and ${MAX_HOLDERS_CAP}. Using max-holders=${DEFAULT_MAX_HOLDERS}.`
+    );
+    return DEFAULT_MAX_HOLDERS;
+  }
+  return value;
+}
+
+function configReadCanFailClosed(error, options = {}) {
+  if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
+    return false;
+  }
+  return (
+    !error.status ||
+    error.status === 401 ||
+    error.status === 403 ||
+    error.status === 408 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
+}
+
+// Per-lock parallelism lives in locks/<lock-name>.config.json on the lock repository's
+// DEFAULT branch (not the state branch): one PR-reviewable source of truth for every
+// consumer repo. Missing or invalid config fails closed to a single holder, which can
+// never over-run a license.
+async function readLockConfig(config, options = {}) {
+  const { owner, repo } = config.lockRepo;
+  const configPath = config.configPath || `locks/${config.lockName}.config.json`;
+  const encodedPath = configPath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  let data;
+  try {
+    data = await api("GET", `/repos/${owner}/${repo}/contents/${encodedPath}`, undefined, config.token, options.apiOptions);
+  } catch (error) {
+    if (error.status === 404) {
+      return { maxHolders: DEFAULT_MAX_HOLDERS };
+    }
+    if (configReadCanFailClosed(error, options)) {
+      console.log(
+        `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
+          `using max-holders=${DEFAULT_MAX_HOLDERS}.`
+      );
+      return { maxHolders: DEFAULT_MAX_HOLDERS };
+    }
+    throw error;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(base64Decode(data.content));
+  } catch (error) {
+    console.log(
+      `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
+        `using max-holders=${DEFAULT_MAX_HOLDERS}.`
+    );
+    return { maxHolders: DEFAULT_MAX_HOLDERS };
+  }
+  return { maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath) };
 }
 
 function currentIdentity(config) {
@@ -678,6 +782,14 @@ function writeReleaseOutputs(config, identity, result) {
   writeOutput("held-by-run-url", result.heldByRunUrl || "");
 }
 
+function firstHolderContext(holders) {
+  const holder = holders[0];
+  return {
+    heldBy: holder ? holder.holderId : "",
+    heldByRunUrl: holder ? holder.runUrl : ""
+  };
+}
+
 async function cleanupIdentity(config, identity, options = {}) {
   const maxAttempts = options.maxAttempts || 10;
   const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
@@ -686,19 +798,13 @@ async function cleanupIdentity(config, identity, options = {}) {
   for (let attempts = 1; attempts <= maxAttempts; attempts++) {
     const { state, sha } = await readState(config, options);
     const queueCleaned = state.queue.some((entry) => entry.holderId === identity.holderId);
-    const originalHolder = state.holder;
     state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
-    let released = false;
-    let heldBy = "";
-    let heldByRunUrl = "";
-
-    if (state.holder && state.holder.holderId === identity.holderId) {
-      state.holder = null;
-      released = true;
-    } else if (state.holder) {
-      heldBy = state.holder.holderId;
-      heldByRunUrl = state.holder.runUrl;
-    }
+    const remainingHolders = state.holders.filter((holder) => holder.holderId !== identity.holderId);
+    const released = remainingHolders.length !== state.holders.length;
+    state.holders = remainingHolders;
+    // Public release outputs are singular; report the same first holder that legacy
+    // clients see through the mirrored `holder` field.
+    const { heldBy, heldByRunUrl } = firstHolderContext(state.holders);
 
     const changed = released || queueCleaned;
     if (!changed) {
@@ -721,8 +827,8 @@ async function cleanupIdentity(config, identity, options = {}) {
           released,
           queueCleaned,
           sha: "",
-          heldBy: released && originalHolder ? "" : heldBy,
-          heldByRunUrl: released && originalHolder ? "" : heldByRunUrl
+          heldBy,
+          heldByRunUrl
         };
       }
       await sleep(jitter(conflictDelayMs), { signal: options.apiOptions && options.apiOptions.signal });
@@ -733,8 +839,8 @@ async function cleanupIdentity(config, identity, options = {}) {
       released,
       queueCleaned,
       sha: write.sha,
-      heldBy: released && originalHolder ? "" : heldBy,
-      heldByRunUrl: released && originalHolder ? "" : heldByRunUrl
+      heldBy,
+      heldByRunUrl
     };
   }
 
@@ -889,101 +995,134 @@ async function acquire(config) {
 
   try {
     await ensureStateBranch(config, { apiOptions });
+    let lockConfig = await readLockConfig(config, { apiOptions });
+    let lockConfigReadAt = Date.now();
     const started = Date.now();
     const deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
     let staleRecovered = false;
     let lastObservation = null;
+    let authFailureSince = null;
 
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
     console.log(`Holder: ${identity.holderId}`);
+    console.log(`Max concurrent holders: ${lockConfig.maxHolders}`);
 
     while (Date.now() < deadline) {
       throwIfCancellation(cancellation);
       attempts++;
       let recoveringStaleHolder = false;
-      const { state, sha } = await readState(config, { apiOptions });
-      throwIfCancellation(cancellation);
-      const stale = await evaluateStale(state.holder, config.token, { apiOptions });
-      throwIfCancellation(cancellation);
-      let changed = false;
-      if (state.holder && state.holder.holderId === identity.holderId && !stale.stale) {
-        recordPostCleanupNeeded();
-        const waitMs = Date.now() - started;
-        const position = queuePosition(state, identity.holderId);
-        console.log(
-          `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${stale.reason}`
-        );
-        writeAcquireOutputs({
-          acquired: true,
-          lockName: config.lockName,
-          holderId: identity.holderId,
-          stateSha: sha || "",
-          waitMs,
-          attempts,
-          staleRecovered
-        });
-        appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
-        console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
-        console.log("::endgroup::");
-        return;
-      }
-
-      const dedupedQueue = state.queue.filter((entry, index, queue) => {
-        return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
-      });
-      state.queue = [];
-      for (const entry of dedupedQueue) {
-        if (entry.holderId !== identity.holderId && (await queueEntryIsFinished(entry, config.token, { apiOptions }))) {
+      try {
+        // Re-read the parallelism config on a TTL so long waits pick up limit changes
+        // without adding a contents read to every poll.
+        const configTtlMs = integerEnvironment("BUILD_LOCK_CONFIG_TTL_MS", DEFAULT_CONFIG_TTL_MS);
+        if (Date.now() - lockConfigReadAt >= configTtlMs) {
+          const refreshed = await readLockConfig(config, { apiOptions });
+          if (refreshed.maxHolders !== lockConfig.maxHolders) {
+            console.log(`Max concurrent holders changed from ${lockConfig.maxHolders} to ${refreshed.maxHolders}.`);
+          }
+          lockConfig = refreshed;
+          lockConfigReadAt = Date.now();
+        }
+        const { state, sha } = await readState(config, { apiOptions });
+        authFailureSince = null;
+        throwIfCancellation(cancellation);
+        const staleness = new Map();
+        for (const holder of state.holders) {
+          staleness.set(holder.holderId, await evaluateStale(holder, config.token, { apiOptions }));
           throwIfCancellation(cancellation);
-          console.log(`Dropping completed queue entry ${entry.holderId}.`);
+        }
+        let changed = false;
+        const myHolder = state.holders.find((holder) => holder.holderId === identity.holderId);
+        if (myHolder && !staleness.get(identity.holderId).stale) {
+          recordPostCleanupNeeded();
+          const waitMs = Date.now() - started;
+          const position = queuePosition(state, identity.holderId);
+          console.log(
+            `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${staleness.get(identity.holderId).reason}`
+          );
+          writeAcquireOutputs({
+            acquired: true,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            stateSha: sha || "",
+            waitMs,
+            attempts,
+            staleRecovered
+          });
+          appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
+          console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
+          console.log("::endgroup::");
+          return;
+        }
+
+        const dedupedQueue = state.queue.filter((entry, index, queue) => {
+          return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
+        });
+        state.queue = [];
+        for (const entry of dedupedQueue) {
+          if (entry.holderId !== identity.holderId && (await queueEntryIsFinished(entry, config.token, { apiOptions }))) {
+            throwIfCancellation(cancellation);
+            console.log(`Dropping completed queue entry ${entry.holderId}.`);
+            changed = true;
+          } else {
+            state.queue.push(entry);
+          }
+        }
+
+        if (!state.queue.some((entry) => entry.holderId === identity.holderId)) {
+          state.queue.push(identity);
           changed = true;
         } else {
-          state.queue.push(entry);
+          recordPostCleanupNeeded();
         }
-      }
 
-      if (!state.queue.some((entry) => entry.holderId === identity.holderId)) {
-        state.queue.push(identity);
-        changed = true;
-      } else {
-        recordPostCleanupNeeded();
-      }
+        const freshHolders = state.holders.filter((holder) => !staleness.get(holder.holderId).stale);
+        const staleHolders = state.holders.filter((holder) => staleness.get(holder.holderId).stale);
 
-      const position = queuePosition(state, identity.holderId);
-      if (state.holder) {
-        lastObservation = {
-          holderId: state.holder.holderId,
-          holderRunUrl: state.holder.runUrl,
-          queuePosition: position,
-          reason: stale.reason
-        };
-        console.log(
-          `Attempt ${attempts}: holder=${state.holder.holderId} run=${state.holder.runUrl} queue-position=${position} reason=${stale.reason}`
-        );
-      } else {
-        lastObservation = {
-          holderId: "",
-          holderRunUrl: "",
-          queuePosition: position,
-          reason: "lock is free"
-        };
-        console.log(`Attempt ${attempts}: lock is free queue-position=${position}`);
-      }
-
-      if ((!state.holder || stale.stale) && state.queue[0] && state.queue[0].holderId === identity.holderId) {
-        if (state.holder && stale.stale) {
-          recoveringStaleHolder = true;
-          console.log(`Recovering stale holder: ${stale.reason}`);
+        const position = queuePosition(state, identity.holderId);
+        if (state.holders.length) {
+          const holderIds = state.holders.map((holder) => holder.holderId).join(",");
+          const holderRuns = state.holders.map((holder) => holder.runUrl).join(",");
+          const reasons = state.holders.map((holder) => staleness.get(holder.holderId).reason).join(",");
+          lastObservation = {
+            holderId: holderIds,
+            holderRunUrl: holderRuns,
+            queuePosition: position,
+            reason: reasons
+          };
+          console.log(
+            `Attempt ${attempts}: holders=${freshHolders.length}/${lockConfig.maxHolders} holder=${holderIds} run=${holderRuns} queue-position=${position} reason=${reasons}`
+          );
+        } else {
+          lastObservation = {
+            holderId: "",
+            holderRunUrl: "",
+            queuePosition: position,
+            reason: "lock is free"
+          };
+          console.log(
+            `Attempt ${attempts}: lock is free queue-position=${position} max-holders=${lockConfig.maxHolders}`
+          );
         }
-        state.holder = holderFromIdentity(identity, config.leaseMinutes);
-        state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
-        changed = true;
-      }
 
-      if (state.holder && state.holder.holderId === identity.holderId) {
-        if (changed) {
+        // Slot admission: after ignoring stale holders, the first `freeSlots` queue
+        // entries may each take a slot. Every waiter only ever admits itself; the CAS
+        // write plus the verification read keep concurrent admissions consistent.
+        const freeSlots = lockConfig.maxHolders - freshHolders.length;
+        const queueIndex = state.queue.findIndex((entry) => entry.holderId === identity.holderId);
+        if (freeSlots > 0 && queueIndex !== -1 && queueIndex < freeSlots) {
+          if (staleHolders.length) {
+            recoveringStaleHolder = true;
+            for (const holder of staleHolders) {
+              console.log(`Recovering stale holder ${holder.holderId}: ${staleness.get(holder.holderId).reason}`);
+            }
+          }
+          state.holders = [...freshHolders, holderFromIdentity(identity, config.leaseMinutes)];
+          state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
+          changed = true;
+
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
           if (write.conflict) {
@@ -1000,7 +1139,7 @@ async function acquire(config) {
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
           const verified = await readState(config, { apiOptions });
-          if (!verified.state.holder || verified.state.holder.holderId !== identity.holderId) {
+          if (!verified.state.holders.some((holder) => holder.holderId === identity.holderId)) {
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
@@ -1019,19 +1158,47 @@ async function acquire(config) {
           console.log("::endgroup::");
           return;
         }
-      }
 
-      if (changed) {
-        throwIfCancellation(cancellation);
-        const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
-        if (write.conflict) {
-          await sleep(jitter(1000), { signal: apiOptions.signal });
-          continue;
+        if (changed) {
+          throwIfCancellation(cancellation);
+          const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
+          if (write.conflict) {
+            await sleep(jitter(1000), { signal: apiOptions.signal });
+            continue;
+          }
+          recordPostCleanupNeeded();
         }
-        recordPostCleanupNeeded();
-      }
 
-      await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
+        await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
+      } catch (error) {
+        if (isCancellationError(error, cancellation)) {
+          throw error;
+        }
+        // A transient 401 that survived api()'s own retries usually means a longer GitHub
+        // auth incident (see issue #12; the same token had just authenticated successfully).
+        // The whole point of this loop is to wait, so keep polling under a bounded grace
+        // window instead of failing the build; genuinely bad credentials still fail once
+        // the grace window is exhausted.
+        if (error.status === 401) {
+          const authGraceMs = integerEnvironment("BUILD_LOCK_AUTH_GRACE_MS", DEFAULT_AUTH_GRACE_MS);
+          const now = Date.now();
+          if (authFailureSince === null) {
+            authFailureSince = now;
+          }
+          const authFailureMs = now - authFailureSince;
+          if (authFailureMs < authGraceMs && now < deadline) {
+            console.log(
+              `::warning::Lock-state access for ${config.lockName} failed with HTTP 401 ` +
+                `(${oneLine(error.message)}); treating it as transient and continuing to wait ` +
+                `(${Math.max(0, authGraceMs - authFailureMs)} ms of auth grace remaining). ` +
+                `Verify BUILD_LOCK_TOKEN scope/lifetime if this persists.`
+            );
+            await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
+            continue;
+          }
+        }
+        throw error;
+      }
     }
 
     const waitMs = Date.now() - started;
@@ -1165,16 +1332,18 @@ async function reap(config) {
     state.queue = keptQueue;
 
     let holderReaped = false;
-    if (state.holder) {
-      const stale = await evaluateStale(state.holder, config.token);
+    const keptHolders = [];
+    for (const holder of state.holders) {
+      const stale = await evaluateStale(holder, config.token);
       if (stale.stale) {
-        console.log(`Reaping holder ${state.holder.holderId}: ${stale.reason}.`);
-        state.holder = null;
+        console.log(`Reaping holder ${holder.holderId}: ${stale.reason}.`);
         holderReaped = true;
       } else {
-        console.log(`Keeping holder ${state.holder.holderId}: ${stale.reason}.`);
+        console.log(`Keeping holder ${holder.holderId}: ${stale.reason}.`);
+        keptHolders.push(holder);
       }
     }
+    state.holders = keptHolders;
 
     const changed = holderReaped || beforeQueue !== state.queue.length;
     if (!changed) {
@@ -1219,6 +1388,7 @@ function config() {
     lockRepo: parseRepository(lockRepository),
     stateBranch: input("state-branch", "lock-state"),
     statePath: `locks/${lockName}.json`,
+    configPath: `locks/${lockName}.config.json`,
     timeoutMinutes: integerInput("timeout-minutes", 180),
     leaseMinutes: integerInput("lease-minutes", 240),
     pollSeconds: integerInput("poll-seconds", 15),
@@ -1266,6 +1436,7 @@ module.exports = {
   isRetryableResponse,
   normalizeState,
   postCleanup,
+  readLockConfig,
   readState,
   release,
   reap,
