@@ -23,6 +23,12 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Check JavaScript syntax
         run: |
           for action_file in .github/dist/*.js; do
@@ -36,23 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="1.7.12"
-          expected_sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-          archive="actionlint_${version}_linux_amd64.tar.gz"
-          checksums="actionlint_${version}_checksums.txt"
-          install_dir="$(mktemp -d "${RUNNER_TEMP}/actionlint.XXXXXX")"
-
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 \
-            --output "${RUNNER_TEMP}/${archive}" \
-            "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}"
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 \
-            --output "${RUNNER_TEMP}/${checksums}" \
-            "https://github.com/rhysd/actionlint/releases/download/v${version}/${checksums}"
-          grep -Fx "${expected_sha256}  ${archive}" "${RUNNER_TEMP}/${checksums}" > /dev/null
-          printf '%s  %s\n' "${expected_sha256}" "${RUNNER_TEMP}/${archive}" | sha256sum -c -
-          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${install_dir}" actionlint
-          test -x "${install_dir}/actionlint"
-          "${install_dir}/actionlint" -color
+          go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
       - name: Run fast action tests
         run: node --test test/*.test.js
