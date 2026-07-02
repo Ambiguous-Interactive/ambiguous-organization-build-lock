@@ -19,7 +19,14 @@ const expectedWorkflowRunScriptSignatures = new Map([
     "auto-release.yml",
     ['git config user.name "github-actions[bot]"\ngit config user.email "41898282+github-actions[bot]@users.noreply.github.com"']
   ],
-  ["ci.yml", ['for action_file in .github/dist/*.js; do\nnode --check "${action_file}"', "node --test test/*.test.js"]],
+  [
+    "ci.yml",
+    [
+      'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
+      "set -euo pipefail\ngo run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
+      "node --test test/*.test.js"
+    ]
+  ],
   [
     "dependabot-auto-merge.yml",
     [
@@ -30,6 +37,12 @@ const expectedWorkflowRunScriptSignatures = new Map([
   ],
   ["reap-stale-locks.yml", []]
 ]);
+const expectedActionlintModule = "github.com/rhysd/actionlint";
+const expectedActionlintCommand = `${expectedActionlintModule}/cmd/actionlint`;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function readWorkflow(name) {
   return fs.readFileSync(path.join(workflowsRoot, name), "utf8");
@@ -1162,6 +1175,40 @@ test("workflow run script scanner covers every expected workflow run step", () =
       `${workflow} run-script policy coverage must stay aligned with checked workflow run steps`
     );
   }
+});
+
+test("CI actionlint step uses a Dependabot-upgradable Go module pin", () => {
+  const text = readWorkflow("ci.yml");
+  const goMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
+  const dependabot = fs.readFileSync(path.join(repoRoot, ".github", "dependabot.yml"), "utf8");
+  const steps = workflowJobStepMaps(text, "validate");
+  const lintStep = steps.find((step) => step.name === "Lint GitHub Actions workflows");
+  const setupGoStep = steps.find((step) => /^actions\/setup-go@v\d+$/.test(step.uses || ""));
+  const lintScript = runScriptSections(text).find((section) => section.text.includes(`go run -mod=readonly ${expectedActionlintCommand}`));
+  const actionlintRequire = new RegExp(
+    `^require ${escapeRegExp(expectedActionlintModule)} (v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\\s+// indirect)?$`,
+    "m"
+  ).exec(goMod);
+
+  assert.ok(lintStep, "CI must keep a named actionlint workflow lint step");
+  assert.equal(lintStep.uses, undefined, "CI actionlint must not use a Docker-based action");
+  assert.equal(lintStep.shell, "bash", "CI actionlint must run under bash for strict shell options");
+  assert.ok(setupGoStep, "CI must install Go explicitly before running module-pinned actionlint");
+  assert.deepEqual(setupGoStep.with, { "go-version-file": "go.mod", cache: "true" });
+  assert.ok(lintScript, "CI actionlint run script must stay visible to policy scanning");
+
+  assert.doesNotMatch(text, /docker:\/\/rhysd\/actionlint/i, "CI actionlint must not depend on Docker pulls");
+  assert.doesNotMatch(text, /https:\/\/github\.com\/rhysd\/actionlint\/releases\/download/i, "CI actionlint must not pin an opaque release URL");
+  assert.doesNotMatch(text, /actionlint_\$\{version\}_checksums\.txt/, "CI actionlint must not require manual checksum updates");
+  assert.doesNotMatch(text, new RegExp(`${escapeRegExp(expectedActionlintCommand)}@`), "CI must take actionlint's version from go.mod");
+  assert.match(lintScript.text, /set -euo pipefail/, "CI actionlint must fail on unset variables and pipeline errors");
+  assert.match(lintScript.text, new RegExp(`^\\s*go run -mod=readonly ${escapeRegExp(expectedActionlintCommand)} -color\\s*$`, "m"));
+  assert.ok(actionlintRequire, "go.mod must pin actionlint with a semantic module version");
+  assert.match(goMod, new RegExp(`^tool ${escapeRegExp(expectedActionlintCommand)}$`, "m"), "go.mod must keep the actionlint command dependency live as a Go tool");
+  assert.match(dependabot, /package-ecosystem:\s*"gomod"/, "Dependabot must watch the Go module that pins actionlint");
+  assert.match(dependabot, /directory:\s*"\/"/, "Dependabot gomod updates must target the root go.mod");
+  assert.match(dependabot, new RegExp(`allow:[\\s\\S]*dependency-name: "${escapeRegExp(expectedActionlintModule)}"`), "Dependabot gomod updates must focus on the actionlint tool pin");
+  assert.match(dependabot, new RegExp(`groups:[\\s\\S]*- "${escapeRegExp(expectedActionlintModule)}"`), "Dependabot grouping must include actionlint");
 });
 
 test("workflow step parser handles compact with and env maps", () => {

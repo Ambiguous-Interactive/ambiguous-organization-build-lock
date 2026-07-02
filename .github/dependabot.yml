@@ -15,10 +15,30 @@ updates:
         patterns:
           - "actions/checkout"
           - "actions/setup-node"
+          - "actions/setup-go"
       other-github-actions:
         patterns:
           - "*"
         exclude-patterns:
           - "actions/checkout"
           - "actions/setup-node"
+          - "actions/setup-go"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    assignees:
+      - "wallstop"
+    reviewers:
+      - "wallstop"
+    commit-message:
+      prefix: "chore(ci)"
+    allow:
+      - dependency-name: "github.com/rhysd/actionlint"
+    groups:
+      actionlint:
+        patterns:
+          - "github.com/rhysd/actionlint"
     open-pull-requests-limit: 5

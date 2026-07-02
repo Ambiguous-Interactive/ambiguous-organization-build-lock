@@ -23,6 +23,12 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Check JavaScript syntax
         run: |
           for action_file in .github/dist/*.js; do
@@ -33,9 +39,10 @@ jobs:
           done
 
       - name: Lint GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
       - name: Run fast action tests
         run: node --test test/*.test.js
