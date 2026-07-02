@@ -590,6 +590,20 @@ function normalizeMaxHolders(raw, sourcePath) {
   return value;
 }
 
+function configReadCanFailClosed(error, options = {}) {
+  if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
+    return false;
+  }
+  return (
+    !error.status ||
+    error.status === 401 ||
+    error.status === 403 ||
+    error.status === 408 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
+}
+
 // Per-lock parallelism lives in locks/<lock-name>.config.json on the lock repository's
 // DEFAULT branch (not the state branch): one PR-reviewable source of truth for every
 // consumer repo. Missing or invalid config fails closed to a single holder, which can
@@ -606,6 +620,13 @@ async function readLockConfig(config, options = {}) {
     data = await api("GET", `/repos/${owner}/${repo}/contents/${encodedPath}`, undefined, config.token, options.apiOptions);
   } catch (error) {
     if (error.status === 404) {
+      return { maxHolders: DEFAULT_MAX_HOLDERS };
+    }
+    if (configReadCanFailClosed(error, options)) {
+      console.log(
+        `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
+          `using max-holders=${DEFAULT_MAX_HOLDERS}.`
+      );
       return { maxHolders: DEFAULT_MAX_HOLDERS };
     }
     throw error;
@@ -761,6 +782,14 @@ function writeReleaseOutputs(config, identity, result) {
   writeOutput("held-by-run-url", result.heldByRunUrl || "");
 }
 
+function firstHolderContext(holders) {
+  const holder = holders[0];
+  return {
+    heldBy: holder ? holder.holderId : "",
+    heldByRunUrl: holder ? holder.runUrl : ""
+  };
+}
+
 async function cleanupIdentity(config, identity, options = {}) {
   const maxAttempts = options.maxAttempts || 10;
   const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
@@ -773,10 +802,9 @@ async function cleanupIdentity(config, identity, options = {}) {
     const remainingHolders = state.holders.filter((holder) => holder.holderId !== identity.holderId);
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
-    // With multiple slots the lock can stay held by co-holders after this run releases
-    // its own slot; report whoever still holds it.
-    const heldBy = state.holders.map((holder) => holder.holderId).join(",");
-    const heldByRunUrl = state.holders.map((holder) => holder.runUrl).join(",");
+    // Public release outputs are singular; report the same first holder that legacy
+    // clients see through the mirrored `holder` field.
+    const { heldBy, heldByRunUrl } = firstHolderContext(state.holders);
 
     const changed = released || queueCleaned;
     if (!changed) {

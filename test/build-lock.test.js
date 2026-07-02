@@ -3618,6 +3618,12 @@ test("committed lock config files are well-formed", () => {
 test("readLockConfig fails closed to a single holder", async (t) => {
   const cases = [
     { name: "missing config file", response: () => jsonResponse(404, { message: "Not Found" }), maxHolders: 1 },
+    {
+      name: "config read auth outage",
+      response: () => jsonResponse(401, { message: "Bad credentials" }, { "x-github-request-id": "AUTH401" }),
+      maxHolders: 1,
+      warning: /Unable to read lock config.*HTTP 401.*AUTH401/
+    },
     { name: "valid maxHolders", response: () => base64Content({ maxHolders: 3 }, "cfg"), maxHolders: 3 },
     { name: "numeric string maxHolders", response: () => base64Content({ maxHolders: "4" }, "cfg"), maxHolders: 4 },
     { name: "config without maxHolders", response: () => base64Content({}, "cfg"), maxHolders: 1 },
@@ -3658,7 +3664,14 @@ test("readLockConfig fails closed to a single holder", async (t) => {
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
         },
         async (logs) => {
-          const lockConfig = await readLockConfig(semaphoreConfig());
+          const lockConfig = await readLockConfig(semaphoreConfig(), {
+            apiOptions: {
+              maxAttempts: 1,
+              baseDelayMs: 0,
+              maxDelayMs: 0,
+              sleep: async () => {}
+            }
+          });
           assert.deepEqual(lockConfig, { maxHolders: testCase.maxHolders });
           if (testCase.warning) {
             assert.match(logs.join("\n"), testCase.warning);
@@ -3669,6 +3682,55 @@ test("readLockConfig fails closed to a single holder", async (t) => {
       );
     });
   }
+});
+
+test("acquire fails closed when the initial lock config read hits an auth outage", async () => {
+  let state = semaphoreState([]);
+  let configReads = 0;
+  let putCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "1" }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            configReads++;
+            return jsonResponse(401, { message: "Bad credentials" }, { "x-github-request-id": "AUTH401" });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async (logs) => {
+          await acquire(semaphoreConfig());
+
+          assert.match(logs.join("\n"), /Unable to read lock config/);
+          assert.match(logs.join("\n"), /Max concurrent holders: 1/);
+        });
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
+    assert.equal(outputs.acquired, "true");
+  });
+
+  assert.equal(configReads, 1);
+  assert.equal(putCalls, 1);
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["owner/repo:123:perf-benchmarks:playmode"]
+  );
 });
 
 test("normalizeState migrates legacy single-holder files and dedupes the mirror", () => {
@@ -3974,10 +4036,11 @@ test("acquire picks up a raised max-holders limit while waiting", async () => {
   );
 });
 
-test("release removes only this run's slot and reports the remaining holders", async () => {
+test("release removes only this run's slot and reports the first remaining holder", async () => {
   const myHolder = semaphoreHolder("owner/repo", "123", "playmode");
-  const coHolder = semaphoreHolder("other/repo", "888", "editmode");
-  let state = semaphoreState([myHolder, coHolder]);
+  const firstCoHolder = semaphoreHolder("other/repo", "888", "editmode");
+  const secondCoHolder = semaphoreHolder("other/repo", "999", "playmode");
+  let state = semaphoreState([myHolder, firstCoHolder, secondCoHolder]);
 
   await withTempFile(async (outputFile) => {
     await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
@@ -4010,9 +4073,9 @@ test("release removes only this run's slot and reports the remaining holders", a
 
   assert.deepEqual(
     state.holders.map((entry) => entry.holderId),
-    ["other/repo:888:perf-benchmarks:editmode"]
+    ["other/repo:888:perf-benchmarks:editmode", "other/repo:999:perf-benchmarks:playmode"]
   );
-  assert.equal(state.holder.holderId, coHolder.holderId, "legacy mirror must follow the remaining holder");
+  assert.equal(state.holder.holderId, firstCoHolder.holderId, "legacy mirror must follow the first remaining holder");
 });
 
 test("reap drops only stale holders and keeps active co-holders", async () => {
