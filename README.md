@@ -76,12 +76,56 @@ only the licensed section; it should not be replaced with a single-runner label.
 Lock files live on the `lock-state` branch under `locks/<lock-name>.json`.
 The actions create the branch and state files on first use.
 
+State schema 2 stores a `holders` array so a lock can admit more than one
+concurrent holder (see Configurable Parallelism). A legacy `holder` mirror of
+the first slot is still written so pre-semaphore clients keep waiting
+conservatively; schema-1 files are migrated on read, and state files written by
+a newer schema than the running action fail closed with an upgrade error.
+
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
 
 Holder identity intentionally excludes `GITHUB_RUN_ATTEMPT`; reruns of the same
 workflow run can therefore release a lock left by the previous attempt instead
 of queueing behind themselves.
+
+## Configurable Parallelism
+
+Each lock defaults to a single holder (a mutex). To let N clients hold a lock
+concurrently, commit `locks/<lock-name>.config.json` to this repository's
+default branch:
+
+```json
+{
+  "maxHolders": 2
+}
+```
+
+The config lives on the default branch (not `lock-state`) so parallelism
+changes go through normal pull-request review. `maxHolders` must be an integer
+between 1 and 64; a missing file or an invalid value fails closed to 1, which
+can never over-run a license. Acquire reads the config at start and refreshes
+it on a TTL (`BUILD_LOCK_CONFIG_TTL_MS`, default 5 minutes) while waiting, so
+raising the limit also unblocks runs that are already queued. Queue order is
+preserved: with F free slots, only the first F queued runs may take a slot.
+
+Rollout note: upgrade every consumer to the latest `v1` before raising
+`maxHolders` above 1. Pre-semaphore clients see only the mirrored first holder
+(they wait conservatively and never over-admit), but a state write from such a
+client drops the extra `holders` entries.
+
+## Transient Auth Failures
+
+GitHub intermittently rejects valid tokens with `401 Bad credentials` (auth
+replica lag); GitHub's guidance is to retry after a short delay. All API calls
+therefore treat 401 as retryable within the standard backoff budget
+(`BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`,
+`BUILD_LOCK_API_RETRY_MAX_MS`), and the acquire wait loop additionally keeps
+polling through 401s under a consecutive-failure grace window
+(`BUILD_LOCK_AUTH_GRACE_MS`, default 5 minutes; `0` restores fail-fast).
+Genuinely bad credentials still fail once the grace window is exhausted, and
+the holder-status poll continues to treat post-retry 401s as "status unknown"
+governed by the holder lease.
 
 ## Stale Recovery
 

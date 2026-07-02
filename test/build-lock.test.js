@@ -12,7 +12,9 @@ const {
   evaluateStale,
   installAcquireSignalCleanup,
   isRetryableResponse,
+  normalizeState,
   postCleanup,
+  readLockConfig,
   release,
   reap,
   runCancellationCleanup,
@@ -1220,6 +1222,7 @@ test("acquire succeeds idempotently when this run already holds the lock", async
     calls.map((call) => `${call.method} ${call.path}`),
     [
       "GET /repos/o/r/git/ref/heads/lock-state",
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/owner/repo/actions/runs/123"
     ]
@@ -1295,6 +1298,7 @@ test("acquire recovers when a successful lock write is reported as a transient f
     calls.map((call) => `${call.method} ${call.path}`),
     [
       "GET /repos/o/r/git/ref/heads/lock-state",
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -1579,7 +1583,7 @@ test("acquire preserves stale recovery when an accepted stale replacement is rep
 
             assert.equal(putCalls, 2);
             assert.equal(state.holder.holderId, "owner/repo:123:perf-benchmarks:playmode");
-            assert.match(logs.join("\n"), /Recovering stale holder: holder run is completed/);
+            assert.match(logs.join("\n"), /Recovering stale holder other\/repo:999:perf-benchmarks:editmode: holder run is completed/);
             assert.match(logs.join("\n"), /HTTP 500; retrying/);
             assert.match(logs.join("\n"), /Already holds wallstop-organization-builds/);
           });
@@ -1601,6 +1605,7 @@ test("acquire preserves stale recovery when an accepted stale replacement is rep
     calls.map((call) => `${call.method} ${call.path}`),
     [
       "GET /repos/o/r/git/ref/heads/lock-state",
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/other/repo/actions/runs/999",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -2051,6 +2056,7 @@ test("acquire timeout preserves stale recovery output after a raced stale replac
                     state = {
                       ...written,
                       holder: competingHolder,
+                      holders: [competingHolder],
                       queue: []
                     };
                   } else {
@@ -2167,6 +2173,7 @@ test("acquire timeout preserves stale recovery after an ambiguous stale replacem
                       state = {
                         ...written,
                         holder: competingHolder,
+                        holders: [competingHolder],
                         queue: [written.holder]
                       };
                       return jsonResponse(500, { message: "accepted but response failed" });
@@ -3520,6 +3527,536 @@ test("stale evaluation keeps waiting when the run-status poll returns 401 before
       }
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// Configurable parallelism (issue #13): the lock acts as a counting semaphore.
+// locks/<lock-name>.config.json on the lock repository's default branch sets
+// {"maxHolders": N}; missing or invalid config fails closed to a single holder.
+// ---------------------------------------------------------------------------
+
+const SEMAPHORE_STATE_PATH = "/repos/o/r/contents/locks/wallstop-organization-builds.json";
+const SEMAPHORE_CONFIG_PATH = "/repos/o/r/contents/locks/wallstop-organization-builds.config.json";
+
+function semaphoreHolder(repository, runId, suffix) {
+  return {
+    holderId: `${repository}:${runId}:perf-benchmarks:${suffix}`,
+    repository,
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId,
+    runAttempt: "1",
+    runUrl: `https://github.com/${repository}/actions/runs/${runId}`,
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+}
+
+function semaphoreQueueEntry(repository, runId, suffix) {
+  const { acquiredAt: _acquiredAt, expiresAt: _expiresAt, ...entry } = semaphoreHolder(repository, runId, suffix);
+  return entry;
+}
+
+function semaphoreState(holders, queue = []) {
+  return {
+    schemaVersion: 2,
+    lock: "wallstop-organization-builds",
+    holder: holders[0] || null,
+    holders,
+    queue,
+    updatedAt: "2026-06-06T00:00:00.000Z"
+  };
+}
+
+function semaphoreConfig(overrides = {}) {
+  return {
+    token: "token",
+    lockName: "wallstop-organization-builds",
+    holderIdSuffix: "playmode",
+    lockRepository: "o/r",
+    lockRepo: { owner: "o", repo: "r" },
+    stateBranch: "lock-state",
+    statePath: "locks/wallstop-organization-builds.json",
+    configPath: "locks/wallstop-organization-builds.config.json",
+    timeoutMinutes: 1,
+    leaseMinutes: 240,
+    pollSeconds: 1,
+    ...overrides
+  };
+}
+
+function base64Content(value, sha) {
+  return jsonResponse(200, {
+    content: Buffer.from(typeof value === "string" ? value : JSON.stringify(value), "utf8").toString("base64"),
+    sha
+  });
+}
+
+const semaphoreActionEnv = {
+  GITHUB_REPOSITORY: "owner/repo",
+  GITHUB_RUN_ID: "123",
+  GITHUB_RUN_ATTEMPT: "1",
+  GITHUB_WORKFLOW: "Perf",
+  GITHUB_JOB: "perf-benchmarks"
+};
+
+test("committed lock config files are well-formed", () => {
+  // An invalid committed config fails closed to one holder at runtime; catch it here
+  // at review time instead.
+  const locksDirectory = path.join(__dirname, "..", "locks");
+  const configFiles = fs.readdirSync(locksDirectory).filter((name) => name.endsWith(".config.json"));
+  for (const file of configFiles) {
+    const parsed = JSON.parse(fs.readFileSync(path.join(locksDirectory, file), "utf8"));
+    assert.ok(
+      Number.isInteger(parsed.maxHolders) && parsed.maxHolders >= 1 && parsed.maxHolders <= 64,
+      `${file} must declare an integer maxHolders between 1 and 64, got ${JSON.stringify(parsed.maxHolders)}`
+    );
+  }
+});
+
+test("readLockConfig fails closed to a single holder", async (t) => {
+  const cases = [
+    { name: "missing config file", response: () => jsonResponse(404, { message: "Not Found" }), maxHolders: 1 },
+    { name: "valid maxHolders", response: () => base64Content({ maxHolders: 3 }, "cfg"), maxHolders: 3 },
+    { name: "numeric string maxHolders", response: () => base64Content({ maxHolders: "4" }, "cfg"), maxHolders: 4 },
+    { name: "config without maxHolders", response: () => base64Content({}, "cfg"), maxHolders: 1 },
+    {
+      name: "malformed JSON",
+      response: () => base64Content("{oops", "cfg"),
+      maxHolders: 1,
+      warning: /not valid JSON/
+    },
+    {
+      name: "zero maxHolders",
+      response: () => base64Content({ maxHolders: 0 }, "cfg"),
+      maxHolders: 1,
+      warning: /Ignoring invalid maxHolders/
+    },
+    {
+      name: "fractional maxHolders",
+      response: () => base64Content({ maxHolders: 2.5 }, "cfg"),
+      maxHolders: 1,
+      warning: /Ignoring invalid maxHolders/
+    },
+    {
+      name: "maxHolders above the cap",
+      response: () => base64Content({ maxHolders: 1000 }, "cfg"),
+      maxHolders: 1,
+      warning: /Ignoring invalid maxHolders/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withMockedFetch(
+        async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return testCase.response();
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        },
+        async (logs) => {
+          const lockConfig = await readLockConfig(semaphoreConfig());
+          assert.deepEqual(lockConfig, { maxHolders: testCase.maxHolders });
+          if (testCase.warning) {
+            assert.match(logs.join("\n"), testCase.warning);
+          } else {
+            assert.equal(logs.filter((line) => line.includes("::warning::")).length, 0);
+          }
+        }
+      );
+    });
+  }
+});
+
+test("normalizeState migrates legacy single-holder files and dedupes the mirror", () => {
+  const holder = semaphoreHolder("other/repo", "999", "editmode");
+
+  const legacy = normalizeState(
+    { schemaVersion: 1, lock: "wallstop-organization-builds", holder, queue: [] },
+    "wallstop-organization-builds"
+  );
+  assert.equal(legacy.schemaVersion, 2);
+  assert.equal(legacy.holders.length, 1);
+  assert.equal(legacy.holders[0].holderId, holder.holderId);
+
+  const mirrored = normalizeState(
+    semaphoreState([holder, semaphoreHolder("other/repo", "888", "playmode")]),
+    "wallstop-organization-builds"
+  );
+  assert.deepEqual(
+    mirrored.holders.map((entry) => entry.holderId),
+    ["other/repo:999:perf-benchmarks:editmode", "other/repo:888:perf-benchmarks:playmode"]
+  );
+});
+
+test("normalizeState rejects state files written by a newer schema", () => {
+  assert.throws(
+    () =>
+      normalizeState(
+        { schemaVersion: 3, lock: "wallstop-organization-builds", holders: [], queue: [] },
+        "wallstop-organization-builds"
+      ),
+    /newer/
+  );
+});
+
+test("acquire takes a free slot alongside an active holder when max holders allows", async () => {
+  const activeHolder = semaphoreHolder("other/repo", "888", "editmode");
+  let state = semaphoreState([activeHolder]);
+  let putCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2 }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            putCalls++;
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        await acquire(semaphoreConfig());
+
+        assert.match(logs.join("\n"), /Max concurrent holders: 2/);
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
+    assert.equal(outputs.acquired, "true");
+    assert.equal(outputs["stale-recovered"], "false");
+  });
+
+  assert.equal(putCalls, 1);
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:editmode", "owner/repo:123:perf-benchmarks:playmode"]
+  );
+  assert.equal(state.holder.holderId, activeHolder.holderId, "legacy mirror must stay the first holder");
+  assert.deepEqual(state.queue, []);
+});
+
+test("acquire waits when the configured max holders are all active", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let state = semaphoreState([
+    semaphoreHolder("other/repo", "888", "editmode"),
+    semaphoreHolder("other/repo", "999", "playmode")
+  ]);
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+              return base64Content({ maxHolders: 2 }, "cfg");
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              if (options.method === "PUT") {
+                const body = JSON.parse(options.body);
+                state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "state-after-write" } });
+              }
+              return base64Content(state, "state-sha");
+            }
+            if (
+              parsed.pathname === "/repos/other/repo/actions/runs/888" ||
+              parsed.pathname === "/repos/other/repo/actions/runs/999"
+            ) {
+              return jsonResponse(200, { status: "in_progress", conclusion: null });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async () => {
+            await assert.rejects(() => acquire(semaphoreConfig()), /Timed out waiting for build lock/);
+          });
+        });
+      });
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "false");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:editmode", "other/repo:999:perf-benchmarks:playmode"]
+  );
+  assert.deepEqual(state.queue, [], "timeout cleanup must remove this run's queue entry");
+});
+
+test("acquire admits a second queue entry when two slots are free", async () => {
+  let state = semaphoreState([], [semaphoreQueueEntry("other/repo", "888", "editmode")]);
+  let putCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2 }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            putCalls++;
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await acquire(semaphoreConfig());
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
+    assert.equal(outputs.acquired, "true");
+  });
+
+  assert.equal(putCalls, 1);
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["owner/repo:123:perf-benchmarks:playmode"]
+  );
+  assert.deepEqual(
+    state.queue.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:editmode"],
+    "the earlier queue entry must keep its place at the queue front"
+  );
+});
+
+test("acquire replaces a stale holder while keeping an active co-holder", async () => {
+  const staleHolder = semaphoreHolder("other/repo", "999", "editmode");
+  const activeHolder = semaphoreHolder("other/repo", "888", "playmode");
+  let state = semaphoreState([staleHolder, activeHolder], [semaphoreQueueEntry("owner/repo", "123", "playmode")]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2 }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-acquire" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+          return jsonResponse(200, { status: "completed", conclusion: "success" });
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        await acquire(semaphoreConfig());
+
+        assert.match(logs.join("\n"), /Recovering stale holder other\/repo:999:perf-benchmarks:editmode/);
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
+    assert.equal(outputs.acquired, "true");
+    assert.equal(outputs["stale-recovered"], "true");
+  });
+
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:playmode", "owner/repo:123:perf-benchmarks:playmode"]
+  );
+  assert.deepEqual(state.queue, []);
+});
+
+test("acquire picks up a raised max-holders limit while waiting", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let configReads = 0;
+  let state = semaphoreState([semaphoreHolder("other/repo", "888", "editmode")]);
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withEnvironment({ BUILD_LOCK_CONFIG_TTL_MS: "60000" }, async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                configReads++;
+                return base64Content({ maxHolders: configReads === 1 ? 1 : 2 }, "cfg");
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  return jsonResponse(200, { content: { sha: "state-after-write" } });
+                }
+                return base64Content(state, "state-sha");
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+                return jsonResponse(200, { status: "in_progress", conclusion: null });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await acquire(semaphoreConfig({ timeoutMinutes: 30 }));
+
+              assert.match(logs.join("\n"), /Max concurrent holders changed from 1 to 2/);
+            });
+          });
+        });
+      });
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "true");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.ok(configReads >= 2, `expected the lock config to be re-read on TTL, saw ${configReads} reads`);
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:editmode", "owner/repo:123:perf-benchmarks:playmode"]
+  );
+});
+
+test("release removes only this run's slot and reports the remaining holders", async () => {
+  const myHolder = semaphoreHolder("owner/repo", "123", "playmode");
+  const coHolder = semaphoreHolder("other/repo", "888", "editmode");
+  let state = semaphoreState([myHolder, coHolder]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-release" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await release(semaphoreConfig());
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs["held-by"], "other/repo:888:perf-benchmarks:editmode");
+    assert.equal(outputs["held-by-run-url"], "https://github.com/other/repo/actions/runs/888");
+  });
+
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:editmode"]
+  );
+  assert.equal(state.holder.holderId, coHolder.holderId, "legacy mirror must follow the remaining holder");
+});
+
+test("reap drops only stale holders and keeps active co-holders", async () => {
+  const staleHolder = semaphoreHolder("other/repo", "999", "editmode");
+  const activeHolder = semaphoreHolder("other/repo", "888", "playmode");
+  let state = semaphoreState([staleHolder, activeHolder]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-reap" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+          return jsonResponse(200, { status: "completed", conclusion: "success" });
+        }
+        if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig());
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, reapOutputNames);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-reap");
+  });
+
+  assert.deepEqual(
+    state.holders.map((entry) => entry.holderId),
+    ["other/repo:888:perf-benchmarks:playmode"]
+  );
 });
 
 test("stale evaluation reclaims when the run-status poll returns 401 after lease expiry", async () => {

@@ -246,3 +246,12 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /acquire-build-lock-with-cleanup/);
   assert.match(readme, /Keep the explicit\s+release step/);
 });
+
+test("README documents configurable parallelism and transient-auth handling", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+  assert.match(readme, /"maxHolders"/);
+  assert.match(readme, /locks\/<lock-name>\.config\.json/);
+  assert.match(readme, /BUILD_LOCK_AUTH_GRACE_MS/);
+  assert.match(readme, /BUILD_LOCK_CONFIG_TTL_MS/);
+});
