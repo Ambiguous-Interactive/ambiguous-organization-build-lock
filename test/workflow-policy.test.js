@@ -19,7 +19,14 @@ const expectedWorkflowRunScriptSignatures = new Map([
     "auto-release.yml",
     ['git config user.name "github-actions[bot]"\ngit config user.email "41898282+github-actions[bot]@users.noreply.github.com"']
   ],
-  ["ci.yml", ['for action_file in .github/dist/*.js; do\nnode --check "${action_file}"', "node --test test/*.test.js"]],
+  [
+    "ci.yml",
+    [
+      'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
+      'set -euo pipefail\nversion="1.7.12"',
+      "node --test test/*.test.js"
+    ]
+  ],
   [
     "dependabot-auto-merge.yml",
     [
@@ -30,6 +37,8 @@ const expectedWorkflowRunScriptSignatures = new Map([
   ],
   ["reap-stale-locks.yml", []]
 ]);
+const expectedActionlintVersion = "1.7.12";
+const expectedActionlintLinuxAmd64Sha256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8";
 
 function readWorkflow(name) {
   return fs.readFileSync(path.join(workflowsRoot, name), "utf8");
@@ -1162,6 +1171,30 @@ test("workflow run script scanner covers every expected workflow run step", () =
       `${workflow} run-script policy coverage must stay aligned with checked workflow run steps`
     );
   }
+});
+
+test("CI actionlint step avoids Docker pulls and verifies the pinned release asset", () => {
+  const text = readWorkflow("ci.yml");
+  const steps = workflowJobStepMaps(text, "validate");
+  const lintStep = steps.find((step) => step.name === "Lint GitHub Actions workflows");
+  const lintScript = runScriptSections(text).find((section) => section.text.includes("actionlint_${version}_linux_amd64.tar.gz"));
+
+  assert.ok(lintStep, "CI must keep a named actionlint workflow lint step");
+  assert.equal(lintStep.uses, undefined, "CI actionlint must not use a Docker-based action");
+  assert.equal(lintStep.shell, "bash", "CI actionlint must run under bash for strict shell options");
+  assert.ok(lintScript, "CI actionlint run script must stay visible to policy scanning");
+
+  assert.doesNotMatch(text, /docker:\/\/rhysd\/actionlint/i, "CI actionlint must not depend on Docker pulls");
+  assert.match(lintScript.text, /set -euo pipefail/, "CI actionlint must fail on unset variables and pipeline errors");
+  assert.match(lintScript.text, new RegExp(`version="${expectedActionlintVersion}"`));
+  assert.match(lintScript.text, new RegExp(`expected_sha256="${expectedActionlintLinuxAmd64Sha256}"`));
+  assert.match(lintScript.text, /install_dir="\$\(mktemp -d "\$\{RUNNER_TEMP\}\/actionlint\.XXXXXX"\)"/);
+  assert.match(lintScript.text, /curl --fail --show-error --silent --location --retry 3 --retry-delay 2 \\/);
+  assert.match(lintScript.text, /grep -Fx "\$\{expected_sha256\}  \$\{archive\}" "\$\{RUNNER_TEMP\}\/\$\{checksums\}" > \/dev\/null/);
+  assert.match(lintScript.text, /printf '%s  %s\\n' "\$\{expected_sha256\}" "\$\{RUNNER_TEMP\}\/\$\{archive\}" \| sha256sum -c -/);
+  assert.match(lintScript.text, /tar -xzf "\$\{RUNNER_TEMP\}\/\$\{archive\}" -C "\$\{install_dir\}" actionlint/);
+  assert.match(lintScript.text, /test -x "\$\{install_dir\}\/actionlint"/);
+  assert.match(lintScript.text, /"\$\{install_dir\}\/actionlint" -color/);
 });
 
 test("workflow step parser handles compact with and env maps", () => {
