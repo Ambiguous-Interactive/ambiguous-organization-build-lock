@@ -974,16 +974,6 @@ function identityIsNewer(existing, incoming, context) {
   return { compatible: true, newer: incomingAttempt > storedAttempt, reason: "" };
 }
 
-function releaseMatchesIdentity(entry, identity, schemaVersion, context) {
-  if (entry.holderId !== identity.holderId) {
-    return false;
-  }
-  if (schemaVersion < 3) {
-    return true;
-  }
-  return identityIsNewer(entry, identity, context).compatible;
-}
-
 function identityIsNewerOrThrow(existing, incoming, context) {
   const comparison = identityIsNewer(existing, incoming, context);
   if (!comparison.compatible) {
@@ -1115,15 +1105,19 @@ async function cleanupIdentity(config, identity, options = {}) {
 
   for (let attempts = 1; attempts <= maxAttempts; attempts++) {
     const { state, sha } = await readState(config, options);
-    const queueCleaned = state.queue.some((entry) =>
-      releaseMatchesIdentity(entry, identity, state.schemaVersion, "Queued request")
-    );
-    state.queue = state.queue.filter(
-      (entry) => !releaseMatchesIdentity(entry, identity, state.schemaVersion, "Queued request")
-    );
-    const remainingHolders = state.holders.filter(
-      (holder) => !releaseMatchesIdentity(holder, identity, state.schemaVersion, "Holder")
-    );
+    if (state.schemaVersion >= 3 && !identity.runnerId) {
+      throw new Error("runner-id is required to clean up schema 3 lock ownership.");
+    }
+    const ownsEntry = (entry) => {
+      if (entry.holderId !== identity.holderId) {
+        return false;
+      }
+      return state.schemaVersion < 3 ||
+        (entry.runnerId === identity.runnerId && entry.runAttempt === identity.runAttempt);
+    };
+    const queueCleaned = state.queue.some(ownsEntry);
+    state.queue = state.queue.filter((entry) => !ownsEntry(entry));
+    const remainingHolders = state.holders.filter((holder) => !ownsEntry(holder));
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
     // Public release outputs are singular; report the same first holder that legacy

@@ -5045,6 +5045,73 @@ test("release preserves schema 3 runner identities while removing only this run'
   assert.equal(state.holder.holderId, firstCoHolder.holderId, "legacy mirror must follow the first remaining holder");
 });
 
+test("schema 3 cleanup requires exact runner and attempt ownership", async (t) => {
+  const cases = [];
+  for (const location of ["active holder", "queued request"]) {
+    for (const mismatch of [
+      { name: "older attempt", storedRunner: "runner-same", storedAttempt: "2", callerRunner: "runner-same" },
+      { name: "different runner", storedRunner: "runner-new", storedAttempt: "1", callerRunner: "runner-old" }
+    ]) {
+      const storedIdentity = {
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), mismatch.storedRunner),
+        runAttempt: mismatch.storedAttempt
+      };
+      cases.push({
+        name: `${location}: ${mismatch.name}`,
+        callerRunner: mismatch.callerRunner,
+        state: location === "active holder"
+          ? {
+              ...semaphoreState([{ ...storedIdentity, acquiredAt: storedIdentity.queuedAt, expiresAt: "2999-01-01T00:00:00.000Z" }]),
+              schemaVersion: 3
+            }
+          : { ...semaphoreState([], [storedIdentity]), schemaVersion: 3 }
+      });
+    }
+  }
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      let putCalls = 0;
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+            }
+            return base64Content(testCase.state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({ runnerId: testCase.callerRunner }));
+        });
+      });
+      assert.equal(putCalls, 0);
+    });
+  }
+});
+
+test("schema 3 cleanup fails closed without runner-id", async () => {
+  const state = { ...semaphoreState([]), schemaVersion: 3 };
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch-sha" } });
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        return base64Content(state, "state-sha");
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(() => release(semaphoreConfig()), /runner-id is required to clean up schema 3/);
+    });
+  });
+});
+
 test("reap preserves schema 3 runner identity while dropping only stale holders", async () => {
   const staleHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
   const activeHolder = withRunner(semaphoreHolder("other/repo", "888", "playmode"), "runner-b");
