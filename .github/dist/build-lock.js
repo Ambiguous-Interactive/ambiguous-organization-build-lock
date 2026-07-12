@@ -1117,7 +1117,9 @@ async function cleanupIdentity(config, identity, options = {}) {
       }
       if (!/^[1-9][0-9]*$/.test(entry.runAttempt) || !/^[1-9][0-9]*$/.test(identity.runAttempt)) {
         throw new Error(
-          `Build-lock cleanup ${identity.holderId} has a non-numeric run attempt; refusing ownership cleanup.`
+          `Build-lock cleanup ${identity.holderId} has invalid run attempts ` +
+            `(stored=${JSON.stringify(entry.runAttempt)}, caller=${JSON.stringify(identity.runAttempt)}); ` +
+            "expected positive decimal integers."
         );
       }
       // runnerId controls admission, not cleanup ownership. A dead self-hosted

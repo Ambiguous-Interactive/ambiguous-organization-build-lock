@@ -5088,7 +5088,10 @@ test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", asy
         }, async () => {
           const operation = () => release(semaphoreConfig({ runnerId: testCase.callerRunner }));
           if (testCase.error) {
-            await assert.rejects(operation, /non-numeric run attempt/);
+            await assert.rejects(
+              operation,
+              /invalid run attempts \(stored="(?:invalid|1)", caller="(?:2|0)"\); expected positive decimal integers/
+            );
           } else {
             await operation();
           }
