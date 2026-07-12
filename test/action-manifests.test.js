@@ -19,7 +19,9 @@ const acquireInputKeys = [
   "state-branch",
   "timeout-minutes",
   "lease-minutes",
-  "poll-seconds"
+  "poll-seconds",
+  "require-resource-lifecycle",
+  "minimum-release-cooldown-seconds"
 ];
 const acquireOutputKeys = [
   "acquired",

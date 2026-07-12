@@ -750,6 +750,42 @@ test("config rejects holder suffixes that fallback cleanup cannot reproduce", as
   }
 });
 
+test("config validates acquire lifecycle requirements", async (t) => {
+  const cases = [
+    { name: "defaults preserve compatibility", lifecycle: undefined, cooldown: undefined, expected: [false, 0] },
+    { name: "explicit requirements", lifecycle: "true", cooldown: "360", expected: [true, 360] },
+    { name: "invalid lifecycle boolean", lifecycle: "yes", cooldown: undefined, error: /must be true or false/ },
+    { name: "negative cooldown", lifecycle: undefined, cooldown: "-1", error: /must be a non-negative integer/ },
+    { name: "fractional cooldown", lifecycle: undefined, cooldown: "1.5", error: /must be a non-negative integer/ },
+    { name: "cooldown above supported maximum", lifecycle: undefined, cooldown: "86401", error: /must be <= 86400/ }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withEnvironment(
+        {
+          "INPUT_LOCK-NAME": "wallstop-organization-builds",
+          "INPUT_LOCK-REPOSITORY": "o/r",
+          "INPUT_REQUIRE-RESOURCE-LIFECYCLE": testCase.lifecycle,
+          "INPUT_MINIMUM-RELEASE-COOLDOWN-SECONDS": testCase.cooldown,
+          BUILD_LOCK_TOKEN: "legacy"
+        },
+        () => {
+          if (testCase.error) {
+            assert.throws(() => config(), testCase.error);
+          } else {
+            const parsed = config();
+            assert.deepEqual(
+              [parsed.requireResourceLifecycle, parsed.minimumReleaseCooldownSeconds],
+              testCase.expected
+            );
+          }
+        }
+      );
+    });
+  }
+});
+
 test("GitHub App configuration rejects invalid private keys without exposing them", async () => {
   const sentinel = "not-a-private-key-secret";
   await withMockedFetch(async () => jsonResponse(500), async (logs) => {
@@ -1608,8 +1644,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/owner/repo/actions/runs/123"
     ]
@@ -1684,8 +1720,8 @@ test("acquire recovers when a successful lock write is reported as a transient f
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -1991,8 +2027,8 @@ test("acquire preserves stale recovery when an accepted stale replacement is rep
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/other/repo/actions/runs/999",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -4013,6 +4049,101 @@ function base64Content(value, sha) {
   });
 }
 
+test("acquire fails closed when its loaded config snapshot does not meet lifecycle requirements", async (t) => {
+  const cases = [
+    {
+      name: "lifecycle is disabled",
+      lockConfig: { maxHolders: 1, resourceLifecycle: false, releaseCooldownSeconds: 360 },
+      requirements: { requireResourceLifecycle: true, minimumReleaseCooldownSeconds: 0 },
+      error: /requires resourceLifecycle=true/
+    },
+    {
+      name: "cooldown is below the requested minimum",
+      lockConfig: {
+        maxHolders: 1,
+        runnerSerialization: true,
+        resourceLifecycle: true,
+        releaseCooldownSeconds: 359
+      },
+      requirements: { requireResourceLifecycle: true, minimumReleaseCooldownSeconds: 360 },
+      error: /releaseCooldownSeconds >= 360.*loaded value is 359/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      let stateReads = 0;
+      let stateBranchAccesses = 0;
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            stateBranchAccesses++;
+            return jsonResponse(404, { message: `unexpected state branch ${options.method || "GET"}` });
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
+            return base64Content(testCase.lockConfig, "config-sha");
+          }
+          if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+            stateReads++;
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(() => acquire(semaphoreConfig(testCase.requirements)), testCase.error);
+        });
+      });
+      assert.equal(stateBranchAccesses, 0, "requirements must reject before state branch access");
+      assert.equal(stateReads, 0, "requirements must reject the loaded acquire snapshot before state mutation");
+    });
+  }
+});
+
+test("acquire revalidates lifecycle requirements on the refreshed config snapshot", async () => {
+  let configReads = 0;
+  let stateReads = 0;
+  await withEnvironment({ BUILD_LOCK_CONFIG_TTL_MS: "0" }, async () => {
+    await withActionEnv(semaphoreActionEnv, async () => {
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
+          configReads++;
+          return base64Content(
+            configReads === 1
+              ? {
+                  maxHolders: 1,
+                  runnerSerialization: true,
+                  resourceLifecycle: true,
+                  releaseCooldownSeconds: 360
+                }
+              : { maxHolders: 1, resourceLifecycle: false, releaseCooldownSeconds: 360 },
+            `config-${configReads}`
+          );
+        }
+        if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+          stateReads++;
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () =>
+            acquire(
+              semaphoreConfig({
+                requireResourceLifecycle: true,
+                minimumReleaseCooldownSeconds: 360
+              })
+            ),
+          /requires resourceLifecycle=true/
+        );
+      });
+    });
+  });
+  assert.equal(configReads, 2);
+  assert.equal(stateReads, 0, "the rejected refreshed snapshot must not be used for state mutation");
+});
+
 const semaphoreActionEnv = {
   GITHUB_REPOSITORY: "owner/repo",
   GITHUB_RUN_ID: "123",
@@ -5435,7 +5566,15 @@ test("ambiguous schema 4 release reports the reservation persisted by a concurre
           const parsed = new URL(url);
           if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
           if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-            return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true }, "cfg");
+            return base64Content(
+              {
+                maxHolders: 1,
+                runnerSerialization: true,
+                resourceLifecycle: true,
+                releaseCooldownSeconds: 360
+              },
+              "cfg"
+            );
           }
           if (parsed.pathname === SEMAPHORE_STATE_PATH) {
             if (options.method === "PUT") {
@@ -5789,7 +5928,14 @@ test("resource lifecycle activation upgrades only drained schema 3 state", async
           if (parsed.pathname.includes("/actions/runs/")) return jsonResponse(200, { status: "in_progress" });
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
         }, async () => {
-          const operation = () => acquire(semaphoreConfig({ runnerId: "runner-a" }));
+          const operation = () =>
+            acquire(
+              semaphoreConfig({
+                runnerId: "runner-a",
+                requireResourceLifecycle: true,
+                minimumReleaseCooldownSeconds: 360
+              })
+            );
           if (testCase.error) await assert.rejects(operation, testCase.error);
           else await operation();
         });
