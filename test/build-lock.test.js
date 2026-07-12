@@ -5052,6 +5052,7 @@ test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", asy
       cases.push({
         name: `${location}: ${ownership.name}`,
         callerRunner: ownership.callerRunner,
+        storedAttempt: ownership.storedAttempt,
         callerAttempt: ownership.callerAttempt,
         cleaned: ownership.cleaned,
         error: ownership.error || false,
@@ -5090,7 +5091,13 @@ test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", asy
           if (testCase.error) {
             await assert.rejects(
               operation,
-              /invalid run attempts \(stored="(?:invalid|1)", caller="(?:2|0)"\); expected positive decimal integers/
+              {
+                name: "Error",
+                message:
+                  "Build-lock cleanup owner/repo:123:perf-benchmarks:playmode has invalid run attempts " +
+                  `(stored=${JSON.stringify(testCase.storedAttempt)}, ` +
+                  `caller=${JSON.stringify(testCase.callerAttempt)}); expected positive decimal integers.`
+              }
             );
           } else {
             await operation();
