@@ -8,6 +8,9 @@ inputs:
     description: Extra identity for matrix cells inside the same workflow job.
     required: false
     default: default
+  runner-id:
+    description: Stable physical runner identity. Pass the same value used by acquire.
+    required: false
   lock-repository:
     description: Repository that stores lock state.
     required: false

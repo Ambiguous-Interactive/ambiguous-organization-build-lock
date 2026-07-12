@@ -13,3 +13,7 @@ per-lock parallelism: `{ "maxHolders": N }` with N between 1 and 64. A missing
 or invalid config fails closed to a single holder. Changes go through normal
 pull-request review and are picked up by waiting runs within the config TTL
 (default 5 minutes).
+
+`runnerSerialization: true` activates the one-way schema-3 upgrade and limits
+each physical `runner-id` to one holder. Enable it only after compatible clients
+are deployed and the schema-2 holder and queue lists are empty.

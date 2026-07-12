@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,7 +9,10 @@ const test = require("node:test");
 const {
   acquire,
   api,
-  emptyState,
+  createAppJwt,
+  createGitHubAppAuth,
+  credential,
+  emptyState: productionEmptyState,
   evaluateStale,
   installAcquireSignalCleanup,
   isRetryableResponse,
@@ -18,8 +22,18 @@ const {
   release,
   reap,
   runCancellationCleanup,
+  selectEligibleQueueEntries,
   writeState
 } = require("../.github/dist/build-lock.js");
+
+const testAppKeys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+const testAppPrivateKey = testAppKeys.privateKey.export({ type: "pkcs8", format: "pem" });
+
+// Older unit fixtures exercise the supported schema-1 singleton shape. New schema-2
+// and schema-3 behavior uses the explicit semaphoreState helper below.
+function emptyState(lockName) {
+  return productionEmptyState(lockName, 1);
+}
 
 function jsonResponse(status, body = {}, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -390,6 +404,339 @@ test("api surfaces persistent 401 responses after exhausting retries", async () 
         }
       );
       assert.equal(calls, 3);
+    }
+  );
+});
+
+test("GitHub App JWT uses bounded RS256 claims and a valid signature", () => {
+  const now = Date.parse("2026-07-11T12:00:00Z");
+  const jwt = createAppJwt("12345", testAppKeys.privateKey, now);
+  const [headerPart, payloadPart, signaturePart] = jwt.split(".");
+  const header = JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8"));
+  const payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
+
+  assert.deepEqual(header, { alg: "RS256", typ: "JWT" });
+  assert.deepEqual(payload, {
+    iat: Math.floor(now / 1000) - 60,
+    exp: Math.floor(now / 1000) + 540,
+    iss: "12345"
+  });
+  assert.equal(
+    crypto.verify(
+      "RSA-SHA256",
+      Buffer.from(`${headerPart}.${payloadPart}`),
+      testAppKeys.publicKey,
+      Buffer.from(signaturePart, "base64url")
+    ),
+    true
+  );
+});
+
+test("GitHub App auth caches and refreshes installation tokens before expiry", async () => {
+  let now = Date.parse("2026-07-11T12:00:00Z");
+  let installationReads = 0;
+  let tokenMints = 0;
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive",
+    now: () => now
+  });
+
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    assert.match(options.headers.Authorization, /^Bearer ey/);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      installationReads++;
+      return jsonResponse(200, { id: 987 });
+    }
+    if (parsed.pathname === "/app/installations/987/access_tokens") {
+      tokenMints++;
+      return jsonResponse(201, {
+        token: `installation-token-${tokenMints}`,
+        expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async (logs) => {
+    assert.deepEqual(await Promise.all([auth.getToken(), auth.getToken()]), [
+      "installation-token-1",
+      "installation-token-1"
+    ]);
+    now += 56 * 60 * 1000;
+    assert.equal(await auth.getToken(), "installation-token-2");
+    assert.ok(logs.includes("::add-mask::installation-token-1"));
+    assert.ok(logs.includes("::add-mask::installation-token-2"));
+    assert.equal(
+      logs.filter((line) => !line.startsWith("::add-mask::")).join("\n").includes("installation-token-"),
+      false
+    );
+  });
+
+  assert.equal(installationReads, 1);
+  assert.equal(tokenMints, 2);
+});
+
+test("api refreshes GitHub App credentials immediately after a 401", async () => {
+  const now = Date.parse("2026-07-11T12:00:00Z");
+  let tokenMints = 0;
+  let resourceCalls = 0;
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive",
+    now: () => now
+  });
+
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      return jsonResponse(200, { id: 987 });
+    }
+    if (parsed.pathname === "/app/installations/987/access_tokens") {
+      tokenMints++;
+      return jsonResponse(201, {
+        token: `installation-token-${tokenMints}`,
+        expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+      });
+    }
+    if (parsed.pathname === "/repos/o/r/contents/lock.json") {
+      resourceCalls++;
+      if (options.headers.Authorization === "Bearer installation-token-1") {
+        return jsonResponse(401, { message: "Bad credentials" });
+      }
+      assert.equal(options.headers.Authorization, "Bearer installation-token-2");
+      return jsonResponse(200, { ok: true });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.deepEqual(await api("GET", "/repos/o/r/contents/lock.json", undefined, auth), { ok: true });
+  });
+
+  assert.equal(tokenMints, 2);
+  assert.equal(resourceCalls, 2);
+});
+
+test("api performs at most one renewable credential refresh per logical request", async () => {
+  let token = "token-1";
+  let invalidations = 0;
+  let tokenReads = 0;
+  let resourceCalls = 0;
+  const auth = {
+    renewable: true,
+    async getToken() {
+      tokenReads++;
+      return token;
+    },
+    invalidateToken(rejected) {
+      invalidations++;
+      assert.equal(rejected, "token-1");
+      token = "token-2";
+    }
+  };
+
+  await withMockedFetch(async () => {
+    resourceCalls++;
+    return jsonResponse(401, { message: "Bad credentials" });
+  }, async () => {
+    await assert.rejects(
+      () => api("GET", "/repos/o/r", undefined, auth, { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 }),
+      /HTTP 401/
+    );
+  });
+
+  assert.equal(invalidations, 1);
+  assert.equal(resourceCalls, 4, "three normal attempts plus one immediate refreshed replay");
+  assert.equal(tokenReads, 4);
+});
+
+test("GitHub App installation lookup honors cancellation", async () => {
+  const controller = new AbortController();
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive"
+  });
+
+  await withMockedFetch(async (_url, options = {}) => {
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      setTimeout(() => controller.abort(new Error("cancel auth lookup")), 0);
+    });
+  }, async () => {
+    await assert.rejects(
+      () => api("GET", "/repos/o/r", undefined, auth, { signal: controller.signal }),
+      /cancel auth lookup/
+    );
+  });
+});
+
+test("concurrent GitHub App token waiters cancel independently", async () => {
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+  let finishInstallationLookup;
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive"
+  });
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      return new Promise((resolve) => {
+        finishInstallationLookup = () => resolve(jsonResponse(200, { id: 987 }));
+      });
+    }
+    if (parsed.pathname === "/app/installations/987/access_tokens") {
+      return jsonResponse(201, {
+        token: "shared-token",
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    const first = auth.getToken({ signal: firstController.signal });
+    const second = auth.getToken({ signal: secondController.signal });
+    await new Promise((resolve) => setImmediate(resolve));
+    firstController.abort(new Error("first waiter cancelled"));
+    finishInstallationLookup();
+
+    await assert.rejects(first, /first waiter cancelled/);
+    assert.equal(await second, "shared-token");
+  });
+});
+
+test("GitHub App auth re-discovers a replaced installation once", async () => {
+  let now = Date.parse("2026-07-11T12:00:00Z");
+  let installationReads = 0;
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive",
+    now: () => now
+  });
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      installationReads++;
+      return jsonResponse(200, { id: installationReads === 1 ? 111 : 222 });
+    }
+    if (parsed.pathname === "/app/installations/111/access_tokens") {
+      if (now > Date.parse("2026-07-11T12:00:00Z")) {
+        return jsonResponse(404, { message: "installation replaced" });
+      }
+      return jsonResponse(201, {
+        token: "old-installation-token",
+        expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+      });
+    }
+    if (parsed.pathname === "/app/installations/222/access_tokens") {
+      return jsonResponse(201, {
+        token: "new-installation-token",
+        expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.equal(await auth.getToken(), "old-installation-token");
+    now += 56 * 60 * 1000;
+    assert.equal(await auth.getToken(), "new-installation-token");
+  });
+
+  assert.equal(installationReads, 2);
+});
+
+test("GitHub App auth rejects malformed installation and token responses", async (t) => {
+  const cases = [
+    { name: "missing installation id", installation: {}, token: null, error: /installation id/ },
+    { name: "missing token", installation: { id: 987 }, token: { expires_at: "2099-01-01T00:00:00Z" }, error: /token or expiry/ },
+    { name: "invalid expiry", installation: { id: 987 }, token: { token: "sentinel", expires_at: "nope" }, error: /token or expiry/ },
+    { name: "expired token", installation: { id: 987 }, token: { token: "sentinel", expires_at: "2000-01-01T00:00:00Z" }, error: /token or expiry/ }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const auth = createGitHubAppAuth({
+        appId: "12345",
+        privateKey: testAppPrivateKey,
+        owner: "Ambiguous-Interactive"
+      });
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+          return jsonResponse(200, testCase.installation);
+        }
+        if (parsed.pathname === "/app/installations/987/access_tokens") {
+          return jsonResponse(201, testCase.token);
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(() => auth.getToken(), testCase.error);
+      });
+    });
+  }
+});
+
+test("credential selection rejects partial App configuration and preserves legacy compatibility", async (t) => {
+  const cases = [
+    { name: "app id only", appId: "123", privateKey: undefined, token: "legacy", error: /provided together/ },
+    { name: "private key only", appId: undefined, privateKey: testAppPrivateKey, token: "legacy", error: /provided together/ },
+    { name: "legacy token only", appId: undefined, privateKey: undefined, token: "legacy" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withEnvironment(
+        {
+          BUILD_LOCK_APP_ID: testCase.appId,
+          BUILD_LOCK_APP_PRIVATE_KEY: testCase.privateKey,
+          BUILD_LOCK_TOKEN: testCase.token
+        },
+        async () => {
+          await withMockedFetch(async () => jsonResponse(500), async (logs) => {
+            if (testCase.error) {
+              assert.throws(() => credential({ owner: "Ambiguous-Interactive" }), testCase.error);
+            } else {
+              assert.equal(credential({ owner: "Ambiguous-Interactive" }), "legacy");
+              assert.ok(logs.includes("::add-mask::legacy"));
+              assert.equal(logs.filter((line) => !line.startsWith("::add-mask::")).join("\n").includes("legacy"), false);
+            }
+          });
+        }
+      );
+    });
+  }
+});
+
+test("GitHub App configuration rejects invalid private keys without exposing them", async () => {
+  const sentinel = "not-a-private-key-secret";
+  await withMockedFetch(async () => jsonResponse(500), async (logs) => {
+    assert.throws(
+      () =>
+        createGitHubAppAuth({
+          appId: "12345",
+          privateKey: sentinel,
+          owner: "Ambiguous-Interactive"
+        }),
+      /not a valid private key/
+    );
+    assert.equal(logs.join("\n").includes(sentinel), false);
+  });
+});
+
+test("complete GitHub App credentials take precedence over the legacy token", async () => {
+  await withEnvironment(
+    {
+      BUILD_LOCK_APP_ID: "12345",
+      BUILD_LOCK_APP_PRIVATE_KEY: String(testAppPrivateKey).replace(/\n/g, "\\n"),
+      BUILD_LOCK_TOKEN: "legacy-must-not-win"
+    },
+    () => {
+      const selected = credential({ owner: "Ambiguous-Interactive" });
+      assert.equal(selected.renewable, true);
+      assert.equal(typeof selected.getToken, "function");
     }
   );
 });
@@ -2718,7 +3065,7 @@ test("release preserves fresh holder context after an ambiguous accepted cleanup
                 const body = JSON.parse(options.body);
                 if (releasePutCalls === 1) {
                   state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-                  state = { ...state, holder: nextHolder };
+                  state = { ...state, holder: nextHolder, holders: [nextHolder] };
                   return jsonResponse(500, { message: "accepted but response failed" });
                 }
                 return jsonResponse(409, { message: "sha does not match" });
@@ -3018,6 +3365,116 @@ test("release reports noop with holder context when this run has no state to cle
   });
 
   assert.equal(wrote, false);
+});
+
+test("schema 3 release preserves newer or conflicting holder ownership", async (t) => {
+  const cases = [
+    { name: "newer rerun holder", holderAttempt: "2", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
+    { name: "conflicting runner holder", holderAttempt: "1", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const held = {
+        ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), testCase.holderRunner),
+        runAttempt: testCase.holderAttempt
+      };
+      const state = { ...semaphoreState([held]), schemaVersion: 3 };
+      let wrote = false;
+
+      await withTempFile(async (outputFile) => {
+        await withActionEnv(
+          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  wrote = true;
+                }
+                return base64Content(state, "state-sha");
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
+
+              assert.match(logs.join("\n"), /Lock is held by owner\/repo:123:perf-benchmarks:playmode/);
+              assert.match(logs.join("\n"), /No release needed for wallstop-organization-builds/);
+            });
+          }
+        );
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "false");
+        assert.equal(outputs["queue-cleaned"], "false");
+        assert.equal(outputs["cleanup-result"], "noop");
+        assert.equal(outputs["state-sha"], "state-sha");
+        assert.equal(outputs["held-by"], held.holderId);
+        assert.equal(outputs["held-by-run-url"], held.runUrl);
+      });
+
+      assert.equal(wrote, false);
+    });
+  }
+});
+
+test("schema 3 release preserves newer or conflicting queued ownership", async (t) => {
+  const cases = [
+    { name: "newer rerun queue entry", queuedAttempt: "2", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
+    { name: "conflicting runner queue entry", queuedAttempt: "1", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const queued = {
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), testCase.queuedRunner),
+        runAttempt: testCase.queuedAttempt
+      };
+      const state = { ...semaphoreState([], [queued]), schemaVersion: 3 };
+      let observedState = null;
+      let wrote = false;
+
+      await withTempFile(async (outputFile) => {
+        await withActionEnv(
+          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  wrote = true;
+                }
+                observedState = JSON.parse(JSON.stringify(state));
+                return base64Content(state, "state-sha");
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
+            });
+          }
+        );
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "false");
+        assert.equal(outputs["queue-cleaned"], "false");
+        assert.equal(outputs["cleanup-result"], "noop");
+        assert.equal(outputs["state-sha"], "state-sha");
+        assert.equal(outputs["held-by"], "");
+        assert.equal(outputs["held-by-run-url"], "");
+      });
+
+      assert.equal(wrote, false);
+      assert.deepEqual(observedState.queue, [queued]);
+    });
+  }
 });
 
 test("reap writes full output contract when no stale state is found", async () => {
@@ -3395,7 +3852,10 @@ test("post cleanup wrapper exits successfully when saved state exists but token 
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /::warning::Build lock post cleanup could not start: BUILD_LOCK_TOKEN is required\./);
+  assert.match(
+    result.stdout,
+    /::warning::Build lock post cleanup could not start: Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY/
+  );
   assert.equal(result.stderr, "");
 });
 
@@ -3422,7 +3882,7 @@ test("stale evaluation fails fast when run status cannot be read due to missing 
   }, async () => {
     await assert.rejects(
       () => evaluateStale(holder, "token"),
-      /Ensure BUILD_LOCK_TOKEN has actions: read access/
+      /Ensure the build-lock credentials have actions: read access/
     );
   });
 });
@@ -3488,7 +3948,7 @@ test("stale evaluation rejects lease fallback when the repository cannot be read
   }, async () => {
     await assert.rejects(
       () => evaluateStale(holder, "token"),
-      /Ensure BUILD_LOCK_TOKEN can read this repository and has actions: read access/
+      /Ensure the build-lock credentials can read this repository and have actions: read access/
     );
   });
 });
@@ -3553,6 +4013,10 @@ function semaphoreHolder(repository, runId, suffix) {
   };
 }
 
+function withRunner(entry, runnerId) {
+  return { ...entry, runnerId };
+}
+
 function semaphoreQueueEntry(repository, runId, suffix) {
   const { acquiredAt: _acquiredAt, expiresAt: _expiresAt, ...entry } = semaphoreHolder(repository, runId, suffix);
   return entry;
@@ -3612,6 +4076,13 @@ test("committed lock config files are well-formed", () => {
       Number.isInteger(parsed.maxHolders) && parsed.maxHolders >= 1 && parsed.maxHolders <= 64,
       `${file} must declare an integer maxHolders between 1 and 64, got ${JSON.stringify(parsed.maxHolders)}`
     );
+    if (Object.hasOwn(parsed, "runnerSerialization")) {
+      assert.equal(
+        typeof parsed.runnerSerialization,
+        "boolean",
+        `${file} runnerSerialization must be a boolean when present`
+      );
+    }
   }
 });
 
@@ -3625,6 +4096,18 @@ test("readLockConfig fails closed to a single holder", async (t) => {
       warning: /Unable to read lock config.*HTTP 401.*AUTH401/
     },
     { name: "valid maxHolders", response: () => base64Content({ maxHolders: 3 }, "cfg"), maxHolders: 3 },
+    {
+      name: "runner serialization enabled",
+      response: () => base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg"),
+      maxHolders: 2,
+      runnerSerialization: true
+    },
+    {
+      name: "invalid runner serialization fails disabled",
+      response: () => base64Content({ maxHolders: 2, runnerSerialization: "true" }, "cfg"),
+      maxHolders: 1,
+      warning: /Ignoring invalid runnerSerialization/
+    },
     { name: "numeric string maxHolders", response: () => base64Content({ maxHolders: "4" }, "cfg"), maxHolders: 4 },
     { name: "config without maxHolders", response: () => base64Content({}, "cfg"), maxHolders: 1 },
     {
@@ -3672,7 +4155,10 @@ test("readLockConfig fails closed to a single holder", async (t) => {
               sleep: async () => {}
             }
           });
-          assert.deepEqual(lockConfig, { maxHolders: testCase.maxHolders });
+          assert.deepEqual(lockConfig, {
+            maxHolders: testCase.maxHolders,
+            runnerSerialization: testCase.runnerSerialization || false
+          });
           if (testCase.warning) {
             assert.match(logs.join("\n"), testCase.warning);
           } else {
@@ -3758,11 +4244,486 @@ test("normalizeState rejects state files written by a newer schema", () => {
   assert.throws(
     () =>
       normalizeState(
-        { schemaVersion: 3, lock: "wallstop-organization-builds", holders: [], queue: [] },
+        { schemaVersion: 4, lock: "wallstop-organization-builds", holders: [], queue: [] },
         "wallstop-organization-builds"
       ),
-    /newer/
+    /unsupported/
   );
+});
+
+test("schema 3 preserves physical runner identity", () => {
+  const holder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "unity-runner-a");
+  const queued = withRunner(semaphoreQueueEntry("other/repo", "888", "playmode"), "unity-runner-b");
+
+  const normalized = normalizeState(
+    { ...semaphoreState([holder], [queued]), schemaVersion: 3 },
+    "wallstop-organization-builds"
+  );
+
+  assert.equal(normalized.schemaVersion, 3);
+  assert.equal(normalized.holders[0].runnerId, "unity-runner-a");
+  assert.equal(normalized.queue[0].runnerId, "unity-runner-b");
+});
+
+test("schema 3 rejects entries without physical runner identity", () => {
+  assert.throws(
+    () =>
+      normalizeState(
+        { ...semaphoreState([semaphoreHolder("other/repo", "999", "editmode")]), schemaVersion: 3 },
+        "wallstop-organization-builds"
+      ),
+    /missing runnerId/
+  );
+});
+
+test("runner-aware admission skips blocked runners without wasting free slots", async (t) => {
+  const a1 = withRunner(semaphoreQueueEntry("queue/repo", "101", "a1"), "runner-a");
+  const a2 = withRunner(semaphoreQueueEntry("queue/repo", "102", "a2"), "runner-a");
+  const b1 = withRunner(semaphoreQueueEntry("queue/repo", "201", "b1"), "runner-b");
+  const c1 = withRunner(semaphoreQueueEntry("queue/repo", "301", "c1"), "runner-c");
+  const activeA = withRunner(semaphoreHolder("active/repo", "1", "active-a"), "runner-a");
+
+  const cases = [
+    {
+      name: "two requests from one runner consume only one of two slots",
+      holders: [],
+      queue: [a1, a2, b1],
+      freeSlots: 2,
+      expected: [a1.holderId, b1.holderId]
+    },
+    {
+      name: "an active runner does not block a later different runner",
+      holders: [activeA],
+      queue: [a1, b1],
+      freeSlots: 1,
+      expected: [b1.holderId]
+    },
+    {
+      name: "FIFO is retained within each runner",
+      holders: [],
+      queue: [a1, b1, a2, c1],
+      freeSlots: 3,
+      expected: [a1.holderId, b1.holderId, c1.holderId]
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, () => {
+      assert.deepEqual(
+        selectEligibleQueueEntries(testCase.holders, testCase.queue, testCase.freeSlots).map(
+          (entry) => entry.holderId
+        ),
+        testCase.expected
+      );
+    });
+  }
+});
+
+test("runner serialization activation upgrades only an empty schema 2 state", async () => {
+  let state = semaphoreState([]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "schema-3-state" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await acquire(semaphoreConfig({ runnerId: "unity-runner-a" }));
+      });
+    });
+
+    assert.equal(readEnvironmentFile(outputFile).acquired, "true");
+  });
+
+  assert.equal(state.schemaVersion, 3);
+  assert.equal(state.holders[0].runnerId, "unity-runner-a");
+});
+
+test("runner serialization activation fails closed without a runner or with live schema 2 state", async (t) => {
+  const cases = [
+    { name: "missing runner id", state: semaphoreState([]), runnerId: "", error: /runner-id is required/ },
+    {
+      name: "live schema 2 holder",
+      state: semaphoreState([semaphoreHolder("other/repo", "999", "editmode")]),
+      runnerId: "unity-runner-a",
+      error: /drain the lock/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      let putCalls = 0;
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+            }
+            return base64Content(testCase.state, "state-sha");
+          }
+          if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+            return jsonResponse(200, { status: "in_progress", conclusion: null });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: testCase.runnerId })),
+            testCase.error
+          );
+        });
+      });
+      assert.equal(putCalls, 0);
+    });
+  }
+});
+
+test("schema 3 acquire skips a queued request whose runner already holds a slot", async () => {
+  const activeA = withRunner(semaphoreHolder("other/repo", "999", "active"), "runner-a");
+  const queuedA = withRunner(semaphoreQueueEntry("queue/repo", "888", "waiting"), "runner-a");
+  let state = { ...semaphoreState([activeA], [queuedA]), schemaVersion: 3 };
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "schema-3-state" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (
+          parsed.pathname === "/repos/other/repo/actions/runs/999" ||
+          parsed.pathname === "/repos/queue/repo/actions/runs/888"
+        ) {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await acquire(semaphoreConfig({ runnerId: "runner-b" }));
+      });
+    });
+
+    assert.equal(readEnvironmentFile(outputFile).acquired, "true");
+  });
+
+  assert.deepEqual(
+    state.holders.map((holder) => [holder.holderId, holder.runnerId]),
+    [
+      [activeA.holderId, "runner-a"],
+      ["owner/repo:123:perf-benchmarks:playmode", "runner-b"]
+    ]
+  );
+  assert.deepEqual(state.queue.map((entry) => entry.holderId), [queuedA.holderId]);
+});
+
+test("schema 3 rerun transfers ownership to a new runner and verifies the full identity", async () => {
+  const previousAttempt = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-old");
+  let state = { ...semaphoreState([previousAttempt]), schemaVersion: 3 };
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: "2", GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "transferred" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await acquire(semaphoreConfig({ runnerId: "runner-new" }));
+      });
+    });
+    assert.equal(readEnvironmentFile(outputFile).acquired, "true");
+  });
+
+  assert.equal(state.schemaVersion, 3);
+  assert.equal(state.holders.length, 1);
+  assert.equal(state.holders[0].runnerId, "runner-new");
+  assert.equal(state.holders[0].runAttempt, "2");
+});
+
+test("schema 3 rejects one run attempt reporting conflicting physical runners", async () => {
+  const active = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-old");
+  const state = { ...semaphoreState([active]), schemaVersion: 3 };
+  let putCalls = 0;
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch-sha" } });
+      }
+      if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+        return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        if (options.method === "PUT") {
+          putCalls++;
+        }
+        return base64Content(state, "state-sha");
+      }
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(200, { status: "in_progress", conclusion: null });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(
+        () => acquire(semaphoreConfig({ runnerId: "runner-new" })),
+        /refusing conflicting identity/
+      );
+    });
+  });
+
+  assert.equal(putCalls, 0);
+});
+
+test("schema 3 rejects a stale run attempt after a newer rerun owns the holder", async () => {
+  const newerAttempt = {
+    ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-new"),
+    runAttempt: "2"
+  };
+  const state = { ...semaphoreState([newerAttempt]), schemaVersion: 3 };
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch-sha" } });
+      }
+      if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+        return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        return base64Content(state, "state-sha");
+      }
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(200, { status: "in_progress", conclusion: null });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(
+        () => acquire(semaphoreConfig({ runnerId: "runner-old" })),
+        /refusing stale attempt 1/
+      );
+    });
+  });
+});
+
+test("schema 3 queue identity advances monotonically across reruns", async (t) => {
+  const cases = [
+    { name: "older attempt rejected", storedAttempt: "2", incomingAttempt: "1", error: /refusing stale attempt 1/ },
+    {
+      name: "same attempt on another runner rejected",
+      storedAttempt: "1",
+      incomingAttempt: "1",
+      error: /refusing conflicting identity/
+    },
+    { name: "newer attempt replaces and acquires", storedAttempt: "1", incomingAttempt: "2" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const queued = {
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-stored"),
+        runAttempt: testCase.storedAttempt
+      };
+      let state = { ...semaphoreState([], [queued]), schemaVersion: 3 };
+      let putCalls = 0;
+
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.incomingAttempt }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "updated" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          const operation = () => acquire(semaphoreConfig({ runnerId: "runner-incoming" }));
+          if (testCase.error) {
+            await assert.rejects(operation, testCase.error);
+          } else {
+            await operation();
+          }
+        });
+      });
+
+      if (testCase.error) {
+        assert.equal(putCalls, 0);
+      } else {
+        assert.equal(state.holders[0].runAttempt, "2");
+        assert.equal(state.holders[0].runnerId, "runner-incoming");
+      }
+    });
+  }
+});
+
+test("activated acquire rejects schema downgrade during post-write verification", async () => {
+  let stateReads = 0;
+  const downgradedHolder = semaphoreHolder("owner/repo", "123", "playmode");
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withImmediateTimers(async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            return jsonResponse(200, { content: { sha: "claimed-write" } });
+          }
+          stateReads++;
+          return stateReads === 1
+            ? base64Content(semaphoreState([]), "state-before")
+            : base64Content(semaphoreState([downgradedHolder]), "downgraded-state");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+          /drain the lock/
+        );
+      });
+    });
+  });
+});
+
+test("normalizeState fails closed on malformed schemas and duplicate active runners", async (t) => {
+  const holderA = withRunner(semaphoreHolder("other/repo", "999", "a"), "runner-a");
+  const holderA2 = withRunner(semaphoreHolder("other/repo", "888", "b"), "runner-a");
+  const cases = [
+    { name: "null state", state: null, error: /JSON object/ },
+    { name: "non-object", state: [], error: /JSON object/ },
+    { name: "empty object", state: {}, error: /lock mismatch/ },
+    {
+      name: "nonnumeric version",
+      state: { schemaVersion: "garbage", lock: "wallstop-organization-builds", holder: null, queue: [] },
+      error: /unsupported/
+    },
+    {
+      name: "null schema 3 queue entry",
+      state: { ...semaphoreState([]), schemaVersion: 3, queue: [null] },
+      error: /queue entries.*non-empty holderId/
+    },
+    {
+      name: "null schema 2 holder",
+      state: { ...semaphoreState([]), holders: [null] },
+      error: /holder entries.*non-empty holderId/
+    },
+    {
+      name: "primitive schema 2 holder",
+      state: { ...semaphoreState([]), holders: ["holder"] },
+      error: /holder entries.*non-empty holderId/
+    },
+    {
+      name: "missing schema 2 legacy mirror",
+      state: { schemaVersion: 2, lock: "wallstop-organization-builds", holders: [], queue: [] },
+      error: /legacy holder mirror/
+    },
+    {
+      name: "null schema 2 mirror with active holder",
+      state: { ...semaphoreState([semaphoreHolder("other/repo", "999", "active")]), holder: null },
+      error: /mirror.*match the first holder/
+    },
+    {
+      name: "mismatched schema 2 mirror",
+      state: {
+        ...semaphoreState([
+          semaphoreHolder("other/repo", "999", "first"),
+          semaphoreHolder("other/repo", "888", "second")
+        ]),
+        holder: semaphoreHolder("other/repo", "888", "second")
+      },
+      error: /mirror.*match the first holder/
+    },
+    {
+      name: "same-id schema 2 mirror with mismatched run metadata",
+      state: (() => {
+        const holder = semaphoreHolder("other/repo", "999", "first");
+        return { ...semaphoreState([holder]), holder: { ...holder, runId: "different" } };
+      })(),
+      error: /mirror.*match the first holder/
+    },
+    {
+      name: "malformed legacy holder",
+      state: { schemaVersion: 1, lock: "wallstop-organization-builds", holder: "holder", queue: [] },
+      error: /Legacy holder/
+    },
+    {
+      name: "schema 3 holders not array",
+      state: { schemaVersion: 3, lock: "wallstop-organization-builds", holders: {}, queue: [] },
+      error: /holders.*array/
+    },
+    {
+      name: "duplicate physical holder",
+      state: { ...semaphoreState([holderA, holderA2]), schemaVersion: 3 },
+      error: /multiple active holders/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, () => {
+      assert.throws(() => normalizeState(testCase.state, "wallstop-organization-builds"), testCase.error);
+    });
+  }
 });
 
 test("acquire takes a free slot alongside an active holder when max holders allows", async () => {
@@ -3811,6 +4772,8 @@ test("acquire takes a free slot alongside an active holder when max holders allo
     state.holders.map((entry) => entry.holderId),
     ["other/repo:888:perf-benchmarks:editmode", "owner/repo:123:perf-benchmarks:playmode"]
   );
+  assert.equal(state.schemaVersion, 2, "compatible clients must keep writing schema 2 before activation");
+  assert.equal(state.holders.some((entry) => Object.hasOwn(entry, "runnerId")), false);
   assert.equal(state.holder.holderId, activeHolder.holderId, "legacy mirror must stay the first holder");
   assert.deepEqual(state.queue, []);
 });
@@ -4036,11 +4999,11 @@ test("acquire picks up a raised max-holders limit while waiting", async () => {
   );
 });
 
-test("release removes only this run's slot and reports the first remaining holder", async () => {
-  const myHolder = semaphoreHolder("owner/repo", "123", "playmode");
-  const firstCoHolder = semaphoreHolder("other/repo", "888", "editmode");
-  const secondCoHolder = semaphoreHolder("other/repo", "999", "playmode");
-  let state = semaphoreState([myHolder, firstCoHolder, secondCoHolder]);
+test("release preserves schema 3 runner identities while removing only this run's slot", async () => {
+  const myHolder = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  const firstCoHolder = withRunner(semaphoreHolder("other/repo", "888", "editmode"), "runner-b");
+  const secondCoHolder = withRunner(semaphoreHolder("other/repo", "999", "playmode"), "runner-c");
+  let state = { ...semaphoreState([myHolder, firstCoHolder, secondCoHolder]), schemaVersion: 3 };
 
   await withTempFile(async (outputFile) => {
     await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
@@ -4059,7 +5022,7 @@ test("release removes only this run's slot and reports the first remaining holde
         }
         return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
       }, async () => {
-        await release(semaphoreConfig());
+        await release(semaphoreConfig({ runnerId: "runner-a" }));
       });
     });
 
@@ -4072,16 +5035,87 @@ test("release removes only this run's slot and reports the first remaining holde
   });
 
   assert.deepEqual(
-    state.holders.map((entry) => entry.holderId),
-    ["other/repo:888:perf-benchmarks:editmode", "other/repo:999:perf-benchmarks:playmode"]
+    state.holders.map((entry) => [entry.holderId, entry.runnerId]),
+    [
+      ["other/repo:888:perf-benchmarks:editmode", "runner-b"],
+      ["other/repo:999:perf-benchmarks:playmode", "runner-c"]
+    ]
   );
+  assert.equal(state.schemaVersion, 3);
   assert.equal(state.holder.holderId, firstCoHolder.holderId, "legacy mirror must follow the first remaining holder");
 });
 
-test("reap drops only stale holders and keeps active co-holders", async () => {
-  const staleHolder = semaphoreHolder("other/repo", "999", "editmode");
-  const activeHolder = semaphoreHolder("other/repo", "888", "playmode");
-  let state = semaphoreState([staleHolder, activeHolder]);
+test("schema 3 cleanup requires exact runner and attempt ownership", async (t) => {
+  const cases = [];
+  for (const location of ["active holder", "queued request"]) {
+    for (const mismatch of [
+      { name: "older attempt", storedRunner: "runner-same", storedAttempt: "2", callerRunner: "runner-same" },
+      { name: "different runner", storedRunner: "runner-new", storedAttempt: "1", callerRunner: "runner-old" }
+    ]) {
+      const storedIdentity = {
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), mismatch.storedRunner),
+        runAttempt: mismatch.storedAttempt
+      };
+      cases.push({
+        name: `${location}: ${mismatch.name}`,
+        callerRunner: mismatch.callerRunner,
+        state: location === "active holder"
+          ? {
+              ...semaphoreState([{ ...storedIdentity, acquiredAt: storedIdentity.queuedAt, expiresAt: "2999-01-01T00:00:00.000Z" }]),
+              schemaVersion: 3
+            }
+          : { ...semaphoreState([], [storedIdentity]), schemaVersion: 3 }
+      });
+    }
+  }
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      let putCalls = 0;
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+            }
+            return base64Content(testCase.state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({ runnerId: testCase.callerRunner }));
+        });
+      });
+      assert.equal(putCalls, 0);
+    });
+  }
+});
+
+test("schema 3 cleanup fails closed without runner-id", async () => {
+  const state = { ...semaphoreState([]), schemaVersion: 3 };
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch-sha" } });
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        return base64Content(state, "state-sha");
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(() => release(semaphoreConfig()), /runner-id is required to clean up schema 3/);
+    });
+  });
+});
+
+test("reap preserves schema 3 runner identity while dropping only stale holders", async () => {
+  const staleHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  const activeHolder = withRunner(semaphoreHolder("other/repo", "888", "playmode"), "runner-b");
+  let state = { ...semaphoreState([staleHolder, activeHolder]), schemaVersion: 3 };
 
   await withTempFile(async (outputFile) => {
     await withActionEnv({ GITHUB_OUTPUT: outputFile }, async () => {
@@ -4117,9 +5151,10 @@ test("reap drops only stale holders and keeps active co-holders", async () => {
   });
 
   assert.deepEqual(
-    state.holders.map((entry) => entry.holderId),
-    ["other/repo:888:perf-benchmarks:playmode"]
+    state.holders.map((entry) => [entry.holderId, entry.runnerId]),
+    [["other/repo:888:perf-benchmarks:playmode", "runner-b"]]
   );
+  assert.equal(state.schemaVersion, 3);
 });
 
 test("stale evaluation reclaims when the run-status poll returns 401 after lease expiry", async () => {

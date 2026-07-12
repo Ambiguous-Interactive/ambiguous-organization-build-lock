@@ -2423,7 +2423,13 @@ test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
   assert.equal(concurrency["cancel-in-progress"], "true");
   assert.ok(reapActionStep, "reap job must call the local reap-stale-locks action");
   assert.equal(reapActionStep.with["lock-name"], "wallstop-organization-builds");
-  assert.equal(reapActionStep.env.BUILD_LOCK_TOKEN, "${{ secrets.ORG_BUILD_LOCK_TOKEN }}");
+  assert.equal(reapActionStep.env.BUILD_LOCK_APP_ID, "${{ vars.BUILD_LOCK_APP_ID }}");
+  assert.equal(
+    reapActionStep.env.BUILD_LOCK_APP_PRIVATE_KEY,
+    "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}"
+  );
+  assert.equal(reapActionStep.env.BUILD_LOCK_TOKEN, undefined);
+  assert.doesNotMatch(text, /ORG_BUILD_LOCK_TOKEN/);
 });
 
 test("semantic-release GitHub workflows declare required token permissions", () => {

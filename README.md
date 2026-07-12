@@ -4,7 +4,7 @@ This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
 > [!NOTE]
-> Consumer workflows must provide `ORG_BUILD_LOCK_TOKEN` (passed as `BUILD_LOCK_TOKEN`) with `contents: read/write` on this repository; stale-holder recovery also requires `actions: read` on consumer repositories.
+> Consumer workflows must provide lock credentials with `contents: read/write` on this repository; stale-holder recovery also requires `actions: read` on consumer repositories. GitHub App credentials are described below; `BUILD_LOCK_TOKEN` remains available only for staged compatibility.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -37,9 +37,11 @@ section, guard every licensed step on the acquire output, and release with
   with:
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
+    runner-id: ${{ runner.name }}
     timeout-minutes: "180"
   env:
-    BUILD_LOCK_TOKEN: ${{ secrets.ORG_BUILD_LOCK_TOKEN }}
+    BUILD_LOCK_APP_ID: ${{ vars.BUILD_LOCK_APP_ID }}
+    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 
 - name: Run Unity Test Runner
   if: ${{ steps.acquire-build-lock.outputs.acquired == 'true' }}
@@ -51,8 +53,10 @@ section, guard every licensed step on the acquire output, and release with
   with:
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
+    runner-id: ${{ runner.name }}
   env:
-    BUILD_LOCK_TOKEN: ${{ secrets.ORG_BUILD_LOCK_TOKEN }}
+    BUILD_LOCK_APP_ID: ${{ vars.BUILD_LOCK_APP_ID }}
+    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 ```
 
 The release action is intentionally safe to run even when acquire never reached
@@ -81,6 +85,9 @@ concurrent holder (see Configurable Parallelism). A legacy `holder` mirror of
 the first slot is still written so pre-semaphore clients keep waiting
 conservatively; schema-1 files are migrated on read, and state files written by
 a newer schema than the running action fail closed with an upgrade error.
+Schema 3 adds `runnerId` to holders and queue entries. Compatible clients keep
+writing schema 2 until `runnerSerialization` is activated, then the state
+upgrades one-way so a temporary configuration outage cannot disable it.
 
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
@@ -106,8 +113,25 @@ changes go through normal pull-request review. `maxHolders` must be an integer
 between 1 and 64; a missing file or an invalid value fails closed to 1, which
 can never over-run a license. Acquire reads the config at start and refreshes
 it on a TTL (`BUILD_LOCK_CONFIG_TTL_MS`, default 5 minutes) while waiting, so
-raising the limit also unblocks runs that are already queued. Queue order is
-preserved: with F free slots, only the first F queued runs may take a slot.
+raising the limit also unblocks runs that are already queued. With runner
+serialization active, admission scans the FIFO queue for up to F distinct
+runners; a blocked request does not waste a free slot when a later request is
+on another runner, while FIFO order within each runner is preserved.
+
+Add `"runnerSerialization": true` only after every consumer passes the same
+non-empty `${{ runner.name }}` to acquire and release and all schema-2 holders
+and queued requests have drained. Activation against non-empty schema-2 state
+fails closed. This assumes one registered runner agent per physical machine.
+
+## Authentication
+
+Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together. The App must
+be installed on the lock repository and every consumer with Metadata read,
+Actions read, and Contents read/write. The client mints an organization
+installation token only when needed, keeps it only in memory, refreshes it five
+minutes before expiry, and remints immediately after a 401. Partial App
+credentials fail closed. `BUILD_LOCK_TOKEN` remains temporarily supported for
+staged migration and should be removed after every old run drains.
 
 Rollout note: upgrade every consumer to the latest `v1` before raising
 `maxHolders` above 1. Pre-semaphore clients see only the mirrored first holder
