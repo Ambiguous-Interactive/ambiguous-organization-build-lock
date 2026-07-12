@@ -39,6 +39,8 @@ section, guard every licensed step on the acquire output, and release with
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
     timeout-minutes: "180"
+    require-resource-lifecycle: "true"
+    minimum-release-cooldown-seconds: "360"
   env:
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
@@ -64,6 +66,13 @@ section, guard every licensed step on the acquire output, and release with
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 ```
+
+The two acquire requirements are opt-in for backward compatibility. Lifecycle-aware
+consumers should set both as shown. Acquire validates them against each lock config
+snapshot it actually uses, including periodic refreshes while queued, and fails
+before reading or mutating lock state if the initial snapshot cannot satisfy them.
+This also makes a missing, malformed, or temporarily unreadable config fail closed
+for consumers that require lifecycle protection.
 
 The Unity return helper must be non-masking and emit `resource-safe=true` only
 when the return command succeeds or an allowlisted response proves the local

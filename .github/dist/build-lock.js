@@ -57,6 +57,21 @@ function booleanInput(name, fallback = false) {
   return raw === "true";
 }
 
+function nonNegativeIntegerInput(name, fallback, maximum) {
+  const raw = input(name, String(fallback));
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`Input ${name} must be a non-negative integer.`);
+  }
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`Input ${name} must be a non-negative integer.`);
+  }
+  if (maximum !== undefined && value > maximum) {
+    throw new Error(`Input ${name} must be <= ${maximum}.`);
+  }
+  return value;
+}
+
 function holderIdSuffixInput() {
   const value = input("holder-id-suffix", "default");
   if (value !== value.trim() || /[\r\n]/.test(value)) {
@@ -970,6 +985,20 @@ function defaultLockConfigSummary() {
   );
 }
 
+function assertAcquireConfigRequirements(config, lockConfig) {
+  if (config.requireResourceLifecycle && !lockConfig.resourceLifecycle) {
+    throw new Error(
+      `Acquire requires resourceLifecycle=true, but the loaded lock config has resourceLifecycle=${lockConfig.resourceLifecycle}.`
+    );
+  }
+  if (lockConfig.releaseCooldownSeconds < config.minimumReleaseCooldownSeconds) {
+    throw new Error(
+      `Acquire requires releaseCooldownSeconds >= ${config.minimumReleaseCooldownSeconds}, ` +
+        `but the loaded value is ${lockConfig.releaseCooldownSeconds}.`
+    );
+  }
+}
+
 function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
@@ -1624,6 +1653,7 @@ async function acquire(config) {
   try {
     await ensureStateBranch(config, { apiOptions });
     let lockConfig = await readLockConfig(config, { apiOptions });
+    assertAcquireConfigRequirements(config, lockConfig);
     let lockConfigReadAt = Date.now();
     const started = Date.now();
     const deadline = started + config.timeoutMinutes * 60 * 1000;
@@ -1648,6 +1678,7 @@ async function acquire(config) {
         const configTtlMs = integerEnvironment("BUILD_LOCK_CONFIG_TTL_MS", DEFAULT_CONFIG_TTL_MS);
         if (Date.now() - lockConfigReadAt >= configTtlMs) {
           const refreshed = await readLockConfig(config, { apiOptions });
+          assertAcquireConfigRequirements(config, refreshed);
           if (refreshed.maxHolders !== lockConfig.maxHolders) {
             console.log(`Max concurrent holders changed from ${lockConfig.maxHolders} to ${refreshed.maxHolders}.`);
           }
@@ -2254,6 +2285,12 @@ function config() {
     timeoutMinutes: integerInput("timeout-minutes", 180),
     leaseMinutes: integerInput("lease-minutes", 240),
     pollSeconds: integerInput("poll-seconds", 15),
+    requireResourceLifecycle: booleanInput("require-resource-lifecycle", false),
+    minimumReleaseCooldownSeconds: nonNegativeIntegerInput(
+      "minimum-release-cooldown-seconds",
+      0,
+      86400
+    ),
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
 }

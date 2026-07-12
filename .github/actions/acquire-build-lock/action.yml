@@ -31,6 +31,14 @@ inputs:
     description: Base polling delay while queued.
     required: false
     default: "15"
+  require-resource-lifecycle:
+    description: Fail unless the loaded lock config has resource lifecycle protection enabled.
+    required: false
+    default: "false"
+  minimum-release-cooldown-seconds:
+    description: Fail unless the loaded lock config's release cooldown is at least this many seconds.
+    required: false
+    default: "0"
 outputs:
   acquired:
     description: "true when this action acquired the lock."
