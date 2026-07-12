@@ -926,19 +926,6 @@ function normalizeMaxHolders(raw, sourcePath) {
   return value;
 }
 
-function normalizeRunnerSerialization(raw, sourcePath) {
-  if (raw === undefined || raw === null) {
-    return false;
-  }
-  if (typeof raw !== "boolean") {
-    console.log(
-      `::warning::Ignoring invalid runnerSerialization=${JSON.stringify(raw)} in ${sourcePath}; expected a boolean.`
-    );
-    return null;
-  }
-  return raw;
-}
-
 function normalizeBooleanConfig(raw, name, sourcePath) {
   if (raw === undefined || raw === null) {
     return false;
@@ -1031,7 +1018,11 @@ async function readLockConfig(config, options = {}) {
     );
     return defaultLockConfig();
   }
-  const runnerSerialization = normalizeRunnerSerialization(parsed && parsed.runnerSerialization, configPath);
+  const runnerSerialization = normalizeBooleanConfig(
+    parsed && parsed.runnerSerialization,
+    "runnerSerialization",
+    configPath
+  );
   if (runnerSerialization === null) {
     return defaultLockConfig();
   }
@@ -1781,11 +1772,18 @@ async function acquire(config) {
         }
 
         const reservations = resourceLifecycle ? state.reservations : [];
+        const reservationDetails = reservations.map((reservation) => {
+          const availability = reservation.availableAt ? ` available-at=${reservation.availableAt}` : "";
+          return `${reservation.reservationId}:${reservation.state}:runner=${reservation.runnerId}${availability}`;
+        }).join(",");
         const position = queuePosition(state, identity.holderId);
         if (state.holders.length) {
           const holderIds = state.holders.map((holder) => holder.holderId).join(",");
           const holderRuns = state.holders.map((holder) => holder.runUrl).join(",");
-          const reasons = state.holders.map((holder) => staleness.get(holder.holderId).reason).join(",");
+          const holderReasons = state.holders.map((holder) => staleness.get(holder.holderId).reason).join(",");
+          const reasons = reservationDetails
+            ? `${holderReasons}; capacity reserved by ${reservationDetails}`
+            : holderReasons;
           lastObservation = {
             holderId: holderIds,
             holderRunUrl: holderRuns,
@@ -1793,13 +1791,11 @@ async function acquire(config) {
             reason: reasons
           };
           console.log(
-            `Attempt ${attempts}: holders=${freshHolders.length}/${lockConfig.maxHolders} holder=${holderIds} run=${holderRuns} queue-position=${position} reason=${reasons}`
+            `Attempt ${attempts}: holders=${freshHolders.length}/${lockConfig.maxHolders} holder=${holderIds} ` +
+              `run=${holderRuns} reservations=${reservationDetails || "<none>"} ` +
+              `queue-position=${position} reason=${reasons}`
           );
         } else if (reservations.length) {
-          const reservationDetails = reservations.map((reservation) => {
-            const availability = reservation.availableAt ? ` available-at=${reservation.availableAt}` : "";
-            return `${reservation.reservationId}:${reservation.state}:runner=${reservation.runnerId}${availability}`;
-          }).join(",");
           lastObservation = {
             holderId: "",
             holderRunUrl: "",

@@ -43,9 +43,9 @@ jobs:
         uses: ./.github/actions/reap-stale-locks
         with:
           lock-name: wallstop-organization-builds
-          operation: ${{ inputs.operation || 'reap' }}
-          reservation-id: ${{ inputs['reservation-id'] || '' }}
-          resource-safe: ${{ inputs['resource-safe'] || false }}
+          operation: ${{ github.event.inputs.operation || 'reap' }}
+          reservation-id: ${{ github.event.inputs['reservation-id'] || '' }}
+          resource-safe: ${{ github.event.inputs['resource-safe'] || false }}
         env:
           BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}

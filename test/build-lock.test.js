@@ -5559,7 +5559,7 @@ test("same-runner quarantine recovery waits while a reduced limit leaves state o
         }, async () => {
           await assert.rejects(
             () => acquire(semaphoreConfig({ runnerId: "runner-a", timeoutMinutes: 1 })),
-            /Timed out waiting/
+            /capacity reserved by .*quarantine/
           );
         });
       });

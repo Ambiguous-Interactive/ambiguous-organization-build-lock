@@ -2423,6 +2423,10 @@ test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
   assert.equal(concurrency["cancel-in-progress"], "true");
   assert.ok(reapActionStep, "reap job must call the local reap-stale-locks action");
   assert.equal(reapActionStep.with["lock-name"], "wallstop-organization-builds");
+  assert.match(reapActionStep.with.operation, /github\.event\.inputs\.operation/);
+  assert.match(reapActionStep.with["reservation-id"], /github\.event\.inputs\['reservation-id'\]/);
+  assert.match(reapActionStep.with["resource-safe"], /github\.event\.inputs\['resource-safe'\]/);
+  assert.doesNotMatch(text, /\$\{\{\s*inputs(?:\.|\[)/);
   assert.equal(reapActionStep.env.BUILD_LOCK_APP_ID, "${{ secrets.BUILD_LOCK_APP_ID }}");
   assert.equal(
     reapActionStep.env.BUILD_LOCK_APP_PRIVATE_KEY,
