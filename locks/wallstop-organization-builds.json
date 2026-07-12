@@ -1,9 +1,20 @@
 {
   "schemaVersion": 3,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29209181102:unitypackage:release-3.5.1",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Release Publish",
+    "job": "unitypackage",
+    "runId": "29209181102",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29209181102",
+    "queuedAt": "2026-07-12T21:14:09.285Z",
+    "acquiredAt": "2026-07-12T21:29:53.599Z",
+    "expiresAt": "2026-07-13T01:29:53.599Z",
+    "runnerId": "GitHub Actions 1000096108"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29209181102:unitypackage:release-3.5.1",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29209181102",
       "queuedAt": "2026-07-12T21:14:09.285Z",
+      "acquiredAt": "2026-07-12T21:29:53.599Z",
+      "expiresAt": "2026-07-13T01:29:53.599Z",
       "runnerId": "GitHub Actions 1000096108"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29208858196:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -38,5 +53,5 @@
       "runnerId": "box-linux"
     }
   ],
-  "updatedAt": "2026-07-12T21:29:42.609Z"
+  "updatedAt": "2026-07-12T21:29:53.600Z"
 }
