@@ -4041,7 +4041,9 @@ test("committed lock config files are well-formed", () => {
     }
     if (Object.hasOwn(parsed, "resourceLifecycle")) {
       assert.equal(typeof parsed.resourceLifecycle, "boolean", `${file} resourceLifecycle must be a boolean`);
-      assert.equal(parsed.runnerSerialization, true, `${file} lifecycle requires runnerSerialization=true`);
+      if (parsed.resourceLifecycle) {
+        assert.equal(parsed.runnerSerialization, true, `${file} enabled lifecycle requires runnerSerialization=true`);
+      }
     }
     if (Object.hasOwn(parsed, "releaseCooldownSeconds")) {
       assert.ok(
@@ -5551,7 +5553,7 @@ test("schema 4 quarantine never expires or admits a different runner during conf
         }, async () => {
           await assert.rejects(
             () => acquire(semaphoreConfig({ runnerId: "runner-b", timeoutMinutes: 1 })),
-            /Timed out waiting/
+            /capacity reserved by .*quarantine/
           );
         });
       });
@@ -5625,6 +5627,41 @@ test("manual confirmed recovery moves an exact quarantine into cooldown", async 
   });
   assert.equal(state.reservations[0].state, "cooldown");
   assert.ok(Date.parse(state.reservations[0].availableAt) > Date.now());
+});
+
+test("manual recovery accepts an ambiguous write when the reservation disappears", async () => {
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([], [], [lifecycleReservation(prior)]);
+  let putCalls = 0;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ releaseCooldownSeconds: 360 }, "cfg");
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+              if (putCalls === 1) {
+                state = lifecycleState();
+                return jsonResponse(500, { message: "ambiguous recovery response" });
+              }
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            return base64Content(state, state.reservations.length ? "before" : "after-recovery");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => reap(semaphoreConfig({
+          operation: "recover",
+          reservationId: "reservation-runner-a",
+          resourceSafe: true
+        })));
+      });
+    });
+    assert.equal(readEnvironmentFile(outputFile).reaped, "true");
+  });
+  assert.equal(putCalls, 2);
 });
 
 test("manual recovery rejects missing proof and non-active reservation IDs", async (t) => {

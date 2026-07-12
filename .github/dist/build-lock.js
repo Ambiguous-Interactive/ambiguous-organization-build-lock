@@ -973,6 +973,13 @@ function defaultLockConfig() {
   };
 }
 
+function defaultLockConfigSummary() {
+  return (
+    `max-holders=${DEFAULT_MAX_HOLDERS}, runner-serialization=false, ` +
+    `resource-lifecycle=false, release-cooldown-seconds=${DEFAULT_RELEASE_COOLDOWN_SECONDS}`
+  );
+}
+
 function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
@@ -1008,7 +1015,7 @@ async function readLockConfig(config, options = {}) {
     if (configReadCanFailClosed(error, options)) {
       console.log(
         `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
-          `using max-holders=${DEFAULT_MAX_HOLDERS}.`
+          `using safe defaults (${defaultLockConfigSummary()}).`
       );
       return defaultLockConfig();
     }
@@ -1020,7 +1027,7 @@ async function readLockConfig(config, options = {}) {
   } catch (error) {
     console.log(
       `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
-        `using max-holders=${DEFAULT_MAX_HOLDERS}.`
+        `using safe defaults (${defaultLockConfigSummary()}).`
     );
     return defaultLockConfig();
   }
@@ -1454,6 +1461,9 @@ function observationText(config, observation, attempts, elapsedMs) {
   } else if (observation) {
     details.push(`holder=<none>`);
     details.push(`queue-position=${observation.queuePosition}`);
+    if (observation.reason) {
+      details.push(`reason=${observation.reason}`);
+    }
   }
   return `${config.lockName} wait state: ${details.join("; ")}.`;
 }
@@ -1770,6 +1780,7 @@ async function acquire(config) {
           }
         }
 
+        const reservations = resourceLifecycle ? state.reservations : [];
         const position = queuePosition(state, identity.holderId);
         if (state.holders.length) {
           const holderIds = state.holders.map((holder) => holder.holderId).join(",");
@@ -1783,6 +1794,21 @@ async function acquire(config) {
           };
           console.log(
             `Attempt ${attempts}: holders=${freshHolders.length}/${lockConfig.maxHolders} holder=${holderIds} run=${holderRuns} queue-position=${position} reason=${reasons}`
+          );
+        } else if (reservations.length) {
+          const reservationDetails = reservations.map((reservation) => {
+            const availability = reservation.availableAt ? ` available-at=${reservation.availableAt}` : "";
+            return `${reservation.reservationId}:${reservation.state}:runner=${reservation.runnerId}${availability}`;
+          }).join(",");
+          lastObservation = {
+            holderId: "",
+            holderRunUrl: "",
+            queuePosition: position,
+            reason: `capacity reserved by ${reservationDetails}`
+          };
+          console.log(
+            `Attempt ${attempts}: holders=0/${lockConfig.maxHolders} reservations=${reservationDetails} ` +
+              `queue-position=${position}`
           );
         } else {
           lastObservation = {
@@ -1799,7 +1825,6 @@ async function acquire(config) {
         // Slot admission: after ignoring stale holders, the first `freeSlots` queue
         // entries may each take a slot. Every waiter only ever admits itself; the CAS
         // write plus the verification read keep concurrent admissions consistent.
-        const reservations = resourceLifecycle ? state.reservations : [];
         const matchingQuarantine = reservations.find(
           (reservation) => reservation.state === "quarantine" && reservation.runnerId === identity.runnerId
         );
@@ -2097,8 +2122,17 @@ async function reap(config) {
         throw new Error("Manual reservation recovery requires the exact reservation-id.");
       }
       const reservation = state.reservations.find((entry) => entry.reservationId === config.reservationId);
-      if (reservation && reservation.state === "cooldown" && ambiguousReap) {
-        writeReapOutputs({ reaped: true, stateSha: sha || "" });
+      if (ambiguousReap && (!reservation || reservation.state === "cooldown")) {
+        if (expiredCooldowns.length) {
+          const write = await writeState(config, sha, state, `Prune recovered reservation ${config.reservationId}`);
+          if (write.conflict) {
+            await sleep(jitter(1000));
+            continue;
+          }
+          writeReapOutputs({ reaped: true, stateSha: write.sha });
+        } else {
+          writeReapOutputs({ reaped: true, stateSha: sha || "" });
+        }
         appendSummary(`Moved quarantine ${config.reservationId} to cooldown for ${config.lockName}.`);
         console.log("::endgroup::");
         return;
