@@ -243,6 +243,7 @@ test("release accepts the physical runner identity required by schema 3", () => 
 
   assert.ok(inputs.includes("runner-id"));
   assert.ok(inputs.includes("holder-id"));
+  assert.match(release, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
 });
 
 test("README documents guarded acquire usage and unconditional release cleanup", () => {

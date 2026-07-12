@@ -9,7 +9,7 @@ inputs:
     required: false
     default: default
   holder-id:
-    description: Exact acquire holder-id to clean and report. If unavailable, reconstruct repository:run-id:source-job-id:suffix. Targets must belong to the current repository and workflow run.
+    description: Exact acquire holder-id to clean and report. If unavailable, reconstruct <repository>:<run-id>:<source-job-id>:<holder-id-suffix>. Targets must belong to the current repository and workflow run.
     required: false
   runner-id:
     description: Physical identity of the runner executing cleanup. Required when runner serialization is active.
