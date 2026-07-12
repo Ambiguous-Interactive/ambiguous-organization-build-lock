@@ -1644,8 +1644,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/owner/repo/actions/runs/123"
     ]
@@ -1720,8 +1720,8 @@ test("acquire recovers when a successful lock write is reported as a transient f
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -2027,8 +2027,8 @@ test("acquire preserves stale recovery when an accepted stale replacement is rep
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
     [
-      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
+      "GET /repos/o/r/git/ref/heads/lock-state",
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "GET /repos/other/repo/actions/runs/999",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
@@ -4073,11 +4073,13 @@ test("acquire fails closed when its loaded config snapshot does not meet lifecyc
   for (const testCase of cases) {
     await t.test(testCase.name, async () => {
       let stateReads = 0;
+      let stateBranchAccesses = 0;
       await withActionEnv(semaphoreActionEnv, async () => {
-        await withMockedFetch(async (url) => {
+        await withMockedFetch(async (url, options = {}) => {
           const parsed = new URL(url);
           if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-            return jsonResponse(200, { object: { sha: "branch-sha" } });
+            stateBranchAccesses++;
+            return jsonResponse(404, { message: `unexpected state branch ${options.method || "GET"}` });
           }
           if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
             return base64Content(testCase.lockConfig, "config-sha");
@@ -4090,6 +4092,7 @@ test("acquire fails closed when its loaded config snapshot does not meet lifecyc
           await assert.rejects(() => acquire(semaphoreConfig(testCase.requirements)), testCase.error);
         });
       });
+      assert.equal(stateBranchAccesses, 0, "requirements must reject before state branch access");
       assert.equal(stateReads, 0, "requirements must reject the loaded acquire snapshot before state mutation");
     });
   }

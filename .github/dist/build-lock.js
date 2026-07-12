@@ -1651,9 +1651,9 @@ async function acquire(config) {
   const recordPostCleanupNeeded = createPostCleanupRecorder(config);
 
   try {
-    await ensureStateBranch(config, { apiOptions });
     let lockConfig = await readLockConfig(config, { apiOptions });
     assertAcquireConfigRequirements(config, lockConfig);
+    await ensureStateBranch(config, { apiOptions });
     let lockConfigReadAt = Date.now();
     const started = Date.now();
     const deadline = started + config.timeoutMinutes * 60 * 1000;
