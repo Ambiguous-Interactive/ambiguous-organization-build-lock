@@ -1,9 +1,20 @@
 {
   "schemaVersion": 3,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29209351047:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29209351047",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29209351047",
+    "queuedAt": "2026-07-12T21:28:49.652Z",
+    "acquiredAt": "2026-07-12T21:32:50.792Z",
+    "expiresAt": "2026-07-13T01:32:50.792Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29209351047:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29209351047",
       "queuedAt": "2026-07-12T21:28:49.652Z",
+      "acquiredAt": "2026-07-12T21:32:50.792Z",
+      "expiresAt": "2026-07-13T01:32:50.792Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29208479816:unity-tests:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -38,5 +53,5 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "updatedAt": "2026-07-12T21:32:30.359Z"
+  "updatedAt": "2026-07-12T21:32:50.792Z"
 }
