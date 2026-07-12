@@ -4451,6 +4451,8 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
       incomingAttempt: "1",
       error: /refusing conflicting identity/
     },
+    { name: "malformed stored attempt rejected", storedAttempt: "invalid", incomingAttempt: "1", invalid: true },
+    { name: "malformed incoming attempt rejected", storedAttempt: "1", incomingAttempt: "0", invalid: true },
     { name: "newer attempt replaces and acquires", storedAttempt: "1", incomingAttempt: "2" }
   ];
 
@@ -4484,7 +4486,15 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
         }, async () => {
           const operation = () => acquire(semaphoreConfig({ runnerId: "runner-incoming" }));
-          if (testCase.error) {
+          if (testCase.invalid) {
+            await assert.rejects(operation, {
+              name: "Error",
+              message:
+                "Queued request owner/repo:123:perf-benchmarks:playmode has invalid run attempts " +
+                `(stored=${JSON.stringify(testCase.storedAttempt)}, ` +
+                `incoming=${JSON.stringify(testCase.incomingAttempt)}); expected positive decimal integers.`
+            });
+          } else if (testCase.error) {
             await assert.rejects(operation, testCase.error);
           } else {
             await operation();
@@ -4492,7 +4502,7 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
         });
       });
 
-      if (testCase.error) {
+      if (testCase.error || testCase.invalid) {
         assert.equal(putCalls, 0);
       } else {
         assert.equal(state.holders[0].runAttempt, "2");
