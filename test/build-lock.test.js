@@ -3367,116 +3367,6 @@ test("release reports noop with holder context when this run has no state to cle
   assert.equal(wrote, false);
 });
 
-test("schema 3 release preserves newer or conflicting holder ownership", async (t) => {
-  const cases = [
-    { name: "newer rerun holder", holderAttempt: "2", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
-    { name: "conflicting runner holder", holderAttempt: "1", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
-  ];
-
-  for (const testCase of cases) {
-    await t.test(testCase.name, async () => {
-      const held = {
-        ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), testCase.holderRunner),
-        runAttempt: testCase.holderAttempt
-      };
-      const state = { ...semaphoreState([held]), schemaVersion: 3 };
-      let wrote = false;
-
-      await withTempFile(async (outputFile) => {
-        await withActionEnv(
-          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
-          async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
-                if (options.method === "PUT") {
-                  wrote = true;
-                }
-                return base64Content(state, "state-sha");
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async (logs) => {
-              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
-
-              assert.match(logs.join("\n"), /Lock is held by owner\/repo:123:perf-benchmarks:playmode/);
-              assert.match(logs.join("\n"), /No release needed for wallstop-organization-builds/);
-            });
-          }
-        );
-
-        const outputs = readEnvironmentFile(outputFile);
-        assertOutputContract(outputs, releaseOutputNames);
-        assert.equal(outputs.released, "false");
-        assert.equal(outputs["queue-cleaned"], "false");
-        assert.equal(outputs["cleanup-result"], "noop");
-        assert.equal(outputs["state-sha"], "state-sha");
-        assert.equal(outputs["held-by"], held.holderId);
-        assert.equal(outputs["held-by-run-url"], held.runUrl);
-      });
-
-      assert.equal(wrote, false);
-    });
-  }
-});
-
-test("schema 3 release preserves newer or conflicting queued ownership", async (t) => {
-  const cases = [
-    { name: "newer rerun queue entry", queuedAttempt: "2", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
-    { name: "conflicting runner queue entry", queuedAttempt: "1", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
-  ];
-
-  for (const testCase of cases) {
-    await t.test(testCase.name, async () => {
-      const queued = {
-        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), testCase.queuedRunner),
-        runAttempt: testCase.queuedAttempt
-      };
-      const state = { ...semaphoreState([], [queued]), schemaVersion: 3 };
-      let observedState = null;
-      let wrote = false;
-
-      await withTempFile(async (outputFile) => {
-        await withActionEnv(
-          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
-          async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
-                if (options.method === "PUT") {
-                  wrote = true;
-                }
-                observedState = JSON.parse(JSON.stringify(state));
-                return base64Content(state, "state-sha");
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async () => {
-              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
-            });
-          }
-        );
-
-        const outputs = readEnvironmentFile(outputFile);
-        assertOutputContract(outputs, releaseOutputNames);
-        assert.equal(outputs.released, "false");
-        assert.equal(outputs["queue-cleaned"], "false");
-        assert.equal(outputs["cleanup-result"], "noop");
-        assert.equal(outputs["state-sha"], "state-sha");
-        assert.equal(outputs["held-by"], "");
-        assert.equal(outputs["held-by-run-url"], "");
-      });
-
-      assert.equal(wrote, false);
-      assert.deepEqual(observedState.queue, [queued]);
-    });
-  }
-});
-
 test("reap writes full output contract when no stale state is found", async () => {
   const state = emptyState("wallstop-organization-builds");
   let wrote = false;
@@ -5045,20 +4935,126 @@ test("release preserves schema 3 runner identities while removing only this run'
   assert.equal(state.holder.holderId, firstCoHolder.holderId, "legacy mirror must follow the first remaining holder");
 });
 
-test("schema 3 cleanup requires exact runner and attempt ownership", async (t) => {
+test("release holder-id targets the original job from a fallback runner", async (t) => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "self-hosted-runner");
+  const cases = [
+    { name: "exact target", target: held.holderId, released: true },
+    { name: "unknown target in the same run", target: "owner/repo:123:other-job:playmode", released: false },
+    { name: "different workflow run", target: "owner/repo:456:perf-benchmarks:playmode", error: true },
+    { name: "different repository", target: "other/repo:123:perf-benchmarks:playmode", error: true }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      let state = { ...semaphoreState([held]), schemaVersion: 3 };
+      let putCalls = 0;
+      await withTempFile(async (outputFile) => {
+        await withActionEnv(
+          {
+            ...semaphoreActionEnv,
+            GITHUB_JOB: "cleanup-fallback",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  putCalls++;
+                  const body = JSON.parse(options.body);
+                  state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
+                }
+                return base64Content(state, "state-sha");
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              const operation = () => release(semaphoreConfig({
+                runnerId: "github-hosted-fallback",
+                targetHolderId: testCase.target
+              }));
+              if (testCase.error) {
+                await assert.rejects(operation, /holder-id must identify a job in the current repository and workflow run/);
+              } else {
+                await operation();
+              }
+            });
+          }
+        );
+
+        if (!testCase.error) {
+          const outputs = readEnvironmentFile(outputFile);
+          assert.equal(outputs["holder-id"], testCase.target);
+          assert.equal(outputs.released, String(testCase.released));
+        }
+      });
+
+      assert.equal(putCalls, testCase.released ? 1 : 0);
+      assert.equal(state.holders.length, testCase.released ? 0 : 1);
+    });
+  }
+});
+
+test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", async (t) => {
   const cases = [];
   for (const location of ["active holder", "queued request"]) {
-    for (const mismatch of [
-      { name: "older attempt", storedRunner: "runner-same", storedAttempt: "2", callerRunner: "runner-same" },
-      { name: "different runner", storedRunner: "runner-new", storedAttempt: "1", callerRunner: "runner-old" }
+    for (const ownership of [
+      {
+        name: "older caller is fenced out",
+        storedRunner: "runner-new",
+        storedAttempt: "2",
+        callerRunner: "runner-old",
+        callerAttempt: "1",
+        cleaned: false
+      },
+      {
+        name: "same attempt can clean up from a different runner",
+        storedRunner: "runner-dead",
+        storedAttempt: "1",
+        callerRunner: "github-hosted-fallback",
+        callerAttempt: "1",
+        cleaned: true
+      },
+      {
+        name: "newer attempt can clean up an older attempt",
+        storedRunner: "runner-old",
+        storedAttempt: "1",
+        callerRunner: "runner-new",
+        callerAttempt: "2",
+        cleaned: true
+      },
+      {
+        name: "malformed stored attempt fails closed",
+        storedRunner: "runner-old",
+        storedAttempt: "invalid",
+        callerRunner: "runner-new",
+        callerAttempt: "2",
+        cleaned: false,
+        error: true
+      },
+      {
+        name: "malformed caller attempt fails closed",
+        storedRunner: "runner-old",
+        storedAttempt: "1",
+        callerRunner: "runner-new",
+        callerAttempt: "0",
+        cleaned: false,
+        error: true
+      }
     ]) {
       const storedIdentity = {
-        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), mismatch.storedRunner),
-        runAttempt: mismatch.storedAttempt
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), ownership.storedRunner),
+        runAttempt: ownership.storedAttempt
       };
       cases.push({
-        name: `${location}: ${mismatch.name}`,
-        callerRunner: mismatch.callerRunner,
+        name: `${location}: ${ownership.name}`,
+        callerRunner: ownership.callerRunner,
+        callerAttempt: ownership.callerAttempt,
+        cleaned: ownership.cleaned,
+        error: ownership.error || false,
         state: location === "active holder"
           ? {
               ...semaphoreState([{ ...storedIdentity, acquiredAt: storedIdentity.queuedAt, expiresAt: "2999-01-01T00:00:00.000Z" }]),
@@ -5072,7 +5068,8 @@ test("schema 3 cleanup requires exact runner and attempt ownership", async (t) =
   for (const testCase of cases) {
     await t.test(testCase.name, async () => {
       let putCalls = 0;
-      await withActionEnv(semaphoreActionEnv, async () => {
+      let writtenState = null;
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.callerAttempt }, async () => {
         await withMockedFetch(async (url, options = {}) => {
           const parsed = new URL(url);
           if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
@@ -5081,15 +5078,29 @@ test("schema 3 cleanup requires exact runner and attempt ownership", async (t) =
           if (parsed.pathname === SEMAPHORE_STATE_PATH) {
             if (options.method === "PUT") {
               putCalls++;
+              const body = JSON.parse(options.body);
+              writtenState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
             }
             return base64Content(testCase.state, "state-sha");
           }
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
         }, async () => {
-          await release(semaphoreConfig({ runnerId: testCase.callerRunner }));
+          const operation = () => release(semaphoreConfig({ runnerId: testCase.callerRunner }));
+          if (testCase.error) {
+            await assert.rejects(operation, /non-numeric run attempt/);
+          } else {
+            await operation();
+          }
         });
       });
-      assert.equal(putCalls, 0);
+      assert.equal(putCalls, testCase.cleaned ? 1 : 0);
+      if (testCase.cleaned) {
+        assert.deepEqual(writtenState.holders, []);
+        assert.deepEqual(writtenState.queue, []);
+      } else {
+        assert.equal(writtenState, null);
+      }
     });
   }
 });

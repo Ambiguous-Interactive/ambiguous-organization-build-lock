@@ -237,11 +237,12 @@ test("legacy and opt-in acquire actions expose the same interface", () => {
   assert.deepEqual(optInOutputs, legacyOutputs);
 });
 
-test("release accepts the same physical runner identity as acquire", () => {
+test("release accepts the physical runner identity required by schema 3", () => {
   const release = readActionManifest("release-build-lock");
   const inputs = yamlRequiredTopLevelMappingKeys(release, "inputs", "release-build-lock/action.yml");
 
   assert.ok(inputs.includes("runner-id"));
+  assert.ok(inputs.includes("holder-id"));
 });
 
 test("README documents guarded acquire usage and unconditional release cleanup", () => {

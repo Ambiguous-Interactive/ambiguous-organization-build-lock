@@ -66,6 +66,14 @@ the current run was waiting but never held the lock, so no licensed work should
 have run. Do not gate the release step on `acquired == 'true'`; release also
 cleans queue entries for runs that were interrupted while waiting.
 
+Cleanup ownership is keyed to the exact logical `holderId`, with a monotonic
+run-attempt fence so a late older attempt cannot delete a newer rerun. `runnerId`
+controls admission only: a same-attempt fallback cleanup may execute on a
+different physical runner. A separate fallback job must pass the original
+acquire output as the release action's `holder-id`; the action restricts explicit
+targets to the current repository and workflow run. The fallback passes its own
+non-empty `runner-id` after runner serialization is activated.
+
 Consumers that want an additional cancellation backstop can replace
 `acquire-build-lock` with `acquire-build-lock-with-cleanup`. Keep the explicit
 release step. The post cleanup is best-effort and only exists to remove this
