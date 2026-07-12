@@ -26,5 +26,5 @@ jobs:
         with:
           lock-name: wallstop-organization-builds
         env:
-          BUILD_LOCK_APP_ID: ${{ vars.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
