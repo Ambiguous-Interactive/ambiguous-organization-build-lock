@@ -48,6 +48,14 @@ function integerInput(name, fallback, minimum = 1) {
   return value;
 }
 
+function holderIdSuffixInput() {
+  const value = input("holder-id-suffix", "default");
+  if (value !== value.trim() || /[\r\n]/.test(value)) {
+    throw new Error("Input holder-id-suffix must not have leading/trailing whitespace or line breaks.");
+  }
+  return value;
+}
+
 function base64Url(value) {
   return Buffer.from(value).toString("base64url");
 }
@@ -1785,10 +1793,11 @@ function config() {
   );
   validateLockName(lockName);
   const lockRepo = parseRepository(lockRepository);
+  const holderIdSuffix = holderIdSuffixInput();
   return {
     token: credential(lockRepo),
     lockName,
-    holderIdSuffix: input("holder-id-suffix", "default"),
+    holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
     lockRepository,

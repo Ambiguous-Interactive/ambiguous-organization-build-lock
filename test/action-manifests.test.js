@@ -254,6 +254,8 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /Do not gate the release step on `acquired == 'true'`/);
   assert.match(readme, /acquire-build-lock-with-cleanup/);
   assert.match(readme, /Keep the explicit\s+release step/);
+  assert.match(readme, /stable `v1` contract/);
+  assert.match(readme, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
 });
 
 test("README documents configurable parallelism and transient-auth handling", () => {

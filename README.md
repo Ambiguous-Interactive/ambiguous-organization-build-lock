@@ -70,9 +70,18 @@ Cleanup ownership is keyed to the exact logical `holderId`. In schema 3, a
 monotonic run-attempt fence prevents a late older attempt from deleting a newer
 rerun. `runnerId` controls admission only: a same-attempt fallback cleanup may
 execute on a different physical runner. A separate fallback job must pass the
-original acquire output as the release action's `holder-id`; the action restricts explicit
-targets to the current repository and workflow run. The fallback passes its own
-non-empty `runner-id` after runner serialization is activated.
+original acquire output as the release action's `holder-id`. If hard runner loss
+makes that output unavailable, reconstruct it using the stable `v1` contract
+`<repository>:<run-id>:<source-job-id>:<holder-id-suffix>`. Here `source-job-id`
+is the acquiring job's YAML key (`GITHUB_JOB`), and every other value is the
+exact value used by acquire. `GITHUB_RUN_ATTEMPT` is intentionally excluded so
+a rerun can clean older ownership. Explicit targets are restricted to the
+current repository and workflow run. The fallback passes its own non-empty
+`runner-id` after runner serialization is activated.
+
+`holder-id-suffix` may contain internal spaces or colons, but must not contain
+line breaks or leading/trailing whitespace; the actions reject those values so
+every acquired holder ID remains exactly reproducible by fallback cleanup.
 
 Consumers that want an additional cancellation backstop can replace
 `acquire-build-lock` with `acquire-build-lock-with-cleanup`. Keep the explicit

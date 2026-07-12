@@ -9,6 +9,7 @@ const test = require("node:test");
 const {
   acquire,
   api,
+  config,
   createAppJwt,
   createGitHubAppAuth,
   credential,
@@ -704,6 +705,41 @@ test("credential selection rejects partial App configuration and preserves legac
               assert.equal(logs.filter((line) => !line.startsWith("::add-mask::")).join("\n").includes("legacy"), false);
             }
           });
+        }
+      );
+    });
+  }
+});
+
+test("config rejects holder suffixes that fallback cleanup cannot reproduce", async (t) => {
+  const cases = [
+    { name: "internal spaces and colons", value: "matrix: Edit Mode" },
+    { name: "leading whitespace", value: " leading", error: true },
+    { name: "trailing whitespace", value: "trailing ", error: true },
+    { name: "line feed", value: "line\nbreak", error: true },
+    { name: "carriage return", value: "line\rbreak", error: true }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withEnvironment(
+        {
+          "INPUT_LOCK-NAME": "wallstop-organization-builds",
+          "INPUT_HOLDER-ID-SUFFIX": testCase.value,
+          "INPUT_LOCK-REPOSITORY": "o/r",
+          BUILD_LOCK_APP_ID: testCase.error ? "partial-app-credentials" : undefined,
+          BUILD_LOCK_APP_PRIVATE_KEY: undefined,
+          BUILD_LOCK_TOKEN: testCase.error ? undefined : "legacy"
+        },
+        async () => {
+          if (testCase.error) {
+            assert.throws(
+              () => config(),
+              /holder-id-suffix must not have leading\/trailing whitespace or line breaks/
+            );
+          } else {
+            assert.equal(config().holderIdSuffix, testCase.value);
+          }
         }
       );
     });
