@@ -3435,6 +3435,7 @@ test("schema 3 release preserves newer or conflicting queued ownership", async (
         runAttempt: testCase.queuedAttempt
       };
       const state = { ...semaphoreState([], [queued]), schemaVersion: 3 };
+      let observedState = null;
       let wrote = false;
 
       await withTempFile(async (outputFile) => {
@@ -3450,6 +3451,7 @@ test("schema 3 release preserves newer or conflicting queued ownership", async (
                 if (options.method === "PUT") {
                   wrote = true;
                 }
+                observedState = JSON.parse(JSON.stringify(state));
                 return base64Content(state, "state-sha");
               }
               return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
@@ -3470,7 +3472,7 @@ test("schema 3 release preserves newer or conflicting queued ownership", async (
       });
 
       assert.equal(wrote, false);
-      assert.deepEqual(state.queue, [queued]);
+      assert.deepEqual(observedState.queue, [queued]);
     });
   }
 });
