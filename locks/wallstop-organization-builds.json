@@ -1,9 +1,20 @@
 {
   "schemaVersion": 3,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29207014937:platform-build-macos:platform-build-macos",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-macos",
+    "runId": "29207014937",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29207014937",
+    "queuedAt": "2026-07-12T20:42:39.663Z",
+    "acquiredAt": "2026-07-12T20:45:44.796Z",
+    "expiresAt": "2026-07-13T00:45:44.796Z",
+    "runnerId": "GitHub Actions 1000095846"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29207014937:platform-build-macos:platform-build-macos",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29207014937",
       "queuedAt": "2026-07-12T20:42:39.663Z",
+      "acquiredAt": "2026-07-12T20:45:44.796Z",
+      "expiresAt": "2026-07-13T00:45:44.796Z",
       "runnerId": "GitHub Actions 1000095846"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29208211994:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -27,5 +42,5 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "updatedAt": "2026-07-12T20:45:26.885Z"
+  "updatedAt": "2026-07-12T20:45:44.796Z"
 }
