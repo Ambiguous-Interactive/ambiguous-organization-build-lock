@@ -1,9 +1,20 @@
 {
   "schemaVersion": 3,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29209638359:unity-tests:unity-tests-1",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29209638359",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29209638359",
+    "queuedAt": "2026-07-12T21:37:06.902Z",
+    "acquiredAt": "2026-07-12T21:45:17.601Z",
+    "expiresAt": "2026-07-13T01:45:17.601Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29209638359:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29209638359",
       "queuedAt": "2026-07-12T21:37:06.902Z",
+      "acquiredAt": "2026-07-12T21:45:17.601Z",
+      "expiresAt": "2026-07-13T01:45:17.601Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29209964705:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -27,5 +42,5 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "updatedAt": "2026-07-12T21:44:59.942Z"
+  "updatedAt": "2026-07-12T21:45:17.601Z"
 }
