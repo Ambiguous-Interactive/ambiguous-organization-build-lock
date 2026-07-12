@@ -3367,6 +3367,114 @@ test("release reports noop with holder context when this run has no state to cle
   assert.equal(wrote, false);
 });
 
+test("schema 3 release preserves newer or conflicting holder ownership", async (t) => {
+  const cases = [
+    { name: "newer rerun holder", holderAttempt: "2", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
+    { name: "conflicting runner holder", holderAttempt: "1", holderRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const held = {
+        ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), testCase.holderRunner),
+        runAttempt: testCase.holderAttempt
+      };
+      const state = { ...semaphoreState([held]), schemaVersion: 3 };
+      let wrote = false;
+
+      await withTempFile(async (outputFile) => {
+        await withActionEnv(
+          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  wrote = true;
+                }
+                return base64Content(state, "state-sha");
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
+
+              assert.match(logs.join("\n"), /Lock is held by owner\/repo:123:perf-benchmarks:playmode/);
+              assert.match(logs.join("\n"), /No release needed for wallstop-organization-builds/);
+            });
+          }
+        );
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "false");
+        assert.equal(outputs["queue-cleaned"], "false");
+        assert.equal(outputs["cleanup-result"], "noop");
+        assert.equal(outputs["state-sha"], "state-sha");
+        assert.equal(outputs["held-by"], held.holderId);
+        assert.equal(outputs["held-by-run-url"], held.runUrl);
+      });
+
+      assert.equal(wrote, false);
+    });
+  }
+});
+
+test("schema 3 release preserves newer or conflicting queued ownership", async (t) => {
+  const cases = [
+    { name: "newer rerun queue entry", queuedAttempt: "2", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" },
+    { name: "conflicting runner queue entry", queuedAttempt: "1", queuedRunner: "runner-new", releaseAttempt: "1", releaseRunner: "runner-old" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const queued = {
+        ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), testCase.queuedRunner),
+        runAttempt: testCase.queuedAttempt
+      };
+      const state = { ...semaphoreState([], [queued]), schemaVersion: 3 };
+      let wrote = false;
+
+      await withTempFile(async (outputFile) => {
+        await withActionEnv(
+          { ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: testCase.releaseAttempt, GITHUB_OUTPUT: outputFile },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  wrote = true;
+                }
+                return base64Content(state, "state-sha");
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await release(semaphoreConfig({ runnerId: testCase.releaseRunner }));
+            });
+          }
+        );
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "false");
+        assert.equal(outputs["queue-cleaned"], "false");
+        assert.equal(outputs["cleanup-result"], "noop");
+        assert.equal(outputs["state-sha"], "state-sha");
+        assert.equal(outputs["held-by"], "");
+        assert.equal(outputs["held-by-run-url"], "");
+      });
+
+      assert.equal(wrote, false);
+      assert.deepEqual(state.queue, [queued]);
+    });
+  }
+});
+
 test("reap writes full output contract when no stale state is found", async () => {
   const state = emptyState("wallstop-organization-builds");
   let wrote = false;
@@ -4912,7 +5020,7 @@ test("release preserves schema 3 runner identities while removing only this run'
         }
         return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
       }, async () => {
-        await release(semaphoreConfig());
+        await release(semaphoreConfig({ runnerId: "runner-a" }));
       });
     });
 

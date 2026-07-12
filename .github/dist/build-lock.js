@@ -954,18 +954,42 @@ function identityIsNewer(existing, incoming, context) {
   const storedAttempt = BigInt(existing.runAttempt);
   const incomingAttempt = BigInt(incoming.runAttempt);
   if (incomingAttempt < storedAttempt) {
-    throw new Error(
-      `${context} ${incoming.holderId} is already owned by newer run attempt ${existing.runAttempt}; ` +
+    return {
+      compatible: false,
+      newer: false,
+      reason:
+        `${context} ${incoming.holderId} is already owned by newer run attempt ${existing.runAttempt}; ` +
         `refusing stale attempt ${incoming.runAttempt}.`
-    );
+    };
   }
   if (incomingAttempt === storedAttempt && existing.runnerId !== incoming.runnerId) {
-    throw new Error(
-      `${context} ${incoming.holderId} is already assigned to runner ${existing.runnerId} for this run attempt; ` +
+    return {
+      compatible: false,
+      newer: false,
+      reason:
+        `${context} ${incoming.holderId} is already assigned to runner ${existing.runnerId} for this run attempt; ` +
         `refusing conflicting identity from ${incoming.runnerId}.`
-    );
+    };
   }
-  return incomingAttempt > storedAttempt;
+  return { compatible: true, newer: incomingAttempt > storedAttempt, reason: "" };
+}
+
+function releaseMatchesIdentity(entry, identity, schemaVersion, context) {
+  if (entry.holderId !== identity.holderId) {
+    return false;
+  }
+  if (schemaVersion < 3) {
+    return true;
+  }
+  return identityIsNewer(entry, identity, context).compatible;
+}
+
+function identityIsNewerOrThrow(existing, incoming, context) {
+  const comparison = identityIsNewer(existing, incoming, context);
+  if (!comparison.compatible) {
+    throw new Error(comparison.reason);
+  }
+  return comparison.newer;
 }
 
 function isActiveRunStatus(status) {
@@ -1091,9 +1115,15 @@ async function cleanupIdentity(config, identity, options = {}) {
 
   for (let attempts = 1; attempts <= maxAttempts; attempts++) {
     const { state, sha } = await readState(config, options);
-    const queueCleaned = state.queue.some((entry) => entry.holderId === identity.holderId);
-    state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
-    const remainingHolders = state.holders.filter((holder) => holder.holderId !== identity.holderId);
+    const queueCleaned = state.queue.some((entry) =>
+      releaseMatchesIdentity(entry, identity, state.schemaVersion, "Queued request")
+    );
+    state.queue = state.queue.filter(
+      (entry) => !releaseMatchesIdentity(entry, identity, state.schemaVersion, "Queued request")
+    );
+    const remainingHolders = state.holders.filter(
+      (holder) => !releaseMatchesIdentity(holder, identity, state.schemaVersion, "Holder")
+    );
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
     // Public release outputs are singular; report the same first holder that legacy
@@ -1351,7 +1381,7 @@ async function acquire(config) {
         const myHolder = state.holders.find((holder) => holder.holderId === identity.holderId);
         let rerunReplacement = false;
         if (runnerSerialization && myHolder) {
-          rerunReplacement = identityIsNewer(myHolder, identity, "Holder");
+          rerunReplacement = identityIsNewerOrThrow(myHolder, identity, "Holder");
         }
         if (myHolder && !rerunReplacement && !staleness.get(identity.holderId).stale) {
           recordPostCleanupNeeded();
@@ -1386,7 +1416,7 @@ async function acquire(config) {
             changed = true;
           } else if (entry.holderId === identity.holderId) {
             if (runnerSerialization) {
-              identityIsNewer(entry, identity, "Queued request");
+              identityIsNewerOrThrow(entry, identity, "Queued request");
             }
             const refreshedEntry = { ...identity, queuedAt: entry.queuedAt };
             if (entry.runnerId !== refreshedEntry.runnerId || entry.runAttempt !== refreshedEntry.runAttempt) {
