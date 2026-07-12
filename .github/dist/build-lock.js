@@ -949,7 +949,11 @@ function selectEligibleQueueEntries(holders, queue, freeSlots) {
 
 function identityIsNewer(existing, incoming, context) {
   if (!/^[1-9][0-9]*$/.test(existing.runAttempt) || !/^[1-9][0-9]*$/.test(incoming.runAttempt)) {
-    throw new Error(`${context} ${incoming.holderId} has a non-numeric run attempt; refusing ownership transfer.`);
+    throw new Error(
+      `${context} ${incoming.holderId} has invalid run attempts ` +
+        `(stored=${JSON.stringify(existing.runAttempt)}, incoming=${JSON.stringify(incoming.runAttempt)}); ` +
+        "expected positive decimal integers."
+    );
   }
   const storedAttempt = BigInt(existing.runAttempt);
   const incomingAttempt = BigInt(incoming.runAttempt);
@@ -1112,8 +1116,20 @@ async function cleanupIdentity(config, identity, options = {}) {
       if (entry.holderId !== identity.holderId) {
         return false;
       }
-      return state.schemaVersion < 3 ||
-        (entry.runnerId === identity.runnerId && entry.runAttempt === identity.runAttempt);
+      if (state.schemaVersion < 3) {
+        return true;
+      }
+      if (!/^[1-9][0-9]*$/.test(entry.runAttempt) || !/^[1-9][0-9]*$/.test(identity.runAttempt)) {
+        throw new Error(
+          `Build-lock cleanup ${identity.holderId} has invalid run attempts ` +
+            `(stored=${JSON.stringify(entry.runAttempt)}, caller=${JSON.stringify(identity.runAttempt)}); ` +
+            "expected positive decimal integers."
+        );
+      }
+      // runnerId controls admission, not cleanup ownership. A dead self-hosted
+      // runner can be cleaned up by a same-attempt fallback job on another runner.
+      // The attempt fence still prevents a late cleanup from deleting a newer rerun.
+      return BigInt(identity.runAttempt) >= BigInt(entry.runAttempt);
     };
     const queueCleaned = state.queue.some(ownsEntry);
     state.queue = state.queue.filter((entry) => !ownsEntry(entry));
@@ -1604,6 +1620,23 @@ async function release(config) {
   validateLockName(config.lockName);
   await ensureStateBranch(config);
   const identity = currentIdentity(config);
+  if (config.targetHolderId) {
+    const targetHolderId = String(config.targetHolderId).trim();
+    const expectedPrefix = `${identity.repository}:${identity.runId}:`;
+    const targetSuffix = targetHolderId.slice(expectedPrefix.length);
+    const jobSeparator = targetSuffix.indexOf(":");
+    if (
+      !targetHolderId.startsWith(expectedPrefix) ||
+      /[\r\n]/.test(targetHolderId) ||
+      jobSeparator <= 0 ||
+      jobSeparator === targetSuffix.length - 1
+    ) {
+      throw new Error(
+        `holder-id must identify a job in the current repository and workflow run (${expectedPrefix}<job>:<suffix>).`
+      );
+    }
+    identity.holderId = targetHolderId;
+  }
   console.log(`::group::Release build lock ${config.lockName}`);
 
   const result = await cleanupIdentity(config, identity);
@@ -1756,6 +1789,7 @@ function config() {
     token: credential(lockRepo),
     lockName,
     holderIdSuffix: input("holder-id-suffix", "default"),
+    targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
     lockRepository,
     lockRepo,
