@@ -4,6 +4,24 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Reap stale state or recover a confirmed quarantine
+        required: true
+        type: choice
+        options:
+          - reap
+          - recover
+        default: reap
+      reservation-id:
+        description: Exact quarantine reservation ID (recover only)
+        required: false
+        type: string
+      resource-safe:
+        description: Confirm the external Unity activation was returned (recover only)
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: build-lock-reaper
@@ -25,6 +43,9 @@ jobs:
         uses: ./.github/actions/reap-stale-locks
         with:
           lock-name: wallstop-organization-builds
+          operation: ${{ github.event.inputs.operation || 'reap' }}
+          reservation-id: ${{ github.event.inputs['reservation-id'] || '' }}
+          resource-safe: ${{ github.event.inputs['resource-safe'] || false }}
         env:
           BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}

@@ -28,7 +28,8 @@ const acquireOutputKeys = [
   "state-sha",
   "wait-ms",
   "attempts",
-  "stale-recovered"
+  "stale-recovered",
+  "quarantine-recovered"
 ];
 
 function readActionManifest(actionName) {
@@ -243,7 +244,22 @@ test("release accepts the physical runner identity required by schema 3", () => 
 
   assert.ok(inputs.includes("runner-id"));
   assert.ok(inputs.includes("holder-id"));
+  assert.ok(inputs.includes("resource-safe"));
   assert.match(release, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
+  assert.match(release, /resource-safe:[\s\S]*?default:\s*"false"/);
+  for (const output of ["reservation-id", "reservation-state", "available-at"]) {
+    assert.match(release, new RegExp(`^  ${output}:`, "m"));
+  }
+});
+
+test("reaper exposes exact confirmed reservation recovery inputs", () => {
+  const reaper = readActionManifest("reap-stale-locks");
+  const inputs = yamlRequiredTopLevelMappingKeys(reaper, "inputs", "reap-stale-locks/action.yml");
+  for (const name of ["operation", "reservation-id", "resource-safe"]) {
+    assert.ok(inputs.includes(name));
+  }
+  assert.match(reaper, /operation:[\s\S]*?default:\s*reap/);
+  assert.match(reaper, /resource-safe:[\s\S]*?default:\s*"false"/);
 });
 
 test("README documents guarded acquire usage and unconditional release cleanup", () => {

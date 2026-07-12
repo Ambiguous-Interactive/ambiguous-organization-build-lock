@@ -17,3 +17,10 @@ pull-request review and are picked up by waiting runs within the config TTL
 `runnerSerialization: true` activates the one-way schema-3 upgrade and limits
 each physical `runner-id` to one holder. Enable it only after compatible clients
 are deployed and the schema-2 holder and queue lists are empty.
+
+`resourceLifecycle: true` activates the one-way schema-4 upgrade after schema 3
+holders and queue entries drain. Schema 4 adds capacity-consuming cooldown and
+quarantine reservations. `releaseCooldownSeconds` controls confirmed-cleanup
+cooldowns and defaults to 360 seconds. Configuration failure cannot downgrade an
+existing schema-4 state. Keep lifecycle disabled until every consumer reports
+explicit cleanup proof to the release action.

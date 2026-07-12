@@ -46,6 +46,8 @@ outputs:
     description: CAS attempts.
   stale-recovered:
     description: "true when this acquire accepted a stale-holder replacement write."
+  quarantine-recovered:
+    description: "true when this acquire atomically reclaimed a quarantine on the same physical runner."
 runs:
   using: node24
   main: ../../dist/acquire.js

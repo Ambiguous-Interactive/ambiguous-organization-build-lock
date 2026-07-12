@@ -47,6 +47,11 @@ section, guard every licensed step on the acquire output, and release with
   if: ${{ steps.acquire-build-lock.outputs.acquired == 'true' }}
   uses: game-ci/unity-test-runner@v4
 
+- name: Return Unity license
+  id: return-unity-license
+  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
+  uses: ./.github/actions/return-unity-license
+
 - name: Release organization Unity lock
   if: always()
   uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@v1
@@ -54,14 +59,25 @@ section, guard every licensed step on the acquire output, and release with
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
+    resource-safe: ${{ steps.return-unity-license.outputs.resource-safe == 'true' }}
   env:
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 ```
 
+The Unity return helper must be non-masking and emit `resource-safe=true` only
+when the return command succeeds or an allowlisted response proves the local
+activation is already absent. Missing credentials or tools, timeouts,
+termination, and unrecognized responses must emit false. Give the return step an
+ID and pass that proof to the unconditional release as shown above.
+
 The release action is intentionally safe to run even when acquire never reached
-the front of the queue. It reports `cleanup-result=released`,
-`cleanup-result=queue-cleaned`, or `cleanup-result=noop`; `queue-cleaned` means
+the front of the queue. It reports `cleanup-result=cooldown-started`,
+`cleanup-result=quarantined`, `cleanup-result=queue-cleaned`, or
+`cleanup-result=noop`. `cleanup-result=released` is also possible before schema 4
+or when an ambiguous schema-4 release is confirmed after its reservation expires.
+`released=true` remains the backward-compatible
+indication that holder ownership was removed. `queue-cleaned` means
 the current run was waiting but never held the lock, so no licensed work should
 have run. Do not gate the release step on `acquired == 'true'`; release also
 cleans queue entries for runs that were interrupted while waiting.
@@ -85,9 +101,9 @@ every acquired holder ID remains exactly reproducible by fallback cleanup.
 
 Consumers that want an additional cancellation backstop can replace
 `acquire-build-lock` with `acquire-build-lock-with-cleanup`. Keep the explicit
-release step. The post cleanup is best-effort and only exists to remove this
-run's held lock or queued request if later workflow steps are interrupted before
-the explicit release action can run.
+release step. The post cleanup is best-effort and removes this run's queued
+request; under schema 4 it moves held ownership into quarantine because it
+cannot prove external resource cleanup.
 
 Keep `runs-on` broad enough for all eligible Unity runners. The lock serializes
 only the licensed section; it should not be replaced with a single-runner label.
@@ -105,6 +121,15 @@ a newer schema than the running action fail closed with an upgrade error.
 Schema 3 adds `runnerId` to holders and queue entries. Compatible clients keep
 writing schema 2 until `runnerSerialization` is activated, then the state
 upgrades one-way so a temporary configuration outage cannot disable it.
+
+Schema 4 adds `reservations`. Confirmed resource cleanup creates a cooldown;
+unknown cleanup creates a non-expiring quarantine. Both consume capacity.
+Cooldowns expire automatically. A queued job may atomically reclaim a
+quarantine only on the same physical runner, preserving return-at-start
+recovery. Stale holders, post-action cleanup, and scheduled reaping become
+quarantines because those paths cannot prove the external activation was
+returned. Once schema 4 exists, configuration cannot downgrade lifecycle
+protection.
 
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
@@ -140,6 +165,13 @@ non-empty `${{ runner.name }}` to acquire and release and all schema-2 holders
 and queued requests have drained. Activation against non-empty schema-2 state
 fails closed. This assumes one registered runner agent per physical machine.
 
+Add `"resourceLifecycle": true` only after all consumers pass cleanup proof and
+schema-3 holders and queue entries have drained. Activation fails closed on
+non-empty state. `"releaseCooldownSeconds": 360` retains a one-minute safety
+margin over the observed five-minute Unity activation handoff. During rollout,
+keep `maxHolders` at 1; restore 2 only after cross-runner canaries show no Unity
+activation-limit failures.
+
 ## Authentication
 
 Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together. The App must
@@ -170,10 +202,15 @@ governed by the holder lease.
 
 ## Stale Recovery
 
-The `Reap stale build locks` workflow runs every 5 minutes. It clears a holder
+The `Reap stale build locks` workflow runs every 5 minutes. Before schema 4 it clears a holder
 when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
+
+Under schema 4, stale holders are quarantined instead of freed. Operators may
+dispatch the reaper with `operation=recover`, the exact reservation ID, and
+`resource-safe=true` only after confirming Unity portal cleanup. Recovery starts
+a cooldown; it never frees capacity immediately.
 
 The acquire actions set `stale-recovered=true` after GitHub accepts a
 stale-holder replacement write. If a race prevents the action from verifying and
