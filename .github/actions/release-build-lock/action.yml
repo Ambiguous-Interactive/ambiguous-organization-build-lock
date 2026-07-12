@@ -32,7 +32,7 @@ outputs:
   queue-cleaned:
     description: "true when this action removed this run from the wait queue."
   cleanup-result:
-    description: "cooldown-started, quarantined, released (pre-schema-4), queue-cleaned, or noop."
+    description: "cooldown-started, quarantined, released, queue-cleaned, or noop."
   lock-name:
     description: Target lock name.
   holder-id:

@@ -1829,10 +1829,16 @@ async function acquire(config) {
           (reservation) => reservation.state === "quarantine" && reservation.runnerId === identity.runnerId
         );
         const firstForRunner = state.queue.find((entry) => entry.runnerId === identity.runnerId);
-        const canRecoverQuarantine = Boolean(
-          matchingQuarantine && firstForRunner && firstForRunner.holderId === identity.holderId
-        );
         const freeSlots = lockConfig.maxHolders - freshHolders.length - reservations.length;
+        // A quarantine belongs to the physical runner, not one logical job. The first
+        // queued job on that runner may swap it for a holder, but never while a reviewed
+        // maxHolders reduction has left the state over capacity.
+        const canRecoverQuarantine = Boolean(
+          matchingQuarantine &&
+          firstForRunner &&
+          firstForRunner.holderId === identity.holderId &&
+          freeSlots >= 0
+        );
         const occupiedCapacity = [...freshHolders, ...reservations.map((reservation) => ({ runnerId: reservation.runnerId }))];
         const eligibleEntries = runnerSerialization
           ? selectEligibleQueueEntries(occupiedCapacity, state.queue, freeSlots)

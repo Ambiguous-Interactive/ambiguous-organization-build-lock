@@ -5526,6 +5526,51 @@ test("schema 4 quarantine can be reclaimed only on the same runner", async () =>
   assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-a"]);
 });
 
+test("same-runner quarantine recovery waits while a reduced limit leaves state over capacity", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  const active = withRunner(semaphoreHolder("active/repo", "888", "active"), "runner-b");
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([active], [], [lifecycleReservation(prior)]);
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+  try {
+    await withActionEnv(semaphoreActionEnv, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "write-sha" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          if (parsed.pathname === "/repos/active/repo/actions/runs/888") {
+            return jsonResponse(200, { status: "in_progress" });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: "runner-a", timeoutMinutes: 1 })),
+            /Timed out waiting/
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-b"]);
+  assert.deepEqual(state.reservations.map((reservation) => reservation.runnerId), ["runner-a"]);
+});
+
 test("schema 4 quarantine never expires or admits a different runner during config outage", async () => {
   const originalNow = Date.now;
   let now = Date.parse("2026-06-06T00:01:00.000Z");

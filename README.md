@@ -74,7 +74,8 @@ ID and pass that proof to the unconditional release as shown above.
 The release action is intentionally safe to run even when acquire never reached
 the front of the queue. It reports `cleanup-result=cooldown-started`,
 `cleanup-result=quarantined`, `cleanup-result=queue-cleaned`, or
-`cleanup-result=noop`; pre-schema-4 state may report `cleanup-result=released`.
+`cleanup-result=noop`. `cleanup-result=released` is also possible before schema 4
+or when an ambiguous schema-4 release is confirmed after its reservation expires.
 `released=true` remains the backward-compatible
 indication that holder ownership was removed. `queue-cleaned` means
 the current run was waiting but never held the lock, so no licensed work should
