@@ -931,7 +931,10 @@ function normalizeBooleanConfig(raw, name, sourcePath) {
     return false;
   }
   if (typeof raw !== "boolean") {
-    console.log(`::warning::Ignoring invalid ${name}=${JSON.stringify(raw)} in ${sourcePath}; expected a boolean.`);
+    console.log(
+      `::warning::Ignoring invalid ${name}=${JSON.stringify(raw)} in ${sourcePath}; expected a boolean; ` +
+        `using safe defaults (${defaultLockConfigSummary()}).`
+    );
     return null;
   }
   return raw;
@@ -1031,7 +1034,10 @@ async function readLockConfig(config, options = {}) {
     return defaultLockConfig();
   }
   if (resourceLifecycle && !runnerSerialization) {
-    console.log(`::warning::Ignoring resourceLifecycle=true in ${configPath}; runnerSerialization must also be true.`);
+    console.log(
+      `::warning::Ignoring resourceLifecycle=true in ${configPath}; runnerSerialization must also be true; ` +
+        `using safe defaults (${defaultLockConfigSummary()}).`
+    );
     return defaultLockConfig();
   }
   return {
@@ -1266,6 +1272,22 @@ function cleanupResultName(result) {
     return "queue-cleaned";
   }
   return "noop";
+}
+
+function explicitReleaseMessage(cleanupResult, lockName) {
+  if (cleanupResult === "cooldown-started") {
+    return `Removed lock ownership for ${lockName}; resource capacity entered cooldown.`;
+  }
+  if (cleanupResult === "quarantined") {
+    return `Removed lock ownership for ${lockName}; resource capacity is quarantined.`;
+  }
+  if (cleanupResult === "released") {
+    return `Released ${lockName}.`;
+  }
+  if (cleanupResult === "queue-cleaned") {
+    return `Cleaned queued request for ${lockName}.`;
+  }
+  return `No release needed for ${lockName}.`;
 }
 
 function writeReleaseOutputs(config, identity, result) {
@@ -2034,20 +2056,9 @@ async function release(config) {
     );
   }
 
-  appendSummary(
-    result.released
-      ? `Released ${config.lockName}.`
-      : cleanupResult === "queue-cleaned"
-        ? `Cleaned queued request for ${config.lockName}.`
-        : `No release needed for ${config.lockName}.`
-  );
-  console.log(
-    result.released
-      ? `Released ${config.lockName}.`
-      : cleanupResult === "queue-cleaned"
-        ? `Cleaned queued request for ${config.lockName}.`
-        : `No release needed for ${config.lockName}.`
-  );
+  const releaseMessage = explicitReleaseMessage(cleanupResult, config.lockName);
+  appendSummary(releaseMessage);
+  console.log(releaseMessage);
   console.log("::endgroup::");
 }
 

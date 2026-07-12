@@ -4089,13 +4089,19 @@ test("readLockConfig fails closed to a single holder", async (t) => {
       name: "resource lifecycle requires runner serialization",
       response: () => base64Content({ maxHolders: 2, resourceLifecycle: true }, "cfg"),
       maxHolders: 1,
-      warning: /runnerSerialization must also be true/
+      warning: /runnerSerialization must also be true; using safe defaults \(max-holders=1, runner-serialization=false, resource-lifecycle=false/
     },
     {
       name: "invalid runner serialization fails disabled",
       response: () => base64Content({ maxHolders: 2, runnerSerialization: "true" }, "cfg"),
       maxHolders: 1,
-      warning: /Ignoring invalid runnerSerialization/
+      warning: /Ignoring invalid runnerSerialization.*using safe defaults \(max-holders=1, runner-serialization=false, resource-lifecycle=false/
+    },
+    {
+      name: "invalid resource lifecycle fails safe",
+      response: () => base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: "true" }, "cfg"),
+      maxHolders: 1,
+      warning: /Ignoring invalid resourceLifecycle.*using safe defaults \(max-holders=1, runner-serialization=false, resource-lifecycle=false/
     },
     { name: "numeric string maxHolders", response: () => base64Content({ maxHolders: "4" }, "cfg"), maxHolders: 4 },
     { name: "config without maxHolders", response: () => base64Content({}, "cfg"), maxHolders: 1 },
@@ -5393,7 +5399,14 @@ test("schema 4 release transitions ownership to cooldown or quarantine", async (
               return base64Content(state, "state-sha");
             }
             return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-          }, () => release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: testCase.resourceSafe })));
+          }, async (logs) => {
+            await release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: testCase.resourceSafe }));
+            const message = testCase.result === "cooldown-started"
+              ? /Removed lock ownership.*resource capacity entered cooldown/
+              : /Removed lock ownership.*resource capacity is quarantined/;
+            assert.match(logs.join("\n"), message);
+            assert.doesNotMatch(logs.join("\n"), /Released wallstop-organization-builds/);
+          });
         });
         const outputs = readEnvironmentFile(outputFile);
         assert.equal(outputs.released, "true");
