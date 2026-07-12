@@ -12,9 +12,20 @@ inputs:
     description: Branch that stores lock state JSON files.
     required: false
     default: lock-state
+  operation:
+    description: "reap, or recover to move an exact quarantine reservation into cooldown."
+    required: false
+    default: reap
+  reservation-id:
+    description: Exact opaque quarantine reservation ID required for recovery.
+    required: false
+  resource-safe:
+    description: Explicit external resource cleanup confirmation required for recovery.
+    required: false
+    default: "false"
 outputs:
   reaped:
-    description: "true when stale state was removed."
+    description: "true when stale state was handled or a reservation recovery completed."
   state-sha:
     description: Lock-state file SHA after reaping.
 runs:

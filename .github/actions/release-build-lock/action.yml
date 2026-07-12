@@ -14,6 +14,10 @@ inputs:
   runner-id:
     description: Physical identity of the runner executing cleanup. Required when runner serialization is active.
     required: false
+  resource-safe:
+    description: "Set true only when external resource cleanup was confirmed; false creates a quarantine under schema 4."
+    required: false
+    default: "false"
   lock-repository:
     description: Repository that stores lock state.
     required: false
@@ -28,7 +32,7 @@ outputs:
   queue-cleaned:
     description: "true when this action removed this run from the wait queue."
   cleanup-result:
-    description: "released, queue-cleaned, or noop."
+    description: "cooldown-started, quarantined, released (pre-schema-4), queue-cleaned, or noop."
   lock-name:
     description: Target lock name.
   holder-id:
@@ -39,6 +43,12 @@ outputs:
     description: Holder identity when another run still holds the lock.
   held-by-run-url:
     description: Holder workflow run URL when another run still holds the lock.
+  reservation-id:
+    description: Opaque lifecycle reservation created when holder ownership is removed.
+  reservation-state:
+    description: cooldown or quarantine when a lifecycle reservation was created.
+  available-at:
+    description: Earliest availability time for a cooldown reservation.
 runs:
   using: node24
   main: ../../dist/release.js

@@ -7,11 +7,11 @@ const crypto = require("crypto");
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
 // Schema 2 replaces the single `holder` with a `holders` array. Schema 3 adds a
-// physical runner identity so one machine cannot consume multiple licensed slots.
-// Writes stay on schema 2 until the reviewed lock configuration activates runner
-// serialization; the upgrade is then one-way so an auth/config outage cannot weaken it.
+// physical runner identity. Schema 4 adds capacity-consuming lifecycle reservations.
+// Each upgrade is activated by reviewed configuration and remains one-way so a
+// configuration outage cannot weaken protections already present in state.
 const DEFAULT_SCHEMA_VERSION = 2;
-const MAX_SCHEMA_VERSION = 3;
+const MAX_SCHEMA_VERSION = 4;
 const DEFAULT_MAX_HOLDERS = 1;
 const MAX_HOLDERS_CAP = 64;
 const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
@@ -19,6 +19,7 @@ const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
+const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 
@@ -46,6 +47,14 @@ function integerInput(name, fallback, minimum = 1) {
     throw new Error(`Input ${name} must be >= ${minimum}.`);
   }
   return value;
+}
+
+function booleanInput(name, fallback = false) {
+  const raw = input(name, String(fallback)).trim().toLowerCase();
+  if (raw !== "true" && raw !== "false") {
+    throw new Error(`Input ${name} must be true or false.`);
+  }
+  return raw === "true";
 }
 
 function holderIdSuffixInput() {
@@ -580,8 +589,59 @@ function emptyState(lockName, schemaVersion = DEFAULT_SCHEMA_VERSION) {
     holder: null,
     holders: [],
     queue: [],
+    ...(schemaVersion >= 4 ? { reservations: [] } : {}),
     updatedAt: nowIso()
   };
+}
+
+function normalizeReservation(reservation) {
+  if (!reservation || typeof reservation !== "object" || Array.isArray(reservation)) {
+    return null;
+  }
+  const state = String(reservation.state || "");
+  if (state !== "cooldown" && state !== "quarantine") {
+    throw new Error(`Reservation ${String(reservation.reservationId || "<unknown>")} has invalid state ${JSON.stringify(state)}.`);
+  }
+  const normalized = {
+    reservationId: String(reservation.reservationId || "").trim(),
+    holderId: String(reservation.holderId || ""),
+    repository: String(reservation.repository || ""),
+    workflow: String(reservation.workflow || ""),
+    job: String(reservation.job || ""),
+    runId: String(reservation.runId || ""),
+    runAttempt: String(reservation.runAttempt || ""),
+    runUrl: String(reservation.runUrl || ""),
+    runnerId: String(reservation.runnerId || "").trim(),
+    state,
+    reason: String(reservation.reason || ""),
+    createdAt: String(reservation.createdAt || "")
+  };
+  if (
+    !normalized.reservationId ||
+    !normalized.holderId ||
+    !normalized.repository ||
+    !normalized.workflow ||
+    !normalized.job ||
+    !normalized.runId ||
+    !normalized.runAttempt ||
+    !normalized.runUrl ||
+    !normalized.runnerId ||
+    !normalized.reason ||
+    !parseTime(normalized.createdAt)
+  ) {
+    throw new Error(
+      "Schema 4 reservations require an ID, original holder/run metadata, runnerId, reason, and a valid createdAt."
+    );
+  }
+  if (state === "cooldown") {
+    normalized.availableAt = String(reservation.availableAt || "");
+    if (!parseTime(normalized.availableAt) || parseTime(normalized.availableAt) <= parseTime(normalized.createdAt)) {
+      throw new Error(`Cooldown reservation ${normalized.reservationId} requires availableAt after createdAt.`);
+    }
+  } else if (Object.hasOwn(reservation, "availableAt")) {
+    throw new Error(`Quarantine reservation ${normalized.reservationId} must not define availableAt.`);
+  }
+  return normalized;
 }
 
 function normalizeEntry(entry, schemaVersion = DEFAULT_SCHEMA_VERSION) {
@@ -634,7 +694,7 @@ function normalizeState(raw, lockName) {
         `expected an integer from 1 through ${MAX_SCHEMA_VERSION}.`
     );
   }
-  const schemaVersion = parsedSchemaVersion >= 3 ? 3 : DEFAULT_SCHEMA_VERSION;
+  const schemaVersion = parsedSchemaVersion >= 3 ? parsedSchemaVersion : DEFAULT_SCHEMA_VERSION;
   if (state.queue !== undefined && !Array.isArray(state.queue)) {
     throw new Error(`State file queue for ${lockName} must be an array.`);
   }
@@ -643,6 +703,21 @@ function normalizeState(raw, lockName) {
   }
   if (parsedSchemaVersion >= 2 && !Object.hasOwn(state, "holder")) {
     throw new Error(`State file for schema ${parsedSchemaVersion} must contain the legacy holder mirror.`);
+  }
+  if (parsedSchemaVersion >= 4 && !Array.isArray(state.reservations)) {
+    throw new Error(`State file reservations for schema ${parsedSchemaVersion} must be an array.`);
+  }
+  if (
+    parsedSchemaVersion >= 4 &&
+    state.reservations.some(
+      (reservation) =>
+        !reservation ||
+        typeof reservation !== "object" ||
+        Array.isArray(reservation) ||
+        !String(reservation.reservationId || "").trim()
+    )
+  ) {
+    throw new Error(`Schema 4 reservations for ${lockName} must be objects with a non-empty reservationId.`);
   }
   if (parsedSchemaVersion === 1 && !Object.hasOwn(state, "holder")) {
     throw new Error(`Schema 1 state for ${lockName} must contain a holder field.`);
@@ -680,6 +755,9 @@ function normalizeState(raw, lockName) {
   const queue = Array.isArray(state.queue)
     ? state.queue.map((entry) => normalizeEntry(entry, schemaVersion)).filter((entry) => entry && entry.holderId)
     : [];
+  const reservations = schemaVersion >= 4
+    ? state.reservations.map(normalizeReservation)
+    : [];
   // Merge the schema-2 holders array with the legacy/mirrored single holder and dedupe;
   // schema-1 files carry only `holder`, schema-2 files mirror holders[0] into `holder`.
   const seenHolderIds = new Set();
@@ -703,17 +781,32 @@ function normalizeState(raw, lockName) {
       throw new Error(`Schema 3 queue for ${lockName} contains duplicate holderId values.`);
     }
   }
+  if (schemaVersion >= 4) {
+    const reservationIds = reservations.map((reservation) => reservation.reservationId);
+    if (new Set(reservationIds).size !== reservationIds.length) {
+      throw new Error(`Schema 4 reservations for ${lockName} contain duplicate reservationId values.`);
+    }
+    const reservedRunnerIds = reservations.map((reservation) => reservation.runnerId);
+    if (new Set(reservedRunnerIds).size !== reservedRunnerIds.length) {
+      throw new Error(`Schema 4 state for ${lockName} contains multiple reservations on one runnerId.`);
+    }
+    const holderRunnerIds = new Set(holders.map((holder) => holder.runnerId));
+    if (reservations.some((reservation) => holderRunnerIds.has(reservation.runnerId))) {
+      throw new Error(`Schema 4 state for ${lockName} contains a runnerId as both holder and reservation.`);
+    }
+  }
   return {
     schemaVersion,
     lock: lockName,
     holders,
     queue,
+    ...(schemaVersion >= 4 ? { reservations } : {}),
     updatedAt: String(state.updatedAt || nowIso())
   };
 }
 
 function stableState(state) {
-  const schemaVersion = state.schemaVersion >= 3 ? 3 : DEFAULT_SCHEMA_VERSION;
+  const schemaVersion = state.schemaVersion >= 3 ? state.schemaVersion : DEFAULT_SCHEMA_VERSION;
   const holders = state.holders.map((holder) => ({
     holderId: holder.holderId,
     repository: holder.repository,
@@ -745,6 +838,7 @@ function stableState(state) {
       queuedAt: entry.queuedAt,
       ...(schemaVersion >= 3 ? { runnerId: entry.runnerId } : {})
     })),
+    ...(schemaVersion >= 4 ? { reservations: state.reservations.map((reservation) => ({ ...reservation })) } : {}),
     updatedAt: state.updatedAt
   };
 }
@@ -845,6 +939,40 @@ function normalizeRunnerSerialization(raw, sourcePath) {
   return raw;
 }
 
+function normalizeBooleanConfig(raw, name, sourcePath) {
+  if (raw === undefined || raw === null) {
+    return false;
+  }
+  if (typeof raw !== "boolean") {
+    console.log(`::warning::Ignoring invalid ${name}=${JSON.stringify(raw)} in ${sourcePath}; expected a boolean.`);
+    return null;
+  }
+  return raw;
+}
+
+function normalizeReleaseCooldownSeconds(raw, sourcePath) {
+  if (raw === undefined || raw === null) {
+    return DEFAULT_RELEASE_COOLDOWN_SECONDS;
+  }
+  if (!Number.isInteger(raw) || raw < 1 || raw > 86400) {
+    console.log(
+      `::warning::Ignoring invalid releaseCooldownSeconds=${JSON.stringify(raw)} in ${sourcePath}; ` +
+        `expected an integer between 1 and 86400. Using ${DEFAULT_RELEASE_COOLDOWN_SECONDS}.`
+    );
+    return DEFAULT_RELEASE_COOLDOWN_SECONDS;
+  }
+  return raw;
+}
+
+function defaultLockConfig() {
+  return {
+    maxHolders: DEFAULT_MAX_HOLDERS,
+    runnerSerialization: false,
+    resourceLifecycle: false,
+    releaseCooldownSeconds: DEFAULT_RELEASE_COOLDOWN_SECONDS
+  };
+}
+
 function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
@@ -875,14 +1003,14 @@ async function readLockConfig(config, options = {}) {
     data = await api("GET", `/repos/${owner}/${repo}/contents/${encodedPath}`, undefined, config.token, options.apiOptions);
   } catch (error) {
     if (error.status === 404) {
-      return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
+      return defaultLockConfig();
     }
     if (configReadCanFailClosed(error, options)) {
       console.log(
         `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
           `using max-holders=${DEFAULT_MAX_HOLDERS}.`
       );
-      return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
+      return defaultLockConfig();
     }
     throw error;
   }
@@ -894,15 +1022,25 @@ async function readLockConfig(config, options = {}) {
       `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
         `using max-holders=${DEFAULT_MAX_HOLDERS}.`
     );
-    return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
+    return defaultLockConfig();
   }
   const runnerSerialization = normalizeRunnerSerialization(parsed && parsed.runnerSerialization, configPath);
   if (runnerSerialization === null) {
-    return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
+    return defaultLockConfig();
+  }
+  const resourceLifecycle = normalizeBooleanConfig(parsed && parsed.resourceLifecycle, "resourceLifecycle", configPath);
+  if (resourceLifecycle === null) {
+    return defaultLockConfig();
+  }
+  if (resourceLifecycle && !runnerSerialization) {
+    console.log(`::warning::Ignoring resourceLifecycle=true in ${configPath}; runnerSerialization must also be true.`);
+    return defaultLockConfig();
   }
   return {
     maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath),
-    runnerSerialization
+    runnerSerialization,
+    resourceLifecycle,
+    releaseCooldownSeconds: normalizeReleaseCooldownSeconds(parsed && parsed.releaseCooldownSeconds, configPath)
   };
 }
 
@@ -1081,7 +1219,48 @@ function queuePosition(state, holderId) {
   return index === -1 ? 0 : index + 1;
 }
 
+function pruneExpiredCooldowns(state, now = Date.now()) {
+  if (state.schemaVersion < 4) {
+    return [];
+  }
+  const expired = state.reservations.filter(
+    (reservation) => reservation.state === "cooldown" && parseTime(reservation.availableAt) <= now
+  );
+  if (expired.length) {
+    const expiredIds = new Set(expired.map((reservation) => reservation.reservationId));
+    state.reservations = state.reservations.filter((reservation) => !expiredIds.has(reservation.reservationId));
+  }
+  return expired;
+}
+
+function reservationFromHolder(holder, state, reason, releaseCooldownSeconds = DEFAULT_RELEASE_COOLDOWN_SECONDS) {
+  const createdAt = nowIso();
+  return {
+    reservationId: crypto.randomUUID(),
+    holderId: holder.holderId,
+    repository: holder.repository,
+    workflow: holder.workflow,
+    job: holder.job,
+    runId: holder.runId,
+    runAttempt: holder.runAttempt,
+    runUrl: holder.runUrl,
+    runnerId: holder.runnerId,
+    state,
+    reason,
+    createdAt,
+    ...(state === "cooldown"
+      ? { availableAt: new Date(Date.parse(createdAt) + releaseCooldownSeconds * 1000).toISOString() }
+      : {})
+  };
+}
+
 function cleanupResultName(result) {
+  if (result.reservationState === "cooldown") {
+    return "cooldown-started";
+  }
+  if (result.reservationState === "quarantine") {
+    return "quarantined";
+  }
   if (result.released) {
     return "released";
   }
@@ -1100,6 +1279,9 @@ function writeReleaseOutputs(config, identity, result) {
   writeOutput("state-sha", result.sha || "");
   writeOutput("held-by", result.heldBy || "");
   writeOutput("held-by-run-url", result.heldByRunUrl || "");
+  writeOutput("reservation-id", result.reservationId || "");
+  writeOutput("reservation-state", result.reservationState || "");
+  writeOutput("available-at", result.availableAt || "");
 }
 
 function firstHolderContext(holders) {
@@ -1114,6 +1296,35 @@ async function cleanupIdentity(config, identity, options = {}) {
   const maxAttempts = options.maxAttempts || 10;
   const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
   let ambiguousCleanup = null;
+
+  const reconcileAmbiguousCleanup = (current, state, sha, heldBy, heldByRunUrl) => {
+    if (!ambiguousCleanup || current.reservationId) {
+      return current;
+    }
+    const reconciled = {
+      ...current,
+      released: current.released || ambiguousCleanup.released,
+      queueCleaned: current.queueCleaned || ambiguousCleanup.queueCleaned,
+      sha,
+      heldBy,
+      heldByRunUrl
+    };
+    if (state.schemaVersion >= 4 && ambiguousCleanup.reservationId) {
+      const persistedReservation = state.reservations.find(
+        (candidate) => candidate.reservationId === ambiguousCleanup.reservationId
+      ) || state.reservations.find(
+        (candidate) => candidate.holderId === identity.holderId && candidate.runnerId === ambiguousCleanup.runnerId
+      );
+      reconciled.reservationId = persistedReservation ? persistedReservation.reservationId : "";
+      reconciled.reservationState = persistedReservation ? persistedReservation.state : "";
+      reconciled.availableAt = persistedReservation ? persistedReservation.availableAt || "" : "";
+    } else {
+      reconciled.reservationId = ambiguousCleanup.reservationId;
+      reconciled.reservationState = ambiguousCleanup.reservationState;
+      reconciled.availableAt = ambiguousCleanup.availableAt;
+    }
+    return reconciled;
+  };
 
   for (let attempts = 1; attempts <= maxAttempts; attempts++) {
     const { state, sha } = await readState(config, options);
@@ -1139,19 +1350,43 @@ async function cleanupIdentity(config, identity, options = {}) {
       // The attempt fence still prevents a late cleanup from deleting a newer rerun.
       return BigInt(identity.runAttempt) >= BigInt(entry.runAttempt);
     };
+    const expiredCooldowns = pruneExpiredCooldowns(state);
+    for (const reservation of expiredCooldowns) {
+      console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
+    }
     const queueCleaned = state.queue.some(ownsEntry);
     state.queue = state.queue.filter((entry) => !ownsEntry(entry));
+    const removedHolders = state.holders.filter(ownsEntry);
     const remainingHolders = state.holders.filter((holder) => !ownsEntry(holder));
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
+    let reservation = null;
+    if (state.schemaVersion >= 4 && removedHolders.length) {
+      const reservationState = options.resourceSafe === true ? "cooldown" : "quarantine";
+      const reason = options.reason ||
+        (reservationState === "cooldown" ? "release cleanup confirmed resource-safe" : "release cleanup was not proven resource-safe");
+      reservation = reservationFromHolder(
+        removedHolders[0],
+        reservationState,
+        reason,
+        options.releaseCooldownSeconds || DEFAULT_RELEASE_COOLDOWN_SECONDS
+      );
+      state.reservations.push(reservation);
+    }
     // Public release outputs are singular; report the same first holder that legacy
     // clients see through the mirrored `holder` field.
     const { heldBy, heldByRunUrl } = firstHolderContext(state.holders);
 
-    const changed = released || queueCleaned;
+    const changed = released || queueCleaned || expiredCooldowns.length > 0;
     if (!changed) {
       if (ambiguousCleanup) {
-        return { ...ambiguousCleanup, sha: sha || "", heldBy, heldByRunUrl };
+        return reconcileAmbiguousCleanup(
+          { released: false, queueCleaned: false },
+          state,
+          sha || "",
+          heldBy,
+          heldByRunUrl
+        );
       }
       return {
         released: false,
@@ -1165,25 +1400,43 @@ async function cleanupIdentity(config, identity, options = {}) {
     const write = await writeState(config, sha, state, `Release ${config.lockName}`, options);
     if (write.conflict) {
       if (write.ambiguous) {
-        ambiguousCleanup = {
+        const nextAmbiguousCleanup = {
           released,
           queueCleaned,
           sha: "",
           heldBy,
-          heldByRunUrl
+          heldByRunUrl,
+          reservationId: reservation && reservation.reservationId,
+          reservationState: reservation && reservation.state,
+          availableAt: reservation && reservation.availableAt,
+          runnerId: reservation && reservation.runnerId
         };
+        ambiguousCleanup = ambiguousCleanup
+          ? {
+              ...nextAmbiguousCleanup,
+              released: ambiguousCleanup.released || nextAmbiguousCleanup.released,
+              queueCleaned: ambiguousCleanup.queueCleaned || nextAmbiguousCleanup.queueCleaned,
+              reservationId: nextAmbiguousCleanup.reservationId || ambiguousCleanup.reservationId,
+              reservationState: nextAmbiguousCleanup.reservationState || ambiguousCleanup.reservationState,
+              availableAt: nextAmbiguousCleanup.availableAt || ambiguousCleanup.availableAt,
+              runnerId: nextAmbiguousCleanup.runnerId || ambiguousCleanup.runnerId
+            }
+          : nextAmbiguousCleanup;
       }
       await sleep(jitter(conflictDelayMs), { signal: options.apiOptions && options.apiOptions.signal });
       continue;
     }
 
-    return {
+    return reconcileAmbiguousCleanup({
       released,
       queueCleaned,
       sha: write.sha,
       heldBy,
-      heldByRunUrl
-    };
+      heldByRunUrl,
+      reservationId: reservation && reservation.reservationId,
+      reservationState: reservation && reservation.state,
+      availableAt: reservation && reservation.availableAt
+    }, state, write.sha, heldBy, heldByRunUrl);
   }
 
   throw new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
@@ -1306,7 +1559,16 @@ async function runCancellationCleanup(config, identity, cancellation) {
   }
 }
 
-function writeAcquireOutputs({ acquired, lockName, holderId, stateSha = "", waitMs, attempts, staleRecovered = false }) {
+function writeAcquireOutputs({
+  acquired,
+  lockName,
+  holderId,
+  stateSha = "",
+  waitMs,
+  attempts,
+  staleRecovered = false,
+  quarantineRecovered = false
+}) {
   writeOutput("acquired", acquired ? "true" : "false");
   writeOutput("lock-name", lockName);
   writeOutput("holder-id", holderId);
@@ -1314,6 +1576,7 @@ function writeAcquireOutputs({ acquired, lockName, holderId, stateSha = "", wait
   writeOutput("wait-ms", String(waitMs));
   writeOutput("attempts", String(attempts));
   writeOutput("stale-recovered", String(staleRecovered));
+  writeOutput("quarantine-recovered", String(quarantineRecovered));
 }
 
 function writeReapOutputs({ reaped, stateSha = "" }) {
@@ -1343,6 +1606,7 @@ async function acquire(config) {
     const deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
     let staleRecovered = false;
+    let quarantineRecovered = false;
     let lastObservation = null;
     let authFailureSince = null;
 
@@ -1369,10 +1633,14 @@ async function acquire(config) {
               `Runner serialization changed from ${lockConfig.runnerSerialization} to ${refreshed.runnerSerialization}.`
             );
           }
+          if (refreshed.resourceLifecycle !== lockConfig.resourceLifecycle) {
+            console.log(`Resource lifecycle changed from ${lockConfig.resourceLifecycle} to ${refreshed.resourceLifecycle}.`);
+          }
           lockConfig = refreshed;
           lockConfigReadAt = Date.now();
         }
         const { state, sha } = await readState(config, { apiOptions });
+        const observedSchemaVersion = state.schemaVersion;
         authFailureSince = null;
         throwIfCancellation(cancellation);
         const runnerSerialization = lockConfig.runnerSerialization || state.schemaVersion >= 3;
@@ -1390,6 +1658,24 @@ async function acquire(config) {
           }
           state.schemaVersion = 3;
           changed = true;
+        }
+        if (lockConfig.resourceLifecycle && state.schemaVersion < 4) {
+          if (observedSchemaVersion !== 3 || state.holders.length || state.queue.length) {
+            throw new Error(
+              "Cannot activate resource lifecycle until the lock is drained on schema 3; drain or complete migration before enabling it."
+            );
+          }
+          state.schemaVersion = 4;
+          state.reservations = [];
+          changed = true;
+        }
+        const resourceLifecycle = state.schemaVersion >= 4;
+        const expiredCooldowns = pruneExpiredCooldowns(state);
+        if (expiredCooldowns.length) {
+          changed = true;
+          for (const reservation of expiredCooldowns) {
+            console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
+          }
         }
         const staleness = new Map();
         for (const holder of state.holders) {
@@ -1415,7 +1701,8 @@ async function acquire(config) {
             stateSha: sha || "",
             waitMs,
             attempts,
-            staleRecovered
+            staleRecovered,
+            quarantineRecovered
           });
           appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
           console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
@@ -1465,6 +1752,23 @@ async function acquire(config) {
           state.holders = freshHolders;
           changed = true;
         }
+        if (resourceLifecycle) {
+          const uncertainHolders = [...staleHolders, ...(rerunReplacement ? [myHolder] : [])]
+            .filter((holder, index, holders) => holders.findIndex((candidate) => candidate.holderId === holder.holderId) === index);
+          for (const holder of uncertainHolders) {
+            const reason = rerunReplacement && holder.holderId === myHolder.holderId
+              ? "holder ownership moved to a newer run attempt without cleanup proof"
+              : `stale holder recovery: ${staleness.get(holder.holderId).reason}`;
+            const reservation = reservationFromHolder(holder, "quarantine", reason);
+            state.reservations.push(reservation);
+            console.log(`Quarantining holder ${holder.holderId} as reservation ${reservation.reservationId}: ${reason}.`);
+          }
+          if (uncertainHolders.length) {
+            state.holders = freshHolders;
+            changed = true;
+            recoveringStaleHolder = staleHolders.length > 0;
+          }
+        }
 
         const position = queuePosition(state, identity.holderId);
         if (state.holders.length) {
@@ -1495,17 +1799,34 @@ async function acquire(config) {
         // Slot admission: after ignoring stale holders, the first `freeSlots` queue
         // entries may each take a slot. Every waiter only ever admits itself; the CAS
         // write plus the verification read keep concurrent admissions consistent.
-        const freeSlots = lockConfig.maxHolders - freshHolders.length;
+        const reservations = resourceLifecycle ? state.reservations : [];
+        const matchingQuarantine = reservations.find(
+          (reservation) => reservation.state === "quarantine" && reservation.runnerId === identity.runnerId
+        );
+        const firstForRunner = state.queue.find((entry) => entry.runnerId === identity.runnerId);
+        const canRecoverQuarantine = Boolean(
+          matchingQuarantine && firstForRunner && firstForRunner.holderId === identity.holderId
+        );
+        const freeSlots = lockConfig.maxHolders - freshHolders.length - reservations.length;
+        const occupiedCapacity = [...freshHolders, ...reservations.map((reservation) => ({ runnerId: reservation.runnerId }))];
         const eligibleEntries = runnerSerialization
-          ? selectEligibleQueueEntries(freshHolders, state.queue, freeSlots)
+          ? selectEligibleQueueEntries(occupiedCapacity, state.queue, freeSlots)
           : state.queue.slice(0, Math.max(0, freeSlots));
-        const eligible = eligibleEntries.some((entry) => entry.holderId === identity.holderId);
-        if (freeSlots > 0 && eligible) {
+        const eligible = canRecoverQuarantine || eligibleEntries.some((entry) => entry.holderId === identity.holderId);
+        if ((freeSlots > 0 || canRecoverQuarantine) && eligible) {
           if (staleHolders.length) {
             recoveringStaleHolder = true;
             for (const holder of staleHolders) {
               console.log(`Recovering stale holder ${holder.holderId}: ${staleness.get(holder.holderId).reason}`);
             }
+          }
+          if (canRecoverQuarantine) {
+            console.log(
+              `Recovering quarantine ${matchingQuarantine.reservationId} on original runner ${identity.runnerId}.`
+            );
+            state.reservations = state.reservations.filter(
+              (reservation) => reservation.reservationId !== matchingQuarantine.reservationId
+            );
           }
           state.holders = [...freshHolders, holderFromIdentity(identity, config.leaseMinutes)];
           state.queue = state.queue.filter((entry) => entry.holderId !== identity.holderId);
@@ -1518,11 +1839,18 @@ async function acquire(config) {
               staleRecovered = true;
               recordPostCleanupNeeded();
             }
+            if (canRecoverQuarantine && write.ambiguous) {
+              quarantineRecovered = true;
+              recordPostCleanupNeeded();
+            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
           if (recoveringStaleHolder) {
             staleRecovered = true;
+          }
+          if (canRecoverQuarantine) {
+            quarantineRecovered = true;
           }
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
@@ -1531,7 +1859,7 @@ async function acquire(config) {
           if (
             !verifiedHolder ||
             (runnerSerialization &&
-              (verified.state.schemaVersion !== 3 ||
+              (verified.state.schemaVersion !== state.schemaVersion ||
                 verifiedHolder.runnerId !== identity.runnerId ||
                 verifiedHolder.runAttempt !== identity.runAttempt))
           ) {
@@ -1546,7 +1874,8 @@ async function acquire(config) {
             stateSha: write.sha,
             waitMs,
             attempts,
-            staleRecovered
+            staleRecovered,
+            quarantineRecovered
           });
           appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
           console.log(`Acquired ${config.lockName}.`);
@@ -1558,8 +1887,15 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
           if (write.conflict) {
+            if (recoveringStaleHolder && write.ambiguous) {
+              staleRecovered = true;
+              recordPostCleanupNeeded();
+            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
+          }
+          if (recoveringStaleHolder) {
+            staleRecovered = true;
           }
           recordPostCleanupNeeded();
         }
@@ -1604,7 +1940,8 @@ async function acquire(config) {
       holderId: identity.holderId,
       waitMs,
       attempts,
-      staleRecovered
+      staleRecovered,
+      quarantineRecovered
     });
     appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
     await cleanupAfterAcquireFailure(config, identity, "timeout", {
@@ -1647,7 +1984,14 @@ async function release(config) {
   }
   console.log(`::group::Release build lock ${config.lockName}`);
 
-  const result = await cleanupIdentity(config, identity);
+  const lockConfig = await readLockConfig(config);
+  const result = await cleanupIdentity(config, identity, {
+    resourceSafe: config.resourceSafe,
+    releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
+    reason: config.resourceSafe
+      ? "explicit release reported resource cleanup safe"
+      : "explicit release could not prove resource cleanup safe"
+  });
   writeReleaseOutputs(config, identity, result);
   const cleanupResult = cleanupResultName(result);
   if (result.heldBy) {
@@ -1664,14 +2008,14 @@ async function release(config) {
   }
 
   appendSummary(
-    cleanupResult === "released"
+    result.released
       ? `Released ${config.lockName}.`
       : cleanupResult === "queue-cleaned"
         ? `Cleaned queued request for ${config.lockName}.`
         : `No release needed for ${config.lockName}.`
   );
   console.log(
-    cleanupResult === "released"
+    result.released
       ? `Released ${config.lockName}.`
       : cleanupResult === "queue-cleaned"
         ? `Cleaned queued request for ${config.lockName}.`
@@ -1693,7 +2037,9 @@ async function postCleanup(config) {
     await ensureStateBranch(config);
     const result = await cleanupIdentity(config, identity, {
       maxAttempts: 3,
-      conflictDelayMs: 500
+      conflictDelayMs: 500,
+      resourceSafe: false,
+      reason: "post-action cleanup cannot prove external resource cleanup"
     });
     const cleanupResult = cleanupResultName(result);
     if (cleanupResult === "noop") {
@@ -1726,12 +2072,57 @@ async function runPostCleanup() {
 
 async function reap(config) {
   validateLockName(config.lockName);
+  config.operation = config.operation || "reap";
+  if (config.operation !== "reap" && config.operation !== "recover") {
+    throw new Error("operation must be reap or recover.");
+  }
   await ensureStateBranch(config);
   console.log(`::group::Reap stale build lock ${config.lockName}`);
   let ambiguousReap = false;
 
   for (let attempts = 1; attempts <= 10; attempts++) {
     const { state, sha } = await readState(config);
+    const expiredCooldowns = pruneExpiredCooldowns(state);
+    for (const reservation of expiredCooldowns) {
+      console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
+    }
+    if (config.operation === "recover") {
+      if (state.schemaVersion < 4) {
+        throw new Error("Manual reservation recovery requires schema 4 state.");
+      }
+      if (!config.resourceSafe) {
+        throw new Error("Manual reservation recovery requires resource-safe=true confirmation.");
+      }
+      if (!config.reservationId) {
+        throw new Error("Manual reservation recovery requires the exact reservation-id.");
+      }
+      const reservation = state.reservations.find((entry) => entry.reservationId === config.reservationId);
+      if (reservation && reservation.state === "cooldown" && ambiguousReap) {
+        writeReapOutputs({ reaped: true, stateSha: sha || "" });
+        appendSummary(`Moved quarantine ${config.reservationId} to cooldown for ${config.lockName}.`);
+        console.log("::endgroup::");
+        return;
+      }
+      if (!reservation || reservation.state !== "quarantine") {
+        throw new Error(`Active quarantine reservation ${config.reservationId} was not found.`);
+      }
+      const lockConfig = await readLockConfig(config);
+      reservation.state = "cooldown";
+      reservation.reason = "operator confirmed external resource cleanup";
+      reservation.availableAt = new Date(Date.now() + lockConfig.releaseCooldownSeconds * 1000).toISOString();
+      const write = await writeState(config, sha, state, `Recover reservation ${config.reservationId}`);
+      if (write.conflict) {
+        if (write.ambiguous) {
+          ambiguousReap = true;
+        }
+        await sleep(jitter(1000));
+        continue;
+      }
+      writeReapOutputs({ reaped: true, stateSha: write.sha });
+      appendSummary(`Moved quarantine ${config.reservationId} to cooldown for ${config.lockName}.`);
+      console.log("::endgroup::");
+      return;
+    }
     const beforeQueue = state.queue.length;
     const keptQueue = [];
     for (const entry of state.queue) {
@@ -1748,8 +2139,13 @@ async function reap(config) {
     for (const holder of state.holders) {
       const stale = await evaluateStale(holder, config.token);
       if (stale.stale) {
-        console.log(`Reaping holder ${holder.holderId}: ${stale.reason}.`);
+        console.log(`${state.schemaVersion >= 4 ? "Quarantining" : "Reaping"} holder ${holder.holderId}: ${stale.reason}.`);
         holderReaped = true;
+        if (state.schemaVersion >= 4) {
+          state.reservations.push(
+            reservationFromHolder(holder, "quarantine", `scheduled stale reaping: ${stale.reason}`)
+          );
+        }
       } else {
         console.log(`Keeping holder ${holder.holderId}: ${stale.reason}.`);
         keptHolders.push(holder);
@@ -1757,7 +2153,7 @@ async function reap(config) {
     }
     state.holders = keptHolders;
 
-    const changed = holderReaped || beforeQueue !== state.queue.length;
+    const changed = holderReaped || beforeQueue !== state.queue.length || expiredCooldowns.length > 0;
     if (!changed) {
       writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
       appendSummary(
@@ -1800,6 +2196,9 @@ function config() {
     holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
+    resourceSafe: booleanInput("resource-safe", false),
+    operation: input("operation", "reap"),
+    reservationId: input("reservation-id"),
     lockRepository,
     lockRepo,
     stateBranch: input("state-branch", "lock-state"),

@@ -65,7 +65,8 @@ const acquireOutputNames = [
   "state-sha",
   "wait-ms",
   "attempts",
-  "stale-recovered"
+  "stale-recovered",
+  "quarantine-recovered"
 ];
 
 const releaseOutputNames = [
@@ -76,7 +77,10 @@ const releaseOutputNames = [
   "holder-id",
   "state-sha",
   "held-by",
-  "held-by-run-url"
+  "held-by-run-url",
+  "reservation-id",
+  "reservation-state",
+  "available-at"
 ];
 
 const reapOutputNames = ["reaped", "state-sha"];
@@ -3959,6 +3963,32 @@ function semaphoreState(holders, queue = []) {
   };
 }
 
+function lifecycleReservation(holder, overrides = {}) {
+  return {
+    reservationId: `reservation-${holder.runnerId}`,
+    holderId: holder.holderId,
+    repository: holder.repository,
+    workflow: holder.workflow,
+    job: holder.job,
+    runId: holder.runId,
+    runAttempt: holder.runAttempt,
+    runUrl: holder.runUrl,
+    runnerId: holder.runnerId,
+    state: "quarantine",
+    reason: "cleanup outcome unknown",
+    createdAt: "2026-06-06T00:01:00.000Z",
+    ...overrides
+  };
+}
+
+function lifecycleState(holders = [], queue = [], reservations = []) {
+  return {
+    ...semaphoreState(holders, queue),
+    schemaVersion: 4,
+    reservations
+  };
+}
+
 function semaphoreConfig(overrides = {}) {
   return {
     token: "token",
@@ -4009,6 +4039,18 @@ test("committed lock config files are well-formed", () => {
         `${file} runnerSerialization must be a boolean when present`
       );
     }
+    if (Object.hasOwn(parsed, "resourceLifecycle")) {
+      assert.equal(typeof parsed.resourceLifecycle, "boolean", `${file} resourceLifecycle must be a boolean`);
+      assert.equal(parsed.runnerSerialization, true, `${file} lifecycle requires runnerSerialization=true`);
+    }
+    if (Object.hasOwn(parsed, "releaseCooldownSeconds")) {
+      assert.ok(
+        Number.isInteger(parsed.releaseCooldownSeconds) &&
+          parsed.releaseCooldownSeconds >= 1 &&
+          parsed.releaseCooldownSeconds <= 86400,
+        `${file} releaseCooldownSeconds must be an integer between 1 and 86400`
+      );
+    }
   }
 });
 
@@ -4027,6 +4069,25 @@ test("readLockConfig fails closed to a single holder", async (t) => {
       response: () => base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg"),
       maxHolders: 2,
       runnerSerialization: true
+    },
+    {
+      name: "resource lifecycle enabled",
+      response: () => base64Content({
+        maxHolders: 2,
+        runnerSerialization: true,
+        resourceLifecycle: true,
+        releaseCooldownSeconds: 420
+      }, "cfg"),
+      maxHolders: 2,
+      runnerSerialization: true,
+      resourceLifecycle: true,
+      releaseCooldownSeconds: 420
+    },
+    {
+      name: "resource lifecycle requires runner serialization",
+      response: () => base64Content({ maxHolders: 2, resourceLifecycle: true }, "cfg"),
+      maxHolders: 1,
+      warning: /runnerSerialization must also be true/
     },
     {
       name: "invalid runner serialization fails disabled",
@@ -4083,7 +4144,9 @@ test("readLockConfig fails closed to a single holder", async (t) => {
           });
           assert.deepEqual(lockConfig, {
             maxHolders: testCase.maxHolders,
-            runnerSerialization: testCase.runnerSerialization || false
+            runnerSerialization: testCase.runnerSerialization || false,
+            resourceLifecycle: testCase.resourceLifecycle || false,
+            releaseCooldownSeconds: testCase.releaseCooldownSeconds || 360
           });
           if (testCase.warning) {
             assert.match(logs.join("\n"), testCase.warning);
@@ -4170,7 +4233,7 @@ test("normalizeState rejects state files written by a newer schema", () => {
   assert.throws(
     () =>
       normalizeState(
-        { schemaVersion: 4, lock: "wallstop-organization-builds", holders: [], queue: [] },
+        { schemaVersion: 5, lock: "wallstop-organization-builds", holders: [], queue: [] },
         "wallstop-organization-builds"
       ),
     /unsupported/
@@ -5257,4 +5320,433 @@ test("stale evaluation reclaims when the run-status poll returns 401 after lease
       }
     );
   });
+});
+
+test("schema 4 reservations round-trip and malformed lifecycle state fails closed", async (t) => {
+  const holder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  const quarantine = lifecycleReservation(holder);
+  const cooldown = lifecycleReservation(holder, {
+    reservationId: "cooldown-a",
+    state: "cooldown",
+    availableAt: "2026-06-06T00:07:00.000Z"
+  });
+
+  for (const reservation of [quarantine, cooldown]) {
+    await t.test(`${reservation.state} round-trip`, () => {
+      const normalized = normalizeState(lifecycleState([], [], [reservation]), "wallstop-organization-builds");
+      assert.deepEqual(normalized.reservations, [reservation]);
+    });
+  }
+
+  const cases = [
+    { name: "missing reservations", mutate: (state) => delete state.reservations, error: /reservations.*array/ },
+    { name: "invalid state", mutate: (state) => { state.reservations[0].state = "free"; }, error: /invalid state/ },
+    { name: "cooldown without availability", mutate: (state) => { state.reservations[0].state = "cooldown"; }, error: /availableAt/ },
+    { name: "missing original metadata", mutate: (state) => { state.reservations[0].repository = ""; }, error: /original holder\/run metadata/ },
+    { name: "duplicate reservation id", mutate: (state) => { state.reservations.push({ ...state.reservations[0] }); }, error: /duplicate reservationId/ },
+    {
+      name: "duplicate reserved runner",
+      mutate: (state) => { state.reservations.push({ ...state.reservations[0], reservationId: "other-id", holderId: "other-holder" }); },
+      error: /multiple reservations on one runnerId/
+    },
+    {
+      name: "holder and reservation share runner",
+      state: lifecycleState([holder], [], [quarantine]),
+      error: /both holder and reservation/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, () => {
+      const state = testCase.state || lifecycleState([], [], [{ ...quarantine }]);
+      if (testCase.mutate) testCase.mutate(state);
+      assert.throws(() => normalizeState(state, "wallstop-organization-builds"), testCase.error);
+    });
+  }
+});
+
+test("schema 4 release transitions ownership to cooldown or quarantine", async (t) => {
+  for (const testCase of [
+    { resourceSafe: true, result: "cooldown-started", state: "cooldown", available: true },
+    { resourceSafe: false, result: "quarantined", state: "quarantine", available: false }
+  ]) {
+    await t.test(testCase.result, async () => {
+      const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+      let state = lifecycleState([held]);
+      await withTempFile(async (outputFile) => {
+        await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+              return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 360 }, "cfg");
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              if (options.method === "PUT") {
+                state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "released-sha" } });
+              }
+              return base64Content(state, "state-sha");
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, () => release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: testCase.resourceSafe })));
+        });
+        const outputs = readEnvironmentFile(outputFile);
+        assert.equal(outputs.released, "true");
+        assert.equal(outputs["cleanup-result"], testCase.result);
+        assert.equal(outputs["reservation-state"], testCase.state);
+        assert.ok(outputs["reservation-id"]);
+        assert.equal(Boolean(outputs["available-at"]), testCase.available);
+      });
+      assert.equal(state.holders.length, 0);
+      assert.equal(state.reservations.length, 1);
+      assert.equal(state.reservations[0].runnerId, "runner-a");
+      assert.equal(state.reservations[0].state, testCase.state);
+    });
+  }
+});
+
+test("ambiguous schema 4 release reports the reservation persisted by a concurrent cleanup", async () => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  const concurrentReservation = lifecycleReservation(held, { reservationId: "concurrent-quarantine" });
+  let state = lifecycleState([held]);
+  let putCalls = 0;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+              if (putCalls === 1) {
+                state = lifecycleState([], [], [concurrentReservation]);
+                return jsonResponse(500, { message: "ambiguous mutation response" });
+              }
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            return base64Content(state, state.holders.length ? "before" : "after-concurrent-release");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: true })));
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["cleanup-result"], "quarantined");
+    assert.equal(outputs["reservation-id"], "concurrent-quarantine");
+    assert.equal(outputs["reservation-state"], "quarantine");
+    assert.equal(outputs["available-at"], "");
+  });
+  assert.equal(putCalls, 2);
+});
+
+test("ambiguous schema 4 release remains released when its cooldown expires before reconciliation", async () => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  const expiredCooldown = lifecycleReservation(held, {
+    reservationId: "expired-concurrent-cooldown",
+    state: "cooldown",
+    availableAt: "2026-06-06T00:02:00.000Z"
+  });
+  let state = lifecycleState([held]);
+  let putCalls = 0;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              putCalls++;
+              if (putCalls === 1) {
+                state = lifecycleState([], [], [expiredCooldown]);
+                return jsonResponse(500, { message: "ambiguous mutation response" });
+              }
+              if (putCalls === 2 || putCalls === 4) return jsonResponse(409, { message: "sha does not match" });
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(500, { message: "ambiguous prune response" });
+            }
+            return base64Content(state, state.holders.length ? "before" : "after-concurrent-release");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: true })));
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs["reservation-id"], "");
+  });
+  assert.equal(putCalls, 4);
+  assert.deepEqual(state.reservations, []);
+});
+
+test("schema 4 quarantine can be reclaimed only on the same runner", async () => {
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([], [], [lifecycleReservation(prior)]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "acquired-sha" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, () => acquire(semaphoreConfig({ runnerId: "runner-a" })));
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "true");
+    assert.equal(outputs["quarantine-recovered"], "true");
+  });
+
+  assert.equal(state.reservations.length, 0);
+  assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-a"]);
+});
+
+test("schema 4 quarantine never expires or admits a different runner during config outage", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-06-06T00:01:00.000Z");
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([], [], [lifecycleReservation(prior)]);
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+  try {
+    await withActionEnv(semaphoreActionEnv, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return jsonResponse(404, { message: "config unavailable" });
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "write-sha" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: "runner-b", timeoutMinutes: 1 })),
+            /Timed out waiting/
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(state.holders.length, 0);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.deepEqual(state.queue, []);
+});
+
+test("schema 4 cooldown blocks cross-runner admission until it expires", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-06-06T00:01:00.000Z");
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([], [], [lifecycleReservation(prior, {
+    state: "cooldown",
+    availableAt: "2026-06-06T00:07:00.000Z"
+  })]);
+  Date.now = () => now;
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              now = Date.parse("2026-06-06T00:07:01.000Z");
+              return jsonResponse(200, { content: { sha: "write-sha" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await withImmediateTimers(() => acquire(semaphoreConfig({ runnerId: "runner-b", pollSeconds: 1, timeoutMinutes: 10 })));
+        });
+      });
+      assert.equal(readEnvironmentFile(outputFile).acquired, "true");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(state.reservations.length, 0);
+  assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-b"]);
+});
+
+test("manual confirmed recovery moves an exact quarantine into cooldown", async () => {
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([], [], [lifecycleReservation(prior)]);
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ releaseCooldownSeconds: 360 }, "cfg");
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "recovered-sha" } });
+          }
+          return base64Content(state, "state-sha");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, () => reap(semaphoreConfig({ operation: "recover", reservationId: "reservation-runner-a", resourceSafe: true })));
+    });
+  });
+  assert.equal(state.reservations[0].state, "cooldown");
+  assert.ok(Date.parse(state.reservations[0].availableAt) > Date.now());
+});
+
+test("manual recovery rejects missing proof and non-active reservation IDs", async (t) => {
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  const cases = [
+    { name: "missing proof", resourceSafe: false, reservationId: "reservation-runner-a", error: /resource-safe=true/ },
+    { name: "wrong id", resourceSafe: true, reservationId: "wrong-id", error: /was not found/ },
+    {
+      name: "already in cooldown",
+      resourceSafe: true,
+      reservationId: "reservation-runner-a",
+      cooldown: true,
+      error: /was not found/
+    }
+  ];
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const reservation = lifecycleReservation(prior, testCase.cooldown ? {
+        state: "cooldown",
+        availableAt: "2999-01-01T00:00:00.000Z"
+      } : {});
+      const state = lifecycleState([], [], [reservation]);
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) return base64Content(state, "state-sha");
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () => reap(semaphoreConfig({
+            operation: "recover",
+            reservationId: testCase.reservationId,
+            resourceSafe: testCase.resourceSafe
+          })),
+          testCase.error
+        );
+      });
+    });
+  }
+});
+
+test("resource lifecycle activation upgrades only drained schema 3 state", async (t) => {
+  const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const queued = withRunner(semaphoreQueueEntry("other/repo", "888", "playmode"), "runner-b");
+  for (const testCase of [
+    { name: "drained state upgrades", state: { ...semaphoreState([]), schemaVersion: 3 }, error: null },
+    { name: "schema 2 cannot skip migration stage", state: semaphoreState([]), error: /drain/ },
+    { name: "active holder blocks upgrade", state: { ...semaphoreState([active]), schemaVersion: 3 }, error: /drain/ },
+    { name: "queued request blocks upgrade", state: { ...semaphoreState([], [queued]), schemaVersion: 3 }, error: /drain/ }
+  ]) {
+    await t.test(testCase.name, async () => {
+      let state = structuredClone(testCase.state);
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "write-sha" } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          if (parsed.pathname.includes("/actions/runs/")) return jsonResponse(200, { status: "in_progress" });
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          const operation = () => acquire(semaphoreConfig({ runnerId: "runner-a" }));
+          if (testCase.error) await assert.rejects(operation, testCase.error);
+          else await operation();
+        });
+      });
+      if (!testCase.error) {
+        assert.equal(state.schemaVersion, 4);
+        assert.deepEqual(state.reservations, []);
+      }
+    });
+  }
+});
+
+test("schema 4 scheduled reaping quarantines stale holders", async () => {
+  const stale = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  let state = lifecycleState([stale]);
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+    if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+      if (options.method === "PUT") {
+        state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+        return jsonResponse(200, { content: { sha: "reaped-sha" } });
+      }
+      return base64Content(state, "state-sha");
+    }
+    if (parsed.pathname === "/repos/other/repo/actions/runs/999") return jsonResponse(200, { status: "completed" });
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, () => reap(semaphoreConfig()));
+  assert.equal(state.holders.length, 0);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.equal(state.reservations[0].runnerId, "runner-a");
+});
+
+test("schema 4 post cleanup quarantines held ownership", async () => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  let state = lifecycleState([held]);
+  await withActionEnv({ ...semaphoreActionEnv, STATE_build_lock_cleanup: "enabled" }, async () => {
+    await withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        if (options.method === "PUT") {
+          state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+          return jsonResponse(200, { content: { sha: "cleanup-sha" } });
+        }
+        return base64Content(state, "state-sha");
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, () => postCleanup(semaphoreConfig({ runnerId: "runner-a" })));
+  });
+  assert.equal(state.holders.length, 0);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.match(state.reservations[0].reason, /post-action cleanup/);
 });
