@@ -40,7 +40,7 @@ section, guard every licensed step on the acquire output, and release with
     runner-id: ${{ runner.name }}
     timeout-minutes: "180"
   env:
-    BUILD_LOCK_APP_ID: ${{ vars.BUILD_LOCK_APP_ID }}
+    BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 
 - name: Run Unity Test Runner
@@ -55,7 +55,7 @@ section, guard every licensed step on the acquire output, and release with
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
   env:
-    BUILD_LOCK_APP_ID: ${{ vars.BUILD_LOCK_APP_ID }}
+    BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
 ```
 
