@@ -949,7 +949,11 @@ function selectEligibleQueueEntries(holders, queue, freeSlots) {
 
 function identityIsNewer(existing, incoming, context) {
   if (!/^[1-9][0-9]*$/.test(existing.runAttempt) || !/^[1-9][0-9]*$/.test(incoming.runAttempt)) {
-    throw new Error(`${context} ${incoming.holderId} has a non-numeric run attempt; refusing ownership transfer.`);
+    throw new Error(
+      `${context} ${incoming.holderId} has invalid run attempts ` +
+        `(stored=${JSON.stringify(existing.runAttempt)}, incoming=${JSON.stringify(incoming.runAttempt)}); ` +
+        "expected positive decimal integers."
+    );
   }
   const storedAttempt = BigInt(existing.runAttempt);
   const incomingAttempt = BigInt(incoming.runAttempt);
