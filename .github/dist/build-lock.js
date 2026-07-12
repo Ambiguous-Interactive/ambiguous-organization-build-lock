@@ -2,13 +2,16 @@
 "use strict";
 
 const fs = require("fs");
+const crypto = require("crypto");
 
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
-// Schema 2 replaces the single `holder` with a `holders` array so a lock can act as a
-// counting semaphore. A legacy `holder` mirror (the first slot) is still written so
-// pre-semaphore clients keep waiting conservatively instead of seeing a free lock.
-const SCHEMA_VERSION = 2;
+// Schema 2 replaces the single `holder` with a `holders` array. Schema 3 adds a
+// physical runner identity so one machine cannot consume multiple licensed slots.
+// Writes stay on schema 2 until the reviewed lock configuration activates runner
+// serialization; the upgrade is then one-way so an auth/config outage cannot weaken it.
+const DEFAULT_SCHEMA_VERSION = 2;
+const MAX_SCHEMA_VERSION = 3;
 const DEFAULT_MAX_HOLDERS = 1;
 const MAX_HOLDERS_CAP = 64;
 const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
@@ -16,6 +19,7 @@ const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
+const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 
 function input(name, fallback = "") {
@@ -44,13 +48,158 @@ function integerInput(name, fallback, minimum = 1) {
   return value;
 }
 
-function token() {
-  const value = process.env.BUILD_LOCK_TOKEN || input("token");
+function base64Url(value) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function maskSecret(value) {
   if (!value) {
-    throw new Error("BUILD_LOCK_TOKEN is required.");
+    return;
   }
-  console.log(`::add-mask::${value}`);
-  return value;
+  const escaped = String(value).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  console.log(`::add-mask::${escaped}`);
+}
+
+function createAppJwt(appId, privateKey, now = Date.now()) {
+  const nowSeconds = Math.floor(now / 1000);
+  const encodedHeader = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const encodedPayload = base64Url(
+    JSON.stringify({ iat: nowSeconds - 60, exp: nowSeconds + 9 * 60, iss: String(appId) })
+  );
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(signingInput), privateKey).toString("base64url");
+  const jwt = `${signingInput}.${signature}`;
+  return jwt;
+}
+
+function createGitHubAppAuth({ appId, privateKey, owner, now = () => Date.now() }) {
+  const normalizedPrivateKey = String(privateKey).includes("\n")
+    ? String(privateKey).trim()
+    : String(privateKey).replace(/\\n/g, "\n").trim();
+  let keyObject;
+  try {
+    keyObject = crypto.createPrivateKey(normalizedPrivateKey);
+  } catch (_error) {
+    throw new Error("BUILD_LOCK_APP_PRIVATE_KEY is not a valid private key.");
+  }
+  let installationId = null;
+  let cachedToken = null;
+  let sharedRefresh = null;
+
+  async function jwtApi(method, path, body, signal) {
+    return api(method, path, body, createAppJwt(appId, keyObject, now()), { maxAttempts: 3, signal });
+  }
+
+  async function lookupInstallation(signal) {
+    const installation = await jwtApi(
+      "GET",
+      `/orgs/${encodeURIComponent(owner)}/installation`,
+      undefined,
+      signal
+    );
+    installationId = installation && installation.id;
+    if (!installationId) {
+      throw new Error(`GitHub App installation for organization ${owner} did not return an installation id.`);
+    }
+  }
+
+  async function mintToken(signal) {
+    if (!installationId) {
+      await lookupInstallation(signal);
+    }
+    let result;
+    try {
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, {}, signal);
+    } catch (error) {
+      if (error.status !== 404) {
+        throw error;
+      }
+      installationId = null;
+      await lookupInstallation(signal);
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, {}, signal);
+    }
+    const expiresAt = Date.parse(result && result.expires_at);
+    if (!result || !result.token || !Number.isFinite(expiresAt) || expiresAt <= now()) {
+      throw new Error("GitHub App installation token response was missing a valid token or expiry.");
+    }
+    maskSecret(result.token);
+    cachedToken = { value: result.token, expiresAt };
+    return cachedToken.value;
+  }
+
+  function waitForRefresh(refresh, signal) {
+    throwIfAborted(signal);
+    refresh.waiters++;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value, aborted = false) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (signal) {
+          signal.removeEventListener("abort", onAbort);
+        }
+        refresh.waiters--;
+        if (aborted && refresh.waiters === 0 && !refresh.controller.signal.aborted) {
+          refresh.controller.abort(value);
+        }
+        callback(value);
+      };
+      const onAbort = () => finish(reject, abortReason(signal), true);
+      if (signal) {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      refresh.promise.then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error)
+      );
+    });
+  }
+
+  return {
+    renewable: true,
+    async getToken(options = {}) {
+      throwIfAborted(options.signal);
+      if (cachedToken && now() + APP_TOKEN_REFRESH_MS < cachedToken.expiresAt) {
+        return cachedToken.value;
+      }
+      if (!sharedRefresh) {
+        const refresh = { controller: new AbortController(), promise: null, waiters: 0 };
+        refresh.promise = mintToken(refresh.controller.signal).finally(() => {
+          if (sharedRefresh === refresh) {
+            sharedRefresh = null;
+          }
+        });
+        sharedRefresh = refresh;
+      }
+      return waitForRefresh(sharedRefresh, options.signal);
+    },
+    invalidateToken(rejectedToken) {
+      if (cachedToken && cachedToken.value === rejectedToken) {
+        cachedToken = null;
+      }
+    }
+  };
+}
+
+function credential(lockRepo) {
+  const appId = String(process.env.BUILD_LOCK_APP_ID || "").trim();
+  const privateKey = process.env.BUILD_LOCK_APP_PRIVATE_KEY || "";
+  const legacyToken = process.env.BUILD_LOCK_TOKEN || input("token");
+  if (Boolean(appId) !== Boolean(privateKey)) {
+    throw new Error("BUILD_LOCK_APP_ID and BUILD_LOCK_APP_PRIVATE_KEY must be provided together.");
+  }
+  if (appId && privateKey) {
+    return createGitHubAppAuth({ appId, privateKey, owner: lockRepo.owner });
+  }
+  if (legacyToken) {
+    maskSecret(legacyToken);
+    return legacyToken;
+  }
+  throw new Error(
+    "Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY, or temporarily provide BUILD_LOCK_TOKEN."
+  );
 }
 
 function validateLockName(lockName) {
@@ -309,10 +458,28 @@ async function api(method, path, body, authToken, options = {}) {
   const retry = apiRetryOptions(options);
   const mutationMethod = method === "PUT";
   let unknownOutcomeMutationFailure = false;
+  let renewableRefreshUsed = false;
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
       throwIfAborted(retry.signal);
-      const { response, data, text } = await fetchApi(method, path, body, authToken, retry);
+      let requestToken =
+        authToken && typeof authToken.getToken === "function"
+          ? await authToken.getToken({ signal: retry.signal })
+          : authToken;
+      let result = await fetchApi(method, path, body, requestToken, retry);
+      if (
+        result.response.status === 401 &&
+        authToken &&
+        authToken.renewable &&
+        !renewableRefreshUsed &&
+        typeof authToken.invalidateToken === "function"
+      ) {
+        renewableRefreshUsed = true;
+        authToken.invalidateToken(requestToken);
+        requestToken = await authToken.getToken({ signal: retry.signal });
+        result = await fetchApi(method, path, body, requestToken, retry);
+      }
+      const { response, data, text } = result;
       if (response.ok) {
         return data;
       }
@@ -398,21 +565,22 @@ async function ensureStateBranch(config, options = {}) {
   }
 }
 
-function emptyState(lockName) {
+function emptyState(lockName, schemaVersion = DEFAULT_SCHEMA_VERSION) {
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion,
     lock: lockName,
+    holder: null,
     holders: [],
     queue: [],
     updatedAt: nowIso()
   };
 }
 
-function normalizeEntry(entry) {
+function normalizeEntry(entry, schemaVersion = DEFAULT_SCHEMA_VERSION) {
   if (!entry || typeof entry !== "object") {
     return null;
   }
-  return {
+  const normalized = {
     holderId: String(entry.holderId || ""),
     repository: String(entry.repository || ""),
     workflow: String(entry.workflow || ""),
@@ -422,10 +590,17 @@ function normalizeEntry(entry) {
     runUrl: String(entry.runUrl || ""),
     queuedAt: String(entry.queuedAt || entry.acquiredAt || nowIso())
   };
+  if (schemaVersion >= 3) {
+    normalized.runnerId = String(entry.runnerId || "").trim();
+    if (!normalized.runnerId) {
+      throw new Error(`Schema ${schemaVersion} entry ${normalized.holderId || "<unknown>"} is missing runnerId.`);
+    }
+  }
+  return normalized;
 }
 
-function normalizeHolder(holder) {
-  const entry = normalizeEntry(holder);
+function normalizeHolder(holder, schemaVersion = DEFAULT_SCHEMA_VERSION) {
+  const entry = normalizeEntry(holder, schemaVersion);
   if (!entry) {
     return null;
   }
@@ -437,25 +612,71 @@ function normalizeHolder(holder) {
 }
 
 function normalizeState(raw, lockName) {
-  const state = raw && typeof raw === "object" ? raw : emptyState(lockName);
-  if (state.lock && state.lock !== lockName) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`State file for ${lockName} must contain a JSON object.`);
+  }
+  const state = raw;
+  if (state.lock !== lockName) {
     throw new Error(`State file lock mismatch: expected ${lockName}, found ${state.lock}`);
   }
-  const schemaVersion = Number(state.schemaVersion);
-  if (Number.isFinite(schemaVersion) && schemaVersion > SCHEMA_VERSION) {
+  const parsedSchemaVersion = state.schemaVersion === undefined ? 1 : Number(state.schemaVersion);
+  if (!Number.isInteger(parsedSchemaVersion) || parsedSchemaVersion < 1 || parsedSchemaVersion > MAX_SCHEMA_VERSION) {
     throw new Error(
-      `State file schema ${schemaVersion} for ${lockName} is newer than supported schema ${SCHEMA_VERSION}; ` +
-        "update the build-lock actions before touching this lock."
+      `State file schema ${String(state.schemaVersion)} for ${lockName} is unsupported; ` +
+        `expected an integer from 1 through ${MAX_SCHEMA_VERSION}.`
     );
   }
+  const schemaVersion = parsedSchemaVersion >= 3 ? 3 : DEFAULT_SCHEMA_VERSION;
+  if (state.queue !== undefined && !Array.isArray(state.queue)) {
+    throw new Error(`State file queue for ${lockName} must be an array.`);
+  }
+  if (parsedSchemaVersion >= 2 && !Array.isArray(state.holders)) {
+    throw new Error(`State file holders for schema ${parsedSchemaVersion} must be an array.`);
+  }
+  if (parsedSchemaVersion >= 2 && !Object.hasOwn(state, "holder")) {
+    throw new Error(`State file for schema ${parsedSchemaVersion} must contain the legacy holder mirror.`);
+  }
+  if (parsedSchemaVersion === 1 && !Object.hasOwn(state, "holder")) {
+    throw new Error(`Schema 1 state for ${lockName} must contain a holder field.`);
+  }
+  const rawHolders = Array.isArray(state.holders) ? state.holders : [];
+  const rawQueue = Array.isArray(state.queue) ? state.queue : [];
+  for (const [kind, entries] of [["holder", rawHolders], ["queue", rawQueue]]) {
+    if (entries.some((entry) => !entry || typeof entry !== "object" || !String(entry.holderId || "").trim())) {
+      throw new Error(`${kind} entries for ${lockName} must be objects with a non-empty holderId.`);
+    }
+  }
+  if (
+    state.holder !== undefined &&
+    state.holder !== null &&
+    (typeof state.holder !== "object" || !String(state.holder.holderId || "").trim())
+  ) {
+    throw new Error(`Legacy holder for ${lockName} must be null or an object with a non-empty holderId.`);
+  }
+  if (parsedSchemaVersion >= 2) {
+    const mirrorFields = [
+      "holderId", "repository", "workflow", "job", "runId", "runAttempt", "runUrl",
+      "queuedAt", "acquiredAt", "expiresAt", ...(schemaVersion >= 3 ? ["runnerId"] : [])
+    ];
+    const mirrorMatches = rawHolders.length
+      ? state.holder && mirrorFields.every((field) => String(state.holder[field] || "") === String(rawHolders[0][field] || ""))
+      : state.holder === null;
+    if (!mirrorMatches) {
+      throw new Error(`Legacy holder mirror for ${lockName} must match the first holder or be null when empty.`);
+    }
+  }
+  const rawHolderIds = rawHolders.map((holder) => String((holder && holder.holderId) || "")).filter(Boolean);
+  if (new Set(rawHolderIds).size !== rawHolderIds.length) {
+    throw new Error(`State file holders for ${lockName} contain duplicate holderId values.`);
+  }
   const queue = Array.isArray(state.queue)
-    ? state.queue.map(normalizeEntry).filter((entry) => entry && entry.holderId)
+    ? state.queue.map((entry) => normalizeEntry(entry, schemaVersion)).filter((entry) => entry && entry.holderId)
     : [];
   // Merge the schema-2 holders array with the legacy/mirrored single holder and dedupe;
   // schema-1 files carry only `holder`, schema-2 files mirror holders[0] into `holder`.
   const seenHolderIds = new Set();
   const holders = [...(Array.isArray(state.holders) ? state.holders : []), state.holder]
-    .map(normalizeHolder)
+    .map((holder) => normalizeHolder(holder, schemaVersion))
     .filter((holder) => holder && holder.holderId)
     .filter((holder) => {
       if (seenHolderIds.has(holder.holderId)) {
@@ -464,8 +685,18 @@ function normalizeState(raw, lockName) {
       seenHolderIds.add(holder.holderId);
       return true;
     });
+  if (schemaVersion >= 3) {
+    const activeRunnerIds = holders.map((holder) => holder.runnerId);
+    if (new Set(activeRunnerIds).size !== activeRunnerIds.length) {
+      throw new Error(`Schema 3 state for ${lockName} contains multiple active holders on one runnerId.`);
+    }
+    const queueHolderIds = queue.map((entry) => entry.holderId);
+    if (new Set(queueHolderIds).size !== queueHolderIds.length) {
+      throw new Error(`Schema 3 queue for ${lockName} contains duplicate holderId values.`);
+    }
+  }
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion,
     lock: lockName,
     holders,
     queue,
@@ -474,6 +705,7 @@ function normalizeState(raw, lockName) {
 }
 
 function stableState(state) {
+  const schemaVersion = state.schemaVersion >= 3 ? 3 : DEFAULT_SCHEMA_VERSION;
   const holders = state.holders.map((holder) => ({
     holderId: holder.holderId,
     repository: holder.repository,
@@ -484,10 +716,11 @@ function stableState(state) {
     runUrl: holder.runUrl,
     queuedAt: holder.queuedAt,
     acquiredAt: holder.acquiredAt,
-    expiresAt: holder.expiresAt
+    expiresAt: holder.expiresAt,
+    ...(schemaVersion >= 3 ? { runnerId: holder.runnerId } : {})
   }));
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion,
     lock: state.lock,
     // Legacy mirror: pre-semaphore clients read `holder` and wait while it is set. They
     // can only under-admit, never over-admit; see the max-holders rollout note in README.
@@ -501,7 +734,8 @@ function stableState(state) {
       runId: entry.runId,
       runAttempt: entry.runAttempt,
       runUrl: entry.runUrl,
-      queuedAt: entry.queuedAt
+      queuedAt: entry.queuedAt,
+      ...(schemaVersion >= 3 ? { runnerId: entry.runnerId } : {})
     })),
     updatedAt: state.updatedAt
   };
@@ -590,6 +824,19 @@ function normalizeMaxHolders(raw, sourcePath) {
   return value;
 }
 
+function normalizeRunnerSerialization(raw, sourcePath) {
+  if (raw === undefined || raw === null) {
+    return false;
+  }
+  if (typeof raw !== "boolean") {
+    console.log(
+      `::warning::Ignoring invalid runnerSerialization=${JSON.stringify(raw)} in ${sourcePath}; expected a boolean.`
+    );
+    return null;
+  }
+  return raw;
+}
+
 function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
@@ -620,14 +867,14 @@ async function readLockConfig(config, options = {}) {
     data = await api("GET", `/repos/${owner}/${repo}/contents/${encodedPath}`, undefined, config.token, options.apiOptions);
   } catch (error) {
     if (error.status === 404) {
-      return { maxHolders: DEFAULT_MAX_HOLDERS };
+      return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
     }
     if (configReadCanFailClosed(error, options)) {
       console.log(
         `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
           `using max-holders=${DEFAULT_MAX_HOLDERS}.`
       );
-      return { maxHolders: DEFAULT_MAX_HOLDERS };
+      return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
     }
     throw error;
   }
@@ -639,9 +886,16 @@ async function readLockConfig(config, options = {}) {
       `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
         `using max-holders=${DEFAULT_MAX_HOLDERS}.`
     );
-    return { maxHolders: DEFAULT_MAX_HOLDERS };
+    return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
   }
-  return { maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath) };
+  const runnerSerialization = normalizeRunnerSerialization(parsed && parsed.runnerSerialization, configPath);
+  if (runnerSerialization === null) {
+    return { maxHolders: DEFAULT_MAX_HOLDERS, runnerSerialization: false };
+  }
+  return {
+    maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath),
+    runnerSerialization
+  };
 }
 
 function currentIdentity(config) {
@@ -660,6 +914,7 @@ function currentIdentity(config) {
     job,
     runId,
     runAttempt,
+    runnerId: String(config.runnerId || "").trim(),
     runUrl: `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${repository}/actions/runs/${runId}`,
     queuedAt: nowIso()
   };
@@ -672,6 +927,45 @@ function holderFromIdentity(identity, leaseMinutes) {
     acquiredAt,
     expiresAt: new Date(Date.parse(acquiredAt) + leaseMinutes * 60 * 1000).toISOString()
   };
+}
+
+function selectEligibleQueueEntries(holders, queue, freeSlots) {
+  if (freeSlots <= 0) {
+    return [];
+  }
+  const occupiedRunnerIds = new Set(holders.map((holder) => holder.runnerId));
+  const selected = [];
+  for (const entry of queue) {
+    if (selected.length >= freeSlots) {
+      break;
+    }
+    if (!occupiedRunnerIds.has(entry.runnerId)) {
+      selected.push(entry);
+      occupiedRunnerIds.add(entry.runnerId);
+    }
+  }
+  return selected;
+}
+
+function identityIsNewer(existing, incoming, context) {
+  if (!/^[1-9][0-9]*$/.test(existing.runAttempt) || !/^[1-9][0-9]*$/.test(incoming.runAttempt)) {
+    throw new Error(`${context} ${incoming.holderId} has a non-numeric run attempt; refusing ownership transfer.`);
+  }
+  const storedAttempt = BigInt(existing.runAttempt);
+  const incomingAttempt = BigInt(incoming.runAttempt);
+  if (incomingAttempt < storedAttempt) {
+    throw new Error(
+      `${context} ${incoming.holderId} is already owned by newer run attempt ${existing.runAttempt}; ` +
+        `refusing stale attempt ${incoming.runAttempt}.`
+    );
+  }
+  if (incomingAttempt === storedAttempt && existing.runnerId !== incoming.runnerId) {
+    throw new Error(
+      `${context} ${incoming.holderId} is already assigned to runner ${existing.runnerId} for this run attempt; ` +
+        `refusing conflicting identity from ${incoming.runnerId}.`
+    );
+  }
+  return incomingAttempt > storedAttempt;
 }
 
 function isActiveRunStatus(status) {
@@ -700,7 +994,7 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
       } catch (repoError) {
         if (repoError.status === 403 || repoError.status === 404) {
           throw new Error(
-            `Unable to verify repository access for ${repository}. Ensure BUILD_LOCK_TOKEN can read this repository and has actions: read access. ${repoError.message}`
+            `Unable to verify repository access for ${repository}. Ensure the build-lock credentials can read this repository and have actions: read access. ${repoError.message}`
           );
         }
         throw repoError;
@@ -709,7 +1003,7 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
     }
     if (error.status === 403) {
       throw new Error(
-        `Unable to read workflow run ${repository}/${runId}. Ensure BUILD_LOCK_TOKEN has actions: read access. ${error.message}`
+        `Unable to read workflow run ${repository}/${runId}. Ensure the build-lock credentials have actions: read access. ${error.message}`
       );
     }
     // A 401 on this READ-ONLY holder-status poll is almost always transient: a brief GitHub
@@ -723,7 +1017,7 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
       console.log(
         `::warning::Holder-status poll for ${repository}/${runId} returned HTTP 401 ` +
           `(${oneLine(error.message)}); treating holder status as unknown and continuing to wait ` +
-          `under the existing lease. Verify BUILD_LOCK_TOKEN lifetime/scope if this persists.`
+          `under the existing lease. Verify the build-lock credential permissions if this persists.`
       );
       return { known: false, status: "", conclusion: "" };
     }
@@ -1022,20 +1316,44 @@ async function acquire(config) {
           if (refreshed.maxHolders !== lockConfig.maxHolders) {
             console.log(`Max concurrent holders changed from ${lockConfig.maxHolders} to ${refreshed.maxHolders}.`);
           }
+          if (refreshed.runnerSerialization !== lockConfig.runnerSerialization) {
+            console.log(
+              `Runner serialization changed from ${lockConfig.runnerSerialization} to ${refreshed.runnerSerialization}.`
+            );
+          }
           lockConfig = refreshed;
           lockConfigReadAt = Date.now();
         }
         const { state, sha } = await readState(config, { apiOptions });
         authFailureSince = null;
         throwIfCancellation(cancellation);
+        const runnerSerialization = lockConfig.runnerSerialization || state.schemaVersion >= 3;
+        if (runnerSerialization && !identity.runnerId) {
+          throw new Error(
+            "runner-id is required after runner serialization is activated; pass the same physical runner identity to acquire and release."
+          );
+        }
+        let changed = false;
+        if (lockConfig.runnerSerialization && state.schemaVersion < 3) {
+          if (state.holders.length || state.queue.length) {
+            throw new Error(
+              "Cannot activate runner serialization while schema 2 has holders or queued requests; drain the lock before enabling it."
+            );
+          }
+          state.schemaVersion = 3;
+          changed = true;
+        }
         const staleness = new Map();
         for (const holder of state.holders) {
           staleness.set(holder.holderId, await evaluateStale(holder, config.token, { apiOptions }));
           throwIfCancellation(cancellation);
         }
-        let changed = false;
         const myHolder = state.holders.find((holder) => holder.holderId === identity.holderId);
-        if (myHolder && !staleness.get(identity.holderId).stale) {
+        let rerunReplacement = false;
+        if (runnerSerialization && myHolder) {
+          rerunReplacement = identityIsNewer(myHolder, identity, "Holder");
+        }
+        if (myHolder && !rerunReplacement && !staleness.get(identity.holderId).stale) {
           recordPostCleanupNeeded();
           const waitMs = Date.now() - started;
           const position = queuePosition(state, identity.holderId);
@@ -1066,6 +1384,15 @@ async function acquire(config) {
             throwIfCancellation(cancellation);
             console.log(`Dropping completed queue entry ${entry.holderId}.`);
             changed = true;
+          } else if (entry.holderId === identity.holderId) {
+            if (runnerSerialization) {
+              identityIsNewer(entry, identity, "Queued request");
+            }
+            const refreshedEntry = { ...identity, queuedAt: entry.queuedAt };
+            if (entry.runnerId !== refreshedEntry.runnerId || entry.runAttempt !== refreshedEntry.runAttempt) {
+              changed = true;
+            }
+            state.queue.push(refreshedEntry);
           } else {
             state.queue.push(entry);
           }
@@ -1078,8 +1405,18 @@ async function acquire(config) {
           recordPostCleanupNeeded();
         }
 
-        const freshHolders = state.holders.filter((holder) => !staleness.get(holder.holderId).stale);
+        const freshHolders = state.holders.filter(
+          (holder) => !staleness.get(holder.holderId).stale && holder.holderId !== (rerunReplacement ? identity.holderId : "")
+        );
         const staleHolders = state.holders.filter((holder) => staleness.get(holder.holderId).stale);
+        if (rerunReplacement) {
+          console.log(
+            `Moving rerun ${identity.holderId} from attempt ${myHolder.runAttempt}/${myHolder.runnerId} ` +
+              `to ${identity.runAttempt}/${identity.runnerId}; re-evaluating admission.`
+          );
+          state.holders = freshHolders;
+          changed = true;
+        }
 
         const position = queuePosition(state, identity.holderId);
         if (state.holders.length) {
@@ -1111,8 +1448,11 @@ async function acquire(config) {
         // entries may each take a slot. Every waiter only ever admits itself; the CAS
         // write plus the verification read keep concurrent admissions consistent.
         const freeSlots = lockConfig.maxHolders - freshHolders.length;
-        const queueIndex = state.queue.findIndex((entry) => entry.holderId === identity.holderId);
-        if (freeSlots > 0 && queueIndex !== -1 && queueIndex < freeSlots) {
+        const eligibleEntries = runnerSerialization
+          ? selectEligibleQueueEntries(freshHolders, state.queue, freeSlots)
+          : state.queue.slice(0, Math.max(0, freeSlots));
+        const eligible = eligibleEntries.some((entry) => entry.holderId === identity.holderId);
+        if (freeSlots > 0 && eligible) {
           if (staleHolders.length) {
             recoveringStaleHolder = true;
             for (const holder of staleHolders) {
@@ -1139,7 +1479,14 @@ async function acquire(config) {
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
           const verified = await readState(config, { apiOptions });
-          if (!verified.state.holders.some((holder) => holder.holderId === identity.holderId)) {
+          const verifiedHolder = verified.state.holders.find((holder) => holder.holderId === identity.holderId);
+          if (
+            !verifiedHolder ||
+            (runnerSerialization &&
+              (verified.state.schemaVersion !== 3 ||
+                verifiedHolder.runnerId !== identity.runnerId ||
+                verifiedHolder.runAttempt !== identity.runAttempt))
+          ) {
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
@@ -1191,7 +1538,7 @@ async function acquire(config) {
               `::warning::Lock-state access for ${config.lockName} failed with HTTP 401 ` +
                 `(${oneLine(error.message)}); treating it as transient and continuing to wait ` +
                 `(${Math.max(0, authGraceMs - authFailureMs)} ms of auth grace remaining). ` +
-                `Verify BUILD_LOCK_TOKEN scope/lifetime if this persists.`
+                `Verify build-lock credential permissions if this persists.`
             );
             await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
             continue;
@@ -1380,12 +1727,14 @@ function config() {
     "Ambiguous-Interactive/ambiguous-organization-build-lock"
   );
   validateLockName(lockName);
+  const lockRepo = parseRepository(lockRepository);
   return {
-    token: token(),
+    token: credential(lockRepo),
     lockName,
     holderIdSuffix: input("holder-id-suffix", "default"),
+    runnerId: input("runner-id"),
     lockRepository,
-    lockRepo: parseRepository(lockRepository),
+    lockRepo,
     stateBranch: input("state-branch", "lock-state"),
     statePath: `locks/${lockName}.json`,
     configPath: `locks/${lockName}.config.json`,
@@ -1430,6 +1779,9 @@ module.exports = {
   api,
   cleanupIdentity,
   config,
+  createAppJwt,
+  createGitHubAppAuth,
+  credential,
   emptyState,
   evaluateStale,
   installAcquireSignalCleanup,
@@ -1443,5 +1795,6 @@ module.exports = {
   run,
   runCancellationCleanup,
   runPostCleanup,
+  selectEligibleQueueEntries,
   writeState
 };

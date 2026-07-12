@@ -8,6 +8,9 @@ inputs:
     description: Extra identity for matrix cells inside the same workflow job.
     required: false
     default: default
+  runner-id:
+    description: Stable physical runner identity. Required when runner serialization is activated.
+    required: false
   lock-repository:
     description: Repository that stores lock state.
     required: false
