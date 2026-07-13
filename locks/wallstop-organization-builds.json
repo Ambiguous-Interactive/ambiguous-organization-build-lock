@@ -1,21 +1,12 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29225236586:unity-tests:unity-tests-1",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "29225236586",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29225236586",
-    "queuedAt": "2026-07-13T05:06:51.446Z",
-    "acquiredAt": "2026-07-13T05:11:38.113Z",
-    "expiresAt": "2026-07-13T09:11:38.113Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "82dd57a8-2031-4ceb-9442-d51202e2c952",
       "holderId": "Ambiguous-Interactive/DoxReloaded:29225236586:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -23,13 +14,12 @@
       "runId": "29225236586",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29225236586",
-      "queuedAt": "2026-07-13T05:06:51.446Z",
-      "acquiredAt": "2026-07-13T05:11:38.113Z",
-      "expiresAt": "2026-07-13T09:11:38.113Z",
-      "runnerId": "box-linux"
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-13T05:15:57.556Z",
+      "availableAt": "2026-07-13T05:21:57.556Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
-  "updatedAt": "2026-07-13T05:11:38.113Z"
+  "updatedAt": "2026-07-13T05:15:57.557Z"
 }
