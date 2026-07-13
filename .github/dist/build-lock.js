@@ -341,13 +341,25 @@ function credential(lockRepo) {
 }
 
 function readerCredential(owner) {
-  const appId = String(process.env.BUILD_LOCK_READER_APP_ID || "").trim();
-  const privateKey = process.env.BUILD_LOCK_READER_APP_PRIVATE_KEY || "";
+  let appId = String(process.env.BUILD_LOCK_READER_APP_ID || "").trim();
+  let privateKey = process.env.BUILD_LOCK_READER_APP_PRIVATE_KEY || "";
   if (Boolean(appId) !== Boolean(privateKey)) {
     throw new Error("BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY must be provided together.");
   }
   if (!appId) {
-    throw new Error("The scheduled reaper requires BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY.");
+    appId = String(process.env.BUILD_LOCK_APP_ID || "").trim();
+    privateKey = process.env.BUILD_LOCK_APP_PRIVATE_KEY || "";
+    if (Boolean(appId) !== Boolean(privateKey)) {
+      throw new Error("The reaper compatibility fallback requires BUILD_LOCK_APP_ID and BUILD_LOCK_APP_PRIVATE_KEY together.");
+    }
+    if (!appId) {
+      throw new Error(
+        "The scheduled reaper requires dedicated reader App credentials or the temporary broad writer App compatibility fallback."
+      );
+    }
+    console.log(
+      "::warning::Dedicated reaper reader credentials are unavailable; minting a consumer-only Actions/Metadata token from the existing App during compatibility cutover."
+    );
   }
   return createGitHubAppAuth({
     appId,
@@ -356,6 +368,10 @@ function readerCredential(owner) {
     repositories: CONSUMER_REPOSITORY_NAMES,
     permissions: { actions: "read", metadata: "read" }
   });
+}
+
+function readerCredentialRequired(mode, operation) {
+  return mode === "reap" && operation === "reap";
 }
 
 function canonicalId(name, value) {
@@ -2635,6 +2651,7 @@ function config() {
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
   const token = credential(lockRepo);
+  const operation = input("operation", "reap");
   const resourceReport = parseReleaseReport({
     resourceSafe: rawInput("resource-safe"),
     cleanupStatus: rawInput("resource-cleanup-status"),
@@ -2643,14 +2660,14 @@ function config() {
   });
   return {
     token,
-    readerToken: MODE === "reap" ? readerCredential(lockRepo.owner) : null,
+    readerToken: readerCredentialRequired(MODE, operation) ? readerCredential(lockRepo.owner) : null,
     lockName,
     holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
     resourceSafe: resourceReport.cleanupStatus === "confirmed",
     resourceReport,
-    operation: input("operation", "reap"),
+    operation,
     reservationId: input("reservation-id"),
     incidentId: input("incident-id"),
     portalCleanupConfirmed: booleanInput("portal-cleanup-confirmed", false),
@@ -2719,6 +2736,7 @@ module.exports = {
   postCleanup,
   readLockConfig,
   readerCredential,
+  readerCredentialRequired,
   readState,
   release,
   reap,

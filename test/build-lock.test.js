@@ -23,6 +23,7 @@ const {
   postCleanup,
   readLockConfig,
   readerCredential,
+  readerCredentialRequired,
   release,
   reap,
   runCancellationCleanup,
@@ -965,6 +966,40 @@ test("reaper reader App token is limited to consumer Actions and Metadata read",
   });
   assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
+});
+
+test("reaper compatibility fallback mints a reader-scoped token from the writer App", async () => {
+  const requests = [];
+  await withEnvironment({
+    BUILD_LOCK_APP_ID: "123",
+    BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey,
+    BUILD_LOCK_READER_APP_ID: undefined,
+    BUILD_LOCK_READER_APP_PRIVATE_KEY: undefined
+  }, async () => {
+    await withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      requests.push({ path: parsed.pathname, body: options.body && JSON.parse(options.body) });
+      if (parsed.pathname.endsWith("/installation")) return jsonResponse(200, { id: 84 });
+      return jsonResponse(201, { token: "compatibility-reader", expires_at: "2999-01-01T00:00:00Z" });
+    }, async () => {
+      assert.equal(await readerCredential("Ambiguous-Interactive").getToken(), "compatibility-reader");
+    });
+  });
+  assert.equal(requests[0].path, "/orgs/Ambiguous-Interactive/installation");
+  assert.deepEqual(requests[1].body, {
+    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
+    permissions: { actions: "read", metadata: "read" }
+  });
+  assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
+  assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
+});
+
+test("only stale-state reaping requires the cross-repository reader credential", () => {
+  assert.equal(readerCredentialRequired("reap", "reap"), true);
+  assert.equal(readerCredentialRequired("reap", "recover"), false);
+  assert.equal(readerCredentialRequired("reap", "recover-incident"), false);
+  assert.equal(readerCredentialRequired("acquire", "reap"), false);
+  assert.equal(readerCredentialRequired("release", "reap"), false);
 });
 
 test("writeState does not mark a 401-then-conflict sequence as an ambiguous write", async () => {
