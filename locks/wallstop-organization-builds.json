@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-standalone",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29245248635",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29245248635",
-    "queuedAt": "2026-07-13T13:12:53.331Z",
-    "acquiredAt": "2026-07-13T13:29:07.490Z",
-    "expiresAt": "2026-07-13T17:29:07.490Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29245248635",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29245248635",
-      "queuedAt": "2026-07-13T13:12:53.331Z",
-      "acquiredAt": "2026-07-13T13:29:07.490Z",
-      "expiresAt": "2026-07-13T17:29:07.490Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29241648370:unity-tests:2022.3.45f1-playmode",
@@ -42,6 +16,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T13:29:07.490Z"
+  "reservations": [
+    {
+      "reservationId": "0c123448-3bd6-4950-b272-ad62005e307d",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29245248635",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29245248635",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-13T13:30:33.605Z",
+      "availableAt": "2026-07-13T13:36:33.605Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T13:30:33.606Z"
 }
