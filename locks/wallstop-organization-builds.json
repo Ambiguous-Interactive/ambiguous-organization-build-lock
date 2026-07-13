@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29245248635",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29245248635",
+    "queuedAt": "2026-07-13T11:40:46.738Z",
+    "acquiredAt": "2026-07-13T11:55:49.496Z",
+    "expiresAt": "2026-07-13T15:55:49.496Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29245248635",
       "queuedAt": "2026-07-13T11:40:46.738Z",
+      "acquiredAt": "2026-07-13T11:55:49.496Z",
+      "expiresAt": "2026-07-13T15:55:49.496Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:2022.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -27,22 +42,6 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "a65c735d-8df1-495b-ba7a-5528071c7b23",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests:6000.5.2f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29239021138",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "explicit release reported resource cleanup safe",
-      "createdAt": "2026-07-13T11:49:44.017Z",
-      "availableAt": "2026-07-13T11:55:44.017Z"
-    }
-  ],
-  "updatedAt": "2026-07-13T11:50:47.455Z"
+  "reservations": [],
+  "updatedAt": "2026-07-13T11:55:49.496Z"
 }
