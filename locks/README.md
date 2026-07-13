@@ -24,3 +24,11 @@ quarantine reservations. `releaseCooldownSeconds` controls confirmed-cleanup
 cooldowns and defaults to 360 seconds. Configuration failure cannot downgrade an
 existing schema-4 state. Keep lifecycle disabled until every consumer reports
 explicit cleanup proof to the release action.
+
+`accountHealth: true` activates the one-way schema-5 upgrade after schema 4 is
+fully drained, including holders, queue entries, cooldowns, and quarantines.
+Schema 5 stores at most one immutable global account incident. A global incident
+blocks admission without growing the queue and never expires. Keep account
+health disabled until every consumer and the reaper is pinned to a reviewed,
+schema-5-capable immutable SHA. Recovery requires the exact incident ID and
+explicit Unity portal cleanup proof, then starts the normal cooldown.

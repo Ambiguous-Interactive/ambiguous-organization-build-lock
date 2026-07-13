@@ -11,7 +11,7 @@ const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
 // Each upgrade is activated by reviewed configuration and remains one-way so a
 // configuration outage cannot weaken protections already present in state.
 const DEFAULT_SCHEMA_VERSION = 2;
-const MAX_SCHEMA_VERSION = 4;
+const MAX_SCHEMA_VERSION = 5;
 const DEFAULT_MAX_HOLDERS = 1;
 const MAX_HOLDERS_CAP = 64;
 const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
@@ -22,6 +22,34 @@ const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
+const AUTHORIZED_OWNER_ID = "212056428";
+const LOCK_NAME = "wallstop-organization-builds";
+const LOCK_REPOSITORY = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+const STATE_BRANCH = "lock-state";
+const AUTHORIZED_REPOSITORIES = new Map([
+  ["Ambiguous-Interactive/DxMessaging", "101020635"],
+  ["Ambiguous-Interactive/unity-helpers", "737391131"],
+  ["Ambiguous-Interactive/DoxReloaded", "825469040"],
+  ["Ambiguous-Interactive/IshoBoy", "885525263"],
+  ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
+  [LOCK_REPOSITORY, "1244796436"]
+]);
+const CONSUMER_REPOSITORY_NAMES = [...AUTHORIZED_REPOSITORIES.keys()]
+  .filter((repository) => repository !== LOCK_REPOSITORY)
+  .map((repository) => repository.split("/")[1]);
+const RESOURCE_REASON_CODES = new Set([
+  "cleanup-confirmed",
+  "cleanup-evidence-unknown",
+  "unity-account-limit-20111",
+  "unity-20113-unclassified",
+  "unity-return-400006",
+  "return-timeout",
+  "return-log-truncated",
+  "return-terminated",
+  "return-missing-positive-evidence",
+  "activation-timeout",
+  "activation-terminated"
+]);
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -55,6 +83,66 @@ function booleanInput(name, fallback = false) {
     throw new Error(`Input ${name} must be true or false.`);
   }
   return raw === "true";
+}
+
+function rawInput(name) {
+  const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
+  const value = process.env[key];
+  return value === undefined || value === "" ? undefined : value;
+}
+
+function parseReleaseReport(values = {}) {
+  const oldRaw = values.resourceSafe;
+  let oldMapping = null;
+  if (oldRaw !== undefined && oldRaw !== "") {
+    const normalized = String(oldRaw).trim().toLowerCase();
+    if (normalized !== "true" && normalized !== "false") {
+      throw new Error("Input resource-safe must be true or false when supplied.");
+    }
+    oldMapping = normalized === "true"
+      ? { cleanupStatus: "confirmed", health: "healthy" }
+      : { cleanupStatus: "unknown", health: "healthy" };
+  }
+
+  const hasNew = [values.cleanupStatus, values.health, values.reason].some(
+    (value) => value !== undefined && value !== ""
+  );
+  if (!hasNew) {
+    const mapped = oldMapping || { cleanupStatus: "unknown", health: "healthy" };
+    return {
+      ...mapped,
+      reason: mapped.cleanupStatus === "confirmed" ? "cleanup-confirmed" : "cleanup-evidence-unknown"
+    };
+  }
+
+  const cleanupStatus = String(values.cleanupStatus || "").trim();
+  const health = String(values.health || "").trim();
+  const reason = String(values.reason || "").trim();
+  if (cleanupStatus !== "confirmed" && cleanupStatus !== "unknown") {
+    throw new Error("resource-cleanup-status must be confirmed or unknown.");
+  }
+  if (health !== "healthy" && health !== "blocked") {
+    throw new Error("resource-health must be healthy or blocked.");
+  }
+  if (!RESOURCE_REASON_CODES.has(reason)) {
+    throw new Error(`resource-reason is not an allowlisted stable reason code: ${JSON.stringify(reason)}.`);
+  }
+  if (health === "blocked" && reason !== "unity-account-limit-20111") {
+    throw new Error("resource-health=blocked is reserved for confirmed unity-account-limit-20111 evidence.");
+  }
+  if (health === "healthy" && reason === "unity-account-limit-20111") {
+    throw new Error("unity-account-limit-20111 requires resource-health=blocked.");
+  }
+  if (health === "healthy" && cleanupStatus === "confirmed" && reason !== "cleanup-confirmed") {
+    throw new Error("confirmed healthy cleanup requires resource-reason=cleanup-confirmed.");
+  }
+  if (cleanupStatus === "unknown" && reason === "cleanup-confirmed") {
+    throw new Error("resource-reason=cleanup-confirmed requires confirmed cleanup status.");
+  }
+  if (oldMapping && (oldMapping.cleanupStatus !== cleanupStatus || oldMapping.health !== health)) {
+    throw new Error("resource-safe contradicts the supplied resource cleanup status or health.");
+  }
+  return { cleanupStatus, health, reason };
 }
 
 function nonNegativeIntegerInput(name, fallback, maximum) {
@@ -104,7 +192,15 @@ function createAppJwt(appId, privateKey, now = Date.now()) {
   return jwt;
 }
 
-function createGitHubAppAuth({ appId, privateKey, owner, now = () => Date.now() }) {
+function createGitHubAppAuth({
+  appId,
+  privateKey,
+  owner,
+  repository = "",
+  repositories = null,
+  permissions = null,
+  now = () => Date.now()
+}) {
   const normalizedPrivateKey = String(privateKey).includes("\n")
     ? String(privateKey).trim()
     : String(privateKey).replace(/\\n/g, "\n").trim();
@@ -125,7 +221,9 @@ function createGitHubAppAuth({ appId, privateKey, owner, now = () => Date.now() 
   async function lookupInstallation(signal) {
     const installation = await jwtApi(
       "GET",
-      `/orgs/${encodeURIComponent(owner)}/installation`,
+      repository
+        ? `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`
+        : `/orgs/${encodeURIComponent(owner)}/installation`,
       undefined,
       signal
     );
@@ -141,14 +239,22 @@ function createGitHubAppAuth({ appId, privateKey, owner, now = () => Date.now() 
     }
     let result;
     try {
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, {}, signal);
+      const tokenRequest = {
+        ...(repositories ? { repositories: [...repositories] } : {}),
+        ...(permissions ? { permissions: { ...permissions } } : {})
+      };
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
     } catch (error) {
       if (error.status !== 404) {
         throw error;
       }
       installationId = null;
       await lookupInstallation(signal);
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, {}, signal);
+      const tokenRequest = {
+        ...(repositories ? { repositories: [...repositories] } : {}),
+        ...(permissions ? { permissions: { ...permissions } } : {})
+      };
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
     }
     const expiresAt = Date.parse(result && result.expires_at);
     if (!result || !result.token || !Number.isFinite(expiresAt) || expiresAt <= now()) {
@@ -218,20 +324,74 @@ function createGitHubAppAuth({ appId, privateKey, owner, now = () => Date.now() 
 function credential(lockRepo) {
   const appId = String(process.env.BUILD_LOCK_APP_ID || "").trim();
   const privateKey = process.env.BUILD_LOCK_APP_PRIVATE_KEY || "";
-  const legacyToken = process.env.BUILD_LOCK_TOKEN || input("token");
   if (Boolean(appId) !== Boolean(privateKey)) {
     throw new Error("BUILD_LOCK_APP_ID and BUILD_LOCK_APP_PRIVATE_KEY must be provided together.");
   }
   if (appId && privateKey) {
-    return createGitHubAppAuth({ appId, privateKey, owner: lockRepo.owner });
+    return createGitHubAppAuth({
+      appId,
+      privateKey,
+      owner: lockRepo.owner,
+      repository: lockRepo.repo,
+      repositories: [lockRepo.repo],
+      permissions: { contents: "write" }
+    });
   }
-  if (legacyToken) {
-    maskSecret(legacyToken);
-    return legacyToken;
+  throw new Error("Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY.");
+}
+
+function readerCredential(owner) {
+  const appId = String(process.env.BUILD_LOCK_READER_APP_ID || "").trim();
+  const privateKey = process.env.BUILD_LOCK_READER_APP_PRIVATE_KEY || "";
+  if (Boolean(appId) !== Boolean(privateKey)) {
+    throw new Error("BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY must be provided together.");
   }
-  throw new Error(
-    "Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY, or temporarily provide BUILD_LOCK_TOKEN."
-  );
+  if (!appId) {
+    throw new Error("The scheduled reaper requires BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY.");
+  }
+  return createGitHubAppAuth({
+    appId,
+    privateKey,
+    owner,
+    repositories: CONSUMER_REPOSITORY_NAMES,
+    permissions: { actions: "read", metadata: "read" }
+  });
+}
+
+function canonicalId(name, value) {
+  const normalized = String(value || "");
+  if (!/^[1-9][0-9]*$/.test(normalized) || BigInt(normalized).toString() !== normalized) {
+    throw new Error(`${name} must be a canonical positive decimal GitHub ID.`);
+  }
+  return normalized;
+}
+
+function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH, mode = MODE }) {
+  if (lockName !== LOCK_NAME) {
+    throw new Error(`lock-name is not authorized; expected ${LOCK_NAME}.`);
+  }
+  if (lockRepository !== LOCK_REPOSITORY) {
+    throw new Error(`lock-repository is not authorized; expected ${LOCK_REPOSITORY}.`);
+  }
+  if (stateBranch !== STATE_BRANCH) {
+    throw new Error(`state-branch is not authorized; expected ${STATE_BRANCH}.`);
+  }
+  const ownerId = canonicalId("GITHUB_REPOSITORY_OWNER_ID", process.env.GITHUB_REPOSITORY_OWNER_ID);
+  const repositoryId = canonicalId("GITHUB_REPOSITORY_ID", process.env.GITHUB_REPOSITORY_ID);
+  const repository = String(process.env.GITHUB_REPOSITORY || "");
+  if (ownerId !== AUTHORIZED_OWNER_ID) {
+    throw new Error("The calling GitHub organization is not authorized to use this lock.");
+  }
+  if (!AUTHORIZED_REPOSITORIES.has(repository) || AUTHORIZED_REPOSITORIES.get(repository) !== repositoryId) {
+    throw new Error("The calling GitHub repository name and ID are not authorized to use this lock.");
+  }
+  if (mode === "reap" && repository !== LOCK_REPOSITORY) {
+    throw new Error("Only the lock repository may run the scheduled reaper.");
+  }
+  if (mode !== "reap" && repository === LOCK_REPOSITORY) {
+    throw new Error("The lock repository is authorized only for the scheduled reaper.");
+  }
+  return { ownerId, repositoryId, repository };
 }
 
 function validateLockName(lockName) {
@@ -605,7 +765,77 @@ function emptyState(lockName, schemaVersion = DEFAULT_SCHEMA_VERSION) {
     holders: [],
     queue: [],
     ...(schemaVersion >= 4 ? { reservations: [] } : {}),
+    ...(schemaVersion >= 5 ? { activeIncident: null } : {}),
     updatedAt: nowIso()
+  };
+}
+
+function normalizeIncident(incident) {
+  if (incident === null) {
+    return null;
+  }
+  if (!incident || typeof incident !== "object" || Array.isArray(incident)) {
+    throw new Error("Schema 5 activeIncident must be null or an incident object.");
+  }
+  const normalized = {
+    incidentId: String(incident.incidentId || "").trim(),
+    repository: String(incident.repository || ""),
+    workflow: String(incident.workflow || ""),
+    job: String(incident.job || ""),
+    runId: String(incident.runId || ""),
+    runAttempt: String(incident.runAttempt || ""),
+    runUrl: String(incident.runUrl || ""),
+    runnerId: String(incident.runnerId || "").trim(),
+    reportedAt: String(incident.reportedAt || ""),
+    reason: String(incident.reason || ""),
+    evidenceDigest: String(incident.evidenceDigest || "").trim()
+  };
+  if (
+    !/^incident-[a-f0-9]{24}$/.test(normalized.incidentId) ||
+    !normalized.repository ||
+    !normalized.workflow ||
+    !normalized.job ||
+    !/^[1-9][0-9]*$/.test(normalized.runId) ||
+    !/^[1-9][0-9]*$/.test(normalized.runAttempt) ||
+    !normalized.runUrl ||
+    !normalized.runnerId ||
+    !parseTime(normalized.reportedAt) ||
+    normalized.reason !== "unity-account-limit-20111" ||
+    !/^[a-f0-9]{64}$/.test(normalized.evidenceDigest) ||
+    normalized.incidentId !== `incident-${normalized.evidenceDigest.slice(0, 24)}`
+  ) {
+    throw new Error(
+      "Schema 5 incidents require immutable run/runner provenance, a valid timestamp, the 20111 reason, and SHA-256 evidence digest."
+    );
+  }
+  return normalized;
+}
+
+function incidentFromIdentity(identity, reason) {
+  const evidenceDigest = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({
+      repository: identity.repository,
+      workflow: identity.workflow,
+      job: identity.job,
+      runId: identity.runId,
+      runAttempt: identity.runAttempt,
+      runnerId: identity.runnerId,
+      reason
+    }))
+    .digest("hex");
+  return {
+    incidentId: `incident-${evidenceDigest.slice(0, 24)}`,
+    repository: identity.repository,
+    workflow: identity.workflow,
+    job: identity.job,
+    runId: identity.runId,
+    runAttempt: identity.runAttempt,
+    runUrl: identity.runUrl,
+    runnerId: identity.runnerId,
+    reportedAt: nowIso(),
+    reason,
+    evidenceDigest
   };
 }
 
@@ -722,6 +952,9 @@ function normalizeState(raw, lockName) {
   if (parsedSchemaVersion >= 4 && !Array.isArray(state.reservations)) {
     throw new Error(`State file reservations for schema ${parsedSchemaVersion} must be an array.`);
   }
+  if (parsedSchemaVersion >= 5 && !Object.hasOwn(state, "activeIncident")) {
+    throw new Error(`State file for schema 5 must contain activeIncident.`);
+  }
   if (
     parsedSchemaVersion >= 4 &&
     state.reservations.some(
@@ -773,6 +1006,7 @@ function normalizeState(raw, lockName) {
   const reservations = schemaVersion >= 4
     ? state.reservations.map(normalizeReservation)
     : [];
+  const activeIncident = schemaVersion >= 5 ? normalizeIncident(state.activeIncident) : null;
   // Merge the schema-2 holders array with the legacy/mirrored single holder and dedupe;
   // schema-1 files carry only `holder`, schema-2 files mirror holders[0] into `holder`.
   const seenHolderIds = new Set();
@@ -816,6 +1050,7 @@ function normalizeState(raw, lockName) {
     holders,
     queue,
     ...(schemaVersion >= 4 ? { reservations } : {}),
+    ...(schemaVersion >= 5 ? { activeIncident } : {}),
     updatedAt: String(state.updatedAt || nowIso())
   };
 }
@@ -854,6 +1089,7 @@ function stableState(state) {
       ...(schemaVersion >= 3 ? { runnerId: entry.runnerId } : {})
     })),
     ...(schemaVersion >= 4 ? { reservations: state.reservations.map((reservation) => ({ ...reservation })) } : {}),
+    ...(schemaVersion >= 5 ? { activeIncident: state.activeIncident ? { ...state.activeIncident } : null } : {}),
     updatedAt: state.updatedAt
   };
 }
@@ -974,6 +1210,7 @@ function defaultLockConfig() {
     maxHolders: DEFAULT_MAX_HOLDERS,
     runnerSerialization: false,
     resourceLifecycle: false,
+    accountHealth: false,
     releaseCooldownSeconds: DEFAULT_RELEASE_COOLDOWN_SECONDS
   };
 }
@@ -981,7 +1218,7 @@ function defaultLockConfig() {
 function defaultLockConfigSummary() {
   return (
     `max-holders=${DEFAULT_MAX_HOLDERS}, runner-serialization=false, ` +
-    `resource-lifecycle=false, release-cooldown-seconds=${DEFAULT_RELEASE_COOLDOWN_SECONDS}`
+    `resource-lifecycle=false, account-health=false, release-cooldown-seconds=${DEFAULT_RELEASE_COOLDOWN_SECONDS}`
   );
 }
 
@@ -1069,10 +1306,22 @@ async function readLockConfig(config, options = {}) {
     );
     return defaultLockConfig();
   }
+  const accountHealth = normalizeBooleanConfig(parsed && parsed.accountHealth, "accountHealth", configPath);
+  if (accountHealth === null) {
+    return defaultLockConfig();
+  }
+  if (accountHealth && !resourceLifecycle) {
+    console.log(
+      `::warning::Ignoring accountHealth=true in ${configPath}; resourceLifecycle must also be true; ` +
+        `using safe defaults (${defaultLockConfigSummary()}).`
+    );
+    return defaultLockConfig();
+  }
   return {
     maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath),
     runnerSerialization,
     resourceLifecycle,
+    accountHealth,
     releaseCooldownSeconds: normalizeReleaseCooldownSeconds(parsed && parsed.releaseCooldownSeconds, configPath)
   };
 }
@@ -1182,7 +1431,8 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
     return {
       known: true,
       status: run.status || "",
-      conclusion: run.conclusion || ""
+      conclusion: run.conclusion || "",
+      runAttempt: String(run.run_attempt || "")
     };
   } catch (error) {
     if (error.status === 404) {
@@ -1229,6 +1479,16 @@ async function evaluateStale(holder, authToken, options = {}) {
   const status = await getRunStatus(holder.repository, holder.runId, authToken, options);
   if (status.known) {
     if (isActiveRunStatus(status.status)) {
+      if (
+        /^[1-9][0-9]*$/.test(holder.runAttempt) &&
+        /^[1-9][0-9]*$/.test(status.runAttempt) &&
+        BigInt(status.runAttempt) > BigInt(holder.runAttempt)
+      ) {
+        return {
+          stale: true,
+          reason: `workflow run advanced from attempt ${holder.runAttempt} to ${status.runAttempt}`
+        };
+      }
       return { stale: false, reason: `holder run is ${status.status}` };
     }
     return { stale: true, reason: `holder run is ${status.status || "unknown"}` };
@@ -1288,6 +1548,9 @@ function reservationFromHolder(holder, state, reason, releaseCooldownSeconds = D
 }
 
 function cleanupResultName(result) {
+  if (result.globalQuarantined) {
+    return "global-quarantined";
+  }
   if (result.reservationState === "cooldown") {
     return "cooldown-started";
   }
@@ -1304,6 +1567,9 @@ function cleanupResultName(result) {
 }
 
 function explicitReleaseMessage(cleanupResult, lockName) {
+  if (cleanupResult === "global-quarantined") {
+    return `Removed lock ownership for ${lockName}; a global account incident blocks all new admission.`;
+  }
   if (cleanupResult === "cooldown-started") {
     return `Removed lock ownership for ${lockName}; resource capacity entered cooldown.`;
   }
@@ -1331,6 +1597,9 @@ function writeReleaseOutputs(config, identity, result) {
   writeOutput("reservation-id", result.reservationId || "");
   writeOutput("reservation-state", result.reservationState || "");
   writeOutput("available-at", result.availableAt || "");
+  writeOutput("incident-id", result.incidentId || "");
+  writeOutput("resource-health", result.resourceHealth || config.resourceReport?.health || "healthy");
+  writeOutput("resource-reason", result.resourceReason || config.resourceReport?.reason || "");
 }
 
 function firstHolderContext(holders) {
@@ -1399,6 +1668,31 @@ async function cleanupIdentity(config, identity, options = {}) {
       // The attempt fence still prevents a late cleanup from deleting a newer rerun.
       return BigInt(identity.runAttempt) >= BigInt(entry.runAttempt);
     };
+    let incident = state.schemaVersion >= 5 ? state.activeIncident : null;
+    let incidentCreated = false;
+    if (state.schemaVersion >= 5 && options.resourceHealth === "blocked") {
+      if (options.resourceReason !== "unity-account-limit-20111") {
+        throw new Error("Only confirmed unity-account-limit-20111 evidence may create a global incident.");
+      }
+      if (!incident) {
+        incident = incidentFromIdentity(identity, options.resourceReason);
+        state.activeIncident = incident;
+        incidentCreated = true;
+      }
+    }
+    const incidentResult = incident
+      ? {
+          globalQuarantined: true,
+          incidentId: incident.incidentId,
+          resourceHealth: "blocked",
+          resourceReason: incident.reason
+        }
+      : {
+          globalQuarantined: false,
+          incidentId: "",
+          resourceHealth: options.resourceHealth || "healthy",
+          resourceReason: options.resourceReason || ""
+        };
     const expiredCooldowns = pruneExpiredCooldowns(state);
     for (const reservation of expiredCooldowns) {
       console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
@@ -1410,7 +1704,11 @@ async function cleanupIdentity(config, identity, options = {}) {
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
     let reservation = null;
-    if (state.schemaVersion >= 4 && removedHolders.length) {
+    if (
+      state.schemaVersion >= 4 &&
+      removedHolders.length &&
+      !(state.schemaVersion >= 5 && options.resourceHealth === "blocked")
+    ) {
       const reservationState = options.resourceSafe === true ? "cooldown" : "quarantine";
       const reason = options.reason ||
         (reservationState === "cooldown" ? "release cleanup confirmed resource-safe" : "release cleanup was not proven resource-safe");
@@ -1426,11 +1724,11 @@ async function cleanupIdentity(config, identity, options = {}) {
     // clients see through the mirrored `holder` field.
     const { heldBy, heldByRunUrl } = firstHolderContext(state.holders);
 
-    const changed = released || queueCleaned || expiredCooldowns.length > 0;
+    const changed = released || queueCleaned || expiredCooldowns.length > 0 || incidentCreated;
     if (!changed) {
       if (ambiguousCleanup) {
         return reconcileAmbiguousCleanup(
-          { released: false, queueCleaned: false },
+          { released: false, queueCleaned: false, ...incidentResult },
           state,
           sha || "",
           heldBy,
@@ -1442,7 +1740,8 @@ async function cleanupIdentity(config, identity, options = {}) {
         queueCleaned: false,
         sha: sha || "",
         heldBy,
-        heldByRunUrl
+        heldByRunUrl,
+        ...incidentResult
       };
     }
 
@@ -1458,7 +1757,8 @@ async function cleanupIdentity(config, identity, options = {}) {
           reservationId: reservation && reservation.reservationId,
           reservationState: reservation && reservation.state,
           availableAt: reservation && reservation.availableAt,
-          runnerId: reservation && reservation.runnerId
+          runnerId: reservation && reservation.runnerId,
+          ...incidentResult
         };
         ambiguousCleanup = ambiguousCleanup
           ? {
@@ -1484,7 +1784,8 @@ async function cleanupIdentity(config, identity, options = {}) {
       heldByRunUrl,
       reservationId: reservation && reservation.reservationId,
       reservationState: reservation && reservation.state,
-      availableAt: reservation && reservation.availableAt
+      availableAt: reservation && reservation.availableAt,
+      ...incidentResult
     }, state, write.sha, heldBy, heldByRunUrl);
   }
 
@@ -1619,7 +1920,11 @@ function writeAcquireOutputs({
   waitMs,
   attempts,
   staleRecovered = false,
-  quarantineRecovered = false
+  quarantineRecovered = false,
+  admissionResult = acquired ? "acquired" : "timeout",
+  incidentId = "",
+  resourceHealth = "healthy",
+  resourceReason = ""
 }) {
   writeOutput("acquired", acquired ? "true" : "false");
   writeOutput("lock-name", lockName);
@@ -1629,6 +1934,10 @@ function writeAcquireOutputs({
   writeOutput("attempts", String(attempts));
   writeOutput("stale-recovered", String(staleRecovered));
   writeOutput("quarantine-recovered", String(quarantineRecovered));
+  writeOutput("admission-result", admissionResult);
+  writeOutput("incident-id", incidentId);
+  writeOutput("resource-health", resourceHealth);
+  writeOutput("resource-reason", resourceReason);
 }
 
 function writeReapOutputs({ reaped, stateSha = "" }) {
@@ -1658,7 +1967,7 @@ async function acquire(config) {
     const started = Date.now();
     const deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
-    let staleRecovered = false;
+    const staleRecovered = false;
     let quarantineRecovered = false;
     let lastObservation = null;
     let authFailureSince = null;
@@ -1671,7 +1980,6 @@ async function acquire(config) {
     while (Date.now() < deadline) {
       throwIfCancellation(cancellation);
       attempts++;
-      let recoveringStaleHolder = false;
       try {
         // Re-read the parallelism config on a TTL so long waits pick up limit changes
         // without adding a contents read to every poll.
@@ -1723,7 +2031,45 @@ async function acquire(config) {
           state.reservations = [];
           changed = true;
         }
+        if (lockConfig.accountHealth && state.schemaVersion < 5) {
+          if (
+            observedSchemaVersion !== 4 ||
+            state.holders.length ||
+            state.queue.length ||
+            state.reservations.length
+          ) {
+            throw new Error(
+              "Cannot activate account health until schema 4 holders, queue entries, and reservations are fully drained."
+            );
+          }
+          state.schemaVersion = 5;
+          state.activeIncident = null;
+          changed = true;
+        }
         const resourceLifecycle = state.schemaVersion >= 4;
+        if (state.schemaVersion >= 5 && state.activeIncident) {
+          const waitMs = Date.now() - started;
+          writeAcquireOutputs({
+            acquired: false,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            stateSha: sha || "",
+            waitMs,
+            attempts,
+            admissionResult: "account-blocked",
+            incidentId: state.activeIncident.incidentId,
+            resourceHealth: "blocked",
+            resourceReason: state.activeIncident.reason
+          });
+          appendSummary(
+            `Admission blocked for ${config.lockName} by global incident ${state.activeIncident.incidentId}.`
+          );
+          console.log(
+            `::error::Global account incident ${state.activeIncident.incidentId} blocks new ${config.lockName} admission.`
+          );
+          console.log("::endgroup::");
+          return;
+        }
         const expiredCooldowns = pruneExpiredCooldowns(state);
         if (expiredCooldowns.length) {
           changed = true;
@@ -1731,17 +2077,26 @@ async function acquire(config) {
             console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
           }
         }
-        const staleness = new Map();
-        for (const holder of state.holders) {
-          staleness.set(holder.holderId, await evaluateStale(holder, config.token, { apiOptions }));
-          throwIfCancellation(cancellation);
-        }
+        // Consumer credentials are deliberately unable to inspect Actions state in
+        // other repositories. Only the scheduled reaper may decide that a holder or
+        // queue entry is stale. Until it does, acquire treats every observed entry as
+        // live and therefore fails closed if the reaper is unavailable.
+        const staleness = new Map(
+          state.holders.map((holder) => [
+            holder.holderId,
+            { stale: false, reason: "awaiting scheduled reaper; consumer status reads are disabled" }
+          ])
+        );
         const myHolder = state.holders.find((holder) => holder.holderId === identity.holderId);
-        let rerunReplacement = false;
         if (runnerSerialization && myHolder) {
-          rerunReplacement = identityIsNewerOrThrow(myHolder, identity, "Holder");
+          if (identityIsNewerOrThrow(myHolder, identity, "Holder")) {
+            throw new Error(
+              `Holder ${identity.holderId} belongs to an earlier run attempt; ` +
+                "the scheduled reaper must reconcile it before a rerun can acquire."
+            );
+          }
         }
-        if (myHolder && !rerunReplacement && !staleness.get(identity.holderId).stale) {
+        if (myHolder) {
           recordPostCleanupNeeded();
           const waitMs = Date.now() - started;
           const position = queuePosition(state, identity.holderId);
@@ -1769,11 +2124,7 @@ async function acquire(config) {
         });
         state.queue = [];
         for (const entry of dedupedQueue) {
-          if (entry.holderId !== identity.holderId && (await queueEntryIsFinished(entry, config.token, { apiOptions }))) {
-            throwIfCancellation(cancellation);
-            console.log(`Dropping completed queue entry ${entry.holderId}.`);
-            changed = true;
-          } else if (entry.holderId === identity.holderId) {
+          if (entry.holderId === identity.holderId) {
             if (runnerSerialization) {
               identityIsNewerOrThrow(entry, identity, "Queued request");
             }
@@ -1794,35 +2145,7 @@ async function acquire(config) {
           recordPostCleanupNeeded();
         }
 
-        const freshHolders = state.holders.filter(
-          (holder) => !staleness.get(holder.holderId).stale && holder.holderId !== (rerunReplacement ? identity.holderId : "")
-        );
-        const staleHolders = state.holders.filter((holder) => staleness.get(holder.holderId).stale);
-        if (rerunReplacement) {
-          console.log(
-            `Moving rerun ${identity.holderId} from attempt ${myHolder.runAttempt}/${myHolder.runnerId} ` +
-              `to ${identity.runAttempt}/${identity.runnerId}; re-evaluating admission.`
-          );
-          state.holders = freshHolders;
-          changed = true;
-        }
-        if (resourceLifecycle) {
-          const uncertainHolders = [...staleHolders, ...(rerunReplacement ? [myHolder] : [])]
-            .filter((holder, index, holders) => holders.findIndex((candidate) => candidate.holderId === holder.holderId) === index);
-          for (const holder of uncertainHolders) {
-            const reason = rerunReplacement && holder.holderId === myHolder.holderId
-              ? "holder ownership moved to a newer run attempt without cleanup proof"
-              : `stale holder recovery: ${staleness.get(holder.holderId).reason}`;
-            const reservation = reservationFromHolder(holder, "quarantine", reason);
-            state.reservations.push(reservation);
-            console.log(`Quarantining holder ${holder.holderId} as reservation ${reservation.reservationId}: ${reason}.`);
-          }
-          if (uncertainHolders.length) {
-            state.holders = freshHolders;
-            changed = true;
-            recoveringStaleHolder = staleHolders.length > 0;
-          }
-        }
+        const freshHolders = state.holders;
 
         const reservations = resourceLifecycle ? state.reservations : [];
         const reservationDetails = reservations.map((reservation) => {
@@ -1894,12 +2217,6 @@ async function acquire(config) {
           : state.queue.slice(0, Math.max(0, freeSlots));
         const eligible = canRecoverQuarantine || eligibleEntries.some((entry) => entry.holderId === identity.holderId);
         if ((freeSlots > 0 || canRecoverQuarantine) && eligible) {
-          if (staleHolders.length) {
-            recoveringStaleHolder = true;
-            for (const holder of staleHolders) {
-              console.log(`Recovering stale holder ${holder.holderId}: ${staleness.get(holder.holderId).reason}`);
-            }
-          }
           if (canRecoverQuarantine) {
             console.log(
               `Recovering quarantine ${matchingQuarantine.reservationId} on original runner ${identity.runnerId}.`
@@ -1915,19 +2232,12 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
           if (write.conflict) {
-            if (recoveringStaleHolder && write.ambiguous) {
-              staleRecovered = true;
-              recordPostCleanupNeeded();
-            }
             if (canRecoverQuarantine && write.ambiguous) {
               quarantineRecovered = true;
               recordPostCleanupNeeded();
             }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
-          }
-          if (recoveringStaleHolder) {
-            staleRecovered = true;
           }
           if (canRecoverQuarantine) {
             quarantineRecovered = true;
@@ -1967,15 +2277,8 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
           if (write.conflict) {
-            if (recoveringStaleHolder && write.ambiguous) {
-              staleRecovered = true;
-              recordPostCleanupNeeded();
-            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
-          }
-          if (recoveringStaleHolder) {
-            staleRecovered = true;
           }
           recordPostCleanupNeeded();
         }
@@ -2065,12 +2368,17 @@ async function release(config) {
   console.log(`::group::Release build lock ${config.lockName}`);
 
   const lockConfig = await readLockConfig(config);
+  const resourceReport = config.resourceReport || {
+    cleanupStatus: config.resourceSafe === true ? "confirmed" : "unknown",
+    health: "healthy",
+    reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
+  };
   const result = await cleanupIdentity(config, identity, {
-    resourceSafe: config.resourceSafe,
+    resourceSafe: resourceReport.cleanupStatus === "confirmed",
+    resourceHealth: resourceReport.health,
+    resourceReason: resourceReport.reason,
     releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
-    reason: config.resourceSafe
-      ? "explicit release reported resource cleanup safe"
-      : "explicit release could not prove resource cleanup safe"
+    reason: resourceReport.reason
   });
   writeReleaseOutputs(config, identity, result);
   const cleanupResult = cleanupResultName(result);
@@ -2142,8 +2450,8 @@ async function runPostCleanup() {
 async function reap(config) {
   validateLockName(config.lockName);
   config.operation = config.operation || "reap";
-  if (config.operation !== "reap" && config.operation !== "recover") {
-    throw new Error("operation must be reap or recover.");
+  if (config.operation !== "reap" && config.operation !== "recover" && config.operation !== "recover-incident") {
+    throw new Error("operation must be reap, recover, or recover-incident.");
   }
   await ensureStateBranch(config);
   console.log(`::group::Reap stale build lock ${config.lockName}`);
@@ -2154,6 +2462,62 @@ async function reap(config) {
     const expiredCooldowns = pruneExpiredCooldowns(state);
     for (const reservation of expiredCooldowns) {
       console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
+    }
+    if (config.operation === "recover-incident") {
+      if (state.schemaVersion < 5) {
+        throw new Error("Global incident recovery requires schema 5 state.");
+      }
+      if (!config.portalCleanupConfirmed) {
+        throw new Error("Global incident recovery requires portal-cleanup-confirmed=true proof.");
+      }
+      if (!config.incidentId) {
+        throw new Error("Global incident recovery requires the exact incident-id.");
+      }
+      const incident = state.activeIncident;
+      if (ambiguousReap && !incident) {
+        writeReapOutputs({ reaped: true, stateSha: sha || "" });
+        appendSummary(`Recovered global incident ${config.incidentId}; ${config.lockName} entered cooldown.`);
+        console.log("::endgroup::");
+        return;
+      }
+      if (!incident || incident.incidentId !== config.incidentId) {
+        throw new Error(`Active global incident ${config.incidentId} was not found.`);
+      }
+      if (state.reservations.some((reservation) => reservation.runnerId === incident.runnerId)) {
+        throw new Error(`Runner ${incident.runnerId} already has a lifecycle reservation; drain it before incident recovery.`);
+      }
+      const lockConfig = await readLockConfig(config);
+      const recoveryHolder = {
+        holderId: `${incident.repository}:${incident.runId}:${incident.job}:incident-recovery`,
+        repository: incident.repository,
+        workflow: incident.workflow,
+        job: incident.job,
+        runId: incident.runId,
+        runAttempt: incident.runAttempt,
+        runUrl: incident.runUrl,
+        runnerId: incident.runnerId
+      };
+      state.reservations.push(
+        reservationFromHolder(
+          recoveryHolder,
+          "cooldown",
+          `portal cleanup confirmed for ${incident.incidentId}`,
+          lockConfig.releaseCooldownSeconds
+        )
+      );
+      state.activeIncident = null;
+      const write = await writeState(config, sha, state, `Recover global incident ${config.incidentId}`);
+      if (write.conflict) {
+        if (write.ambiguous) {
+          ambiguousReap = true;
+        }
+        await sleep(jitter(1000));
+        continue;
+      }
+      writeReapOutputs({ reaped: true, stateSha: write.sha });
+      appendSummary(`Recovered global incident ${config.incidentId}; ${config.lockName} entered cooldown.`);
+      console.log("::endgroup::");
+      return;
     }
     if (config.operation === "recover") {
       if (state.schemaVersion < 4) {
@@ -2204,7 +2568,7 @@ async function reap(config) {
     const beforeQueue = state.queue.length;
     const keptQueue = [];
     for (const entry of state.queue) {
-      if (await queueEntryIsFinished(entry, config.token)) {
+      if (await queueEntryIsFinished(entry, config.readerToken)) {
         console.log(`Dropping completed queue entry ${entry.holderId}.`);
       } else {
         keptQueue.push(entry);
@@ -2215,7 +2579,7 @@ async function reap(config) {
     let holderReaped = false;
     const keptHolders = [];
     for (const holder of state.holders) {
-      const stale = await evaluateStale(holder, config.token);
+      const stale = await evaluateStale(holder, config.readerToken);
       if (stale.stale) {
         console.log(`${state.schemaVersion >= 4 ? "Quarantining" : "Reaping"} holder ${holder.holderId}: ${stale.reason}.`);
         holderReaped = true;
@@ -2265,21 +2629,34 @@ function config() {
     "lock-repository",
     "Ambiguous-Interactive/ambiguous-organization-build-lock"
   );
+  const stateBranch = input("state-branch", STATE_BRANCH);
   validateLockName(lockName);
+  authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE });
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
+  const token = credential(lockRepo);
+  const resourceReport = parseReleaseReport({
+    resourceSafe: rawInput("resource-safe"),
+    cleanupStatus: rawInput("resource-cleanup-status"),
+    health: rawInput("resource-health"),
+    reason: rawInput("resource-reason")
+  });
   return {
-    token: credential(lockRepo),
+    token,
+    readerToken: MODE === "reap" ? readerCredential(lockRepo.owner) : null,
     lockName,
     holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
-    resourceSafe: booleanInput("resource-safe", false),
+    resourceSafe: resourceReport.cleanupStatus === "confirmed",
+    resourceReport,
     operation: input("operation", "reap"),
     reservationId: input("reservation-id"),
+    incidentId: input("incident-id"),
+    portalCleanupConfirmed: booleanInput("portal-cleanup-confirmed", false),
     lockRepository,
     lockRepo,
-    stateBranch: input("state-branch", "lock-state"),
+    stateBranch,
     statePath: `locks/${lockName}.json`,
     configPath: `locks/${lockName}.config.json`,
     timeoutMinutes: integerInput("timeout-minutes", 180),
@@ -2327,6 +2704,7 @@ if (require.main === module) {
 module.exports = {
   acquire,
   api,
+  authorizeCaller,
   cleanupIdentity,
   config,
   createAppJwt,
@@ -2337,8 +2715,10 @@ module.exports = {
   installAcquireSignalCleanup,
   isRetryableResponse,
   normalizeState,
+  parseReleaseReport,
   postCleanup,
   readLockConfig,
+  readerCredential,
   readState,
   release,
   reap,

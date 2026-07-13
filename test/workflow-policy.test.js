@@ -55,6 +55,21 @@ function listWorkflows() {
     .map((entry) => entry.name);
 }
 
+test("all remote workflow actions are pinned to immutable commit SHAs", () => {
+  for (const workflowName of listWorkflows()) {
+    const workflow = readWorkflow(workflowName);
+    for (const match of workflow.matchAll(/^\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/gm)) {
+      const reference = match[1];
+      if (reference.startsWith("./")) continue;
+      assert.match(
+        reference,
+        /^[^/@\s]+\/[^/@\s]+(?:\/[^@\s]+)?@[a-f0-9]{40}$/,
+        `${workflowName} must pin ${reference} to a full immutable commit SHA`
+      );
+    }
+  }
+});
+
 function listPolicyTextFiles(root = repoRoot) {
   return childProcess
     .execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
@@ -1183,7 +1198,7 @@ test("CI actionlint step uses a Dependabot-upgradable Go module pin", () => {
   const dependabot = fs.readFileSync(path.join(repoRoot, ".github", "dependabot.yml"), "utf8");
   const steps = workflowJobStepMaps(text, "validate");
   const lintStep = steps.find((step) => step.name === "Lint GitHub Actions workflows");
-  const setupGoStep = steps.find((step) => /^actions\/setup-go@v\d+$/.test(step.uses || ""));
+  const setupGoStep = steps.find((step) => /^actions\/setup-go@[a-f0-9]{40}$/.test(step.uses || ""));
   const lintScript = runScriptSections(text).find((section) => section.text.includes(`go run -mod=readonly ${expectedActionlintCommand}`));
   const actionlintRequire = new RegExp(
     `^require ${escapeRegExp(expectedActionlintModule)} (v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\\s+// indirect)?$`,

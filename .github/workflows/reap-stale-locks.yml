@@ -12,6 +12,7 @@ on:
         options:
           - reap
           - recover
+          - recover-incident
         default: reap
       reservation-id:
         description: Exact quarantine reservation ID (recover only)
@@ -19,6 +20,15 @@ on:
         type: string
       resource-safe:
         description: Confirm the external Unity activation was returned (recover only)
+        required: false
+        type: boolean
+        default: false
+      incident-id:
+        description: Exact global incident ID (recover-incident only)
+        required: false
+        type: string
+      portal-cleanup-confirmed:
+        description: Confirm Unity portal cleanup (recover-incident only)
         required: false
         type: boolean
         default: false
@@ -37,7 +47,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Reap stale wallstop organization build lock
         uses: ./.github/actions/reap-stale-locks
@@ -46,6 +56,10 @@ jobs:
           operation: ${{ github.event.inputs.operation || 'reap' }}
           reservation-id: ${{ github.event.inputs['reservation-id'] || '' }}
           resource-safe: ${{ github.event.inputs['resource-safe'] || false }}
+          incident-id: ${{ github.event.inputs['incident-id'] || '' }}
+          portal-cleanup-confirmed: ${{ github.event.inputs['portal-cleanup-confirmed'] || false }}
         env:
           BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+          BUILD_LOCK_READER_APP_ID: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
+          BUILD_LOCK_READER_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}

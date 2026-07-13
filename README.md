@@ -4,7 +4,9 @@ This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
 > [!NOTE]
-> Consumer workflows must provide lock credentials with `contents: read/write` on this repository; stale-holder recovery also requires `actions: read` on consumer repositories. GitHub App credentials are described below; `BUILD_LOCK_TOKEN` remains available only for staged compatibility.
+> Consumer jobs use a state-writer GitHub App restricted to this repository with
+> `contents: write`. Only the scheduled reaper has a separate reader App installed
+> on the five registered consumers with `actions: read` and `metadata: read`.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -33,7 +35,7 @@ section, guard every licensed step on the acquire output, and release with
 
 - name: Acquire organization Unity lock
   id: acquire-build-lock
-  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@v1
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@COMPATIBILITY_COMMIT_SHA
   with:
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
@@ -56,12 +58,14 @@ section, guard every licensed step on the acquire output, and release with
 
 - name: Release organization Unity lock
   if: always()
-  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@v1
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@COMPATIBILITY_COMMIT_SHA
   with:
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
-    resource-safe: ${{ steps.return-unity-license.outputs.resource-safe == 'true' }}
+    resource-cleanup-status: ${{ steps.return-unity-license.outputs.resource-cleanup-status }}
+    resource-health: ${{ steps.return-unity-license.outputs.resource-health }}
+    resource-reason: ${{ steps.return-unity-license.outputs.resource-reason }}
   env:
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
@@ -74,16 +78,19 @@ before reading or mutating lock state if the initial snapshot cannot satisfy the
 This also makes a missing, malformed, or temporarily unreadable config fail closed
 for consumers that require lifecycle protection.
 
-The Unity return helper must be non-masking and emit `resource-safe=true` only
-when the return command succeeds or an allowlisted response proves the local
-activation is already absent. Missing credentials or tools, timeouts,
-termination, and unrecognized responses must emit false. Give the return step an
-ID and pass that proof to the unconditional release as shown above.
+Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
+mutable major tags are not permitted in protected consumers. The Unity return
+helper must emit `resource-cleanup-status=confirmed` only for exact positive
+return evidence. Exit zero or `Serial number unavailable` alone is insufficient.
+Timeouts, truncated logs, termination, `400006`, `20113`, and missing positive
+evidence report `unknown/healthy` with an allowlisted reason. Confirmed `20111`
+reports `unknown/blocked` with `unity-account-limit-20111`.
 
 The release action is intentionally safe to run even when acquire never reached
 the front of the queue. It reports `cleanup-result=cooldown-started`,
 `cleanup-result=quarantined`, `cleanup-result=queue-cleaned`, or
-`cleanup-result=noop`. `cleanup-result=released` is also possible before schema 4
+`cleanup-result=noop`. Under schema 5, `cleanup-result=global-quarantined`
+identifies an active account incident. `cleanup-result=released` is also possible before schema 4
 or when an ambiguous schema-4 release is confirmed after its reservation expires.
 `released=true` remains the backward-compatible
 indication that holder ownership was removed. `queue-cleaned` means
@@ -140,6 +147,13 @@ quarantines because those paths cannot prove the external activation was
 returned. Once schema 4 exists, configuration cannot downgrade lifecycle
 protection.
 
+Schema 5 adds at most one immutable global account incident. It is supported by
+this release but remains dormant while `accountHealth` is false. Enabling it is
+a one-way, drained migration: schema 4 holders, queue entries, cooldowns, and
+quarantines must all be empty. A confirmed `20111` report blocks admission
+immediately without growing the queue. Existing holders may finish and clean up.
+Incidents never expire and cannot be recovered by same-runner admission.
+
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
 
@@ -183,13 +197,22 @@ activation-limit failures.
 
 ## Authentication
 
-Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together. The App must
-be installed on the lock repository and every consumer with Metadata read,
-Actions read, and Contents read/write. The client mints an organization
-installation token only when needed, keeps it only in memory, refreshes it five
-minutes before expiry, and remints immediately after a 401. Partial App
-credentials fail closed. `BUILD_LOCK_TOKEN` remains temporarily supported for
-staged migration and should be removed after every old run drains.
+Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together in only the
+five protected consumer environments. The writer App is installed only on this
+lock repository. Tokens are minted for only
+`ambiguous-organization-build-lock` with `contents: write`; caller owner ID,
+repository ID/name, lock repository, and lock name are validated before any
+credential parsing or network access.
+
+The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
+`BUILD_LOCK_READER_APP_PRIVATE_KEY`. That reader App is installed only on
+DxMessaging, unity-helpers, DoxReloaded, IshoBoy, and
+DepartmentOfArrangements, and its token requests only `actions: read` and
+`metadata: read`. Acquire and release never read cross-repository Actions state;
+an unreaped holder remains authoritative and admission fails closed.
+
+Legacy `BUILD_LOCK_TOKEN` authentication is rejected. Old pinned runs must drain
+before the state-writer App key is rotated.
 
 Rollout note: upgrade every consumer to the latest `v1` before raising
 `maxHolders` above 1. Pre-semaphore clients see only the mirrored first holder
@@ -216,15 +239,19 @@ when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
 
-Under schema 4, stale holders are quarantined instead of freed. Operators may
+Under schema 4 and 5, stale holders are quarantined instead of freed. Operators may
 dispatch the reaper with `operation=recover`, the exact reservation ID, and
 `resource-safe=true` only after confirming Unity portal cleanup. Recovery starts
 a cooldown; it never frees capacity immediately.
 
-The acquire actions set `stale-recovered=true` after GitHub accepts a
-stale-holder replacement write. If a race prevents the action from verifying and
-using that replacement before timeout, `acquired=false` remains authoritative for
-guarding licensed work while `stale-recovered=true` preserves the diagnostic.
+For schema 5, dispatch `operation=recover-incident` with the exact incident ID
+and `portal-cleanup-confirmed=true` only after the Unity portal inventory is
+reconciled. Recovery clears the global incident into a normal cooldown; a wrong
+ID or missing proof fails closed.
+
+`stale-recovered` remains in the versioned output contract but is always false:
+consumer acquire no longer replaces stale holders. The scheduled reaper is the
+sole authority for cross-repository run observation and stale-state transitions.
 
 ## Dependabot Auto-Merge
 

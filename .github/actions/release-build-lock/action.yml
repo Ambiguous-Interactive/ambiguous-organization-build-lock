@@ -15,9 +15,17 @@ inputs:
     description: Physical identity of the runner executing cleanup. Required when runner serialization is active.
     required: false
   resource-safe:
-    description: "Set true only when external resource cleanup was confirmed; false creates a quarantine under schema 4."
+    description: Deprecated compatibility input. True maps to confirmed/healthy; false maps to unknown/healthy.
     required: false
-    default: "false"
+  resource-cleanup-status:
+    description: "External cleanup evidence: confirmed or unknown."
+    required: false
+  resource-health:
+    description: "Account health classification: healthy or blocked."
+    required: false
+  resource-reason:
+    description: Allowlisted stable evidence reason code.
+    required: false
   lock-repository:
     description: Repository that stores lock state.
     required: false
@@ -49,6 +57,12 @@ outputs:
     description: cooldown or quarantine when a lifecycle reservation was created.
   available-at:
     description: Earliest availability time for a cooldown reservation.
+  incident-id:
+    description: Active immutable global incident ID, when account health is blocked.
+  resource-health:
+    description: Effective resource health after cleanup reporting.
+  resource-reason:
+    description: Stable effective resource reason code.
 runs:
   using: node24
   main: ../../dist/release.js

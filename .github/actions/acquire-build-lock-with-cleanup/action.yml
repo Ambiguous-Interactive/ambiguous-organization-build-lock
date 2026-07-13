@@ -53,9 +53,17 @@ outputs:
   attempts:
     description: CAS attempts.
   stale-recovered:
-    description: "true when this acquire accepted a stale-holder replacement write."
+    description: Compatibility output; always false because only the scheduled reaper handles stale holders.
   quarantine-recovered:
     description: "true when this acquire atomically reclaimed a quarantine on the same physical runner."
+  admission-result:
+    description: "acquired, timeout, or account-blocked."
+  incident-id:
+    description: Active global incident ID when admission is account-blocked.
+  resource-health:
+    description: Effective resource health observed during admission.
+  resource-reason:
+    description: Stable resource reason code when admission is blocked.
 runs:
   using: node24
   main: ../../dist/acquire-with-cleanup.js
