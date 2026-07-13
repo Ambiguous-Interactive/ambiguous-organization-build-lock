@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests-standalone:2021.3.45f1-standalone",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests-standalone",
-    "runId": "29239021138",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-    "queuedAt": "2026-07-13T12:12:11.770Z",
-    "acquiredAt": "2026-07-13T12:30:55.107Z",
-    "expiresAt": "2026-07-13T16:30:55.107Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests-standalone:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29239021138",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-      "queuedAt": "2026-07-13T12:12:11.770Z",
-      "acquiredAt": "2026-07-13T12:30:55.107Z",
-      "expiresAt": "2026-07-13T16:30:55.107Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29245248635:unity-tests:2021.3.45f1-playmode",
@@ -42,6 +16,21 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T12:30:55.107Z"
+  "reservations": [
+    {
+      "reservationId": "57c1a7e0-ce8a-416b-b535-cc676842f7ca",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests-standalone:2021.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29239021138",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "explicit release could not prove resource cleanup safe",
+      "createdAt": "2026-07-13T12:35:37.704Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T12:35:37.705Z"
 }
