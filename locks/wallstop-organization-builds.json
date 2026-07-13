@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29218686624:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29218686624",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29218686624",
+    "queuedAt": "2026-07-13T02:03:55.852Z",
+    "acquiredAt": "2026-07-13T02:09:26.890Z",
+    "expiresAt": "2026-07-13T06:09:26.890Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29218686624:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29218686624",
       "queuedAt": "2026-07-13T02:03:55.852Z",
+      "acquiredAt": "2026-07-13T02:09:26.890Z",
+      "expiresAt": "2026-07-13T06:09:26.890Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "9f912bca-0773-4331-91e5-30485581ad7f",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29218563753:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29218563753",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29218563753",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "operator confirmed external resource cleanup",
-      "createdAt": "2026-07-13T02:01:09.994Z",
-      "availableAt": "2026-07-13T02:08:58.325Z"
-    }
-  ],
-  "updatedAt": "2026-07-13T02:03:58.187Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-13T02:09:26.890Z"
 }
