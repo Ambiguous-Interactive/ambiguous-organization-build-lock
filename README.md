@@ -211,6 +211,14 @@ DepartmentOfArrangements, and its token requests only `actions: read` and
 `metadata: read`. Acquire and release never read cross-repository Actions state;
 an unreaped holder remains authoritative and admission fails closed.
 
+During the compatibility cutover only, if the dedicated reader credentials are
+absent, the scheduled reaper may mint the same consumer-only Actions/Metadata
+token from the existing broad writer App. The token remains restricted to the
+five registered consumers and has no Contents permission. Provision the reader
+App before narrowing the writer installation, then remove reliance on this
+fallback. Operator `recover` and `recover-incident` operations do not inspect
+workflow runs and therefore do not require reader credentials.
+
 Legacy `BUILD_LOCK_TOKEN` authentication is rejected. Old pinned runs must drain
 before the state-writer App key is rotated.
 
