@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unitypackage-smoke:unitypackage-smoke-29239021138",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "29239021138",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-    "queuedAt": "2026-07-13T14:05:55.588Z",
-    "acquiredAt": "2026-07-13T14:18:25.892Z",
-    "expiresAt": "2026-07-13T18:18:25.892Z",
-    "runnerId": "GitHub Actions 1000098734"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unitypackage-smoke:unitypackage-smoke-29239021138",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29239021138",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-      "queuedAt": "2026-07-13T14:05:55.588Z",
-      "acquiredAt": "2026-07-13T14:18:25.892Z",
-      "expiresAt": "2026-07-13T18:18:25.892Z",
-      "runnerId": "GitHub Actions 1000098734"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29241648370:unity-tests:2022.3.45f1-standalone",
@@ -53,6 +27,21 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T14:18:25.892Z"
+  "reservations": [
+    {
+      "reservationId": "91173598-3f5b-4809-8f12-d4a30eb5b36e",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unitypackage-smoke:unitypackage-smoke-29239021138",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "29239021138",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
+      "runnerId": "GitHub Actions 1000098734",
+      "state": "quarantine",
+      "reason": "explicit release could not prove resource cleanup safe",
+      "createdAt": "2026-07-13T14:20:27.399Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T14:20:27.399Z"
 }
