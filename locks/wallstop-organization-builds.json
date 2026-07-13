@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29274150696:unity-tests:unity-tests-1",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "29274150696",
-    "runAttempt": "2",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29274150696",
-    "queuedAt": "2026-07-13T21:27:26.753Z",
-    "acquiredAt": "2026-07-13T21:36:55.361Z",
-    "expiresAt": "2026-07-14T01:36:55.361Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29274150696:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29274150696",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29274150696",
-      "queuedAt": "2026-07-13T21:27:26.753Z",
-      "acquiredAt": "2026-07-13T21:36:55.361Z",
-      "expiresAt": "2026-07-14T01:36:55.361Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29284973970:unitypackage-smoke:unitypackage-smoke-29284973970",
@@ -42,6 +16,22 @@
       "runnerId": "GitHub Actions 1000099003"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T21:36:55.361Z"
+  "reservations": [
+    {
+      "reservationId": "c52d567c-45d2-4735-b939-ea77570b1a96",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29274150696:unity-tests:unity-tests-1",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "29274150696",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29274150696",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-13T21:41:06.088Z",
+      "availableAt": "2026-07-13T21:47:06.088Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T21:41:06.088Z"
 }
