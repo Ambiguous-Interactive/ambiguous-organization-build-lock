@@ -1,0 +1,133 @@
+# Secure Two-Seat Unity Rollout
+
+This runbook is the deployment gate for the code in this repository. Keep
+`maxHolders: 1` and `accountHealth: false` until every prerequisite below is
+recorded in one restricted tracking issue. Never attach raw PEM files, serials,
+logs, ZIP files, or credential values to the issue or repository.
+
+## Evidence and containment
+
+- Disable every Unity-capable DepartmentOfArrangements workflow, including its
+  credential watch, Unity CI, and WebGL jobs. Freeze all licensed canaries.
+- Before rotation, account for every in-flight holder and allow its exact
+  activation identity to return the license.
+- Preserve sanitized event/run metadata, artifact hashes, machine IDs, App
+  events, and lock-state history. Classify each assertion as confirmed, likely,
+  disproved, or unavailable.
+- Search all refs, retained logs, artifacts, and release assets for the old
+  serial and safe transformations. Record only counts, locations, and hashes;
+  never print matching content.
+- In the Unity portal, clear unexplained activations and record a zero-unexplained
+  baseline. Do not claim an exact exfiltration path without direct evidence.
+
+The confirmed root cause for this rollout is untracked activation capacity:
+DepartmentOfArrangements activated outside the central lock; its credential
+watch did not return a randomized machine identity; and other jobs attempted
+return from a different stock image. Those activations exhausted two seats while
+the lock state remained internally consistent.
+
+## Authorization cutover
+
+The only registered owner ID is `212056428`. Registered repositories are:
+
+| Repository | Repository ID |
+| --- | ---: |
+| ambiguous-organization-build-lock | 1244796436 |
+| DxMessaging | 101020635 |
+| unity-helpers | 737391131 |
+| DoxReloaded | 825469040 |
+| IshoBoy | 885525263 |
+| DepartmentOfArrangements | 1079492096 |
+
+1. Release the schema-4-compatible authorization change at an immutable SHA.
+2. Create the reader App, installed only on the five consumers, with Metadata
+   read and Actions read. Store its key only in the lock repository.
+3. Verify compatibility while the writer App still has its old installation.
+4. Restrict the writer App installation to only this lock repository, with
+   Contents write. Rotate its key and update only the five protected
+   `unity-license` environments.
+5. Prove the reader token cannot read contents and the writer token cannot
+   access a consumer repository. The unit suite verifies requested token scope;
+   the tracking issue must record live negative API probes.
+
+Repository-ID validation is defense in depth. In this GitHub-only design, the
+shared writer App private key is the ultimate authorization boundary; a stolen
+key can call GitHub without executing this action. Cryptographic caller identity
+would require an OIDC broker.
+
+## Consumer sequence
+
+Migrate one repository at a time: unity-helpers,
+DepartmentOfArrangements, DxMessaging, DoxReloaded, then IshoBoy. Do not start
+the next PR until the prior PR is merged, reviewed at its exact SHA, green, and
+canaried.
+
+Each repository must have a data-driven policy test enumerating every Unity
+secret, GameCI use, and activation reference. Licensed jobs must use the
+protected `unity-license` environment, immutable action SHAs, persistent
+licensing home and machine identity across activation/return, and protected
+`main` or controlled manual dispatch only. PR code must never run licensed
+jobs. Job-scoped Unity secrets and custom-image/stock-return mismatches are
+prohibited.
+
+The shared classifier contract is:
+
+- exact positive return evidence: `confirmed/healthy`;
+- `20111`: `unknown/blocked`, reason `unity-account-limit-20111`;
+- `400006`, timeout, truncation, termination, or missing positive evidence:
+  `unknown/healthy` with the matching runner-local reason;
+- `20113`: `unknown/healthy`, reason `unity-20113-unclassified`, until sanitized
+  production evidence establishes a stronger meaning.
+
+## Schema 5 activation and rollback
+
+Before activation, prove all five consumers and the reaper are pinned to an
+immutable schema-5-capable SHA and organization-wide search finds no schema-4-
+only or mutable `@v1` consumer. Preserve that schema-5-capable release as the
+rollback artifact; never run a schema-4-only client against schema 5.
+
+Drain holders, queue entries, cooldowns, and quarantines. Merge a configuration-
+only PR changing `accountHealth` to `true` while leaving `maxHolders` at 1. Run
+normal return, cross-machine handoff, cancellation, hard-stop reaping, synthetic
+`20111`, wrong-ID recovery rejection, exact-ID confirmed recovery, and one
+successful canary from each consumer.
+
+## Two-seat enablement
+
+Only after the portal has zero unexplained activations, prove two distinct
+machines activate concurrently under two holders, both return with their
+activating identities, and a third machine succeeds after cooldown. Then merge
+a configuration-only PR changing `maxHolders` from 1 to 2.
+
+At capacity two, one runner quarantine leaves effective capacity one; two leave
+zero. A global incident immediately leaves zero. Do not add an automatic
+configuration rollback to one holder.
+
+Monitor for seven days. Close the incident issues only with zero `20111`
+events, zero unexplained activations, zero unsafe releases admitted as clean,
+and zero unauthorized caller attempts.
+
+## Organization audit
+
+Use a one-time owner-authenticated collection without a permanent `admin:org`
+PAT. Record sanitized principals, teams, outside/direct collaborators, service
+and enterprise owners, 2FA and SAML/SCIM posture, dormant access, Apps, OAuth
+Apps, PAT approvals, deploy/SSH keys, runner groups, environments, ruleset
+bypasses, and secret names/scopes/update times (never values).
+
+Verify owner recovery, then enable organization 2FA. Move all seven all-
+repository Apps to selected repositories and least privilege or uninstall them,
+while preserving Cursor Bugbot and Copilot on the review-loop repositories.
+Stage rulesets in evaluate mode, validate required App bypasses, then enforce.
+Only the writer App may bypass `lock-state`; administrators may not. Enable and
+test secret scanning and push protection, including a Unity-serial pattern.
+Repeat the principal audit quarterly and after membership, App, or secret-scope
+changes.
+
+## Review evidence
+
+For every pushed SHA, record focused and full tests, Actions checks, exact-SHA
+Cursor and Copilot requests/responses, unresolved thread inspection, fixes,
+thread resolution, and the final zero-actionable-findings result. Silence or a
+stale review is not consensus; retry once through the alternate supported
+mechanism and record a bounded reviewer-unavailable timeout.

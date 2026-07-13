@@ -9,6 +9,7 @@ const test = require("node:test");
 const {
   acquire,
   api,
+  authorizeCaller,
   config,
   createAppJwt,
   createGitHubAppAuth,
@@ -18,8 +19,10 @@ const {
   installAcquireSignalCleanup,
   isRetryableResponse,
   normalizeState,
+  parseReleaseReport,
   postCleanup,
   readLockConfig,
+  readerCredential,
   release,
   reap,
   runCancellationCleanup,
@@ -48,6 +51,8 @@ function jsonResponse(status, body = {}, headers = {}) {
 
 const actionEnvNames = [
   "GITHUB_REPOSITORY",
+  "GITHUB_REPOSITORY_ID",
+  "GITHUB_REPOSITORY_OWNER_ID",
   "GITHUB_RUN_ID",
   "GITHUB_RUN_ATTEMPT",
   "GITHUB_WORKFLOW",
@@ -58,6 +63,12 @@ const actionEnvNames = [
   "STATE_build_lock_cleanup"
 ];
 
+const authorizedConsumerEnv = {
+  GITHUB_REPOSITORY: "Ambiguous-Interactive/unity-helpers",
+  GITHUB_REPOSITORY_ID: "737391131",
+  GITHUB_REPOSITORY_OWNER_ID: "212056428"
+};
+
 const acquireOutputNames = [
   "acquired",
   "lock-name",
@@ -66,7 +77,11 @@ const acquireOutputNames = [
   "wait-ms",
   "attempts",
   "stale-recovered",
-  "quarantine-recovered"
+  "quarantine-recovered",
+  "admission-result",
+  "incident-id",
+  "resource-health",
+  "resource-reason"
 ];
 
 const releaseOutputNames = [
@@ -80,7 +95,10 @@ const releaseOutputNames = [
   "held-by-run-url",
   "reservation-id",
   "reservation-state",
-  "available-at"
+  "available-at",
+  "incident-id",
+  "resource-health",
+  "resource-reason"
 ];
 
 const reapOutputNames = ["reaped", "state-sha"];
@@ -684,11 +702,11 @@ test("GitHub App auth rejects malformed installation and token responses", async
   }
 });
 
-test("credential selection rejects partial App configuration and preserves legacy compatibility", async (t) => {
+test("credential selection requires complete GitHub App configuration and rejects legacy tokens", async (t) => {
   const cases = [
     { name: "app id only", appId: "123", privateKey: undefined, token: "legacy", error: /provided together/ },
     { name: "private key only", appId: undefined, privateKey: testAppPrivateKey, token: "legacy", error: /provided together/ },
-    { name: "legacy token only", appId: undefined, privateKey: undefined, token: "legacy" }
+    { name: "legacy token only", appId: undefined, privateKey: undefined, token: "legacy", error: /Provide BUILD_LOCK_APP_ID/ }
   ];
 
   for (const testCase of cases) {
@@ -701,13 +719,11 @@ test("credential selection rejects partial App configuration and preserves legac
         },
         async () => {
           await withMockedFetch(async () => jsonResponse(500), async (logs) => {
-            if (testCase.error) {
-              assert.throws(() => credential({ owner: "Ambiguous-Interactive" }), testCase.error);
-            } else {
-              assert.equal(credential({ owner: "Ambiguous-Interactive" }), "legacy");
-              assert.ok(logs.includes("::add-mask::legacy"));
-              assert.equal(logs.filter((line) => !line.startsWith("::add-mask::")).join("\n").includes("legacy"), false);
-            }
+            assert.throws(
+              () => credential({ owner: "Ambiguous-Interactive", repo: "ambiguous-organization-build-lock" }),
+              testCase.error
+            );
+            assert.equal(logs.join("\n").includes("legacy"), false);
           });
         }
       );
@@ -730,10 +746,12 @@ test("config rejects holder suffixes that fallback cleanup cannot reproduce", as
         {
           "INPUT_LOCK-NAME": "wallstop-organization-builds",
           "INPUT_HOLDER-ID-SUFFIX": testCase.value,
-          "INPUT_LOCK-REPOSITORY": "o/r",
-          BUILD_LOCK_APP_ID: testCase.error ? "partial-app-credentials" : undefined,
-          BUILD_LOCK_APP_PRIVATE_KEY: undefined,
-          BUILD_LOCK_TOKEN: testCase.error ? undefined : "legacy"
+          "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+          GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+          GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+          GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
+          BUILD_LOCK_APP_ID: testCase.error ? "partial-app-credentials" : "12345",
+          BUILD_LOCK_APP_PRIVATE_KEY: testCase.error ? undefined : testAppPrivateKey
         },
         async () => {
           if (testCase.error) {
@@ -765,10 +783,14 @@ test("config validates acquire lifecycle requirements", async (t) => {
       await withEnvironment(
         {
           "INPUT_LOCK-NAME": "wallstop-organization-builds",
-          "INPUT_LOCK-REPOSITORY": "o/r",
+          "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+          GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+          GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+          GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
           "INPUT_REQUIRE-RESOURCE-LIFECYCLE": testCase.lifecycle,
           "INPUT_MINIMUM-RELEASE-COOLDOWN-SECONDS": testCase.cooldown,
-          BUILD_LOCK_TOKEN: "legacy"
+          BUILD_LOCK_APP_ID: "12345",
+          BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey
         },
         () => {
           if (testCase.error) {
@@ -802,19 +824,120 @@ test("GitHub App configuration rejects invalid private keys without exposing the
   });
 });
 
-test("complete GitHub App credentials take precedence over the legacy token", async () => {
+test("complete GitHub App credentials select renewable scoped authentication", async () => {
   await withEnvironment(
     {
       BUILD_LOCK_APP_ID: "12345",
-      BUILD_LOCK_APP_PRIVATE_KEY: String(testAppPrivateKey).replace(/\n/g, "\\n"),
-      BUILD_LOCK_TOKEN: "legacy-must-not-win"
+      BUILD_LOCK_APP_PRIVATE_KEY: String(testAppPrivateKey).replace(/\n/g, "\\n")
     },
     () => {
-      const selected = credential({ owner: "Ambiguous-Interactive" });
+      const selected = credential({ owner: "Ambiguous-Interactive", repo: "ambiguous-organization-build-lock" });
       assert.equal(selected.renewable, true);
       assert.equal(typeof selected.getToken, "function");
     }
   );
+});
+
+test("config rejects unauthorized callers before credential parsing", async (t) => {
+  for (const testCase of [
+    { name: "wrong owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "1" } },
+    { name: "non-canonical owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "0212056428" } },
+    { name: "wrong repository id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_ID: "1" } },
+    { name: "repository name and id mismatch", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "Ambiguous-Interactive/IshoBoy" } },
+    { name: "wrong state branch", env: authorizedConsumerEnv, inputs: { "INPUT_STATE-BRANCH": "main" } }
+  ]) {
+    await t.test(testCase.name, async () => {
+      await withActionEnv(testCase.env, async () => {
+        await withEnvironment({
+          "INPUT_LOCK-NAME": "wallstop-organization-builds",
+          "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+          ...(testCase.inputs || {}),
+          BUILD_LOCK_APP_ID: "123",
+          BUILD_LOCK_APP_PRIVATE_KEY: "deliberately-invalid-private-key"
+        }, () => {
+          assert.throws(() => config(), /not authorized|canonical/i);
+        });
+      });
+    });
+  }
+});
+
+test("authorization registry accepts only the lock repository and five canonical consumers", async (t) => {
+  const repositories = [
+    ["Ambiguous-Interactive/DxMessaging", "101020635"],
+    ["Ambiguous-Interactive/unity-helpers", "737391131"],
+    ["Ambiguous-Interactive/DoxReloaded", "825469040"],
+    ["Ambiguous-Interactive/IshoBoy", "885525263"],
+    ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
+    ["Ambiguous-Interactive/ambiguous-organization-build-lock", "1244796436"]
+  ];
+  for (const [repository, repositoryId] of repositories) {
+    await t.test(repository, async () => {
+      await withActionEnv({
+        GITHUB_REPOSITORY: repository,
+        GITHUB_REPOSITORY_ID: repositoryId,
+        GITHUB_REPOSITORY_OWNER_ID: "212056428"
+      }, () => {
+        assert.equal(
+          authorizeCaller({
+            lockName: "wallstop-organization-builds",
+            lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+            mode: repository.endsWith("/ambiguous-organization-build-lock") ? "reap" : "acquire"
+          }).repository,
+          repository
+        );
+      });
+    });
+  }
+});
+
+test("state-writer App tokens are limited to the lock repository and contents write", async () => {
+  const requests = [];
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    requests.push({ path: parsed.pathname, method: options.method, body: options.body && JSON.parse(options.body) });
+    if (parsed.pathname.endsWith("/installation")) return jsonResponse(200, { id: 42 });
+    return jsonResponse(201, { token: "scoped-writer", expires_at: "2999-01-01T00:00:00Z" });
+  }, async () => {
+    const auth = createGitHubAppAuth({
+      appId: "123",
+      privateKey: testAppPrivateKey,
+      owner: "Ambiguous-Interactive",
+      repository: "ambiguous-organization-build-lock",
+      repositories: ["ambiguous-organization-build-lock"],
+      permissions: { contents: "write" }
+    });
+    assert.equal(await auth.getToken(), "scoped-writer");
+  });
+  assert.equal(requests[0].path, "/repos/Ambiguous-Interactive/ambiguous-organization-build-lock/installation");
+  assert.deepEqual(requests[1].body, {
+    repositories: ["ambiguous-organization-build-lock"],
+    permissions: { contents: "write" }
+  });
+});
+
+test("reaper reader App token is limited to consumer Actions and Metadata read", async () => {
+  const requests = [];
+  await withEnvironment({
+    BUILD_LOCK_READER_APP_ID: "456",
+    BUILD_LOCK_READER_APP_PRIVATE_KEY: testAppPrivateKey
+  }, async () => {
+    await withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      requests.push({ path: parsed.pathname, body: options.body && JSON.parse(options.body) });
+      if (parsed.pathname.endsWith("/installation")) return jsonResponse(200, { id: 84 });
+      return jsonResponse(201, { token: "scoped-reader", expires_at: "2999-01-01T00:00:00Z" });
+    }, async () => {
+      assert.equal(await readerCredential("Ambiguous-Interactive").getToken(), "scoped-reader");
+    });
+  });
+  assert.equal(requests[0].path, "/orgs/Ambiguous-Interactive/installation");
+  assert.deepEqual(requests[1].body, {
+    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
+    permissions: { actions: "read", metadata: "read" }
+  });
+  assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
+  assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
 
 test("writeState does not mark a 401-then-conflict sequence as an ambiguous write", async () => {
@@ -1646,8 +1769,7 @@ test("acquire succeeds idempotently when this run already holds the lock", async
     [
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
       "GET /repos/o/r/git/ref/heads/lock-state",
-      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/owner/repo/actions/runs/123"
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json"
     ]
   );
 });
@@ -1725,8 +1847,7 @@ test("acquire recovers when a successful lock write is reported as a transient f
       "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
       "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/owner/repo/actions/runs/123"
+      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json"
     ]
   );
 });
@@ -1928,116 +2049,6 @@ test("acquire fails fast on 401 when the auth grace window is disabled", async (
   );
 });
 
-test("acquire preserves stale recovery when an accepted stale replacement is reported as a transient failure", async () => {
-  let state = {
-    ...emptyState("wallstop-organization-builds"),
-    holder: {
-      holderId: "other/repo:999:perf-benchmarks:editmode",
-      repository: "other/repo",
-      workflow: "Perf",
-      job: "perf-benchmarks",
-      runId: "999",
-      runAttempt: "1",
-      runUrl: "https://github.com/other/repo/actions/runs/999",
-      queuedAt: "2026-06-06T00:00:00.000Z",
-      acquiredAt: "2026-06-06T00:00:00.000Z",
-      expiresAt: "2999-01-01T00:00:00.000Z"
-    }
-  };
-  let putCalls = 0;
-  const calls = [];
-
-  await withTempFile(async (outputFile) => {
-    await withActionEnv(
-      {
-        GITHUB_REPOSITORY: "owner/repo",
-        GITHUB_RUN_ID: "123",
-        GITHUB_RUN_ATTEMPT: "1",
-        GITHUB_WORKFLOW: "Perf",
-        GITHUB_JOB: "perf-benchmarks",
-        GITHUB_OUTPUT: outputFile
-      },
-      async () => {
-        await withImmediateTimers(async () => {
-          await withMockedFetch(async (url, options = {}) => {
-            const parsed = new URL(url);
-            calls.push({ method: options.method || "GET", path: parsed.pathname });
-            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-              return jsonResponse(200, { object: { sha: "branch-sha" } });
-            }
-            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
-              if (options.method === "PUT") {
-                putCalls++;
-                const body = JSON.parse(options.body);
-                const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-                if (putCalls === 1) {
-                  state = written;
-                  return jsonResponse(500, { message: "accepted but response failed" });
-                }
-                return jsonResponse(409, { message: "sha does not match" });
-              }
-              return jsonResponse(200, {
-                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
-                sha: state.holder.holderId === "owner/repo:123:perf-benchmarks:playmode"
-                  ? "state-sha-after-put"
-                  : "state-sha-before-put"
-              });
-            }
-            if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-              return jsonResponse(200, { status: "completed", conclusion: "success" });
-            }
-            if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
-              return jsonResponse(200, { status: "in_progress", conclusion: null });
-            }
-            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-          }, async (logs) => {
-            await acquire({
-              token: "token",
-              lockName: "wallstop-organization-builds",
-              holderIdSuffix: "playmode",
-              lockRepository: "o/r",
-              lockRepo: { owner: "o", repo: "r" },
-              stateBranch: "lock-state",
-              statePath: "locks/wallstop-organization-builds.json",
-              timeoutMinutes: 1,
-              leaseMinutes: 240,
-              pollSeconds: 1
-            });
-
-            assert.equal(putCalls, 2);
-            assert.equal(state.holder.holderId, "owner/repo:123:perf-benchmarks:playmode");
-            assert.match(logs.join("\n"), /Recovering stale holder other\/repo:999:perf-benchmarks:editmode: holder run is completed/);
-            assert.match(logs.join("\n"), /HTTP 500; retrying/);
-            assert.match(logs.join("\n"), /Already holds wallstop-organization-builds/);
-          });
-        });
-      }
-    );
-
-    const outputs = readEnvironmentFile(outputFile);
-    assertOutputContract(outputs, acquireOutputNames);
-    assert.equal(outputs.acquired, "true");
-    assert.equal(outputs["lock-name"], "wallstop-organization-builds");
-    assert.equal(outputs["holder-id"], "owner/repo:123:perf-benchmarks:playmode");
-    assert.equal(outputs["state-sha"], "state-sha-after-put");
-    assert.equal(outputs.attempts, "2");
-    assert.equal(outputs["stale-recovered"], "true");
-  });
-
-  assert.deepEqual(
-    calls.map((call) => `${call.method} ${call.path}`),
-    [
-      "GET /repos/o/r/contents/locks/wallstop-organization-builds.config.json",
-      "GET /repos/o/r/git/ref/heads/lock-state",
-      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/other/repo/actions/runs/999",
-      "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "PUT /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/o/r/contents/locks/wallstop-organization-builds.json",
-      "GET /repos/owner/repo/actions/runs/123"
-    ]
-  );
-});
 
 test("acquire records post cleanup state only when opt-in cleanup is enabled", async () => {
   let holderState = null;
@@ -2377,7 +2388,7 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
                     leaseMinutes: 240,
                     pollSeconds: 1
                   }),
-                /holder=other\/repo:999:perf-benchmarks:editmode.*queue-position=1.*reason=holder run is in_progress/
+                /holder=other\/repo:999:perf-benchmarks:editmode.*queue-position=1.*reason=awaiting scheduled reaper/
               );
 
               assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
@@ -2402,475 +2413,9 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
   assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
 });
 
-test("acquire timeout preserves stale recovery output after a raced stale replacement", async () => {
-  const originalNow = Date.now;
-  let now = 0;
-  let readCount = 0;
-  let staleReplacementWrites = 0;
-  let state = {
-    ...emptyState("wallstop-organization-builds"),
-    holder: {
-      holderId: "other/repo:999:perf-benchmarks:editmode",
-      repository: "other/repo",
-      workflow: "Perf",
-      job: "perf-benchmarks",
-      runId: "999",
-      runAttempt: "1",
-      runUrl: "https://github.com/other/repo/actions/runs/999",
-      queuedAt: "2026-06-06T00:00:00.000Z",
-      acquiredAt: "2026-06-06T00:00:00.000Z",
-      expiresAt: "2026-06-06T01:00:00.000Z"
-    },
-    queue: [
-      {
-        holderId: "owner/repo:123:perf-benchmarks:playmode",
-        repository: "owner/repo",
-        workflow: "Perf",
-        job: "perf-benchmarks",
-        runId: "123",
-        runAttempt: "1",
-        runUrl: "https://github.com/owner/repo/actions/runs/123",
-        queuedAt: "2026-06-06T00:00:00.000Z"
-      }
-    ]
-  };
-  const competingHolder = {
-    holderId: "other/repo:456:perf-benchmarks:editmode",
-    repository: "other/repo",
-    workflow: "Perf",
-    job: "perf-benchmarks",
-    runId: "456",
-    runAttempt: "1",
-    runUrl: "https://github.com/other/repo/actions/runs/456",
-    queuedAt: "2026-06-06T00:01:00.000Z",
-    acquiredAt: "2026-06-06T00:01:00.000Z",
-    expiresAt: "2999-01-01T00:00:00.000Z"
-  };
 
-  Date.now = () => {
-    now += 30000;
-    return now;
-  };
 
-  try {
-    await withTempFile(async (outputFile) => {
-      await withActionEnv(
-        {
-          GITHUB_REPOSITORY: "owner/repo",
-          GITHUB_RUN_ID: "123",
-          GITHUB_RUN_ATTEMPT: "1",
-          GITHUB_WORKFLOW: "Perf",
-          GITHUB_JOB: "perf-benchmarks",
-          GITHUB_OUTPUT: outputFile
-        },
-        async () => {
-          await withImmediateTimers(async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
-                if (options.method === "PUT") {
-                  const body = JSON.parse(options.body);
-                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-                  if (written.holder && written.holder.holderId === "owner/repo:123:perf-benchmarks:playmode") {
-                    staleReplacementWrites++;
-                    state = {
-                      ...written,
-                      holder: competingHolder,
-                      holders: [competingHolder],
-                      queue: []
-                    };
-                  } else {
-                    state = written;
-                  }
-                  return jsonResponse(200, { content: { sha: `state-after-write-${staleReplacementWrites}` } });
-                }
-                readCount++;
-                return jsonResponse(200, {
-                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
-                  sha: `state-read-${readCount}`
-                });
-              }
-              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-                return jsonResponse(200, { status: "completed", conclusion: "success" });
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async () => {
-              await assert.rejects(
-                () =>
-                  acquire({
-                    token: "token",
-                    lockName: "wallstop-organization-builds",
-                    holderIdSuffix: "playmode",
-                    lockRepository: "o/r",
-                    lockRepo: { owner: "o", repo: "r" },
-                    stateBranch: "lock-state",
-                    statePath: "locks/wallstop-organization-builds.json",
-                    timeoutMinutes: 1,
-                    leaseMinutes: 240,
-                    pollSeconds: 1
-                  }),
-                /Timed out waiting for build lock/
-              );
-            });
-          });
-        }
-      );
 
-      assert.equal(staleReplacementWrites, 1);
-      const outputs = readEnvironmentFile(outputFile);
-      assertOutputContract(outputs, acquireOutputNames);
-      assert.equal(outputs.acquired, "false");
-      assert.equal(outputs["stale-recovered"], "true");
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("acquire timeout preserves stale recovery after an ambiguous stale replacement sees another holder", async () => {
-  const originalNow = Date.now;
-  let now = 0;
-  let readCount = 0;
-  let acquirePutCalls = 0;
-  let state = {
-    ...emptyState("wallstop-organization-builds"),
-    holder: {
-      holderId: "other/repo:999:perf-benchmarks:editmode",
-      repository: "other/repo",
-      workflow: "Perf",
-      job: "perf-benchmarks",
-      runId: "999",
-      runAttempt: "1",
-      runUrl: "https://github.com/other/repo/actions/runs/999",
-      queuedAt: "2026-06-06T00:00:00.000Z",
-      acquiredAt: "2026-06-06T00:00:00.000Z",
-      expiresAt: "2999-01-01T00:00:00.000Z"
-    }
-  };
-  const competingHolder = {
-    holderId: "other/repo:456:perf-benchmarks:editmode",
-    repository: "other/repo",
-    workflow: "Perf",
-    job: "perf-benchmarks",
-    runId: "456",
-    runAttempt: "1",
-    runUrl: "https://github.com/other/repo/actions/runs/456",
-    queuedAt: "2026-06-06T00:01:00.000Z",
-    acquiredAt: "2026-06-06T00:01:00.000Z",
-    expiresAt: "2999-01-01T00:00:00.000Z"
-  };
-
-  Date.now = () => {
-    now += 10000;
-    return now;
-  };
-
-  try {
-    await withTempFile(async (outputFile) => {
-      await withActionEnv(
-        {
-          GITHUB_REPOSITORY: "owner/repo",
-          GITHUB_RUN_ID: "123",
-          GITHUB_RUN_ATTEMPT: "1",
-          GITHUB_WORKFLOW: "Perf",
-          GITHUB_JOB: "perf-benchmarks",
-          GITHUB_OUTPUT: outputFile
-        },
-        async () => {
-          await withImmediateTimers(async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
-                if (options.method === "PUT") {
-                  const body = JSON.parse(options.body);
-                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-                  if (body.message === "Acquire wallstop-organization-builds") {
-                    acquirePutCalls++;
-                    if (acquirePutCalls === 1) {
-                      state = {
-                        ...written,
-                        holder: competingHolder,
-                        holders: [competingHolder],
-                        queue: [written.holder]
-                      };
-                      return jsonResponse(500, { message: "accepted but response failed" });
-                    }
-                    return jsonResponse(409, { message: "sha does not match" });
-                  }
-                  state = written;
-                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
-                }
-                readCount++;
-                return jsonResponse(200, {
-                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
-                  sha: `state-read-${readCount}`
-                });
-              }
-              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-                return jsonResponse(200, { status: "completed", conclusion: "success" });
-              }
-              if (parsed.pathname === "/repos/other/repo/actions/runs/456") {
-                return jsonResponse(200, { status: "in_progress", conclusion: null });
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async () => {
-              await assert.rejects(
-                () =>
-                  acquire({
-                    token: "token",
-                    lockName: "wallstop-organization-builds",
-                    holderIdSuffix: "playmode",
-                    lockRepository: "o/r",
-                    lockRepo: { owner: "o", repo: "r" },
-                    stateBranch: "lock-state",
-                    statePath: "locks/wallstop-organization-builds.json",
-                    timeoutMinutes: 1,
-                    leaseMinutes: 240,
-                    pollSeconds: 1
-                  }),
-                /holder=other\/repo:456:perf-benchmarks:editmode.*queue-position=1.*reason=holder run is in_progress/
-              );
-            });
-          });
-        }
-      );
-
-      assert.equal(acquirePutCalls, 2);
-      const outputs = readEnvironmentFile(outputFile);
-      assertOutputContract(outputs, acquireOutputNames);
-      assert.equal(outputs.acquired, "false");
-      assert.equal(outputs["stale-recovered"], "true");
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-
-  assert.equal(state.holder.holderId, "other/repo:456:perf-benchmarks:editmode");
-  assert.deepEqual(state.queue, []);
-});
-
-test("opt-in acquire records post cleanup after an ambiguous stale recovery write", async () => {
-  const originalNow = Date.now;
-  let now = 0;
-  let acquirePutCalls = 0;
-  let state = {
-    ...emptyState("wallstop-organization-builds"),
-    holder: {
-      holderId: "other/repo:999:perf-benchmarks:editmode",
-      repository: "other/repo",
-      workflow: "Perf",
-      job: "perf-benchmarks",
-      runId: "999",
-      runAttempt: "1",
-      runUrl: "https://github.com/other/repo/actions/runs/999",
-      queuedAt: "2026-06-06T00:00:00.000Z",
-      acquiredAt: "2026-06-06T00:00:00.000Z",
-      expiresAt: "2026-06-06T01:00:00.000Z"
-    },
-    queue: [
-      {
-        holderId: "owner/repo:123:perf-benchmarks:playmode",
-        repository: "owner/repo",
-        workflow: "Perf",
-        job: "perf-benchmarks",
-        runId: "123",
-        runAttempt: "1",
-        runUrl: "https://github.com/owner/repo/actions/runs/123",
-        queuedAt: "2026-06-06T00:00:00.000Z"
-      }
-    ]
-  };
-
-  Date.now = () => {
-    now += 30000;
-    return now;
-  };
-
-  try {
-    await withTempFile(async (stateFile) => {
-      await withActionEnv(
-        {
-          GITHUB_REPOSITORY: "owner/repo",
-          GITHUB_RUN_ID: "123",
-          GITHUB_RUN_ATTEMPT: "1",
-          GITHUB_WORKFLOW: "Perf",
-          GITHUB_JOB: "perf-benchmarks",
-          GITHUB_STATE: stateFile
-        },
-        async () => {
-          await withImmediateTimers(async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
-                if (options.method === "PUT") {
-                  const body = JSON.parse(options.body);
-                  const written = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-                  if (body.message === "Acquire wallstop-organization-builds") {
-                    acquirePutCalls++;
-                    if (acquirePutCalls === 1) {
-                      state = written;
-                      return jsonResponse(500, { message: "accepted but response failed" });
-                    }
-                    return jsonResponse(409, { message: "sha does not match" });
-                  }
-                  state = written;
-                  return jsonResponse(200, { content: { sha: "state-after-cleanup" } });
-                }
-                return jsonResponse(200, {
-                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
-                  sha: state.holder && state.holder.holderId === "owner/repo:123:perf-benchmarks:playmode"
-                    ? "state-after-ambiguous-acquire"
-                    : "state-before-acquire"
-                });
-              }
-              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-                return jsonResponse(200, { status: "completed", conclusion: "success" });
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async () => {
-              await assert.rejects(
-                () =>
-                  acquire({
-                    token: "token",
-                    lockName: "wallstop-organization-builds",
-                    holderIdSuffix: "playmode",
-                    lockRepository: "o/r",
-                    lockRepo: { owner: "o", repo: "r" },
-                    stateBranch: "lock-state",
-                    statePath: "locks/wallstop-organization-builds.json",
-                    timeoutMinutes: 1,
-                    leaseMinutes: 240,
-                    pollSeconds: 1,
-                    registerPostCleanup: true
-                  }),
-                /Timed out waiting for build lock/
-              );
-            });
-          });
-        }
-      );
-
-      assert.equal(acquirePutCalls, 2);
-      assert.equal(readEnvironmentFile(stateFile).build_lock_cleanup, "enabled");
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("acquire timeout does not mark stale recovery after an unrecovered stale CAS conflict", async () => {
-  const originalNow = Date.now;
-  let now = 0;
-  let staleRecoveryConflicts = 0;
-  const state = {
-    ...emptyState("wallstop-organization-builds"),
-    holder: {
-      holderId: "other/repo:999:perf-benchmarks:editmode",
-      repository: "other/repo",
-      workflow: "Perf",
-      job: "perf-benchmarks",
-      runId: "999",
-      runAttempt: "1",
-      runUrl: "https://github.com/other/repo/actions/runs/999",
-      queuedAt: "2026-06-06T00:00:00.000Z",
-      acquiredAt: "2026-06-06T00:00:00.000Z",
-      expiresAt: "2026-06-06T01:00:00.000Z"
-    },
-    queue: [
-      {
-        holderId: "owner/repo:123:perf-benchmarks:playmode",
-        repository: "owner/repo",
-        workflow: "Perf",
-        job: "perf-benchmarks",
-        runId: "123",
-        runAttempt: "1",
-        runUrl: "https://github.com/owner/repo/actions/runs/123",
-        queuedAt: "2026-06-06T00:00:00.000Z"
-      }
-    ]
-  };
-
-  Date.now = () => {
-    now += 30000;
-    return now;
-  };
-
-  try {
-    await withTempFile(async (outputFile) => {
-      await withActionEnv(
-        {
-          GITHUB_REPOSITORY: "owner/repo",
-          GITHUB_RUN_ID: "123",
-          GITHUB_RUN_ATTEMPT: "1",
-          GITHUB_WORKFLOW: "Perf",
-          GITHUB_JOB: "perf-benchmarks",
-          GITHUB_OUTPUT: outputFile
-        },
-        async () => {
-          await withImmediateTimers(async () => {
-            await withMockedFetch(async (url, options = {}) => {
-              const parsed = new URL(url);
-              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
-              }
-              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
-                if (options.method === "PUT") {
-                  const body = JSON.parse(options.body);
-                  if (body.message === "Acquire wallstop-organization-builds") {
-                    staleRecoveryConflicts++;
-                  }
-                  return jsonResponse(409, { message: "sha does not match" });
-                }
-                return jsonResponse(200, {
-                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
-                  sha: "state-before-read"
-                });
-              }
-              if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-                return jsonResponse(200, { status: "completed", conclusion: "success" });
-              }
-              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-            }, async () => {
-              await assert.rejects(
-                () =>
-                  acquire({
-                    token: "token",
-                    lockName: "wallstop-organization-builds",
-                    holderIdSuffix: "playmode",
-                    lockRepository: "o/r",
-                    lockRepo: { owner: "o", repo: "r" },
-                    stateBranch: "lock-state",
-                    statePath: "locks/wallstop-organization-builds.json",
-                    timeoutMinutes: 1,
-                    leaseMinutes: 240,
-                    pollSeconds: 1
-                  }),
-                /Timed out waiting for build lock/
-              );
-            });
-          });
-        }
-      );
-
-      assert.equal(staleRecoveryConflicts, 1);
-      const outputs = readEnvironmentFile(outputFile);
-      assertOutputContract(outputs, acquireOutputNames);
-      assert.equal(outputs.acquired, "false");
-      assert.equal(outputs["stale-recovered"], "false");
-    });
-  } finally {
-    Date.now = originalNow;
-  }
-});
 
 test("release is idempotent when this run is not the holder", async () => {
   const state = {
@@ -3812,6 +3357,9 @@ test("post cleanup wrapper exits successfully when saved state exists but token 
     env: {
       ...process.env,
       BUILD_LOCK_TOKEN: "",
+      GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+      GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+      GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
       "INPUT_LOCK-NAME": "wallstop-organization-builds",
       STATE_build_lock_cleanup: "enabled"
     }
@@ -4146,11 +3694,50 @@ test("acquire revalidates lifecycle requirements on the refreshed config snapsho
 
 const semaphoreActionEnv = {
   GITHUB_REPOSITORY: "owner/repo",
+  GITHUB_REPOSITORY_ID: "101020635",
+  GITHUB_REPOSITORY_OWNER_ID: "212056428",
   GITHUB_RUN_ID: "123",
   GITHUB_RUN_ATTEMPT: "1",
   GITHUB_WORKFLOW: "Perf",
   GITHUB_JOB: "perf-benchmarks"
 };
+
+test("consumer acquire never reads cross-repository workflow status", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const state = lifecycleState([active]);
+  let actionsReads = 0;
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+  try {
+    await withActionEnv(semaphoreActionEnv, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname.includes("/actions/runs/")) {
+            actionsReads++;
+            return jsonResponse(200, { status: "completed" });
+          }
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true }, "cfg");
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) return base64Content(state, "state");
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: "runner-a", timeoutMinutes: 1 })),
+            /timed out/i
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(actionsReads, 0);
+});
 
 test("committed lock config files are well-formed", () => {
   // An invalid committed config fails closed to one holder at runtime; catch it here
@@ -4174,6 +3761,12 @@ test("committed lock config files are well-formed", () => {
       assert.equal(typeof parsed.resourceLifecycle, "boolean", `${file} resourceLifecycle must be a boolean`);
       if (parsed.resourceLifecycle) {
         assert.equal(parsed.runnerSerialization, true, `${file} enabled lifecycle requires runnerSerialization=true`);
+      }
+    }
+    if (Object.hasOwn(parsed, "accountHealth")) {
+      assert.equal(typeof parsed.accountHealth, "boolean", `${file} accountHealth must be a boolean`);
+      if (parsed.accountHealth) {
+        assert.equal(parsed.resourceLifecycle, true, `${file} enabled account health requires resourceLifecycle=true`);
       }
     }
     if (Object.hasOwn(parsed, "releaseCooldownSeconds")) {
@@ -4215,6 +3808,25 @@ test("readLockConfig fails closed to a single holder", async (t) => {
       runnerSerialization: true,
       resourceLifecycle: true,
       releaseCooldownSeconds: 420
+    },
+    {
+      name: "account health enabled",
+      response: () => base64Content({
+        maxHolders: 1,
+        runnerSerialization: true,
+        resourceLifecycle: true,
+        accountHealth: true
+      }, "cfg"),
+      maxHolders: 1,
+      runnerSerialization: true,
+      resourceLifecycle: true,
+      accountHealth: true
+    },
+    {
+      name: "account health requires resource lifecycle",
+      response: () => base64Content({ runnerSerialization: true, accountHealth: true }, "cfg"),
+      maxHolders: 1,
+      warning: /accountHealth=true.*resourceLifecycle must also be true/
     },
     {
       name: "resource lifecycle requires runner serialization",
@@ -4285,6 +3897,7 @@ test("readLockConfig fails closed to a single holder", async (t) => {
             maxHolders: testCase.maxHolders,
             runnerSerialization: testCase.runnerSerialization || false,
             resourceLifecycle: testCase.resourceLifecycle || false,
+            accountHealth: testCase.accountHealth || false,
             releaseCooldownSeconds: testCase.releaseCooldownSeconds || 360
           });
           if (testCase.warning) {
@@ -4372,7 +3985,7 @@ test("normalizeState rejects state files written by a newer schema", () => {
   assert.throws(
     () =>
       normalizeState(
-        { schemaVersion: 5, lock: "wallstop-organization-builds", holders: [], queue: [] },
+        { schemaVersion: 6, lock: "wallstop-organization-builds", holders: [], queue: [] },
         "wallstop-organization-builds"
       ),
     /unsupported/
@@ -4574,44 +4187,6 @@ test("schema 3 acquire skips a queued request whose runner already holds a slot"
   assert.deepEqual(state.queue.map((entry) => entry.holderId), [queuedA.holderId]);
 });
 
-test("schema 3 rerun transfers ownership to a new runner and verifies the full identity", async () => {
-  const previousAttempt = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-old");
-  let state = { ...semaphoreState([previousAttempt]), schemaVersion: 3 };
-
-  await withTempFile(async (outputFile) => {
-    await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: "2", GITHUB_OUTPUT: outputFile }, async () => {
-      await withMockedFetch(async (url, options = {}) => {
-        const parsed = new URL(url);
-        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-          return jsonResponse(200, { object: { sha: "branch-sha" } });
-        }
-        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-          return base64Content({ maxHolders: 2, runnerSerialization: true }, "cfg");
-        }
-        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
-          if (options.method === "PUT") {
-            const body = JSON.parse(options.body);
-            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-            return jsonResponse(200, { content: { sha: "transferred" } });
-          }
-          return base64Content(state, "state-sha");
-        }
-        if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
-          return jsonResponse(200, { status: "in_progress", conclusion: null });
-        }
-        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-      }, async () => {
-        await acquire(semaphoreConfig({ runnerId: "runner-new" }));
-      });
-    });
-    assert.equal(readEnvironmentFile(outputFile).acquired, "true");
-  });
-
-  assert.equal(state.schemaVersion, 3);
-  assert.equal(state.holders.length, 1);
-  assert.equal(state.holders[0].runnerId, "runner-new");
-  assert.equal(state.holders[0].runAttempt, "2");
-});
 
 test("schema 3 rejects one run attempt reporting conflicting physical runners", async () => {
   const active = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-old");
@@ -5026,55 +4601,6 @@ test("acquire admits a second queue entry when two slots are free", async () => 
   );
 });
 
-test("acquire replaces a stale holder while keeping an active co-holder", async () => {
-  const staleHolder = semaphoreHolder("other/repo", "999", "editmode");
-  const activeHolder = semaphoreHolder("other/repo", "888", "playmode");
-  let state = semaphoreState([staleHolder, activeHolder], [semaphoreQueueEntry("owner/repo", "123", "playmode")]);
-
-  await withTempFile(async (outputFile) => {
-    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
-      await withMockedFetch(async (url, options = {}) => {
-        const parsed = new URL(url);
-        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-          return jsonResponse(200, { object: { sha: "branch-sha" } });
-        }
-        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-          return base64Content({ maxHolders: 2 }, "cfg");
-        }
-        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
-          if (options.method === "PUT") {
-            const body = JSON.parse(options.body);
-            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
-            return jsonResponse(200, { content: { sha: "state-after-acquire" } });
-          }
-          return base64Content(state, "state-sha");
-        }
-        if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
-          return jsonResponse(200, { status: "completed", conclusion: "success" });
-        }
-        if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
-          return jsonResponse(200, { status: "in_progress", conclusion: null });
-        }
-        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-      }, async (logs) => {
-        await acquire(semaphoreConfig());
-
-        assert.match(logs.join("\n"), /Recovering stale holder other\/repo:999:perf-benchmarks:editmode/);
-      });
-    });
-
-    const outputs = readEnvironmentFile(outputFile);
-    assertOutputContract(outputs, acquireOutputNames);
-    assert.equal(outputs.acquired, "true");
-    assert.equal(outputs["stale-recovered"], "true");
-  });
-
-  assert.deepEqual(
-    state.holders.map((entry) => entry.holderId),
-    ["other/repo:888:perf-benchmarks:playmode", "owner/repo:123:perf-benchmarks:playmode"]
-  );
-  assert.deepEqual(state.queue, []);
-});
 
 test("acquire picks up a raised max-holders limit while waiting", async () => {
   const originalNow = Date.now;
@@ -5990,4 +5516,257 @@ test("schema 4 post cleanup quarantines held ownership", async () => {
   assert.equal(state.holders.length, 0);
   assert.equal(state.reservations[0].state, "quarantine");
   assert.match(state.reservations[0].reason, /post-action cleanup/);
+});
+
+function accountIncident(overrides = {}) {
+  return {
+    incidentId: "incident-0123456789abcdef01234567",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    reportedAt: "2026-06-06T00:01:00.000Z",
+    reason: "unity-account-limit-20111",
+    evidenceDigest: "0123456789abcdef01234567" + "a".repeat(40),
+    ...overrides
+  };
+}
+
+function accountHealthState(holders = [], queue = [], reservations = [], activeIncident = null) {
+  return { ...lifecycleState(holders, queue, reservations), schemaVersion: 5, activeIncident };
+}
+
+test("release report compatibility mapping rejects contradictory old and new inputs", () => {
+  assert.deepEqual(parseReleaseReport({ resourceSafe: "true" }), {
+    cleanupStatus: "confirmed",
+    health: "healthy",
+    reason: "cleanup-confirmed"
+  });
+  assert.deepEqual(parseReleaseReport({ resourceSafe: "false" }), {
+    cleanupStatus: "unknown",
+    health: "healthy",
+    reason: "cleanup-evidence-unknown"
+  });
+  assert.throws(
+    () => parseReleaseReport({
+      resourceSafe: "true",
+      cleanupStatus: "unknown",
+      health: "healthy",
+      reason: "return-timeout"
+    }),
+    /contradicts/
+  );
+  assert.throws(
+    () => parseReleaseReport({ cleanupStatus: "unknown", health: "blocked", reason: "unity-20113-unclassified" }),
+    /reserved for confirmed.*20111/
+  );
+});
+
+test("schema 5 global incidents round-trip and require immutable evidence provenance", () => {
+  const incident = accountIncident();
+  const normalized = normalizeState(accountHealthState([], [], [], incident), "wallstop-organization-builds");
+  assert.deepEqual(normalized.activeIncident, incident);
+  assert.throws(
+    () => normalizeState(accountHealthState([], [], [], { ...incident, evidenceDigest: "not-a-digest" }), "wallstop-organization-builds"),
+    /SHA-256 evidence digest/
+  );
+});
+
+test("schema 5 blocked release creates one immutable global incident", async () => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  let state = accountHealthState([held]);
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, accountHealth: true }, "cfg");
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "incident-sha" } });
+          }
+          return base64Content(state, "before");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, () => release(semaphoreConfig({
+        runnerId: "runner-a",
+        resourceReport: { cleanupStatus: "unknown", health: "blocked", reason: "unity-account-limit-20111" }
+      })));
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["cleanup-result"], "global-quarantined");
+    assert.match(outputs["incident-id"], /^incident-[a-f0-9]{24}$/);
+    assert.equal(outputs["resource-health"], "blocked");
+  });
+  assert.equal(state.holders.length, 0);
+  assert.equal(state.reservations.length, 0);
+  assert.equal(state.activeIncident.reason, "unity-account-limit-20111");
+});
+
+test("schema 5 uncertainty reasons remain runner-local and never create account incidents", async (t) => {
+  for (const reason of [
+    "unity-return-400006",
+    "return-timeout",
+    "return-log-truncated",
+    "return-terminated",
+    "return-missing-positive-evidence",
+    "unity-20113-unclassified"
+  ]) {
+    await t.test(reason, async () => {
+      const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+      let state = accountHealthState([held]);
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, accountHealth: true }, "cfg");
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "local-quarantine" } });
+            }
+            return base64Content(state, "before");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => release(semaphoreConfig({
+          runnerId: "runner-a",
+          resourceReport: { cleanupStatus: "unknown", health: "healthy", reason }
+        })));
+      });
+      assert.equal(state.activeIncident, null);
+      assert.equal(state.reservations.length, 1);
+      assert.equal(state.reservations[0].state, "quarantine");
+      assert.equal(state.reservations[0].reason, reason);
+    });
+  }
+});
+
+test("schema 5 global incident blocks acquire immediately without growing the queue", async () => {
+  const incident = accountIncident();
+  const state = accountHealthState([], [], [], incident);
+  let writes = 0;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, accountHealth: true }, "cfg");
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") writes++;
+          return base64Content(state, "blocked-state");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, () => acquire(semaphoreConfig({ runnerId: "runner-b" })));
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "account-blocked");
+    assert.equal(outputs["incident-id"], incident.incidentId);
+  });
+  assert.equal(writes, 0);
+  assert.deepEqual(state.queue, []);
+});
+
+test("schema 5 incident recovery requires exact ID and portal proof then enters cooldown", async () => {
+  const incident = accountIncident();
+  let state = accountHealthState([], [], [], incident);
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+    if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ releaseCooldownSeconds: 360 }, "cfg");
+    if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+      if (options.method === "PUT") {
+        state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+        return jsonResponse(200, { content: { sha: "recovered" } });
+      }
+      return base64Content(state, "before");
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, () => reap(semaphoreConfig({
+    operation: "recover-incident",
+    incidentId: incident.incidentId,
+    portalCleanupConfirmed: true
+  })));
+  assert.equal(state.activeIncident, null);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "cooldown");
+  assert.match(state.reservations[0].reason, new RegExp(incident.incidentId));
+});
+
+test("schema 5 incident recovery rejects missing proof and mismatched incident IDs", async (t) => {
+  const incident = accountIncident();
+  for (const testCase of [
+    { name: "missing portal proof", incidentId: incident.incidentId, proof: false, error: /portal-cleanup-confirmed=true/ },
+    { name: "wrong incident id", incidentId: "incident-ffffffffffffffffffffffff", proof: true, error: /was not found/ }
+  ]) {
+    await t.test(testCase.name, async () => {
+      let writes = 0;
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") writes++;
+          return base64Content(accountHealthState([], [], [], incident), "before");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () => reap(semaphoreConfig({
+            operation: "recover-incident",
+            incidentId: testCase.incidentId,
+            portalCleanupConfirmed: testCase.proof
+          })),
+          testCase.error
+        );
+      });
+      assert.equal(writes, 0);
+    });
+  }
+});
+
+test("account health activation is a drained one-way schema 5 migration", async (t) => {
+  const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const prior = withRunner(semaphoreHolder("other/repo", "998", "editmode"), "runner-c");
+  for (const testCase of [
+    { name: "drained schema 4 upgrades", state: lifecycleState(), error: null },
+    { name: "schema 3 cannot skip schema 4", state: { ...semaphoreState([]), schemaVersion: 3 }, error: /drained/ },
+    { name: "holder blocks migration", state: lifecycleState([active]), error: /drained/ },
+    { name: "reservation blocks migration", state: lifecycleState([], [], [lifecycleReservation(prior)]), error: /drained/ }
+  ]) {
+    await t.test(testCase.name, async () => {
+      let state = structuredClone(testCase.state);
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({
+            maxHolders: 1,
+            runnerSerialization: true,
+            resourceLifecycle: true,
+            accountHealth: true
+          }, "cfg");
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "write" } });
+            }
+            return base64Content(state, "before");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          const operation = () => acquire(semaphoreConfig({ runnerId: "runner-a" }));
+          if (testCase.error) await assert.rejects(operation, testCase.error);
+          else await operation();
+        });
+      });
+      if (!testCase.error) {
+        assert.equal(state.schemaVersion, 5);
+        assert.equal(state.activeIncident, null);
+      }
+    });
+  }
 });
