@@ -891,6 +891,33 @@ test("authorization registry accepts only the lock repository and five canonical
   }
 });
 
+test("authorization separates lock-repository reaping from consumer lock operations", async () => {
+  await withActionEnv({
+    GITHUB_REPOSITORY: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+    GITHUB_REPOSITORY_ID: "1244796436",
+    GITHUB_REPOSITORY_OWNER_ID: "212056428"
+  }, () => {
+    assert.throws(
+      () => authorizeCaller({
+        lockName: "wallstop-organization-builds",
+        lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+        mode: "acquire"
+      }),
+      /only for the scheduled reaper/
+    );
+  });
+  await withActionEnv(authorizedConsumerEnv, () => {
+    assert.throws(
+      () => authorizeCaller({
+        lockName: "wallstop-organization-builds",
+        lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+        mode: "reap"
+      }),
+      /Only the lock repository/
+    );
+  });
+});
+
 test("state-writer App tokens are limited to the lock repository and contents write", async () => {
   const requests = [];
   await withMockedFetch(async (url, options = {}) => {

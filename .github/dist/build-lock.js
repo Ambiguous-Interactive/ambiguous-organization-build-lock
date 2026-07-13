@@ -388,6 +388,9 @@ function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH,
   if (mode === "reap" && repository !== LOCK_REPOSITORY) {
     throw new Error("Only the lock repository may run the scheduled reaper.");
   }
+  if (mode !== "reap" && repository === LOCK_REPOSITORY) {
+    throw new Error("The lock repository is authorized only for the scheduled reaper.");
+  }
   return { ownerId, repositoryId, repository };
 }
 
