@@ -1,8 +1,34 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29239287751",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29239287751",
+    "queuedAt": "2026-07-13T10:23:43.011Z",
+    "acquiredAt": "2026-07-13T10:23:44.394Z",
+    "expiresAt": "2026-07-13T14:23:44.394Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:2021.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29239287751",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29239287751",
+      "queuedAt": "2026-07-13T10:23:43.011Z",
+      "acquiredAt": "2026-07-13T10:23:44.394Z",
+      "expiresAt": "2026-07-13T14:23:44.394Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29241648419:perf-benchmarks:perf-6000.3.16f1-standalone",
@@ -16,21 +42,6 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "8b03450e-6cac-41bf-93af-8c981b1bb192",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29239021138",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "explicit release could not prove resource cleanup safe",
-      "createdAt": "2026-07-13T10:22:56.006Z"
-    }
-  ],
-  "updatedAt": "2026-07-13T10:22:56.007Z"
+  "reservations": [],
+  "updatedAt": "2026-07-13T10:23:44.394Z"
 }
