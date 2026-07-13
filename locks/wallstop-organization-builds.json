@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:6000.3.16f1-playmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29239287751",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29239287751",
-    "queuedAt": "2026-07-13T13:31:00.649Z",
-    "acquiredAt": "2026-07-13T13:44:08.526Z",
-    "expiresAt": "2026-07-13T17:44:08.526Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29239287751",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29239287751",
-      "queuedAt": "2026-07-13T13:31:00.649Z",
-      "acquiredAt": "2026-07-13T13:44:08.526Z",
-      "expiresAt": "2026-07-13T17:44:08.526Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
@@ -42,6 +16,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T13:44:08.526Z"
+  "reservations": [
+    {
+      "reservationId": "0af06eb5-0655-4057-a342-2328fba0653f",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29239287751:unity-tests:6000.3.16f1-playmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29239287751",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29239287751",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-13T13:44:52.765Z",
+      "availableAt": "2026-07-13T13:50:52.765Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T13:44:52.767Z"
 }
