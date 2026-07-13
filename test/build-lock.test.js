@@ -990,6 +990,7 @@ test("reaper compatibility fallback mints a reader-scoped token from the writer 
     repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
     permissions: { actions: "read", metadata: "read" }
   });
+  assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
 
