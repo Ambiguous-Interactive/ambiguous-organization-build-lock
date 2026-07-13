@@ -1431,7 +1431,8 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
     return {
       known: true,
       status: run.status || "",
-      conclusion: run.conclusion || ""
+      conclusion: run.conclusion || "",
+      runAttempt: String(run.run_attempt || "")
     };
   } catch (error) {
     if (error.status === 404) {
@@ -1478,6 +1479,16 @@ async function evaluateStale(holder, authToken, options = {}) {
   const status = await getRunStatus(holder.repository, holder.runId, authToken, options);
   if (status.known) {
     if (isActiveRunStatus(status.status)) {
+      if (
+        /^[1-9][0-9]*$/.test(holder.runAttempt) &&
+        /^[1-9][0-9]*$/.test(status.runAttempt) &&
+        BigInt(status.runAttempt) > BigInt(holder.runAttempt)
+      ) {
+        return {
+          stale: true,
+          reason: `workflow run advanced from attempt ${holder.runAttempt} to ${status.runAttempt}`
+        };
+      }
       return { stale: false, reason: `holder run is ${status.status}` };
     }
     return { stale: true, reason: `holder run is ${status.status || "unknown"}` };
@@ -2077,15 +2088,6 @@ async function acquire(config) {
           ])
         );
         const myHolder = state.holders.find((holder) => holder.holderId === identity.holderId);
-        const expiredHolder = state.holders.find(
-          (holder) => holder.holderId !== identity.holderId && parseTime(holder.expiresAt) <= Date.now()
-        );
-        if (expiredHolder) {
-          throw new Error(
-            `Holder ${expiredHolder.holderId} has reached its lease but remains authoritative; ` +
-              "the scheduled reaper must reconcile it before admission can continue."
-          );
-        }
         if (runnerSerialization && myHolder) {
           if (identityIsNewerOrThrow(myHolder, identity, "Holder")) {
             throw new Error(

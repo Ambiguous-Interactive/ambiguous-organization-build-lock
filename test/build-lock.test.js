@@ -3530,6 +3530,30 @@ test("stale evaluation keeps waiting when the run-status poll returns 401 before
   });
 });
 
+test("stale evaluation delegates newer run-attempt reconciliation to the reaper", async () => {
+  const holder = {
+    holderId: "owner/repo:123:perf-benchmarks:playmode",
+    repository: "owner/repo",
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    queuedAt: "2026-06-06T00:00:00.000Z",
+    acquiredAt: "2026-06-06T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+  await withMockedFetch(
+    async () => jsonResponse(200, { status: "in_progress", run_attempt: 2 }),
+    async () => {
+      assert.deepEqual(await evaluateStale(holder, "reader"), {
+        stale: true,
+        reason: "workflow run advanced from attempt 1 to 2"
+      });
+    }
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Configurable parallelism (issue #13): the lock acts as a counting semaphore.
 // locks/<lock-name>.config.json on the lock repository's default branch sets
@@ -3729,10 +3753,13 @@ const semaphoreActionEnv = {
   GITHUB_JOB: "perf-benchmarks"
 };
 
-test("consumer acquire never reads cross-repository workflow status", async () => {
+test("consumer acquire keeps expired holders authoritative without cross-repository status reads", async () => {
   const originalNow = Date.now;
   let now = 0;
-  const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const active = {
+    ...withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b"),
+    expiresAt: "1970-01-01T00:00:01.000Z"
+  };
   const state = lifecycleState([active]);
   let actionsReads = 0;
   Date.now = () => {
