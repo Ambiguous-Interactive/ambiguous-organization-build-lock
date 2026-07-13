@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests:2021.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29239021138",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-    "queuedAt": "2026-07-13T10:03:32.503Z",
-    "acquiredAt": "2026-07-13T10:19:54.169Z",
-    "expiresAt": "2026-07-13T14:19:54.169Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29239021138",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
-      "queuedAt": "2026-07-13T10:03:32.503Z",
-      "acquiredAt": "2026-07-13T10:19:54.169Z",
-      "expiresAt": "2026-07-13T14:19:54.169Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29241648419:perf-benchmarks:perf-6000.3.16f1-standalone",
@@ -42,6 +16,21 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-13T10:19:54.169Z"
+  "reservations": [
+    {
+      "reservationId": "8b03450e-6cac-41bf-93af-8c981b1bb192",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29239021138:unity-tests:2021.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29239021138",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29239021138",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "explicit release could not prove resource cleanup safe",
+      "createdAt": "2026-07-13T10:22:56.006Z"
+    }
+  ],
+  "updatedAt": "2026-07-13T10:22:56.007Z"
 }
