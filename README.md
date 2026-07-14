@@ -210,9 +210,12 @@ by the registered organization can enroll without a lock-action code change;
 secret access remains the authorization boundary.
 
 The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
-`BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App on each enrolled
-consumer repository using selected-repository access. Its token requests only
-`actions: read` and `metadata: read` across the App installation. Acquire and
+`BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App with all-repository
+access in the registered organization so newly created organization repositories
+are reaper-visible without an App installation change. The reader has only
+Actions read and Metadata read; it has no Contents permission. Each installation
+token minted by the reaper is explicitly restricted to `actions: read` and
+`metadata: read` within the App's configured permission ceiling. Acquire and
 release never read cross-repository Actions state; an unreaped holder remains
 authoritative and admission fails closed.
 
