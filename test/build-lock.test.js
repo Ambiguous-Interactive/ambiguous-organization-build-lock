@@ -21,6 +21,7 @@ const {
   normalizeState,
   parseReleaseReport,
   postCleanup,
+  queueEntryIsFinished,
   readLockConfig,
   readerCredential,
   readerCredentialRequired,
@@ -843,8 +844,9 @@ test("config rejects unauthorized callers before credential parsing", async (t) 
   for (const testCase of [
     { name: "wrong owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "1" } },
     { name: "non-canonical owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "0212056428" } },
-    { name: "wrong repository id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_ID: "1" } },
-    { name: "repository name and id mismatch", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "Ambiguous-Interactive/IshoBoy" } },
+    { name: "non-canonical repository id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_ID: "0737391131" } },
+    { name: "wrong repository owner", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "Not-Ambiguous/unity-helpers" } },
+    { name: "non-canonical repository name", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "ambiguous-interactive/unity-helpers" } },
     { name: "wrong state branch", env: authorizedConsumerEnv, inputs: { "INPUT_STATE-BRANCH": "main" } }
   ]) {
     await t.test(testCase.name, async () => {
@@ -863,13 +865,15 @@ test("config rejects unauthorized callers before credential parsing", async (t) 
   }
 });
 
-test("authorization registry accepts only the lock repository and five canonical consumers", async (t) => {
+test("authorization accepts canonical repositories owned by the organization", async (t) => {
   const repositories = [
     ["Ambiguous-Interactive/DxMessaging", "101020635"],
     ["Ambiguous-Interactive/unity-helpers", "737391131"],
     ["Ambiguous-Interactive/DoxReloaded", "825469040"],
     ["Ambiguous-Interactive/IshoBoy", "885525263"],
     ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
+    ["Ambiguous-Interactive/qora-redux", "1290240478"],
+    ["Ambiguous-Interactive/future-unity-project", "9999999999"],
     ["Ambiguous-Interactive/ambiguous-organization-build-lock", "1244796436"]
   ];
   for (const [repository, repositoryId] of repositories) {
@@ -917,6 +921,20 @@ test("authorization separates lock-repository reaping from consumer lock operati
       /Only the lock repository/
     );
   });
+  await withActionEnv({
+    GITHUB_REPOSITORY: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+    GITHUB_REPOSITORY_ID: "9999999999",
+    GITHUB_REPOSITORY_OWNER_ID: "212056428"
+  }, () => {
+    assert.throws(
+      () => authorizeCaller({
+        lockName: "wallstop-organization-builds",
+        lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+        mode: "reap"
+      }),
+      /repository ID is not authorized/
+    );
+  });
 });
 
 test("state-writer App tokens are limited to the lock repository and contents write", async () => {
@@ -961,10 +979,9 @@ test("reaper reader App token is limited to consumer Actions and Metadata read",
   });
   assert.equal(requests[0].path, "/orgs/Ambiguous-Interactive/installation");
   assert.deepEqual(requests[1].body, {
-    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
     permissions: { actions: "read", metadata: "read" }
   });
-  assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
+  assert.equal(Object.hasOwn(requests[1].body, "repositories"), false);
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
 
@@ -3589,6 +3606,185 @@ test("stale evaluation delegates newer run-attempt reconciliation to the reaper"
   );
 });
 
+test("stale evaluation reclaims a completed holder job while sibling matrix jobs keep the run active", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(200, {
+        total_count: 2,
+        jobs: [
+          {
+            id: 11,
+            runner_name: "runner-a",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: "2026-06-06T00:02:00.000Z"
+          },
+          {
+            id: 12,
+            runner_name: "runner-b",
+            status: "in_progress",
+            conclusion: null,
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: null
+          }
+        ]
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.deepEqual(await evaluateStale(holder, "reader"), {
+      stale: true,
+      reason: "holder job 11 is completed"
+    });
+  });
+});
+
+test("queue cleanup drops a completed waiting job while sibling matrix jobs keep the run active", async () => {
+  const entry = {
+    holderId: "owner/repo:123:unity-tests:editmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:01:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(200, {
+        total_count: 2,
+        jobs: [
+          {
+            id: 21,
+            runner_name: "runner-a",
+            status: "completed",
+            conclusion: "cancelled",
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: "2026-06-06T00:02:00.000Z"
+          },
+          {
+            id: 22,
+            runner_name: "runner-b",
+            status: "in_progress",
+            conclusion: null,
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: null
+          }
+        ]
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.equal(await queueEntryIsFinished(entry, "reader"), true);
+  });
+});
+
+test("exact holder-job lookup fails closed when runner timestamps do not identify one job", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(
+    async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+      }
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+        return jsonResponse(200, {
+          total_count: 1,
+          jobs: [
+            {
+              id: 31,
+              runner_name: "runner-a",
+              status: "completed",
+              conclusion: "success",
+              started_at: "2026-06-06T00:02:00.000Z",
+              completed_at: "2026-06-06T00:03:00.000Z"
+            }
+          ]
+        });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    },
+    async (logs) => {
+      assert.deepEqual(await evaluateStale(holder, "reader"), {
+        stale: false,
+        reason: "holder run is in_progress"
+      });
+      assert.match(logs.join("\n"), /found 0 jobs/);
+    }
+  );
+});
+
+test("exact holder-job lookup rejects missing Actions read permission", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(403, { message: "Resource not accessible by integration" });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => evaluateStale(holder, "reader"),
+      /Ensure the reaper reader credentials have actions: read access/
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Configurable parallelism (issue #13): the lock acts as a counting semaphore.
 // locks/<lock-name>.config.json on the lock repository's default branch sets
@@ -4409,9 +4605,73 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
       } else {
         assert.equal(state.holders[0].runAttempt, "2");
         assert.equal(state.holders[0].runnerId, "runner-incoming");
+        assert.notEqual(state.holders[0].queuedAt, queued.queuedAt);
+        assert.ok(Date.parse(state.holders[0].queuedAt) > Date.parse(queued.queuedAt));
       }
     });
   }
+});
+
+test("rerun queue refresh records the new attempt timestamp", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-06-06T01:00:00.000Z");
+  const queued = {
+    ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-old"),
+    runAttempt: "1",
+    queuedAt: "2026-06-06T00:00:00.000Z"
+  };
+  let state = {
+    ...semaphoreState([
+      withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-holder")
+    ], [queued]),
+    schemaVersion: 3
+  };
+  const writtenStates = [];
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: "2" }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              writtenStates.push(structuredClone(state));
+              return jsonResponse(200, { content: { sha: `state-${writtenStates.length}` } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: "runner-new", timeoutMinutes: 1 })),
+            /Timed out waiting for build lock/
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const refreshed = writtenStates.find((candidate) => candidate.queue.some((entry) => entry.runAttempt === "2"));
+  assert.ok(refreshed, "expected the rerun queue identity to be persisted");
+  const refreshedEntry = refreshed.queue.find((entry) => entry.runAttempt === "2");
+  assert.equal(refreshedEntry.runnerId, "runner-new");
+  assert.notEqual(refreshedEntry.queuedAt, queued.queuedAt);
+  assert.ok(Date.parse(refreshedEntry.queuedAt) > Date.parse(queued.queuedAt));
 });
 
 test("activated acquire rejects schema downgrade during post-write verification", async () => {

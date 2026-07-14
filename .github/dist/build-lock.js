@@ -22,21 +22,22 @@ const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
+const AUTHORIZED_OWNER = "Ambiguous-Interactive";
 const AUTHORIZED_OWNER_ID = "212056428";
 const LOCK_NAME = "wallstop-organization-builds";
 const LOCK_REPOSITORY = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+const LOCK_REPOSITORY_ID = "1244796436";
 const STATE_BRANCH = "lock-state";
-const AUTHORIZED_REPOSITORIES = new Map([
-  ["Ambiguous-Interactive/DxMessaging", "101020635"],
-  ["Ambiguous-Interactive/unity-helpers", "737391131"],
-  ["Ambiguous-Interactive/DoxReloaded", "825469040"],
-  ["Ambiguous-Interactive/IshoBoy", "885525263"],
-  ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
-  [LOCK_REPOSITORY, "1244796436"]
-]);
-const CONSUMER_REPOSITORY_NAMES = [...AUTHORIZED_REPOSITORIES.keys()]
-  .filter((repository) => repository !== LOCK_REPOSITORY)
-  .map((repository) => repository.split("/")[1]);
+// Temporary compatibility fallback only. The dedicated reader App token covers
+// every repository on its selected-repository installation, so new consumers do
+// not require a code release here.
+const COMPATIBILITY_READER_REPOSITORY_NAMES = [
+  "DxMessaging",
+  "unity-helpers",
+  "DoxReloaded",
+  "IshoBoy",
+  "DepartmentOfArrangements"
+];
 const RESOURCE_REASON_CODES = new Set([
   "cleanup-confirmed",
   "cleanup-evidence-unknown",
@@ -343,6 +344,7 @@ function credential(lockRepo) {
 function readerCredential(owner) {
   let appId = String(process.env.BUILD_LOCK_READER_APP_ID || "").trim();
   let privateKey = process.env.BUILD_LOCK_READER_APP_PRIVATE_KEY || "";
+  const dedicatedReader = Boolean(appId);
   if (Boolean(appId) !== Boolean(privateKey)) {
     throw new Error("BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY must be provided together.");
   }
@@ -365,7 +367,7 @@ function readerCredential(owner) {
     appId,
     privateKey,
     owner,
-    repositories: CONSUMER_REPOSITORY_NAMES,
+    repositories: dedicatedReader ? null : COMPATIBILITY_READER_REPOSITORY_NAMES,
     permissions: { actions: "read", metadata: "read" }
   });
 }
@@ -398,8 +400,12 @@ function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH,
   if (ownerId !== AUTHORIZED_OWNER_ID) {
     throw new Error("The calling GitHub organization is not authorized to use this lock.");
   }
-  if (!AUTHORIZED_REPOSITORIES.has(repository) || AUTHORIZED_REPOSITORIES.get(repository) !== repositoryId) {
-    throw new Error("The calling GitHub repository name and ID are not authorized to use this lock.");
+  const parsedRepository = parseRepository(repository);
+  if (parsedRepository.owner !== AUTHORIZED_OWNER) {
+    throw new Error("The calling GitHub repository owner is not authorized to use this lock.");
+  }
+  if (repository === LOCK_REPOSITORY && repositoryId !== LOCK_REPOSITORY_ID) {
+    throw new Error("The lock repository ID is not authorized.");
   }
   if (mode === "reap" && repository !== LOCK_REPOSITORY) {
     throw new Error("Only the lock repository may run the scheduled reaper.");
@@ -1488,6 +1494,83 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
   }
 }
 
+async function getIdentityJobStatus(identity, observedAt, authToken, options = {}) {
+  const parsed = parseRepository(identity.repository);
+  const observedTime = parseTime(observedAt);
+  if (
+    !/^[1-9][0-9]*$/.test(identity.runAttempt || "") ||
+    !identity.runnerId ||
+    observedTime <= 0
+  ) {
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
+
+  const jobs = [];
+  let totalCount = 0;
+  let page = 1;
+  try {
+    do {
+      const response = await api(
+        "GET",
+        `/repos/${parsed.owner}/${parsed.repo}/actions/runs/${encodeURIComponent(identity.runId)}` +
+          `/attempts/${encodeURIComponent(identity.runAttempt)}/jobs?filter=all&per_page=100&page=${page}`,
+        undefined,
+        authToken,
+        options.apiOptions
+      );
+      if (!response || !Array.isArray(response.jobs) || !Number.isInteger(response.total_count)) {
+        throw new Error(`Malformed workflow jobs response for ${identity.repository}/${identity.runId}.`);
+      }
+      totalCount = response.total_count;
+      jobs.push(...response.jobs);
+      page++;
+      if (page > 1000) {
+        throw new Error(`Workflow jobs response for ${identity.repository}/${identity.runId} exceeded pagination limits.`);
+      }
+    } while (jobs.length < totalCount);
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      console.log(
+        `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} ` +
+          `returned HTTP ${error.status}; retaining workflow-run status as the fail-closed fallback.`
+      );
+      return { known: false, status: "", conclusion: "", jobId: "" };
+    }
+    if (error.status === 403) {
+      throw new Error(
+        `Unable to read workflow jobs for ${identity.repository}/${identity.runId}. ` +
+          `Ensure the reaper reader credentials have actions: read access. ${error.message}`
+      );
+    }
+    throw error;
+  }
+
+  const matchingJobs = jobs.filter((job) => {
+    if (!job || job.runner_name !== identity.runnerId) {
+      return false;
+    }
+    const startedAt = parseTime(job.started_at);
+    const completedAt = parseTime(job.completed_at);
+    return startedAt > 0 && startedAt <= observedTime && (completedAt <= 0 || observedTime <= completedAt);
+  });
+  if (matchingJobs.length !== 1) {
+    console.log(
+      `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} found ` +
+        `${matchingJobs.length} jobs on runner ${identity.runnerId} containing ${observedAt}; ` +
+        `retaining workflow-run status as the fail-closed fallback.`
+    );
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
+
+  const job = matchingJobs[0];
+  return {
+    known: true,
+    status: job.status || "",
+    conclusion: job.conclusion || "",
+    jobId: String(job.id || "")
+  };
+}
+
 async function evaluateStale(holder, authToken, options = {}) {
   if (!holder) {
     return { stale: true, reason: "no holder" };
@@ -1505,6 +1588,13 @@ async function evaluateStale(holder, authToken, options = {}) {
           reason: `workflow run advanced from attempt ${holder.runAttempt} to ${status.runAttempt}`
         };
       }
+      const jobStatus = await getIdentityJobStatus(holder, holder.acquiredAt, authToken, options);
+      if (jobStatus.known) {
+        if (isActiveRunStatus(jobStatus.status)) {
+          return { stale: false, reason: `holder job ${jobStatus.jobId} is ${jobStatus.status}` };
+        }
+        return { stale: true, reason: `holder job ${jobStatus.jobId} is ${jobStatus.status || "unknown"}` };
+      }
       return { stale: false, reason: `holder run is ${status.status}` };
     }
     return { stale: true, reason: `holder run is ${status.status || "unknown"}` };
@@ -1520,7 +1610,18 @@ async function queueEntryIsFinished(entry, authToken, options = {}) {
   if (!status.known) {
     return false;
   }
-  return !isActiveRunStatus(status.status);
+  if (!isActiveRunStatus(status.status)) {
+    return true;
+  }
+  if (
+    /^[1-9][0-9]*$/.test(entry.runAttempt) &&
+    /^[1-9][0-9]*$/.test(status.runAttempt) &&
+    BigInt(status.runAttempt) > BigInt(entry.runAttempt)
+  ) {
+    return true;
+  }
+  const jobStatus = await getIdentityJobStatus(entry, entry.queuedAt, authToken, options);
+  return jobStatus.known ? !isActiveRunStatus(jobStatus.status) : false;
 }
 
 function queuePosition(state, holderId) {
@@ -2141,10 +2242,14 @@ async function acquire(config) {
         state.queue = [];
         for (const entry of dedupedQueue) {
           if (entry.holderId === identity.holderId) {
+            let attemptAdvanced = entry.runAttempt !== identity.runAttempt;
             if (runnerSerialization) {
-              identityIsNewerOrThrow(entry, identity, "Queued request");
+              attemptAdvanced = identityIsNewerOrThrow(entry, identity, "Queued request");
             }
-            const refreshedEntry = { ...identity, queuedAt: entry.queuedAt };
+            const refreshedEntry = {
+              ...identity,
+              queuedAt: attemptAdvanced ? identity.queuedAt : entry.queuedAt
+            };
             if (entry.runnerId !== refreshedEntry.runnerId || entry.runAttempt !== refreshedEntry.runAttempt) {
               changed = true;
             }
@@ -2734,6 +2839,7 @@ module.exports = {
   normalizeState,
   parseReleaseReport,
   postCleanup,
+  queueEntryIsFinished,
   readLockConfig,
   readerCredential,
   readerCredentialRequired,
