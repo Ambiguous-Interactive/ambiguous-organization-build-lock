@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29296657918:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29296657918",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29296657918",
+    "queuedAt": "2026-07-14T00:44:07.859Z",
+    "acquiredAt": "2026-07-14T00:54:57.313Z",
+    "expiresAt": "2026-07-14T04:54:57.313Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29296657918:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29296657918",
       "queuedAt": "2026-07-14T00:44:07.859Z",
+      "acquiredAt": "2026-07-14T00:54:57.313Z",
+      "expiresAt": "2026-07-14T04:54:57.313Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29293619034:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -28,5 +43,5 @@
     }
   ],
   "reservations": [],
-  "updatedAt": "2026-07-14T00:54:45.095Z"
+  "updatedAt": "2026-07-14T00:54:57.313Z"
 }
