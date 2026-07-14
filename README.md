@@ -6,7 +6,7 @@ that share one Unity Pro seat must use this lock before invoking Unity.
 > [!NOTE]
 > Consumer jobs use a state-writer GitHub App restricted to this repository with
 > `contents: write`. Only the scheduled reaper has a separate reader App installed
-> on the five registered consumers with `actions: read` and `metadata: read`.
+> on selected organization consumers with `actions: read` and `metadata: read`.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -197,24 +197,26 @@ activation-limit failures.
 
 ## Authentication
 
-Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together in only the
-five protected consumer environments. The writer App is installed only on this
-lock repository. Tokens are minted for only
-`ambiguous-organization-build-lock` with `contents: write`; caller owner ID,
-repository ID/name, lock repository, and lock name are validated before any
-credential parsing or network access.
+Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together only in the
+protected `unity-license` environment of each enrolled organization repository.
+The writer App is installed only on this lock repository. Tokens are minted for
+only `ambiguous-organization-build-lock` with `contents: write`; caller owner
+ID/name, canonical repository ID/name, lock repository, and lock name are
+validated before any credential parsing or network access. Any repository owned
+by the registered organization can enroll without a lock-action code change;
+secret access remains the authorization boundary.
 
 The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
-`BUILD_LOCK_READER_APP_PRIVATE_KEY`. That reader App is installed only on
-DxMessaging, unity-helpers, DoxReloaded, IshoBoy, and
-DepartmentOfArrangements, and its token requests only `actions: read` and
-`metadata: read`. Acquire and release never read cross-repository Actions state;
-an unreaped holder remains authoritative and admission fails closed.
+`BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App on each enrolled
+consumer repository using selected-repository access. Its token requests only
+`actions: read` and `metadata: read` across the App installation. Acquire and
+release never read cross-repository Actions state; an unreaped holder remains
+authoritative and admission fails closed.
 
 During the compatibility cutover only, if the dedicated reader credentials are
 absent, the scheduled reaper may mint the same consumer-only Actions/Metadata
 token from the existing broad writer App. The token remains restricted to the
-five registered consumers and has no Contents permission. Provision the reader
+five original consumers and has no Contents permission. Provision the reader
 App before narrowing the writer installation, then remove reliance on this
 fallback. Operator `recover` and `recover-incident` operations do not inspect
 workflow runs and therefore do not require reader credentials.

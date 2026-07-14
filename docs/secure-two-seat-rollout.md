@@ -28,24 +28,20 @@ the lock state remained internally consistent.
 
 ## Authorization cutover
 
-The only registered owner ID is `212056428`. Registered repositories are:
-
-| Repository | Repository ID |
-| --- | ---: |
-| ambiguous-organization-build-lock | 1244796436 |
-| DxMessaging | 101020635 |
-| unity-helpers | 737391131 |
-| DoxReloaded | 825469040 |
-| IshoBoy | 885525263 |
-| DepartmentOfArrangements | 1079492096 |
+The registered organization is `Ambiguous-Interactive`, owner ID `212056428`.
+The lock repository is fixed to `ambiguous-organization-build-lock`, repository
+ID `1244796436`. Any canonical repository context owned by the registered
+organization may enroll; the protected writer credential is the actual
+authorization boundary.
 
 1. Release the schema-4-compatible authorization change at an immutable SHA.
-2. Create the reader App, installed only on the five consumers, with Metadata
-   read and Actions read. Store its key only in the lock repository.
+2. Create the reader App, installed with selected-repository access on every
+   enrolled consumer, with Metadata read and Actions read. Store its key only in
+   the lock repository.
 3. Verify compatibility while the writer App still has its old installation.
 4. Restrict the writer App installation to only this lock repository, with
-   Contents write. Rotate its key and update only the five protected
-   `unity-license` environments.
+   Contents write. Rotate its key and update each enrolled protected
+   `unity-license` environment.
 5. Prove the reader token cannot read contents and the writer token cannot
    access a consumer repository. The unit suite verifies requested token scope;
    the tracking issue must record live negative API probes.
@@ -53,7 +49,7 @@ The only registered owner ID is `212056428`. Registered repositories are:
 If the compatibility release lands before reader credentials are provisioned,
 the reaper temporarily mints its consumer-only Actions/Metadata token from the
 existing broad writer App. This fallback is valid only while that App remains
-installed on the five consumers. Provision and verify the dedicated reader App
+installed on the five original consumers. Provision and verify the dedicated reader App
 before narrowing the writer installation; operator quarantine/incident recovery
 does not require the reader because it never reads workflow-run status.
 
@@ -88,7 +84,7 @@ The shared classifier contract is:
 
 ## Schema 5 activation and rollback
 
-Before activation, prove all five consumers and the reaper are pinned to an
+Before activation, prove all enrolled consumers and the reaper are pinned to an
 immutable schema-5-capable SHA and organization-wide search finds no schema-4-
 only or mutable `@v1` consumer. Preserve that schema-5-capable release as the
 rollback artifact; never run a schema-4-only client against schema 5.
