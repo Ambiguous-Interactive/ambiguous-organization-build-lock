@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29373853567:unity-tests:2021.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29373853567",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29373853567",
-    "queuedAt": "2026-07-14T22:43:32.134Z",
-    "acquiredAt": "2026-07-14T22:54:17.306Z",
-    "expiresAt": "2026-07-15T02:54:17.306Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29373853567:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29373853567",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29373853567",
-      "queuedAt": "2026-07-14T22:43:32.134Z",
-      "acquiredAt": "2026-07-14T22:54:17.306Z",
-      "expiresAt": "2026-07-15T02:54:17.306Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29373853567:unity-tests:6000.3.16f1-editmode",
@@ -42,7 +16,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "25bd45de-26fc-4ce9-9508-3c161af90d13",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29373853567:unity-tests:2021.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29373853567",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29373853567",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-14T23:01:39.107Z",
+      "availableAt": "2026-07-14T23:07:39.107Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-14T22:54:17.306Z"
+  "updatedAt": "2026-07-14T23:01:39.107Z"
 }
