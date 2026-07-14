@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unitypackage-smoke:unitypackage-smoke-29321840893",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unitypackage-smoke",
+    "runId": "29321840893",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
+    "queuedAt": "2026-07-14T11:58:56.689Z",
+    "acquiredAt": "2026-07-14T12:02:42.838Z",
+    "expiresAt": "2026-07-14T16:02:42.838Z",
+    "runnerId": "GitHub Actions 1000101285"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unitypackage-smoke:unitypackage-smoke-29321840893",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
       "queuedAt": "2026-07-14T11:58:56.689Z",
+      "acquiredAt": "2026-07-14T12:02:42.838Z",
+      "expiresAt": "2026-07-14T16:02:42.838Z",
       "runnerId": "GitHub Actions 1000101285"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "626feaca-37b9-4d15-9af2-510ea03dd11e",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "29321840893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T11:56:30.872Z",
-      "availableAt": "2026-07-14T12:02:30.872Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T11:58:57.517Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T12:02:42.838Z"
 }
