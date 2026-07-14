@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29293619034:unity-tests:unity-tests-1",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "29293619034",
-    "runAttempt": "2",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29293619034",
-    "queuedAt": "2026-07-14T00:47:06.640Z",
-    "acquiredAt": "2026-07-14T00:47:07.862Z",
-    "expiresAt": "2026-07-14T04:47:07.862Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29293619034:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29293619034",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29293619034",
-      "queuedAt": "2026-07-14T00:47:06.640Z",
-      "acquiredAt": "2026-07-14T00:47:07.862Z",
-      "expiresAt": "2026-07-14T04:47:07.862Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29296657918:unity-tests:2022.3.45f1-editmode",
@@ -42,6 +16,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-14T00:47:07.862Z"
+  "reservations": [
+    {
+      "reservationId": "32dd4039-cbb5-492f-9261-9ca29d6ed40e",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29293619034:unity-tests:unity-tests-1",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "29293619034",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29293619034",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-14T00:48:41.111Z",
+      "availableAt": "2026-07-14T00:54:41.111Z"
+    }
+  ],
+  "updatedAt": "2026-07-14T00:48:41.111Z"
 }
