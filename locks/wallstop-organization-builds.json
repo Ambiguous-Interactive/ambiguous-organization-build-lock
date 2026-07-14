@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests:2021.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29321840893",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
+    "queuedAt": "2026-07-14T10:04:49.567Z",
+    "acquiredAt": "2026-07-14T10:22:41.380Z",
+    "expiresAt": "2026-07-14T14:22:41.380Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
       "queuedAt": "2026-07-14T10:04:49.567Z",
+      "acquiredAt": "2026-07-14T10:22:41.380Z",
+      "expiresAt": "2026-07-14T14:22:41.380Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests:2022.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -27,22 +42,6 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "a9f42405-e481-4065-a73f-11245c883470",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests:6000.5.2f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29321840893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T10:16:27.504Z",
-      "availableAt": "2026-07-14T10:22:27.504Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T10:18:56.321Z"
+  "reservations": [],
+  "updatedAt": "2026-07-14T10:22:41.380Z"
 }
