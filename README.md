@@ -25,6 +25,9 @@ credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
 
 ## Consumer Workflow Pattern
 
+See [consumer enrollment](docs/consumer-enrollment.md) for the repeatable
+repository/App/environment checklist and canary requirements.
+
 Validate local secret shape first, acquire immediately before the licensed Unity
 section, guard every licensed step on the acquire output, and release with
 `if: always()`:
