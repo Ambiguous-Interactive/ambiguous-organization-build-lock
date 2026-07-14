@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:build-webgl:build-webgl",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "build-webgl",
-    "runId": "29374989227",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
-    "queuedAt": "2026-07-14T23:28:29.716Z",
-    "acquiredAt": "2026-07-14T23:32:44.225Z",
-    "expiresAt": "2026-07-15T03:32:44.225Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:build-webgl:build-webgl",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "build-webgl",
-      "runId": "29374989227",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
-      "queuedAt": "2026-07-14T23:28:29.716Z",
-      "acquiredAt": "2026-07-14T23:32:44.225Z",
-      "expiresAt": "2026-07-15T03:32:44.225Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29374353954:unity:qora-EditMode",
@@ -68,8 +42,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-14T23:52:57.943Z",
       "availableAt": "2026-07-14T23:58:57.943Z"
+    },
+    {
+      "reservationId": "f477dcd4-d1b0-429c-ad11-e0d1e3a17ad5",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:build-webgl:build-webgl",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "build-webgl",
+      "runId": "29374989227",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-14T23:53:47.074Z",
+      "availableAt": "2026-07-14T23:59:47.074Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-14T23:53:33.061Z"
+  "updatedAt": "2026-07-14T23:53:47.075Z"
 }
