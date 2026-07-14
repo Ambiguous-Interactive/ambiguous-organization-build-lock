@@ -843,8 +843,9 @@ test("config rejects unauthorized callers before credential parsing", async (t) 
   for (const testCase of [
     { name: "wrong owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "1" } },
     { name: "non-canonical owner id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_OWNER_ID: "0212056428" } },
-    { name: "wrong repository id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_ID: "1" } },
-    { name: "repository name and id mismatch", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "Ambiguous-Interactive/IshoBoy" } },
+    { name: "non-canonical repository id", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY_ID: "0737391131" } },
+    { name: "wrong repository owner", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "Not-Ambiguous/unity-helpers" } },
+    { name: "non-canonical repository name", env: { ...authorizedConsumerEnv, GITHUB_REPOSITORY: "ambiguous-interactive/unity-helpers" } },
     { name: "wrong state branch", env: authorizedConsumerEnv, inputs: { "INPUT_STATE-BRANCH": "main" } }
   ]) {
     await t.test(testCase.name, async () => {
@@ -863,13 +864,15 @@ test("config rejects unauthorized callers before credential parsing", async (t) 
   }
 });
 
-test("authorization registry accepts only the lock repository and five canonical consumers", async (t) => {
+test("authorization accepts canonical repositories owned by the organization", async (t) => {
   const repositories = [
     ["Ambiguous-Interactive/DxMessaging", "101020635"],
     ["Ambiguous-Interactive/unity-helpers", "737391131"],
     ["Ambiguous-Interactive/DoxReloaded", "825469040"],
     ["Ambiguous-Interactive/IshoBoy", "885525263"],
     ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
+    ["Ambiguous-Interactive/qora-redux", "1290240478"],
+    ["Ambiguous-Interactive/future-unity-project", "9999999999"],
     ["Ambiguous-Interactive/ambiguous-organization-build-lock", "1244796436"]
   ];
   for (const [repository, repositoryId] of repositories) {
@@ -917,6 +920,20 @@ test("authorization separates lock-repository reaping from consumer lock operati
       /Only the lock repository/
     );
   });
+  await withActionEnv({
+    GITHUB_REPOSITORY: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+    GITHUB_REPOSITORY_ID: "9999999999",
+    GITHUB_REPOSITORY_OWNER_ID: "212056428"
+  }, () => {
+    assert.throws(
+      () => authorizeCaller({
+        lockName: "wallstop-organization-builds",
+        lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+        mode: "reap"
+      }),
+      /repository ID is not authorized/
+    );
+  });
 });
 
 test("state-writer App tokens are limited to the lock repository and contents write", async () => {
@@ -961,10 +978,9 @@ test("reaper reader App token is limited to consumer Actions and Metadata read",
   });
   assert.equal(requests[0].path, "/orgs/Ambiguous-Interactive/installation");
   assert.deepEqual(requests[1].body, {
-    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
     permissions: { actions: "read", metadata: "read" }
   });
-  assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);
+  assert.equal(Object.hasOwn(requests[1].body, "repositories"), false);
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
 

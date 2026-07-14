@@ -22,21 +22,22 @@ const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
+const AUTHORIZED_OWNER = "Ambiguous-Interactive";
 const AUTHORIZED_OWNER_ID = "212056428";
 const LOCK_NAME = "wallstop-organization-builds";
 const LOCK_REPOSITORY = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+const LOCK_REPOSITORY_ID = "1244796436";
 const STATE_BRANCH = "lock-state";
-const AUTHORIZED_REPOSITORIES = new Map([
-  ["Ambiguous-Interactive/DxMessaging", "101020635"],
-  ["Ambiguous-Interactive/unity-helpers", "737391131"],
-  ["Ambiguous-Interactive/DoxReloaded", "825469040"],
-  ["Ambiguous-Interactive/IshoBoy", "885525263"],
-  ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
-  [LOCK_REPOSITORY, "1244796436"]
-]);
-const CONSUMER_REPOSITORY_NAMES = [...AUTHORIZED_REPOSITORIES.keys()]
-  .filter((repository) => repository !== LOCK_REPOSITORY)
-  .map((repository) => repository.split("/")[1]);
+// Temporary compatibility fallback only. The dedicated reader App token covers
+// every repository on its selected-repository installation, so new consumers do
+// not require a code release here.
+const COMPATIBILITY_READER_REPOSITORY_NAMES = [
+  "DxMessaging",
+  "unity-helpers",
+  "DoxReloaded",
+  "IshoBoy",
+  "DepartmentOfArrangements"
+];
 const RESOURCE_REASON_CODES = new Set([
   "cleanup-confirmed",
   "cleanup-evidence-unknown",
@@ -343,6 +344,7 @@ function credential(lockRepo) {
 function readerCredential(owner) {
   let appId = String(process.env.BUILD_LOCK_READER_APP_ID || "").trim();
   let privateKey = process.env.BUILD_LOCK_READER_APP_PRIVATE_KEY || "";
+  const dedicatedReader = Boolean(appId);
   if (Boolean(appId) !== Boolean(privateKey)) {
     throw new Error("BUILD_LOCK_READER_APP_ID and BUILD_LOCK_READER_APP_PRIVATE_KEY must be provided together.");
   }
@@ -365,7 +367,7 @@ function readerCredential(owner) {
     appId,
     privateKey,
     owner,
-    repositories: CONSUMER_REPOSITORY_NAMES,
+    repositories: dedicatedReader ? null : COMPATIBILITY_READER_REPOSITORY_NAMES,
     permissions: { actions: "read", metadata: "read" }
   });
 }
@@ -398,8 +400,12 @@ function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH,
   if (ownerId !== AUTHORIZED_OWNER_ID) {
     throw new Error("The calling GitHub organization is not authorized to use this lock.");
   }
-  if (!AUTHORIZED_REPOSITORIES.has(repository) || AUTHORIZED_REPOSITORIES.get(repository) !== repositoryId) {
-    throw new Error("The calling GitHub repository name and ID are not authorized to use this lock.");
+  const parsedRepository = parseRepository(repository);
+  if (parsedRepository.owner !== AUTHORIZED_OWNER) {
+    throw new Error("The calling GitHub repository owner is not authorized to use this lock.");
+  }
+  if (repository === LOCK_REPOSITORY && repositoryId !== LOCK_REPOSITORY_ID) {
+    throw new Error("The lock repository ID is not authorized.");
   }
   if (mode === "reap" && repository !== LOCK_REPOSITORY) {
     throw new Error("Only the lock repository may run the scheduled reaper.");
