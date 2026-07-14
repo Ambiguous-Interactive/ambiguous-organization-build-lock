@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29331258432:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29331258432",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29331258432",
+    "queuedAt": "2026-07-14T12:08:06.383Z",
+    "acquiredAt": "2026-07-14T12:10:58.197Z",
+    "expiresAt": "2026-07-14T16:10:58.197Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29331258432:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29331258432",
       "queuedAt": "2026-07-14T12:08:06.383Z",
+      "acquiredAt": "2026-07-14T12:10:58.197Z",
+      "expiresAt": "2026-07-14T16:10:58.197Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "fbdeb380-ce77-485e-b321-f267b54cf91b",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unitypackage-smoke:unitypackage-smoke-29321840893",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29321840893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
-      "runnerId": "GitHub Actions 1000101285",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T12:04:46.713Z",
-      "availableAt": "2026-07-14T12:10:46.713Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T12:08:07.670Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T12:10:58.198Z"
 }
