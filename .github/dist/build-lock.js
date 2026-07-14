@@ -2242,10 +2242,14 @@ async function acquire(config) {
         state.queue = [];
         for (const entry of dedupedQueue) {
           if (entry.holderId === identity.holderId) {
+            let attemptAdvanced = entry.runAttempt !== identity.runAttempt;
             if (runnerSerialization) {
-              identityIsNewerOrThrow(entry, identity, "Queued request");
+              attemptAdvanced = identityIsNewerOrThrow(entry, identity, "Queued request");
             }
-            const refreshedEntry = { ...identity, queuedAt: entry.queuedAt };
+            const refreshedEntry = {
+              ...identity,
+              queuedAt: attemptAdvanced ? identity.queuedAt : entry.queuedAt
+            };
             if (entry.runnerId !== refreshedEntry.runnerId || entry.runAttempt !== refreshedEntry.runAttempt) {
               changed = true;
             }

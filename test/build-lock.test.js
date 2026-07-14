@@ -4605,9 +4605,73 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
       } else {
         assert.equal(state.holders[0].runAttempt, "2");
         assert.equal(state.holders[0].runnerId, "runner-incoming");
+        assert.notEqual(state.holders[0].queuedAt, queued.queuedAt);
+        assert.ok(Date.parse(state.holders[0].queuedAt) > Date.parse(queued.queuedAt));
       }
     });
   }
+});
+
+test("rerun queue refresh records the new attempt timestamp", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-06-06T01:00:00.000Z");
+  const queued = {
+    ...withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-old"),
+    runAttempt: "1",
+    queuedAt: "2026-06-06T00:00:00.000Z"
+  };
+  let state = {
+    ...semaphoreState([
+      withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-holder")
+    ], [queued]),
+    schemaVersion: 3
+  };
+  const writtenStates = [];
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_RUN_ATTEMPT: "2" }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              writtenStates.push(structuredClone(state));
+              return jsonResponse(200, { content: { sha: `state-${writtenStates.length}` } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ runnerId: "runner-new", timeoutMinutes: 1 })),
+            /Timed out waiting for build lock/
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const refreshed = writtenStates.find((candidate) => candidate.queue.some((entry) => entry.runAttempt === "2"));
+  assert.ok(refreshed, "expected the rerun queue identity to be persisted");
+  const refreshedEntry = refreshed.queue.find((entry) => entry.runAttempt === "2");
+  assert.equal(refreshedEntry.runnerId, "runner-new");
+  assert.notEqual(refreshedEntry.queuedAt, queued.queuedAt);
+  assert.ok(Date.parse(refreshedEntry.queuedAt) > Date.parse(queued.queuedAt));
 });
 
 test("activated acquire rejects schema downgrade during post-write verification", async () => {
