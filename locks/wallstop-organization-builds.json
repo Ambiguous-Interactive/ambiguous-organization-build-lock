@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "29321840893",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
+    "queuedAt": "2026-07-14T11:04:47.664Z",
+    "acquiredAt": "2026-07-14T11:20:21.507Z",
+    "expiresAt": "2026-07-14T15:20:21.507Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
       "queuedAt": "2026-07-14T11:04:47.664Z",
+      "acquiredAt": "2026-07-14T11:20:21.507Z",
+      "expiresAt": "2026-07-14T15:20:21.507Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.5.2f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -27,22 +42,6 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "d14e55ad-5a17-4824-aa11-091236816535",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29321840893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T11:14:19.298Z",
-      "availableAt": "2026-07-14T11:20:19.298Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T11:19:50.522Z"
+  "reservations": [],
+  "updatedAt": "2026-07-14T11:20:21.507Z"
 }
