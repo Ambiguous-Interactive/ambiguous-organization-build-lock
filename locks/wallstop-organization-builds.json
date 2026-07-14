@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29365530879:unity-tests:unity-ci-PlayMode",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "29365530879",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29365530879",
+    "queuedAt": "2026-07-14T20:28:54.989Z",
+    "acquiredAt": "2026-07-14T20:32:57.805Z",
+    "expiresAt": "2026-07-15T00:32:57.805Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29365530879:unity-tests:unity-ci-PlayMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,26 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29365530879",
       "queuedAt": "2026-07-14T20:28:54.989Z",
+      "acquiredAt": "2026-07-14T20:32:57.805Z",
+      "expiresAt": "2026-07-15T00:32:57.805Z",
       "runnerId": "box-linux"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "a32610fd-08e2-4fa0-90fe-ecbdcf4581b8",
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29365530879:unity-tests:unity-ci-EditMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29365530879",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29365530879",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T20:26:44.183Z",
-      "availableAt": "2026-07-14T20:32:44.183Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-14T20:28:56.301Z"
+  "updatedAt": "2026-07-14T20:32:57.805Z"
 }
