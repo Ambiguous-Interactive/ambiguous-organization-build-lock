@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.5.2f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "29321840893",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
+    "queuedAt": "2026-07-14T11:19:49.057Z",
+    "acquiredAt": "2026-07-14T11:29:59.751Z",
+    "expiresAt": "2026-07-14T15:29:59.751Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.5.2f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
       "queuedAt": "2026-07-14T11:19:49.057Z",
+      "acquiredAt": "2026-07-14T11:29:59.751Z",
+      "expiresAt": "2026-07-14T15:29:59.751Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "3bbdea8e-cf58-4222-83fe-ab2521296251",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29321840893:unity-tests-standalone:6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29321840893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29321840893",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T11:23:57.327Z",
-      "availableAt": "2026-07-14T11:29:57.327Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T11:23:57.327Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T11:29:59.751Z"
 }
