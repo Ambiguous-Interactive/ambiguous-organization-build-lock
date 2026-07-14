@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29305269520:unity-tests:unity-tests-1",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29305269520",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29305269520",
+    "queuedAt": "2026-07-14T04:12:54.741Z",
+    "acquiredAt": "2026-07-14T04:17:04.647Z",
+    "expiresAt": "2026-07-14T08:17:04.647Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29305269520:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29305269520",
       "queuedAt": "2026-07-14T04:12:54.741Z",
+      "acquiredAt": "2026-07-14T04:17:04.647Z",
+      "expiresAt": "2026-07-14T08:17:04.647Z",
       "runnerId": "box-linux"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "91faa396-8de6-4365-a60b-6309e4cfb1c0",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29304222023:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29304222023",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29304222023",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "operator confirmed external resource cleanup",
-      "createdAt": "2026-07-14T04:04:06.933Z",
-      "availableAt": "2026-07-14T04:16:50.276Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T04:12:55.901Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T04:17:04.648Z"
 }
