@@ -68,10 +68,13 @@ canaried.
 Each repository must have a data-driven policy test enumerating every Unity
 secret, GameCI use, and activation reference. Licensed jobs must use the
 protected `unity-license` environment, immutable action SHAs, persistent
-licensing home and machine identity across activation/return, and protected
-`main` or controlled manual dispatch only. PR code must never run licensed
-jobs. Job-scoped Unity secrets and custom-image/stock-return mismatches are
-prohibited.
+licensing home and machine identity across activation/return. Licensed jobs may
+validate protected branches, controlled manual dispatches, and trusted
+same-repository pull requests. Fork and Dependabot pull requests must never
+receive the licensed environment or its credentials. Same-repository PR
+validation requires no manual environment approval, so repository write access
+is part of the credential trust boundary. Job-scoped Unity secrets and
+custom-image/stock-return mismatches are prohibited.
 
 The shared classifier contract is:
 
