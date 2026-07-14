@@ -21,6 +21,7 @@ const {
   normalizeState,
   parseReleaseReport,
   postCleanup,
+  queueEntryIsFinished,
   readLockConfig,
   readerCredential,
   readerCredentialRequired,
@@ -3603,6 +3604,185 @@ test("stale evaluation delegates newer run-attempt reconciliation to the reaper"
       });
     }
   );
+});
+
+test("stale evaluation reclaims a completed holder job while sibling matrix jobs keep the run active", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(200, {
+        total_count: 2,
+        jobs: [
+          {
+            id: 11,
+            runner_name: "runner-a",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: "2026-06-06T00:02:00.000Z"
+          },
+          {
+            id: 12,
+            runner_name: "runner-b",
+            status: "in_progress",
+            conclusion: null,
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: null
+          }
+        ]
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.deepEqual(await evaluateStale(holder, "reader"), {
+      stale: true,
+      reason: "holder job 11 is completed"
+    });
+  });
+});
+
+test("queue cleanup drops a completed waiting job while sibling matrix jobs keep the run active", async () => {
+  const entry = {
+    holderId: "owner/repo:123:unity-tests:editmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:01:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(200, {
+        total_count: 2,
+        jobs: [
+          {
+            id: 21,
+            runner_name: "runner-a",
+            status: "completed",
+            conclusion: "cancelled",
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: "2026-06-06T00:02:00.000Z"
+          },
+          {
+            id: 22,
+            runner_name: "runner-b",
+            status: "in_progress",
+            conclusion: null,
+            started_at: "2026-06-06T00:00:00.000Z",
+            completed_at: null
+          }
+        ]
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.equal(await queueEntryIsFinished(entry, "reader"), true);
+  });
+});
+
+test("exact holder-job lookup fails closed when runner timestamps do not identify one job", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(
+    async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+        return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+      }
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+        return jsonResponse(200, {
+          total_count: 1,
+          jobs: [
+            {
+              id: 31,
+              runner_name: "runner-a",
+              status: "completed",
+              conclusion: "success",
+              started_at: "2026-06-06T00:02:00.000Z",
+              completed_at: "2026-06-06T00:03:00.000Z"
+            }
+          ]
+        });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    },
+    async (logs) => {
+      assert.deepEqual(await evaluateStale(holder, "reader"), {
+        stale: false,
+        reason: "holder run is in_progress"
+      });
+      assert.match(logs.join("\n"), /found 0 jobs/);
+    }
+  );
+});
+
+test("exact holder-job lookup rejects missing Actions read permission", async () => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+      return jsonResponse(403, { message: "Resource not accessible by integration" });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => evaluateStale(holder, "reader"),
+      /Ensure the reaper reader credentials have actions: read access/
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

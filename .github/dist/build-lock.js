@@ -1494,6 +1494,83 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
   }
 }
 
+async function getIdentityJobStatus(identity, observedAt, authToken, options = {}) {
+  const parsed = parseRepository(identity.repository);
+  const observedTime = parseTime(observedAt);
+  if (
+    !/^[1-9][0-9]*$/.test(identity.runAttempt || "") ||
+    !identity.runnerId ||
+    observedTime <= 0
+  ) {
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
+
+  const jobs = [];
+  let totalCount = 0;
+  let page = 1;
+  try {
+    do {
+      const response = await api(
+        "GET",
+        `/repos/${parsed.owner}/${parsed.repo}/actions/runs/${encodeURIComponent(identity.runId)}` +
+          `/attempts/${encodeURIComponent(identity.runAttempt)}/jobs?filter=all&per_page=100&page=${page}`,
+        undefined,
+        authToken,
+        options.apiOptions
+      );
+      if (!response || !Array.isArray(response.jobs) || !Number.isInteger(response.total_count)) {
+        throw new Error(`Malformed workflow jobs response for ${identity.repository}/${identity.runId}.`);
+      }
+      totalCount = response.total_count;
+      jobs.push(...response.jobs);
+      page++;
+      if (page > 1000) {
+        throw new Error(`Workflow jobs response for ${identity.repository}/${identity.runId} exceeded pagination limits.`);
+      }
+    } while (jobs.length < totalCount);
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      console.log(
+        `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} ` +
+          `returned HTTP ${error.status}; retaining workflow-run status as the fail-closed fallback.`
+      );
+      return { known: false, status: "", conclusion: "", jobId: "" };
+    }
+    if (error.status === 403) {
+      throw new Error(
+        `Unable to read workflow jobs for ${identity.repository}/${identity.runId}. ` +
+          `Ensure the reaper reader credentials have actions: read access. ${error.message}`
+      );
+    }
+    throw error;
+  }
+
+  const matchingJobs = jobs.filter((job) => {
+    if (!job || job.runner_name !== identity.runnerId) {
+      return false;
+    }
+    const startedAt = parseTime(job.started_at);
+    const completedAt = parseTime(job.completed_at);
+    return startedAt > 0 && startedAt <= observedTime && (completedAt <= 0 || observedTime <= completedAt);
+  });
+  if (matchingJobs.length !== 1) {
+    console.log(
+      `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} found ` +
+        `${matchingJobs.length} jobs on runner ${identity.runnerId} containing ${observedAt}; ` +
+        `retaining workflow-run status as the fail-closed fallback.`
+    );
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
+
+  const job = matchingJobs[0];
+  return {
+    known: true,
+    status: job.status || "",
+    conclusion: job.conclusion || "",
+    jobId: String(job.id || "")
+  };
+}
+
 async function evaluateStale(holder, authToken, options = {}) {
   if (!holder) {
     return { stale: true, reason: "no holder" };
@@ -1511,6 +1588,13 @@ async function evaluateStale(holder, authToken, options = {}) {
           reason: `workflow run advanced from attempt ${holder.runAttempt} to ${status.runAttempt}`
         };
       }
+      const jobStatus = await getIdentityJobStatus(holder, holder.acquiredAt, authToken, options);
+      if (jobStatus.known) {
+        if (isActiveRunStatus(jobStatus.status)) {
+          return { stale: false, reason: `holder job ${jobStatus.jobId} is ${jobStatus.status}` };
+        }
+        return { stale: true, reason: `holder job ${jobStatus.jobId} is ${jobStatus.status || "unknown"}` };
+      }
       return { stale: false, reason: `holder run is ${status.status}` };
     }
     return { stale: true, reason: `holder run is ${status.status || "unknown"}` };
@@ -1526,7 +1610,18 @@ async function queueEntryIsFinished(entry, authToken, options = {}) {
   if (!status.known) {
     return false;
   }
-  return !isActiveRunStatus(status.status);
+  if (!isActiveRunStatus(status.status)) {
+    return true;
+  }
+  if (
+    /^[1-9][0-9]*$/.test(entry.runAttempt) &&
+    /^[1-9][0-9]*$/.test(status.runAttempt) &&
+    BigInt(status.runAttempt) > BigInt(entry.runAttempt)
+  ) {
+    return true;
+  }
+  const jobStatus = await getIdentityJobStatus(entry, entry.queuedAt, authToken, options);
+  return jobStatus.known ? !isActiveRunStatus(jobStatus.status) : false;
 }
 
 function queuePosition(state, holderId) {
@@ -2740,6 +2835,7 @@ module.exports = {
   normalizeState,
   parseReleaseReport,
   postCleanup,
+  queueEntryIsFinished,
   readLockConfig,
   readerCredential,
   readerCredentialRequired,
