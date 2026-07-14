@@ -35,9 +35,10 @@ organization may enroll; the protected writer credential is the actual
 authorization boundary.
 
 1. Release the schema-4-compatible authorization change at an immutable SHA.
-2. Create the reader App, installed with selected-repository access on every
-   enrolled consumer, with Metadata read and Actions read. Store its key only in
-   the lock repository.
+2. Create the reader App with Metadata read and Actions read, no Contents access,
+   and install it with all-repository access in the registered organization. This
+   read-only installation makes future organization repositories reaper-visible
+   without changing App scope. Store its key only in the lock repository.
 3. Verify compatibility while the writer App still has its old installation.
 4. Restrict the writer App installation to only this lock repository, with
    Contents write. Rotate its key and update each enrolled protected

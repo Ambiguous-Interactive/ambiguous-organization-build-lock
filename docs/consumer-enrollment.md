@@ -5,8 +5,9 @@ lock action. The protected writer credential remains the authorization boundary.
 
 ## Repository setup
 
-1. Add the repository to the reader GitHub App installation with selected-repository
-   access. The App needs only Actions read and Metadata read.
+1. Confirm the dedicated reader GitHub App is installed with all-repository access
+   in the registered organization. The App has only Actions read and Metadata read,
+   so future organization repositories require no reader installation change.
 2. Create a `unity-license` environment with no required reviewers or wait timer.
 3. Store the writer App ID/private key and Unity credentials as environment
    secrets on `unity-license` in this repository. Do not use repository or
@@ -41,6 +42,7 @@ Before making the Unity check required or raising lock capacity:
 7. Confirm the scheduled reaper can read the new repository's workflow-run status.
 
 If credential validation fails, update the `unity-license` environment secrets
-in that repository. If reaper lookup fails, update the reader App installation's
-selected-repository scope. Never copy credential values into repository files or
-diagnostic output.
+in that repository. If reaper lookup fails, verify the dedicated reader secrets
+exist on the lock repository and that its all-repository installation includes
+the repository; do not broaden the contents-writing App. Never copy credential
+values into repository files or diagnostic output.
