@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29358427914:unity-tests:unity-ci-PlayMode",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "29358427914",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29358427914",
+    "queuedAt": "2026-07-14T18:45:38.130Z",
+    "acquiredAt": "2026-07-14T18:49:27.373Z",
+    "expiresAt": "2026-07-14T22:49:27.373Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29358427914:unity-tests:unity-ci-PlayMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29358427914",
       "queuedAt": "2026-07-14T18:45:38.130Z",
+      "acquiredAt": "2026-07-14T18:49:27.373Z",
+      "expiresAt": "2026-07-14T22:49:27.373Z",
       "runnerId": "box-linux"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "7ddd2289-2aac-4150-9717-ea3a5580570a",
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29358427914:unity-tests:unity-ci-EditMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29358427914",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29358427914",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T18:43:17.577Z",
-      "availableAt": "2026-07-14T18:49:17.577Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T18:45:39.428Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T18:49:27.373Z"
 }
