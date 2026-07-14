@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29296639743:unity-tests:2021.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29296639743",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29296639743",
-    "queuedAt": "2026-07-14T21:49:27.743Z",
-    "acquiredAt": "2026-07-14T21:56:34.520Z",
-    "expiresAt": "2026-07-15T01:56:34.520Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29296639743:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29296639743",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29296639743",
-      "queuedAt": "2026-07-14T21:49:27.743Z",
-      "acquiredAt": "2026-07-14T21:56:34.520Z",
-      "expiresAt": "2026-07-15T01:56:34.520Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29298454403:unity-tests:2021.3.45f1-standalone",
@@ -53,7 +27,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "836abd37-cf12-48d3-9ed7-01270a6e73e6",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29296639743:unity-tests:2021.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29296639743",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29296639743",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-07-14T22:19:41.190Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-14T22:17:57.904Z"
+  "updatedAt": "2026-07-14T22:19:41.190Z"
 }
