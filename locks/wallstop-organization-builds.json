@@ -1,9 +1,20 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29331258432:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-single-threaded",
+    "runId": "29331258432",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29331258432",
+    "queuedAt": "2026-07-14T12:19:22.424Z",
+    "acquiredAt": "2026-07-14T12:32:07.228Z",
+    "expiresAt": "2026-07-14T16:32:07.228Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29331258432:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29331258432",
       "queuedAt": "2026-07-14T12:19:22.424Z",
+      "acquiredAt": "2026-07-14T12:32:07.228Z",
+      "expiresAt": "2026-07-14T16:32:07.228Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "caf8b97a-2420-41ee-9ba5-34afa52edccc",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29331258432:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "29331258432",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29331258432",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-14T12:25:57.226Z",
-      "availableAt": "2026-07-14T12:31:57.226Z"
-    }
-  ],
-  "updatedAt": "2026-07-14T12:25:57.227Z"
+  "queue": [],
+  "reservations": [],
+  "updatedAt": "2026-07-14T12:32:07.228Z"
 }
