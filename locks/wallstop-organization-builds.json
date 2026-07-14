@@ -1,34 +1,8 @@
 {
   "schemaVersion": 4,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29302376600:build-webgl:build-webgl",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "build-webgl",
-    "runId": "29302376600",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29302376600",
-    "queuedAt": "2026-07-14T03:27:25.246Z",
-    "acquiredAt": "2026-07-14T03:30:00.525Z",
-    "expiresAt": "2026-07-14T07:30:00.525Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29302376600:build-webgl:build-webgl",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "build-webgl",
-      "runId": "29302376600",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29302376600",
-      "queuedAt": "2026-07-14T03:27:25.246Z",
-      "acquiredAt": "2026-07-14T03:30:00.525Z",
-      "expiresAt": "2026-07-14T07:30:00.525Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29304222023:platform-build-windows:platform-build-windows",
@@ -42,6 +16,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
-  "updatedAt": "2026-07-14T03:46:21.603Z"
+  "reservations": [
+    {
+      "reservationId": "30b5ad53-024f-470d-a3e8-77f07d12927d",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29302376600:build-webgl:build-webgl",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "build-webgl",
+      "runId": "29302376600",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29302376600",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "explicit release reported resource cleanup safe",
+      "createdAt": "2026-07-14T03:50:33.448Z",
+      "availableAt": "2026-07-14T03:56:33.448Z"
+    }
+  ],
+  "updatedAt": "2026-07-14T03:50:33.448Z"
 }
