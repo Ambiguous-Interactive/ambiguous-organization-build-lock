@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29386369206:unity-tests:6000.5.2f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29386369206",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386369206",
+    "queuedAt": "2026-07-15T04:53:23.548Z",
+    "acquiredAt": "2026-07-15T05:07:01.789Z",
+    "expiresAt": "2026-07-15T09:07:01.789Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29386369206:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386369206",
       "queuedAt": "2026-07-15T04:53:23.548Z",
+      "acquiredAt": "2026-07-15T05:07:01.789Z",
+      "expiresAt": "2026-07-15T09:07:01.789Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:2021.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -28,21 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "c4591313-460d-466c-8aab-f22afba541ef",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29380913216:unitypackage-smoke:unitypackage-smoke-29380913216",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29380913216",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29380913216",
-      "runnerId": "GitHub Actions 1000103341",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T05:00:55.745Z",
-      "availableAt": "2026-07-15T05:06:55.745Z"
-    },
     {
       "reservationId": "4de83674-54aa-4fd7-864e-ef1923627776",
       "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:2022.3.45f1-editmode",
@@ -60,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T05:02:38.764Z"
+  "updatedAt": "2026-07-15T05:07:01.789Z"
 }
