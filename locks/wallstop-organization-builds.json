@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29379321713:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29379321713",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29379321713",
+    "queuedAt": "2026-07-15T01:11:57.691Z",
+    "acquiredAt": "2026-07-15T01:17:30.460Z",
+    "expiresAt": "2026-07-15T05:17:30.460Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29379321713:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29379321713",
       "queuedAt": "2026-07-15T01:11:57.691Z",
+      "acquiredAt": "2026-07-15T01:17:30.460Z",
+      "expiresAt": "2026-07-15T05:17:30.460Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "01561dd7-76a4-4f65-a34f-d50d336bb94e",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29379321713:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29379321713",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29379321713",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T01:11:14.872Z",
-      "availableAt": "2026-07-15T01:17:14.872Z"
-    },
     {
       "reservationId": "8abe3cdf-fa91-43a8-95fb-566908df6ec7",
       "holderId": "Ambiguous-Interactive/unity-helpers:29380913216:unity-tests:2022.3.45f1-editmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T01:16:38.099Z"
+  "updatedAt": "2026-07-15T01:17:30.461Z"
 }
