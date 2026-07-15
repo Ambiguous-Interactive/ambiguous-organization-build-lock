@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29458564916:unity-tests:unity-ci-PlayMode",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "29458564916",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29458564916",
+    "queuedAt": "2026-07-15T23:42:55.427Z",
+    "acquiredAt": "2026-07-15T23:50:21.361Z",
+    "expiresAt": "2026-07-16T03:50:21.361Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29458564916:unity-tests:unity-ci-PlayMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29458564916",
       "queuedAt": "2026-07-15T23:42:55.427Z",
+      "acquiredAt": "2026-07-15T23:50:21.361Z",
+      "expiresAt": "2026-07-16T03:50:21.361Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -40,21 +55,6 @@
   ],
   "reservations": [
     {
-      "reservationId": "70b0cd07-a395-4e50-92a9-7fb35274c657",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29457982141",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29457982141",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T23:44:19.199Z",
-      "availableAt": "2026-07-15T23:50:19.199Z"
-    },
-    {
       "reservationId": "19d85f70-85c3-4bb4-b961-fbfc336b54bd",
       "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -71,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T23:50:17.929Z"
+  "updatedAt": "2026-07-15T23:50:21.362Z"
 }
