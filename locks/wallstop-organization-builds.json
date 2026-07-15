@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:2021.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29458003753",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003753",
-    "queuedAt": "2026-07-15T23:16:02.188Z",
-    "acquiredAt": "2026-07-15T23:18:48.489Z",
-    "expiresAt": "2026-07-16T03:18:48.489Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29458003753",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003753",
-      "queuedAt": "2026-07-15T23:16:02.188Z",
-      "acquiredAt": "2026-07-15T23:18:48.489Z",
-      "expiresAt": "2026-07-16T03:18:48.489Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29457982151:perf-benchmarks:perf-6000.3.16f1-standalone",
@@ -57,8 +31,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-15T23:16:22.643Z",
       "availableAt": "2026-07-15T23:22:22.643Z"
+    },
+    {
+      "reservationId": "f2342200-cf73-4b75-b2b6-40c0d8df6349",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:2021.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29458003753",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003753",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-15T23:19:38.333Z",
+      "availableAt": "2026-07-15T23:25:38.333Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T23:18:48.489Z"
+  "updatedAt": "2026-07-15T23:19:38.333Z"
 }
