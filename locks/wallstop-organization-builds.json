@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29455563977:unity-tests:2022.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29455563977",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29455563977",
+    "queuedAt": "2026-07-15T22:49:30.645Z",
+    "acquiredAt": "2026-07-15T22:53:18.271Z",
+    "expiresAt": "2026-07-16T02:53:18.271Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29455563977:unity-tests:2022.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29455563977",
       "queuedAt": "2026-07-15T22:49:30.645Z",
+      "acquiredAt": "2026-07-15T22:53:18.271Z",
+      "expiresAt": "2026-07-16T02:53:18.271Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "7021448e-1ff5-488b-96f7-a048323df6c8",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29455563977:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29455563977",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29455563977",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T22:47:02.857Z",
-      "availableAt": "2026-07-15T22:53:02.857Z"
-    },
     {
       "reservationId": "a2aa227e-6607-4f6a-a1ee-fe5b5b101ce4",
       "holderId": "Ambiguous-Interactive/DxMessaging:29455563977:unity-tests:2022.3.45f1-editmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T22:49:32.005Z"
+  "updatedAt": "2026-07-15T22:53:18.271Z"
 }
