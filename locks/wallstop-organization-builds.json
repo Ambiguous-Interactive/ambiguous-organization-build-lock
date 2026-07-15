@@ -1,8 +1,34 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29443356797:unity-tests-standalone:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "29443356797",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29443356797",
+    "queuedAt": "2026-07-15T19:58:12.984Z",
+    "acquiredAt": "2026-07-15T19:58:14.181Z",
+    "expiresAt": "2026-07-15T23:58:14.181Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/unity-helpers:29443356797:unity-tests-standalone:2021.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29443356797",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29443356797",
+      "queuedAt": "2026-07-15T19:58:12.984Z",
+      "acquiredAt": "2026-07-15T19:58:14.181Z",
+      "expiresAt": "2026-07-15T23:58:14.181Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29443356797:unity-tests-standalone:2022.3.45f1-standalone",
@@ -17,20 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "45e84839-2d51-4146-9103-cd7dfa82c314",
-      "holderId": "Ambiguous-Interactive/IshoBoy:29444581279:unity-tests:unity-ci-tests-EditMode",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29444581279",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29444581279",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-missing-positive-evidence",
-      "createdAt": "2026-07-15T19:55:20.201Z"
-    },
     {
       "reservationId": "3c621173-4487-4ae5-bf8f-e74e978e3246",
       "holderId": "Ambiguous-Interactive/unity-helpers:29443356797:unity-tests:6000.5.2f1-playmode",
@@ -48,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T19:58:20.168Z"
+  "updatedAt": "2026-07-15T19:58:14.181Z"
 }
