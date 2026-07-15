@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "29374989227",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
-    "queuedAt": "2026-07-15T00:09:59.282Z",
-    "acquiredAt": "2026-07-15T00:15:35.337Z",
-    "expiresAt": "2026-07-15T04:15:35.337Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29374989227",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
-      "queuedAt": "2026-07-15T00:09:59.282Z",
-      "acquiredAt": "2026-07-15T00:15:35.337Z",
-      "expiresAt": "2026-07-15T04:15:35.337Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29373853567:unity-tests:6000.5.2f1-playmode",
@@ -57,8 +31,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-15T00:23:29.394Z",
       "availableAt": "2026-07-15T00:29:29.394Z"
+    },
+    {
+      "reservationId": "f8cb259b-6e59-42b3-89a8-2ce7613d99e3",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29374989227",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-15T00:24:22.194Z",
+      "availableAt": "2026-07-15T00:30:22.194Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T00:24:04.864Z"
+  "updatedAt": "2026-07-15T00:24:22.195Z"
 }
