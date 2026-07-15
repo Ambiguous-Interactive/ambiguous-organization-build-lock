@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:6000.5.2f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29386555287",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
+    "queuedAt": "2026-07-15T05:21:21.046Z",
+    "acquiredAt": "2026-07-15T05:26:50.513Z",
+    "expiresAt": "2026-07-15T09:26:50.513Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
       "queuedAt": "2026-07-15T05:21:21.046Z",
+      "acquiredAt": "2026-07-15T05:26:50.513Z",
+      "expiresAt": "2026-07-15T09:26:50.513Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29390327422:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -45,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T05:26:56.818Z"
+  "updatedAt": "2026-07-15T05:26:50.514Z"
 }
