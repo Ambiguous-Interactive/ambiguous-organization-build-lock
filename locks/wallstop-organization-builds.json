@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:29448772308:unity:qora-PlayMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "29448772308",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29448772308",
+    "queuedAt": "2026-07-15T20:44:51.111Z",
+    "acquiredAt": "2026-07-15T20:56:42.308Z",
+    "expiresAt": "2026-07-16T00:56:42.308Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29448772308:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29448772308",
       "queuedAt": "2026-07-15T20:44:51.111Z",
+      "acquiredAt": "2026-07-15T20:56:42.308Z",
+      "expiresAt": "2026-07-16T00:56:42.308Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "b5c9a68e-455f-4659-a17a-fbc29efee626",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29443356797:unitypackage-smoke:unitypackage-smoke-29443356797",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29443356797",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29443356797",
-      "runnerId": "GitHub Actions 1000104972",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T20:50:37.088Z",
-      "availableAt": "2026-07-15T20:56:37.088Z"
-    },
     {
       "reservationId": "1b8d639e-cad5-4183-a869-6def4192d46e",
       "holderId": "Ambiguous-Interactive/qora-redux:29448772308:unity:qora-EditMode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T20:55:01.619Z"
+  "updatedAt": "2026-07-15T20:56:42.308Z"
 }
