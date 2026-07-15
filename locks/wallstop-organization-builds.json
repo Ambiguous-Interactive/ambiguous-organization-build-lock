@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:6000.3.16f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29386555287",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
+    "queuedAt": "2026-07-15T05:13:08.294Z",
+    "acquiredAt": "2026-07-15T05:13:09.595Z",
+    "expiresAt": "2026-07-15T09:13:09.595Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "e6f52e81-de6e-468b-9d4a-44e41cbc1e1c",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29386369206:unity-tests:6000.5.2f1-editmode",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:6000.3.16f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests",
-      "runId": "29386369206",
+      "runId": "29386555287",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386369206",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-missing-positive-evidence",
-      "createdAt": "2026-07-15T05:12:29.619Z"
-    },
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
+      "queuedAt": "2026-07-15T05:13:08.294Z",
+      "acquiredAt": "2026-07-15T05:13:09.595Z",
+      "expiresAt": "2026-07-15T09:13:09.595Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "0c7c6ca5-9305-460c-8db4-805401ce8f6d",
       "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests:2021.3.45f1-editmode",
@@ -36,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T05:13:13.778Z"
+  "updatedAt": "2026-07-15T05:13:09.595Z"
 }
