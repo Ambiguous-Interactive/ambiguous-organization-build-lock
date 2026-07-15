@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:29450423193:unity:qora-EditMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "29450423193",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29450423193",
+    "queuedAt": "2026-07-15T21:01:51.905Z",
+    "acquiredAt": "2026-07-15T21:06:05.726Z",
+    "expiresAt": "2026-07-16T01:06:05.726Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29450423193:unity:qora-EditMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29450423193",
       "queuedAt": "2026-07-15T21:01:51.905Z",
+      "acquiredAt": "2026-07-15T21:06:05.726Z",
+      "expiresAt": "2026-07-16T01:06:05.726Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29450423193:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -28,21 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "14a1fc76-bdb8-4cba-a6ac-890406bf4dc8",
-      "holderId": "Ambiguous-Interactive/qora-redux:29448772308:unity:qora-PlayMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "29448772308",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29448772308",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T20:59:55.836Z",
-      "availableAt": "2026-07-15T21:05:55.836Z"
-    },
     {
       "reservationId": "7ae05218-ca4e-48cf-9085-3fccc205d53d",
       "holderId": "Ambiguous-Interactive/IshoBoy:29448436620:unity-tests:unity-ci-tests-EditMode",
@@ -60,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T21:05:34.987Z"
+  "updatedAt": "2026-07-15T21:06:05.726Z"
 }
