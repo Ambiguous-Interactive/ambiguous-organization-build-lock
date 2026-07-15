@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "29374989227",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
+    "queuedAt": "2026-07-15T00:09:59.282Z",
+    "acquiredAt": "2026-07-15T00:15:35.337Z",
+    "expiresAt": "2026-07-15T04:15:35.337Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29374989227:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29374989227",
       "queuedAt": "2026-07-15T00:09:59.282Z",
+      "acquiredAt": "2026-07-15T00:15:35.337Z",
+      "expiresAt": "2026-07-15T04:15:35.337Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "eef49761-0466-4f43-ae1e-0a8e18ba767a",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29375540499:unity-tests:6000.3.16f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29375540499",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29375540499",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T00:09:16.037Z",
-      "availableAt": "2026-07-15T00:15:16.037Z"
-    },
     {
       "reservationId": "7ca4d0cd-e76f-45df-8020-36060d5493a4",
       "holderId": "Ambiguous-Interactive/unity-helpers:29375540499:unity-tests:6000.5.2f1-editmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T00:15:12.742Z"
+  "updatedAt": "2026-07-15T00:15:35.337Z"
 }
