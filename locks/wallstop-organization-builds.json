@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests-standalone:2022.3.45f1-standalone",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests-standalone",
-    "runId": "29386555287",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
-    "queuedAt": "2026-07-15T06:24:04.402Z",
-    "acquiredAt": "2026-07-15T06:29:02.807Z",
-    "expiresAt": "2026-07-15T10:29:02.807Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests-standalone:2022.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29386555287",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
-      "queuedAt": "2026-07-15T06:24:04.402Z",
-      "acquiredAt": "2026-07-15T06:29:02.807Z",
-      "expiresAt": "2026-07-15T10:29:02.807Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests-standalone:6000.3.16f1-standalone",
@@ -42,7 +16,22 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "90c9bbe9-0909-45b2-b185-9084804b31db",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29386555287:unity-tests-standalone:2022.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29386555287",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29386555287",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder job 87281835236 is completed",
+      "createdAt": "2026-07-15T07:18:41.686Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T07:00:52.783Z"
+  "updatedAt": "2026-07-15T07:18:41.686Z"
 }
