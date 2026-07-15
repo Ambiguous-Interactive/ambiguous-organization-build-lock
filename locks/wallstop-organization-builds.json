@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/qora-redux:29386736843:unity:qora-EditMode",
-    "repository": "Ambiguous-Interactive/qora-redux",
-    "workflow": "Unity Tests",
-    "job": "unity",
-    "runId": "29386736843",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29386736843",
-    "queuedAt": "2026-07-15T04:53:00.053Z",
-    "acquiredAt": "2026-07-15T04:53:01.113Z",
-    "expiresAt": "2026-07-15T08:53:01.113Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/qora-redux:29386736843:unity:qora-EditMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "29386736843",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29386736843",
-      "queuedAt": "2026-07-15T04:53:00.053Z",
-      "acquiredAt": "2026-07-15T04:53:01.113Z",
-      "expiresAt": "2026-07-15T08:53:01.113Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29380913216:unitypackage-smoke:unitypackage-smoke-29380913216",
@@ -68,8 +42,22 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-15T04:52:42.897Z",
       "availableAt": "2026-07-15T04:58:42.897Z"
+    },
+    {
+      "reservationId": "5124d2f6-7ac8-4dfe-8c40-e853ab470784",
+      "holderId": "Ambiguous-Interactive/qora-redux:29386736843:unity:qora-EditMode",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "29386736843",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29386736843",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-07-15T04:56:20.453Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T04:53:24.595Z"
+  "updatedAt": "2026-07-15T04:56:20.454Z"
 }
