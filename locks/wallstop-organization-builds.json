@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29437535408:unity-tests:6000.3.16f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29437535408",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29437535408",
+    "queuedAt": "2026-07-15T18:10:15.981Z",
+    "acquiredAt": "2026-07-15T18:15:53.767Z",
+    "expiresAt": "2026-07-15T22:15:53.767Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29437535408:unity-tests:6000.3.16f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29437535408",
       "queuedAt": "2026-07-15T18:10:15.981Z",
+      "acquiredAt": "2026-07-15T18:15:53.767Z",
+      "expiresAt": "2026-07-15T22:15:53.767Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "70854dfa-e71f-4fc8-afae-629fca98ed84",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29437535408:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29437535408",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29437535408",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-15T18:09:39.779Z",
-      "availableAt": "2026-07-15T18:15:39.779Z"
-    },
     {
       "reservationId": "c462c9f2-ab73-45e2-bf33-48f7dd953ebc",
       "holderId": "Ambiguous-Interactive/unity-helpers:29437535408:unity-tests:2022.3.45f1-playmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-15T18:15:05.112Z"
+  "updatedAt": "2026-07-15T18:15:53.767Z"
 }
