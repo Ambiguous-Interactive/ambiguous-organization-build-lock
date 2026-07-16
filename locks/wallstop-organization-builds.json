@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity Credential Watch",
-    "job": "validate",
-    "runId": "29527838031",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29527838031",
-    "queuedAt": "2026-07-16T19:27:12.418Z",
-    "acquiredAt": "2026-07-16T19:38:46.177Z",
-    "expiresAt": "2026-07-16T23:38:46.177Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity Credential Watch",
-      "job": "validate",
-      "runId": "29527838031",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29527838031",
-      "queuedAt": "2026-07-16T19:27:12.418Z",
-      "acquiredAt": "2026-07-16T19:38:46.177Z",
-      "expiresAt": "2026-07-16T23:38:46.177Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2021.3.45f1-standalone",
@@ -57,8 +31,22 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T19:33:10.018Z",
       "availableAt": "2026-07-16T19:39:10.018Z"
+    },
+    {
+      "reservationId": "5f1f6588-670e-4b79-9464-9dcd4e852541",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity Credential Watch",
+      "job": "validate",
+      "runId": "29527838031",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29527838031",
+      "runnerId": "box-linux",
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-07-16T19:39:02.266Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:38:43.587Z"
+  "updatedAt": "2026-07-16T19:39:02.266Z"
 }
