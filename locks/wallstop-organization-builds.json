@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29463335739",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
+    "queuedAt": "2026-07-16T01:48:11.615Z",
+    "acquiredAt": "2026-07-16T01:53:45.240Z",
+    "expiresAt": "2026-07-16T05:53:45.240Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,26 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
       "queuedAt": "2026-07-16T01:48:11.615Z",
+      "acquiredAt": "2026-07-16T01:53:45.240Z",
+      "expiresAt": "2026-07-16T05:53:45.240Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "a304cf5a-e17b-400a-becf-dd1976e61acd",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29463335739",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T01:47:44.764Z",
-      "availableAt": "2026-07-16T01:53:44.764Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T01:49:28.400Z"
+  "updatedAt": "2026-07-16T01:53:45.240Z"
 }
