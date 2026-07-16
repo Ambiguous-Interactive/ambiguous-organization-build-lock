@@ -6,27 +6,31 @@ lock action. The protected writer credential remains the authorization boundary.
 ## Repository setup
 
 1. Confirm the dedicated reader GitHub App is installed with all-repository access
-   in the registered organization. The App has only Actions read and Metadata read,
-   so future organization repositories require no reader installation change.
-2. Create a `unity-license` environment with no required reviewers or wait timer.
-3. Store the writer App ID/private key and Unity credentials as environment
-   secrets on `unity-license` in this repository. Do not use repository or
-   organization secrets for these credentials: GitHub organization-secret
-   selection limits repositories, not environments. The writer App itself stays
-   installed only on `ambiguous-organization-build-lock` with Contents write.
+   in the registered organization. The App has Actions read, Metadata read, and
+   organization Self-hosted runners read, so future organization repositories
+   require no reader installation change. Each operation still mints a token with
+   only the subset it needs.
+2. Confirm the organization-level writer, reader, and Unity secrets are visible
+   to the repository. Do not add per-repository environments or approval gates.
+   The writer App itself stays installed only on
+   `ambiguous-organization-build-lock` with Contents write.
 4. Pin acquire and release actions to one reviewed immutable commit SHA.
 5. Restrict licensed pull-request jobs to same-repository heads. Reject fork and
    Dependabot pull requests before the job can enter `unity-license`.
 6. Keep Unity activation, tests/build, positive return evidence classification,
    and lock release in one job on one physical runner identity.
+7. Add a hosted `runner-preflight` job using
+   `check-unity-runner-availability`, make every licensed self-hosted job depend on
+   it, and add an always-reporting required aggregate. The aggregate must reject a
+   failed/cancelled preflight and any unexpected skipped licensed job.
 
 No environment approval is required for a trusted same-repository pull request.
 Repository write access is therefore part of the credential trust boundary: a
-writer can propose workflow code that receives the licensed environment's
-secrets. Restrict write access to trusted principals, protect workflow changes
-with CODEOWNERS/rulesets where available, and keep fork and Dependabot pull
-requests outside the licensed job. Branch protection on the default branch does
-not by itself protect secrets used by same-repository pull-request workflows.
+writer can propose workflow code that receives organization secrets. Restrict
+write access to trusted principals, protect workflow changes with
+CODEOWNERS/rulesets where available, and keep fork and Dependabot pull requests
+outside the licensed job. Branch protection on the default branch does not by
+itself protect secrets used by same-repository pull-request workflows.
 
 ## Canary
 

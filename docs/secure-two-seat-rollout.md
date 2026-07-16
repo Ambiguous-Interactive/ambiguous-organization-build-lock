@@ -35,14 +35,15 @@ organization may enroll; the protected writer credential is the actual
 authorization boundary.
 
 1. Release the schema-4-compatible authorization change at an immutable SHA.
-2. Create the reader App with Metadata read and Actions read, no Contents access,
-   and install it with all-repository access in the registered organization. This
-   read-only installation makes future organization repositories reaper-visible
-   without changing App scope. Store its key only in the lock repository.
+2. Create the reader App with Metadata read, Actions read, and organization
+   Self-hosted runners read, with no Contents access, and install it with
+   all-repository access in the registered organization. This read-only
+   installation makes future organization repositories reaper-visible and lets
+   hosted preflights fail closed on runner outages without changing App scope.
 3. Verify compatibility while the writer App still has its old installation.
 4. Restrict the writer App installation to only this lock repository, with
-   Contents write. Rotate its key and update each enrolled protected
-   `unity-license` environment.
+   Contents write. Rotate its key and update the organization writer secret
+   exposed to enrolled repositories.
 5. Prove the reader token cannot read contents and the writer token cannot
    access a consumer repository. The unit suite verifies requested token scope;
    the tracking issue must record live negative API probes.

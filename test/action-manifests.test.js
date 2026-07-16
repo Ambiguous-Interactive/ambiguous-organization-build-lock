@@ -271,6 +271,24 @@ test("reaper exposes exact confirmed reservation and incident recovery inputs", 
   assert.match(reaper, /resource-safe:[\s\S]*?default:\s*"false"/);
 });
 
+test("runner availability action requires reader App auth and fail-closed label sets", () => {
+  const manifest = readActionManifest("check-unity-runner-availability");
+  const inputs = yamlRequiredTopLevelMappingKeys(
+    manifest,
+    "inputs",
+    "check-unity-runner-availability/action.yml"
+  );
+  const outputs = yamlRequiredTopLevelMappingKeys(
+    manifest,
+    "outputs",
+    "check-unity-runner-availability/action.yml"
+  );
+
+  assert.deepEqual(inputs, ["reader-app-id", "reader-app-private-key", "owner", "required-label-sets"]);
+  assert.deepEqual(outputs, ["online-runner-count", "matched-runners"]);
+  assert.match(manifest, /main:\s+\.\.\/\.\.\/dist\/check-unity-runners\.js/);
+});
+
 test("README documents guarded acquire usage and unconditional release cleanup", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 

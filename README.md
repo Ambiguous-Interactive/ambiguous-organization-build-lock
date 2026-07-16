@@ -5,8 +5,9 @@ build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
 > [!NOTE]
 > Consumer jobs use a state-writer GitHub App restricted to this repository with
-> `contents: write`. Only the scheduled reaper has a separate reader App installed
-> on selected organization consumers with `actions: read` and `metadata: read`.
+> `contents: write`. A separate all-repository reader App has `actions: read`,
+> `metadata: read`, and organization `self-hosted runners: read`; each operation
+> requests only the permission subset it needs.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -27,6 +28,28 @@ credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
 
 See [consumer enrollment](docs/consumer-enrollment.md) for the repeatable
 repository/App/environment checklist and canary requirements.
+
+Run a hosted preflight before every self-hosted Unity job. It mints a
+short-lived token from the reader App and fails closed when runner inventory
+cannot be read or any required label set has no online runner. A busy online
+runner is considered available and may queue the licensed job.
+
+```yaml
+runner-preflight:
+  name: Unity runner preflight
+  runs-on: ubuntu-latest
+  steps:
+    - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/check-unity-runner-availability@IMMUTABLE_COMMIT_SHA
+      with:
+        reader-app-id: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
+        reader-app-private-key: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}
+        required-label-sets: '[["self-hosted","Linux","unity"]]'
+```
+
+The licensed job must depend on this preflight. An always-reporting required
+aggregate job must fail if the preflight or licensed job fails, is cancelled,
+or is unexpectedly skipped. Only explicitly modeled cases such as fork-secret
+safety or a documented no-change path may accept a skipped licensed job.
 
 Validate local secret shape first, acquire immediately before the licensed Unity
 section, guard every licensed step on the acquire output, and release with
@@ -200,22 +223,24 @@ activation-limit failures.
 
 ## Authentication
 
-Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together only in the
-protected `unity-license` environment of each enrolled organization repository.
-The writer App is installed only on this lock repository. Tokens are minted for
-only `ambiguous-organization-build-lock` with `contents: write`; caller owner
-ID/name, canonical repository ID/name, lock repository, and lock name are
-validated before any credential parsing or network access. Any repository owned
-by the registered organization can enroll without a lock-action code change;
-secret access remains the authorization boundary.
+Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together as organization
+secrets available to enrolled organization repositories. The writer App is
+installed only on this lock repository. Tokens are minted for only
+`ambiguous-organization-build-lock` with `contents: write`; caller owner ID/name,
+canonical repository ID/name, lock repository, and lock name are validated
+before any credential parsing or network access. Any repository owned by the
+registered organization can enroll without a lock-action code change; App-key
+possession and organization-secret repository access remain the authorization
+boundary.
 
 The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
 `BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App with all-repository
 access in the registered organization so newly created organization repositories
-are reaper-visible without an App installation change. The reader has only
-Actions read and Metadata read; it has no Contents permission. Each installation
-token minted by the reaper is explicitly restricted to `actions: read` and
-`metadata: read` within the App's configured permission ceiling. Acquire and
+are reaper-visible without an App installation change. The reader has Actions
+read, Metadata read, and organization Self-hosted runners read; it has no
+Contents permission. Each use mints a token restricted to the operation: the
+reaper requests only `actions: read` and `metadata: read`, while hosted runner
+preflights request only organization self-hosted-runner inventory. Acquire and
 release never read cross-repository Actions state; an unreaped holder remains
 authoritative and admission fails closed.
 
