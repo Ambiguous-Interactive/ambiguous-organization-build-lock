@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "29481256977",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29481256977",
-    "queuedAt": "2026-07-16T09:03:19.621Z",
-    "acquiredAt": "2026-07-16T09:09:04.642Z",
-    "expiresAt": "2026-07-16T13:09:04.642Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29481256977",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29481256977",
-      "queuedAt": "2026-07-16T09:03:19.621Z",
-      "acquiredAt": "2026-07-16T09:09:04.642Z",
-      "expiresAt": "2026-07-16T13:09:04.642Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unitypackage-smoke:unitypackage-smoke-29479589221",
@@ -57,8 +31,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T09:10:19.519Z",
       "availableAt": "2026-07-16T09:16:19.519Z"
+    },
+    {
+      "reservationId": "39c98a58-b915-4856-b8ba-ee99414a0d3e",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29481256977",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29481256977",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T09:15:24.649Z",
+      "availableAt": "2026-07-16T09:21:24.649Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T09:11:07.874Z"
+  "updatedAt": "2026-07-16T09:15:24.650Z"
 }
