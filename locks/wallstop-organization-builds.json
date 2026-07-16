@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29461649247:unity-build:unity-ci-compile",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity CI Validation",
-    "job": "unity-build",
-    "runId": "29461649247",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29461649247",
-    "queuedAt": "2026-07-16T01:08:36.603Z",
-    "acquiredAt": "2026-07-16T01:15:51.046Z",
-    "expiresAt": "2026-07-16T05:15:51.046Z",
-    "runnerId": "GitHub Actions 1000106428"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29461649247:unity-build:unity-ci-compile",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-build",
-      "runId": "29461649247",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29461649247",
-      "queuedAt": "2026-07-16T01:08:36.603Z",
-      "acquiredAt": "2026-07-16T01:15:51.046Z",
-      "expiresAt": "2026-07-16T05:15:51.046Z",
-      "runnerId": "GitHub Actions 1000106428"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:6000.3.16f1-standalone",
@@ -68,8 +42,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T01:27:59.069Z",
       "availableAt": "2026-07-16T01:33:59.069Z"
+    },
+    {
+      "reservationId": "c8aead21-0e39-4023-a723-cfdacb4f2697",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29461649247:unity-build:unity-ci-compile",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-build",
+      "runId": "29461649247",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29461649247",
+      "runnerId": "GitHub Actions 1000106428",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T01:33:14.707Z",
+      "availableAt": "2026-07-16T01:39:14.707Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T01:28:29.208Z"
+  "updatedAt": "2026-07-16T01:33:14.707Z"
 }
