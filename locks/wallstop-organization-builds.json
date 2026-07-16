@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29530827919:unity-tests:unity-ci-PlayMode",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity CI Validation",
-    "job": "unity-tests",
-    "runId": "29530827919",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29530827919",
-    "queuedAt": "2026-07-16T20:45:33.980Z",
-    "acquiredAt": "2026-07-16T20:50:22.118Z",
-    "expiresAt": "2026-07-17T00:50:22.118Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29530827919:unity-tests:unity-ci-PlayMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29530827919",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29530827919",
-      "queuedAt": "2026-07-16T20:45:33.980Z",
-      "acquiredAt": "2026-07-16T20:50:22.118Z",
-      "expiresAt": "2026-07-17T00:50:22.118Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29533557041:unity:qora-PlayMode",
@@ -68,8 +42,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T20:48:48.484Z",
       "availableAt": "2026-07-16T20:54:48.484Z"
+    },
+    {
+      "reservationId": "ad14f172-f335-497a-a51b-606c49f55791",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29530827919:unity-tests:unity-ci-PlayMode",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "29530827919",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29530827919",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T20:52:40.177Z",
+      "availableAt": "2026-07-16T20:58:40.177Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T20:50:29.320Z"
+  "updatedAt": "2026-07-16T20:52:40.177Z"
 }
