@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unitypackage-smoke:unitypackage-smoke-29474122159",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "29474122159",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
-    "queuedAt": "2026-07-16T07:01:15.565Z",
-    "acquiredAt": "2026-07-16T07:06:45.589Z",
-    "expiresAt": "2026-07-16T11:06:45.589Z",
-    "runnerId": "GitHub Actions 1000107409"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unitypackage-smoke:unitypackage-smoke-29474122159",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29474122159",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
-      "queuedAt": "2026-07-16T07:01:15.565Z",
-      "acquiredAt": "2026-07-16T07:06:45.589Z",
-      "expiresAt": "2026-07-16T11:06:45.589Z",
-      "runnerId": "GitHub Actions 1000107409"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29477131617:build-webgl:build-webgl",
@@ -57,8 +31,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T07:06:35.788Z",
       "availableAt": "2026-07-16T07:12:35.788Z"
+    },
+    {
+      "reservationId": "355af84d-eb4f-4c1a-96f5-53a7931f7e9b",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unitypackage-smoke:unitypackage-smoke-29474122159",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "29474122159",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
+      "runnerId": "GitHub Actions 1000107409",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T07:08:46.385Z",
+      "availableAt": "2026-07-16T07:14:46.385Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T07:08:07.661Z"
+  "updatedAt": "2026-07-16T07:08:46.386Z"
 }
