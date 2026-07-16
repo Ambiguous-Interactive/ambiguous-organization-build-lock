@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-build:unity-ci-compile",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity CI Validation",
-    "job": "unity-build",
-    "runId": "29522991370",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29525459898:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29525459898",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-    "queuedAt": "2026-07-16T18:53:40.427Z",
-    "acquiredAt": "2026-07-16T19:03:38.262Z",
-    "expiresAt": "2026-07-16T23:03:38.262Z",
-    "runnerId": "GitHub Actions 1000108461"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29525459898",
+    "queuedAt": "2026-07-16T19:02:51.590Z",
+    "acquiredAt": "2026-07-16T19:22:14.809Z",
+    "expiresAt": "2026-07-16T23:22:14.809Z",
+    "runnerId": "box-linux"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-build:unity-ci-compile",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-build",
-      "runId": "29522991370",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-      "queuedAt": "2026-07-16T18:53:40.427Z",
-      "acquiredAt": "2026-07-16T19:03:38.262Z",
-      "expiresAt": "2026-07-16T23:03:38.262Z",
-      "runnerId": "GitHub Actions 1000108461"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29525459898:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -66,7 +53,23 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "a9f9ec6a-c2b1-49dd-b82c-69d4fe89c5c6",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-build:unity-ci-compile",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-build",
+      "runId": "29522991370",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
+      "runnerId": "GitHub Actions 1000108461",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T19:25:16.272Z",
+      "availableAt": "2026-07-16T19:31:16.272Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:22:14.809Z"
+  "updatedAt": "2026-07-16T19:25:16.273Z"
 }
