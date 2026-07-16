@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29479906093:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29479906093",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29479906093",
+    "queuedAt": "2026-07-16T07:28:39.492Z",
+    "acquiredAt": "2026-07-16T07:43:25.740Z",
+    "expiresAt": "2026-07-16T11:43:25.740Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29479906093:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29479906093",
       "queuedAt": "2026-07-16T07:28:39.492Z",
+      "acquiredAt": "2026-07-16T07:43:25.740Z",
+      "expiresAt": "2026-07-16T11:43:25.740Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -56,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T07:43:21.772Z"
+  "updatedAt": "2026-07-16T07:43:25.741Z"
 }
