@@ -104,7 +104,7 @@ test("accessible runner-group pagination fails closed on malformed responses", a
   const paths = [];
   const groups = await readAllRunnerGroups(
     "Ambiguous-Interactive",
-    "Ambiguous-Interactive/unity-helpers",
+    "unity-helpers",
     async (path) => {
       paths.push(path);
       return pages.shift();
@@ -113,8 +113,8 @@ test("accessible runner-group pagination fails closed on malformed responses", a
 
   assert.equal(groups.length, 101);
   assert.deepEqual(paths, [
-    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=1",
-    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=2"
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=unity-helpers&per_page=100&page=1",
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=unity-helpers&per_page=100&page=2"
   ]);
 
   for (const response of [
@@ -127,7 +127,7 @@ test("accessible runner-group pagination fails closed on malformed responses", a
       () =>
         readAllRunnerGroups(
           "Ambiguous-Interactive",
-          "Ambiguous-Interactive/unity-helpers",
+          "unity-helpers",
           async () => response
         ),
       /runner-group inventory/i
@@ -138,7 +138,7 @@ test("accessible runner-group pagination fails closed on malformed responses", a
     () =>
       readAllRunnerGroups(
         "Ambiguous-Interactive",
-        "Ambiguous-Interactive/unity-helpers",
+        "unity-helpers",
         async () => ({
           total_count: 101,
           runner_groups: Array.from({ length: 100 }, (_, id) => ({ id }))
@@ -153,7 +153,7 @@ test("only runners in repository-visible groups are returned", async () => {
   const paths = [];
   const runners = await readAccessibleOrganizationRunners(
     "Ambiguous-Interactive",
-    "Ambiguous-Interactive/unity-helpers",
+    "unity-helpers",
     async (path) => {
       paths.push(path);
       if (path.includes("runner-groups?")) {
@@ -171,7 +171,7 @@ test("only runners in repository-visible groups are returned", async () => {
 
   assert.deepEqual(runners.map((runner) => runner.id), [7]);
   assert.deepEqual(paths, [
-    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=1",
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=unity-helpers&per_page=100&page=1",
     "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners?per_page=100&page=1"
   ]);
 
@@ -179,7 +179,7 @@ test("only runners in repository-visible groups are returned", async () => {
     () =>
       readAccessibleOrganizationRunners(
         "Ambiguous-Interactive",
-        "Ambiguous-Interactive/unity-helpers",
+        "unity-helpers",
         async (path) =>
           path.includes("runner-groups?")
             ? { total_count: 0, runner_groups: [] }
@@ -224,7 +224,7 @@ test("runtime requests only organization runner read permission and rejects an e
     }
     if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
       assert.equal(options.headers.Authorization, "Bearer short-lived-reader-token");
-      assert.equal(parsed.searchParams.get("visible_to_repository"), "Ambiguous-Interactive/unity-helpers");
+      assert.equal(parsed.searchParams.get("visible_to_repository"), "unity-helpers");
       return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
     }
     if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {

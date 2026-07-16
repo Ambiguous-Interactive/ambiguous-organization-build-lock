@@ -210,6 +210,7 @@ async function execute() {
     throw new Error(`owner is not authorized; expected ${AUTHORIZED_OWNER}.`);
   }
   const repository = parseRepository(process.env.GITHUB_REPOSITORY, owner);
+  const repositoryName = repository.slice(owner.length + 1);
   const requiredLabelSets = parseRequiredLabelSets(requiredInput("required-label-sets"));
   const appId = requiredInput("reader-app-id");
   if (!/^[1-9][0-9]*$/.test(appId)) {
@@ -223,7 +224,7 @@ async function execute() {
     owner,
     permissions: { organization_self_hosted_runners: "read" }
   });
-  const runners = await readAccessibleOrganizationRunners(owner, repository, (path) =>
+  const runners = await readAccessibleOrganizationRunners(owner, repositoryName, (path) =>
     api("GET", path, undefined, auth)
   );
   const onlineRunnerCount = runners.filter((runner) => runner && runner.status === "online").length;
