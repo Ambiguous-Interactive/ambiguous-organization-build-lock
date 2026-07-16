@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.3.16f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29521658913",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29521658913",
+    "queuedAt": "2026-07-16T19:07:35.477Z",
+    "acquiredAt": "2026-07-16T19:31:17.497Z",
+    "expiresAt": "2026-07-16T23:31:17.497Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.3.16f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29521658913",
       "queuedAt": "2026-07-16T19:07:35.477Z",
+      "acquiredAt": "2026-07-16T19:31:17.497Z",
+      "expiresAt": "2026-07-16T23:31:17.497Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -40,21 +55,6 @@
   ],
   "reservations": [
     {
-      "reservationId": "a9f9ec6a-c2b1-49dd-b82c-69d4fe89c5c6",
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-build:unity-ci-compile",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-build",
-      "runId": "29522991370",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-      "runnerId": "GitHub Actions 1000108461",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T19:25:16.272Z",
-      "availableAt": "2026-07-16T19:31:16.272Z"
-    },
-    {
       "reservationId": "cc6e02ec-ac05-49c9-ac45-836d7c453341",
       "holderId": "Ambiguous-Interactive/DoxReloaded:29525459898:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -71,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:27:13.616Z"
+  "updatedAt": "2026-07-16T19:31:17.497Z"
 }
