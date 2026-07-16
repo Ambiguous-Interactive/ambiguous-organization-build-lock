@@ -27,19 +27,6 @@
       "acquiredAt": "2026-07-16T18:41:02.557Z",
       "expiresAt": "2026-07-16T22:41:02.557Z",
       "runnerId": "DAD-MACHINE"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-tests:unity-ci-PlayMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29522991370",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-      "queuedAt": "2026-07-16T18:37:07.417Z",
-      "acquiredAt": "2026-07-16T18:45:23.717Z",
-      "expiresAt": "2026-07-16T22:45:23.717Z",
-      "runnerId": "box-linux"
     }
   ],
   "queue": [
@@ -55,7 +42,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "c38b3243-050d-499b-a241-808e93ba89e9",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-tests:unity-ci-PlayMode",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "29522991370",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T18:47:40.975Z",
+      "availableAt": "2026-07-16T18:53:40.975Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T18:45:23.717Z"
+  "updatedAt": "2026-07-16T18:47:40.976Z"
 }
