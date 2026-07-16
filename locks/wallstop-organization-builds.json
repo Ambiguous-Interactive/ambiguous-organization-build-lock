@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-tests:unity-ci-EditMode",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "29533518317",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29533518317",
+    "queuedAt": "2026-07-16T21:27:08.095Z",
+    "acquiredAt": "2026-07-16T21:38:07.663Z",
+    "expiresAt": "2026-07-17T01:38:07.663Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-tests:unity-ci-EditMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29533518317",
       "queuedAt": "2026-07-16T21:27:08.095Z",
+      "acquiredAt": "2026-07-16T21:38:07.663Z",
+      "expiresAt": "2026-07-17T01:38:07.663Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29531009081:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -28,21 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "fccd7e65-7a92-4f60-be98-8eb3fe6b44ca",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29533514083:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29533514083",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29533514083",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T21:32:06.429Z",
-      "availableAt": "2026-07-16T21:38:06.429Z"
-    },
     {
       "reservationId": "2fad1ff5-a04a-4b22-ad7f-cf3d0181d801",
       "holderId": "Ambiguous-Interactive/unity-helpers:29533558548:unity-tests:2021.3.45f1-editmode",
@@ -60,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T21:37:38.719Z"
+  "updatedAt": "2026-07-16T21:38:07.663Z"
 }
