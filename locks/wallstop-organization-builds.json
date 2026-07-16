@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unity-tests-standalone:2022.3.45f1-standalone",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests-standalone",
-    "runId": "29479589221",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
-    "queuedAt": "2026-07-16T08:17:52.229Z",
-    "acquiredAt": "2026-07-16T08:25:03.872Z",
-    "expiresAt": "2026-07-16T12:25:03.872Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unity-tests-standalone:2022.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29479589221",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
-      "queuedAt": "2026-07-16T08:17:52.229Z",
-      "acquiredAt": "2026-07-16T08:25:03.872Z",
-      "expiresAt": "2026-07-16T12:25:03.872Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:build-webgl:build-webgl",
@@ -68,8 +42,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T08:27:14.883Z",
       "availableAt": "2026-07-16T08:33:14.883Z"
+    },
+    {
+      "reservationId": "c4c3cc26-e7f3-481c-b6ef-41df49564dca",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unity-tests-standalone:2022.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29479589221",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T08:32:17.937Z",
+      "availableAt": "2026-07-16T08:38:17.937Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T08:28:27.044Z"
+  "updatedAt": "2026-07-16T08:32:17.937Z"
 }
