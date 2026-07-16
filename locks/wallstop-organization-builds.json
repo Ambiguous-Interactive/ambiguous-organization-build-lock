@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:29527955061:unity-compile-check:unity-ci-compile-check",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-compile-check",
+    "runId": "29527955061",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29527955061",
+    "queuedAt": "2026-07-16T19:41:18.658Z",
+    "acquiredAt": "2026-07-16T19:51:10.145Z",
+    "expiresAt": "2026-07-16T23:51:10.145Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29527955061:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29527955061",
       "queuedAt": "2026-07-16T19:41:18.658Z",
+      "acquiredAt": "2026-07-16T19:51:10.145Z",
+      "expiresAt": "2026-07-16T23:51:10.145Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29528543763:unity:qora-EditMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -28,21 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "9153e3ab-171d-4b6d-9f40-0b17ebda65ed",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29528797699:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29528797699",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29528797699",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T19:45:09.589Z",
-      "availableAt": "2026-07-16T19:51:09.589Z"
-    },
     {
       "reservationId": "645fa267-6662-43f6-8e1f-3ad0211412be",
       "holderId": "Ambiguous-Interactive/qora-redux:29528543763:unity:qora-PlayMode",
@@ -60,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:51:07.267Z"
+  "updatedAt": "2026-07-16T19:51:10.145Z"
 }
