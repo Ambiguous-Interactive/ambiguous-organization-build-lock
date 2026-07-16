@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29525109940",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29525109940",
+    "queuedAt": "2026-07-16T19:38:42.259Z",
+    "acquiredAt": "2026-07-16T19:39:21.207Z",
+    "expiresAt": "2026-07-16T23:39:21.207Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29525109940",
       "queuedAt": "2026-07-16T19:38:42.259Z",
+      "acquiredAt": "2026-07-16T19:39:21.207Z",
+      "expiresAt": "2026-07-16T23:39:21.207Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "a29add24-72a2-49f7-9735-53c77bdbd7c5",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29521658913",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29521658913",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T19:33:10.018Z",
-      "availableAt": "2026-07-16T19:39:10.018Z"
-    },
     {
       "reservationId": "5f1f6588-670e-4b79-9464-9dcd4e852541",
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
@@ -48,5 +47,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:39:02.266Z"
+  "updatedAt": "2026-07-16T19:39:21.208Z"
 }
