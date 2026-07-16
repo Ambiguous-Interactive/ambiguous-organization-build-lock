@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:2022.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29457982141",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29457982141",
+    "queuedAt": "2026-07-16T00:18:42.917Z",
+    "acquiredAt": "2026-07-16T00:31:19.964Z",
+    "expiresAt": "2026-07-16T04:31:19.964Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:2022.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29457982141",
       "queuedAt": "2026-07-16T00:18:42.917Z",
+      "acquiredAt": "2026-07-16T00:31:19.964Z",
+      "expiresAt": "2026-07-16T04:31:19.964Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29458003885:perf-benchmarks:perf-6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -28,21 +43,6 @@
     }
   ],
   "reservations": [
-    {
-      "reservationId": "870b479d-b327-4f9e-b824-4475b67a2539",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:2022.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29458003753",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003753",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T00:25:17.899Z",
-      "availableAt": "2026-07-16T00:31:17.899Z"
-    },
     {
       "reservationId": "f9b6091f-efa3-4e9f-960f-64b554ab7fad",
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29458564916:unity-build:unity-ci-compile",
@@ -60,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T00:30:00.596Z"
+  "updatedAt": "2026-07-16T00:31:19.964Z"
 }
