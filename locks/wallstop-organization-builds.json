@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29493584708:unity-tests:2022.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29493584708",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29493584708",
+    "queuedAt": "2026-07-16T11:47:10.925Z",
+    "acquiredAt": "2026-07-16T11:49:46.651Z",
+    "expiresAt": "2026-07-16T15:49:46.651Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29493584708:unity-tests:2022.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29493584708",
       "queuedAt": "2026-07-16T11:47:10.925Z",
+      "acquiredAt": "2026-07-16T11:49:46.651Z",
+      "expiresAt": "2026-07-16T15:49:46.651Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "0f6b750d-1c4b-4435-b6e0-5659487ef2a4",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29491677682:unity-tests:6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29491677682",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29491677682",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T11:43:32.101Z",
-      "availableAt": "2026-07-16T11:49:32.101Z"
-    },
     {
       "reservationId": "ee46ecb7-aa93-4261-965d-10f12652d8ba",
       "holderId": "Ambiguous-Interactive/DxMessaging:29493584708:unity-tests:2022.3.45f1-playmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T11:47:12.527Z"
+  "updatedAt": "2026-07-16T11:49:46.651Z"
 }
