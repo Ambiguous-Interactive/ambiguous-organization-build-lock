@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29463335739",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
+    "queuedAt": "2026-07-16T01:40:46.194Z",
+    "acquiredAt": "2026-07-16T01:46:18.527Z",
+    "expiresAt": "2026-07-16T05:46:18.527Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
       "queuedAt": "2026-07-16T01:40:46.194Z",
+      "acquiredAt": "2026-07-16T01:46:18.527Z",
+      "expiresAt": "2026-07-16T05:46:18.527Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "a0f0ecf9-8a76-4f82-bd68-24d93b1e5d6a",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29463335739:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29463335739",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29463335739",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T01:40:07.395Z",
-      "availableAt": "2026-07-16T01:46:07.395Z"
-    },
     {
       "reservationId": "80f3f176-b1b8-4624-a0e2-762ae22f1319",
       "holderId": "Ambiguous-Interactive/DxMessaging:29458003753:unity-tests:6000.3.16f1-standalone",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T01:43:26.027Z"
+  "updatedAt": "2026-07-16T01:46:18.527Z"
 }
