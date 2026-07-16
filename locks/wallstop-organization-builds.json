@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-tests:unity-ci-PlayMode",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity CI Validation",
-    "job": "unity-tests",
-    "runId": "29533518317",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29533518317",
-    "queuedAt": "2026-07-16T22:03:33.229Z",
-    "acquiredAt": "2026-07-16T22:14:25.030Z",
-    "expiresAt": "2026-07-17T02:14:25.030Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-tests:unity-ci-PlayMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29533518317",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29533518317",
-      "queuedAt": "2026-07-16T22:03:33.229Z",
-      "acquiredAt": "2026-07-16T22:14:25.030Z",
-      "expiresAt": "2026-07-17T02:14:25.030Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29537573165:unity-compile-check:unity-ci-compile-check",
@@ -68,8 +42,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-16T22:10:51.484Z",
       "availableAt": "2026-07-16T22:16:51.484Z"
+    },
+    {
+      "reservationId": "ef03c450-0e45-4ef6-bab2-52eff9ebb99a",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-tests:unity-ci-PlayMode",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "29533518317",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29533518317",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T22:16:42.815Z",
+      "availableAt": "2026-07-16T22:22:42.815Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T22:14:25.030Z"
+  "updatedAt": "2026-07-16T22:16:42.816Z"
 }
