@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29533558548:unity-tests:6000.5.2f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29533558548",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29533558548",
+    "queuedAt": "2026-07-16T22:19:09.572Z",
+    "acquiredAt": "2026-07-16T22:33:42.116Z",
+    "expiresAt": "2026-07-17T02:33:42.116Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29533558548:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29533558548",
       "queuedAt": "2026-07-16T22:19:09.572Z",
+      "acquiredAt": "2026-07-16T22:33:42.116Z",
+      "expiresAt": "2026-07-17T02:33:42.116Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29533518317:unity-build:unity-ci-compile",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -56,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T22:33:35.289Z"
+  "updatedAt": "2026-07-16T22:33:42.116Z"
 }
