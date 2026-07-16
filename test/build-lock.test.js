@@ -51,6 +51,16 @@ function jsonResponse(status, body = {}, headers = {}) {
   });
 }
 
+function htmlResponse(status, body, headers = {}) {
+  return new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      ...headers
+    }
+  });
+}
+
 const actionEnvNames = [
   "GITHUB_REPOSITORY",
   "GITHUB_REPOSITORY_ID",
@@ -1637,6 +1647,41 @@ test("api treats rate-limited 403 responses as retryable but not ordinary forbid
   assert.equal(isRetryableResponse(jsonResponse(403, { message: "Resource not accessible by integration" }), {
     message: "Resource not accessible by integration"
   }), false);
+});
+
+test("api retries GitHub's transient HTML bad-request interstitial", async () => {
+  const interstitial =
+    "<html><head><title>Bad request &middot; GitHub</title></head>" +
+    "<body><h1>Whoa there!</h1><p>You have sent an invalid request.</p></body></html>";
+  const response = htmlResponse(400, interstitial, {
+    "x-github-request-id": "TRANSIENT400"
+  });
+
+  assert.equal(isRetryableResponse(response, { message: interstitial }), true);
+  assert.equal(
+    isRetryableResponse(jsonResponse(400, { message: "Invalid request parameters" }), {
+      message: "Invalid request parameters"
+    }),
+    false
+  );
+
+  let calls = 0;
+  await withMockedFetch(async () => {
+    calls++;
+    return calls === 1
+      ? htmlResponse(400, interstitial, { "x-github-request-id": "TRANSIENT400" })
+      : jsonResponse(200, { ok: true });
+  }, async () => {
+    const result = await api("GET", "/repos/o/r/contents/locks/x.json", undefined, "token", {
+      maxAttempts: 2,
+      baseDelayMs: 0,
+      maxDelayMs: 0,
+      sleep: async () => {}
+    });
+    assert.deepEqual(result, { ok: true });
+  });
+
+  assert.equal(calls, 2);
 });
 
 test("writeState marks CAS conflicts after a retryable mutation failure as ambiguous", async () => {

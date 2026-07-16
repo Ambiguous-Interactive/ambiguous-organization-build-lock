@@ -589,6 +589,21 @@ function isRateLimitResponse(response, data) {
   );
 }
 
+function isTransientGitHubBadRequest(response, data) {
+  if (response.status !== 400) {
+    return false;
+  }
+  const contentType = String(header(response, "content-type") || "").toLowerCase();
+  const message = String((data && data.message) || "").toLowerCase();
+  return (
+    contentType.includes("text/html") &&
+    message.includes("<title>bad request") &&
+    message.includes("github") &&
+    message.includes("whoa there!") &&
+    message.includes("invalid request")
+  );
+}
+
 function isRetryableResponse(response, data) {
   if (response.status === 408 || response.status === 429 || response.status >= 500) {
     return true;
@@ -597,6 +612,13 @@ function isRetryableResponse(response, data) {
   // lag); GitHub's guidance is to retry after a short delay. A 401 is rejected before the
   // request is processed, so retrying is also safe for mutations and cannot double-write.
   if (response.status === 401) {
+    return true;
+  }
+  // GitHub occasionally serves a branded HTML interstitial with HTTP 400 for an
+  // otherwise valid API request. It is generated before the API operation is
+  // processed and has been observed to clear on retry. Match the complete,
+  // distinctive interstitial instead of retrying ordinary JSON 400 responses.
+  if (isTransientGitHubBadRequest(response, data)) {
     return true;
   }
   return response.status === 403 && isRateLimitResponse(response, data);
