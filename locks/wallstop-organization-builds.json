@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unitypackage-smoke:unitypackage-smoke-29479589221",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unitypackage-smoke",
+    "runId": "29479589221",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
+    "queuedAt": "2026-07-16T09:11:06.663Z",
+    "acquiredAt": "2026-07-16T09:16:30.367Z",
+    "expiresAt": "2026-07-16T13:16:30.367Z",
+    "runnerId": "GitHub Actions 1000107593"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unitypackage-smoke:unitypackage-smoke-29479589221",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
       "queuedAt": "2026-07-16T09:11:06.663Z",
+      "acquiredAt": "2026-07-16T09:16:30.367Z",
+      "expiresAt": "2026-07-16T13:16:30.367Z",
       "runnerId": "GitHub Actions 1000107593"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "87caad90-bf5a-4433-b1c4-77136ac2d20b",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "29479589221",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29479589221",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T09:10:19.519Z",
-      "availableAt": "2026-07-16T09:16:19.519Z"
-    },
     {
       "reservationId": "39c98a58-b915-4856-b8ba-ee99414a0d3e",
       "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:platform-build-windows:platform-build-windows",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T09:15:24.650Z"
+  "updatedAt": "2026-07-16T09:16:30.367Z"
 }
