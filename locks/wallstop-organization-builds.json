@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29525109940",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29525109940",
+    "queuedAt": "2026-07-16T19:53:16.335Z",
+    "acquiredAt": "2026-07-16T20:04:53.154Z",
+    "expiresAt": "2026-07-17T00:04:53.154Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29525109940:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29525109940",
       "queuedAt": "2026-07-16T19:53:16.335Z",
+      "acquiredAt": "2026-07-16T20:04:53.154Z",
+      "expiresAt": "2026-07-17T00:04:53.154Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29529885195:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -56,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T20:05:01.795Z"
+  "updatedAt": "2026-07-16T20:04:53.155Z"
 }
