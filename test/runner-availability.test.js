@@ -97,6 +97,16 @@ test("organization runner inventory pagination fails closed on malformed respons
       /runner inventory/i
     );
   }
+
+  await assert.rejects(
+    () =>
+      readAllOrganizationRunners(
+        "Ambiguous-Interactive",
+        async () => ({ total_count: 101, runners: Array.from({ length: 100 }, (_, id) => ({ id })) }),
+        1
+      ),
+    /pagination exceeded/i
+  );
 });
 
 test("runtime requests only organization runner read permission and rejects an empty match", async (t) => {

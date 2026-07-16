@@ -5,6 +5,7 @@ const fs = require("fs");
 const { api, createGitHubAppAuth } = require("./build-lock.js");
 
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
+const MAX_RUNNER_INVENTORY_PAGES = 10;
 
 function input(name) {
   return String(process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "").trim();
@@ -82,7 +83,7 @@ function validateRunnerInventoryPage(page) {
   }
 }
 
-async function readAllOrganizationRunners(owner, getPage) {
+async function readAllOrganizationRunners(owner, getPage, maxPages = MAX_RUNNER_INVENTORY_PAGES) {
   const runners = [];
   let pageNumber = 1;
   let expectedTotal = null;
@@ -99,6 +100,9 @@ async function readAllOrganizationRunners(owner, getPage) {
     }
     if (page.runners.length === 0) {
       throw new Error("GitHub runner inventory pagination ended before total_count was satisfied.");
+    }
+    if (pageNumber >= maxPages) {
+      throw new Error(`GitHub runner inventory pagination exceeded the ${maxPages}-page safety limit.`);
     }
     pageNumber += 1;
   }
