@@ -1,25 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29486845603:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29486845603",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29486845603",
+    "queuedAt": "2026-07-16T09:23:08.769Z",
+    "acquiredAt": "2026-07-16T09:23:10.078Z",
+    "expiresAt": "2026-07-16T13:23:10.078Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "39c98a58-b915-4856-b8ba-ee99414a0d3e",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29481256977:platform-build-windows:platform-build-windows",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29486845603:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29481256977",
+      "job": "unity-tests",
+      "runId": "29486845603",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29481256977",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T09:15:24.649Z",
-      "availableAt": "2026-07-16T09:21:24.649Z"
-    },
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29486845603",
+      "queuedAt": "2026-07-16T09:23:08.769Z",
+      "acquiredAt": "2026-07-16T09:23:10.078Z",
+      "expiresAt": "2026-07-16T13:23:10.078Z",
+      "runnerId": "box-linux"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "e242ee0b-458c-4ddb-80ce-2e018bd91fe2",
       "holderId": "Ambiguous-Interactive/unity-helpers:29479589221:unitypackage-smoke:unitypackage-smoke-29479589221",
@@ -37,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T09:18:40.583Z"
+  "updatedAt": "2026-07-16T09:23:10.078Z"
 }
