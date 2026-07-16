@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29477131617:build-webgl:build-webgl",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "build-webgl",
+    "runId": "29477131617",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29477131617",
+    "queuedAt": "2026-07-16T07:08:06.366Z",
+    "acquiredAt": "2026-07-16T07:12:37.461Z",
+    "expiresAt": "2026-07-16T11:12:37.461Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29477131617:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29477131617",
       "queuedAt": "2026-07-16T07:08:06.366Z",
+      "acquiredAt": "2026-07-16T07:12:37.461Z",
+      "expiresAt": "2026-07-16T11:12:37.461Z",
       "runnerId": "box-linux"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "70efc801-5e8b-4b7c-8036-9a0ba9bc748f",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29477131617:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29477131617",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29477131617",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T07:06:35.788Z",
-      "availableAt": "2026-07-16T07:12:35.788Z"
-    },
     {
       "reservationId": "355af84d-eb4f-4c1a-96f5-53a7931f7e9b",
       "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unitypackage-smoke:unitypackage-smoke-29474122159",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T07:08:46.386Z"
+  "updatedAt": "2026-07-16T07:12:37.461Z"
 }
