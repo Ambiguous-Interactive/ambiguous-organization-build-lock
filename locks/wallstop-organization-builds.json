@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29530827919:unity-tests:unity-ci-PlayMode",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "29530827919",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29530827919",
+    "queuedAt": "2026-07-16T20:45:33.980Z",
+    "acquiredAt": "2026-07-16T20:50:22.118Z",
+    "expiresAt": "2026-07-17T00:50:22.118Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29530827919:unity-tests:unity-ci-PlayMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29530827919",
       "queuedAt": "2026-07-16T20:45:33.980Z",
+      "acquiredAt": "2026-07-16T20:50:22.118Z",
+      "expiresAt": "2026-07-17T00:50:22.118Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29533557041:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -45,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T20:50:14.872Z"
+  "updatedAt": "2026-07-16T20:50:22.118Z"
 }
