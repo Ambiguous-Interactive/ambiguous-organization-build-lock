@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:2021.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29474122159",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
+    "queuedAt": "2026-07-16T05:48:47.016Z",
+    "acquiredAt": "2026-07-16T05:54:27.324Z",
+    "expiresAt": "2026-07-16T09:54:27.324Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
       "queuedAt": "2026-07-16T05:48:47.016Z",
+      "acquiredAt": "2026-07-16T05:54:27.324Z",
+      "expiresAt": "2026-07-16T09:54:27.324Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "b3b81042-715d-4958-accb-bdbe2917fc2a",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:6000.3.16f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29474122159",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T05:48:12.400Z",
-      "availableAt": "2026-07-16T05:54:12.400Z"
-    },
     {
       "reservationId": "2339b150-1d61-4e0e-94ab-0b4d1f2a73cc",
       "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:6000.5.2f1-editmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T05:54:02.212Z"
+  "updatedAt": "2026-07-16T05:54:27.324Z"
 }
