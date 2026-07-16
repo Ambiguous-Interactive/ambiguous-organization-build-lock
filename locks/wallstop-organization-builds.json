@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
+    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+    "workflow": "Unity Credential Watch",
+    "job": "validate",
+    "runId": "29527838031",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29527838031",
+    "queuedAt": "2026-07-16T19:27:12.418Z",
+    "acquiredAt": "2026-07-16T19:38:46.177Z",
+    "expiresAt": "2026-07-16T23:38:46.177Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29527838031:validate:credential-watch",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29527838031",
       "queuedAt": "2026-07-16T19:27:12.418Z",
+      "acquiredAt": "2026-07-16T19:38:46.177Z",
+      "expiresAt": "2026-07-16T23:38:46.177Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.5.2f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -56,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T19:38:43.466Z"
+  "updatedAt": "2026-07-16T19:38:46.178Z"
 }
