@@ -20,9 +20,12 @@ lock action. The protected writer credential remains the authorization boundary.
 6. Keep Unity activation, tests/build, positive return evidence classification,
    and lock release in one job on one physical runner identity.
 7. Add a hosted `runner-preflight` job using
-   `check-unity-runner-availability`, make every licensed self-hosted job depend on
-   it, and add an always-reporting required aggregate. The aggregate must reject a
-   failed/cancelled preflight and any unexpected skipped licensed job.
+   `check-unity-runner-availability`. The action filters runner groups by the
+   calling repository before checking online runners, so an online runner that
+   the repository cannot use does not pass the preflight. Make every licensed
+   self-hosted job depend on it, and add an always-reporting required aggregate.
+   The aggregate must reject a failed/cancelled preflight and any unexpected
+   skipped licensed job.
 
 No environment approval is required for a trusted same-repository pull request.
 Repository write access is therefore part of the credential trust boundary: a

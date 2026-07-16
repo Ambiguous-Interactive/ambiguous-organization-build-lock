@@ -9,7 +9,9 @@ const {
   execute,
   matchingOnlineRunners,
   parseRequiredLabelSets,
-  readAllOrganizationRunners
+  parseRepository,
+  readAccessibleOrganizationRunners,
+  readAllRunnerGroups
 } = require("../.github/dist/check-unity-runners.js");
 
 const testKey = crypto
@@ -74,38 +76,116 @@ test("runner matching requires every label and an online status", () => {
   assert.deepEqual(matchingOnlineRunners(runners, ["self-hosted", "linux", "unity"]), []);
 });
 
-test("organization runner inventory pagination fails closed on malformed responses", async () => {
+test("calling repository identity is canonical and organization-owned", () => {
+  assert.equal(
+    parseRepository("Ambiguous-Interactive/unity-helpers", "Ambiguous-Interactive"),
+    "Ambiguous-Interactive/unity-helpers"
+  );
+  for (const invalid of [
+    "",
+    "unity-helpers",
+    "Ambiguous-Interactive/unity-helpers/extra",
+    "Other-Organization/unity-helpers",
+    "Ambiguous-Interactive/unity helpers",
+    "Ambiguous-Interactive/unity-helpers\n::error::injected"
+  ]) {
+    assert.throws(() => parseRepository(invalid, "Ambiguous-Interactive"), /repository/i);
+  }
+});
+
+test("accessible runner-group pagination fails closed on malformed responses", async () => {
   const pages = [
-    { total_count: 101, runners: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })) },
-    { total_count: 101, runners: [{ id: 101 }] }
+    {
+      total_count: 101,
+      runner_groups: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 }))
+    },
+    { total_count: 101, runner_groups: [{ id: 101 }] }
   ];
   const paths = [];
-  const runners = await readAllOrganizationRunners("Ambiguous-Interactive", async (path) => {
-    paths.push(path);
-    return pages.shift();
-  });
+  const groups = await readAllRunnerGroups(
+    "Ambiguous-Interactive",
+    "Ambiguous-Interactive/unity-helpers",
+    async (path) => {
+      paths.push(path);
+      return pages.shift();
+    }
+  );
 
-  assert.equal(runners.length, 101);
+  assert.equal(groups.length, 101);
   assert.deepEqual(paths, [
-    "/orgs/Ambiguous-Interactive/actions/runners?per_page=100&page=1",
-    "/orgs/Ambiguous-Interactive/actions/runners?per_page=100&page=2"
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=1",
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=2"
   ]);
 
-  for (const response of [null, {}, { total_count: "1", runners: [] }, { total_count: 1, runners: null }]) {
+  for (const response of [
+    null,
+    {},
+    { total_count: "1", runner_groups: [] },
+    { total_count: 1, runner_groups: null }
+  ]) {
     await assert.rejects(
-      () => readAllOrganizationRunners("Ambiguous-Interactive", async () => response),
-      /runner inventory/i
+      () =>
+        readAllRunnerGroups(
+          "Ambiguous-Interactive",
+          "Ambiguous-Interactive/unity-helpers",
+          async () => response
+        ),
+      /runner-group inventory/i
     );
   }
 
   await assert.rejects(
     () =>
-      readAllOrganizationRunners(
+      readAllRunnerGroups(
         "Ambiguous-Interactive",
-        async () => ({ total_count: 101, runners: Array.from({ length: 100 }, (_, id) => ({ id })) }),
+        "Ambiguous-Interactive/unity-helpers",
+        async () => ({
+          total_count: 101,
+          runner_groups: Array.from({ length: 100 }, (_, id) => ({ id }))
+        }),
         1
       ),
     /pagination exceeded/i
+  );
+});
+
+test("only runners in repository-visible groups are returned", async () => {
+  const paths = [];
+  const runners = await readAccessibleOrganizationRunners(
+    "Ambiguous-Interactive",
+    "Ambiguous-Interactive/unity-helpers",
+    async (path) => {
+      paths.push(path);
+      if (path.includes("runner-groups?")) {
+        return { total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] };
+      }
+      if (path.includes("runner-groups/42/runners")) {
+        return {
+          total_count: 1,
+          runners: [{ id: 7, name: "accessible-unity-runner", status: "online", labels: [] }]
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    }
+  );
+
+  assert.deepEqual(runners.map((runner) => runner.id), [7]);
+  assert.deepEqual(paths, [
+    "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive%2Funity-helpers&per_page=100&page=1",
+    "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners?per_page=100&page=1"
+  ]);
+
+  await assert.rejects(
+    () =>
+      readAccessibleOrganizationRunners(
+        "Ambiguous-Interactive",
+        "Ambiguous-Interactive/unity-helpers",
+        async (path) =>
+          path.includes("runner-groups?")
+            ? { total_count: 0, runner_groups: [] }
+            : { total_count: 0, runners: [] }
+      ),
+    /no runner groups visible/i
   );
 });
 
@@ -127,6 +207,7 @@ test("runtime requests only organization runner read permission and rejects an e
   process.env["INPUT_READER-APP-ID"] = "12345";
   process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
   process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows","unity"]]';
   process.env.GITHUB_OUTPUT = path.join(tempRoot, "output.txt");
   process.env.GITHUB_STEP_SUMMARY = path.join(tempRoot, "summary.md");
@@ -141,7 +222,12 @@ test("runtime requests only organization runner read permission and rejects an e
       tokenRequest = JSON.parse(options.body);
       return jsonResponse({ token: "short-lived-reader-token", expires_at: "2099-01-01T00:00:00Z" });
     }
-    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runners") {
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
+      assert.equal(options.headers.Authorization, "Bearer short-lived-reader-token");
+      assert.equal(parsed.searchParams.get("visible_to_repository"), "Ambiguous-Interactive/unity-helpers");
+      return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {
       assert.equal(options.headers.Authorization, "Bearer short-lived-reader-token");
       return jsonResponse({
         total_count: 1,
@@ -165,5 +251,23 @@ test("runtime requests only organization runner read permission and rejects an e
   assert.match(fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"), /^online-runner-count=1$/m);
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
-  await assert.rejects(() => execute(), /No online organization runner matches/);
+  await assert.rejects(() => execute(), /No accessible online organization runner matches/);
+});
+
+test("runtime validates repository identity before parsing credentials or making requests", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+  });
+
+  process.env["INPUT_READER-APP-ID"] = "not-an-app-id";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = "not-a-key";
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Other-Organization/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows"]]';
+  global.fetch = async () => assert.fail("repository validation must precede network access");
+
+  await assert.rejects(() => execute(), /repository owner is not authorized/i);
 });

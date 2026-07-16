@@ -72,6 +72,34 @@ function parseRequiredLabelSets(value) {
   });
 }
 
+function parseRepository(value, owner) {
+  const parts = String(value || "").split("/");
+  if (parts.length !== 2 || parts[0] !== owner) {
+    throw new Error(`repository owner is not authorized; expected ${owner}.`);
+  }
+  const repositoryName = parts[1];
+  if (
+    !repositoryName ||
+    repositoryName === "." ||
+    repositoryName === ".." ||
+    !/^[A-Za-z0-9_.-]+$/.test(repositoryName)
+  ) {
+    throw new Error("repository must be a canonical owner/name GitHub repository identifier.");
+  }
+  return `${owner}/${repositoryName}`;
+}
+
+function validateRunnerGroupInventoryPage(page) {
+  if (
+    !page ||
+    !Number.isSafeInteger(page.total_count) ||
+    page.total_count < 0 ||
+    !Array.isArray(page.runner_groups)
+  ) {
+    throw new Error("GitHub returned a malformed accessible runner-group inventory response.");
+  }
+}
+
 function validateRunnerInventoryPage(page) {
   if (
     !page ||
@@ -79,17 +107,49 @@ function validateRunnerInventoryPage(page) {
     page.total_count < 0 ||
     !Array.isArray(page.runners)
   ) {
-    throw new Error("GitHub returned a malformed organization runner inventory response.");
+    throw new Error("GitHub returned a malformed runner-group runner inventory response.");
   }
 }
 
-async function readAllOrganizationRunners(owner, getPage, maxPages = MAX_RUNNER_INVENTORY_PAGES) {
+async function readAllRunnerGroups(owner, repository, getPage, maxPages = MAX_RUNNER_INVENTORY_PAGES) {
+  const runnerGroups = [];
+  let pageNumber = 1;
+  let expectedTotal = null;
+
+  for (;;) {
+    const path =
+      `/orgs/${encodeURIComponent(owner)}/actions/runner-groups` +
+      `?visible_to_repository=${encodeURIComponent(repository)}&per_page=100&page=${pageNumber}`;
+    const page = await getPage(path);
+    validateRunnerGroupInventoryPage(page);
+    expectedTotal = page.total_count;
+    runnerGroups.push(...page.runner_groups);
+
+    if (runnerGroups.length >= expectedTotal) {
+      return runnerGroups;
+    }
+    if (page.runner_groups.length === 0) {
+      throw new Error("GitHub runner-group inventory pagination ended before total_count was satisfied.");
+    }
+    if (pageNumber >= maxPages) {
+      throw new Error(`GitHub runner-group inventory pagination exceeded the ${maxPages}-page safety limit.`);
+    }
+    pageNumber += 1;
+  }
+}
+
+async function readAllGroupRunners(owner, runnerGroupId, getPage, maxPages = MAX_RUNNER_INVENTORY_PAGES) {
+  if (!Number.isSafeInteger(runnerGroupId) || runnerGroupId <= 0) {
+    throw new Error("GitHub returned a malformed accessible runner-group identifier.");
+  }
   const runners = [];
   let pageNumber = 1;
   let expectedTotal = null;
 
   for (;;) {
-    const path = `/orgs/${encodeURIComponent(owner)}/actions/runners?per_page=100&page=${pageNumber}`;
+    const path =
+      `/orgs/${encodeURIComponent(owner)}/actions/runner-groups/${runnerGroupId}/runners` +
+      `?per_page=100&page=${pageNumber}`;
     const page = await getPage(path);
     validateRunnerInventoryPage(page);
     expectedTotal = page.total_count;
@@ -99,13 +159,35 @@ async function readAllOrganizationRunners(owner, getPage, maxPages = MAX_RUNNER_
       return runners;
     }
     if (page.runners.length === 0) {
-      throw new Error("GitHub runner inventory pagination ended before total_count was satisfied.");
+      throw new Error("GitHub runner-group inventory pagination ended before total_count was satisfied.");
     }
     if (pageNumber >= maxPages) {
-      throw new Error(`GitHub runner inventory pagination exceeded the ${maxPages}-page safety limit.`);
+      throw new Error(`GitHub runner-group inventory pagination exceeded the ${maxPages}-page safety limit.`);
     }
     pageNumber += 1;
   }
+}
+
+async function readAccessibleOrganizationRunners(owner, repository, getPage) {
+  const runnerGroups = await readAllRunnerGroups(owner, repository, getPage);
+  if (runnerGroups.length === 0) {
+    throw new Error(`GitHub returned no runner groups visible to ${repository}.`);
+  }
+
+  const runnersById = new Map();
+  for (const group of runnerGroups) {
+    if (!group || !Number.isSafeInteger(group.id) || group.id <= 0) {
+      throw new Error("GitHub returned a malformed accessible runner-group identifier.");
+    }
+    const groupRunners = await readAllGroupRunners(owner, group.id, getPage);
+    for (const runner of groupRunners) {
+      if (!runner || !Number.isSafeInteger(runner.id) || runner.id <= 0) {
+        throw new Error("GitHub returned a malformed runner in an accessible runner group.");
+      }
+      runnersById.set(runner.id, runner);
+    }
+  }
+  return [...runnersById.values()];
 }
 
 function matchingOnlineRunners(runners, requiredLabels) {
@@ -127,20 +209,23 @@ async function execute() {
   if (owner !== AUTHORIZED_OWNER) {
     throw new Error(`owner is not authorized; expected ${AUTHORIZED_OWNER}.`);
   }
+  const repository = parseRepository(process.env.GITHUB_REPOSITORY, owner);
+  const requiredLabelSets = parseRequiredLabelSets(requiredInput("required-label-sets"));
   const appId = requiredInput("reader-app-id");
   if (!/^[1-9][0-9]*$/.test(appId)) {
     throw new Error("reader-app-id must be a canonical positive decimal GitHub App ID.");
   }
   const privateKey = requiredInput("reader-app-private-key");
   maskSecret(privateKey);
-  const requiredLabelSets = parseRequiredLabelSets(requiredInput("required-label-sets"));
   const auth = createGitHubAppAuth({
     appId,
     privateKey,
     owner,
     permissions: { organization_self_hosted_runners: "read" }
   });
-  const runners = await readAllOrganizationRunners(owner, (path) => api("GET", path, undefined, auth));
+  const runners = await readAccessibleOrganizationRunners(owner, repository, (path) =>
+    api("GET", path, undefined, auth)
+  );
   const onlineRunnerCount = runners.filter((runner) => runner && runner.status === "online").length;
   const matches = requiredLabelSets.map((labels) => ({
     labels,
@@ -149,7 +234,7 @@ async function execute() {
   const missing = matches.filter((match) => match.runners.length === 0);
   if (missing.length > 0) {
     throw new Error(
-      `No online organization runner matches required label set(s): ${missing
+      `No accessible online organization runner matches required label set(s): ${missing
         .map((match) => `[${match.labels.join(", ")}]`)
         .join("; ")}.`
     );
@@ -157,7 +242,9 @@ async function execute() {
 
   writeOutput("online-runner-count", onlineRunnerCount);
   writeOutput("matched-runners", JSON.stringify(matches));
-  appendSummary(`Unity runner preflight passed: ${requiredLabelSets.length} required label set(s), ${onlineRunnerCount} online runner(s).`);
+  appendSummary(
+    `Unity runner preflight passed for ${repository}: ${requiredLabelSets.length} required label set(s), ${onlineRunnerCount} accessible online runner(s).`
+  );
   console.log(`Unity runner preflight passed for ${requiredLabelSets.length} required label set(s).`);
   return { onlineRunnerCount, matches };
 }
@@ -181,6 +268,9 @@ module.exports = {
   execute,
   matchingOnlineRunners,
   parseRequiredLabelSets,
-  readAllOrganizationRunners,
+  parseRepository,
+  readAccessibleOrganizationRunners,
+  readAllGroupRunners,
+  readAllRunnerGroups,
   run
 };

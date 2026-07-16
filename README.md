@@ -30,9 +30,11 @@ See [consumer enrollment](docs/consumer-enrollment.md) for the repeatable
 repository/App/environment checklist and canary requirements.
 
 Run a hosted preflight before every self-hosted Unity job. It mints a
-short-lived token from the reader App and fails closed when runner inventory
-cannot be read or any required label set has no online runner. A busy online
-runner is considered available and may queue the licensed job.
+short-lived token from the reader App, asks GitHub for runner groups visible to
+the calling repository, and considers only runners in those groups. It fails
+closed when that inventory cannot be read, the repository has no visible runner
+group, or any required label set has no accessible online runner. A busy online
+runner is considered available infrastructure and may queue the licensed job.
 
 ```yaml
 runner-preflight:
