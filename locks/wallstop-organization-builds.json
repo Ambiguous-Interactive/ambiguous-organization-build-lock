@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-tests:unity-ci-EditMode",
-    "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-    "workflow": "Unity CI Validation",
+    "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.3.16f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
     "job": "unity-tests",
-    "runId": "29522991370",
+    "runId": "29521658913",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-    "queuedAt": "2026-07-16T18:20:49.374Z",
-    "acquiredAt": "2026-07-16T18:33:03.013Z",
-    "expiresAt": "2026-07-16T22:33:03.013Z",
-    "runnerId": "box-linux"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29521658913",
+    "queuedAt": "2026-07-16T18:27:21.750Z",
+    "acquiredAt": "2026-07-16T18:34:34.971Z",
+    "expiresAt": "2026-07-16T22:34:34.971Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-tests:unity-ci-EditMode",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29522991370",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
-      "queuedAt": "2026-07-16T18:20:49.374Z",
-      "acquiredAt": "2026-07-16T18:33:03.013Z",
-      "expiresAt": "2026-07-16T22:33:03.013Z",
-      "runnerId": "box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29521658913:unity-tests:6000.3.16f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -55,7 +42,23 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "111bd4de-3de1-4159-b0f3-535b44f7c7ab",
+      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29522991370:unity-tests:unity-ci-EditMode",
+      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "29522991370",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29522991370",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-16T18:35:09.902Z",
+      "availableAt": "2026-07-16T18:41:09.902Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T18:34:34.971Z"
+  "updatedAt": "2026-07-16T18:35:09.902Z"
 }
