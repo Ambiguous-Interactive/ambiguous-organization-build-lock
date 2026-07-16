@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29458003885:perf-benchmarks:perf-6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Performance Numbers",
+    "job": "perf-benchmarks",
+    "runId": "29458003885",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003885",
+    "queuedAt": "2026-07-16T00:26:18.829Z",
+    "acquiredAt": "2026-07-16T00:36:10.158Z",
+    "expiresAt": "2026-07-16T04:36:10.158Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29458003885:perf-benchmarks:perf-6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29458003885",
       "queuedAt": "2026-07-16T00:26:18.829Z",
+      "acquiredAt": "2026-07-16T00:36:10.158Z",
+      "expiresAt": "2026-07-16T04:36:10.158Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29461649247:unity-tests:unity-ci-EditMode",
       "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
@@ -40,21 +55,6 @@
   ],
   "reservations": [
     {
-      "reservationId": "f9b6091f-efa3-4e9f-960f-64b554ab7fad",
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29458564916:unity-build:unity-ci-compile",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-build",
-      "runId": "29458564916",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29458564916",
-      "runnerId": "GitHub Actions 1000106032",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T00:30:00.595Z",
-      "availableAt": "2026-07-16T00:36:00.595Z"
-    },
-    {
       "reservationId": "933eb4c6-f16c-4b8c-82db-eaedf3eff2fa",
       "holderId": "Ambiguous-Interactive/DxMessaging:29457982141:unity-tests:2022.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -71,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T00:35:25.411Z"
+  "updatedAt": "2026-07-16T00:36:10.158Z"
 }
