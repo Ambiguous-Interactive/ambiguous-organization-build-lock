@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29531009081:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "29531009081",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29531009081",
+    "queuedAt": "2026-07-16T21:32:49.761Z",
+    "acquiredAt": "2026-07-16T21:43:50.484Z",
+    "expiresAt": "2026-07-17T01:43:50.484Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29531009081:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29531009081",
       "queuedAt": "2026-07-16T21:32:49.761Z",
+      "acquiredAt": "2026-07-16T21:43:50.484Z",
+      "expiresAt": "2026-07-17T01:43:50.484Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29533513896:unity-tests:unity-ci-tests-EditMode",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -56,5 +71,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T21:43:45.144Z"
+  "updatedAt": "2026-07-16T21:43:50.484Z"
 }
