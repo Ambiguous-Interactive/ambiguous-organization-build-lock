@@ -28,7 +28,15 @@ test("required runner label sets are strict non-empty JSON arrays", () => {
     ["self-hosted", "windows", "unity"]
   ]);
 
-  for (const invalid of ["", "{}", "[]", "[[]]", '[["self-hosted",""]]', '[["Windows"]]']) {
+  for (const invalid of [
+    "",
+    "{}",
+    "[]",
+    "[[]]",
+    '[["self-hosted",""]]',
+    '[["Windows"]]',
+    '[["self-hosted","Windows\\n::error::injected"]]'
+  ]) {
     assert.throws(() => parseRequiredLabelSets(invalid), /required-label-sets/i);
   }
 });

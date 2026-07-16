@@ -51,7 +51,12 @@ function parseRequiredLabelSets(value) {
       throw new Error(`required-label-sets[${index}] must be a non-empty label array.`);
     }
     const normalized = labels.map((label) => {
-      if (typeof label !== "string" || !label.trim() || label !== label.trim()) {
+      if (
+        typeof label !== "string" ||
+        !label.trim() ||
+        label !== label.trim() ||
+        /[\u0000-\u001f\u007f]/.test(label)
+      ) {
         throw new Error(`required-label-sets[${index}] contains an invalid label.`);
       }
       return label.toLowerCase();
