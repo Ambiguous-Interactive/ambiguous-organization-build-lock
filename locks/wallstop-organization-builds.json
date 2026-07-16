@@ -1,25 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29476229322:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29476229322",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29476229322",
+    "queuedAt": "2026-07-16T06:18:19.431Z",
+    "acquiredAt": "2026-07-16T06:18:20.712Z",
+    "expiresAt": "2026-07-16T10:18:20.712Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29476229322:unity-tests:unity-tests-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "29476229322",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29476229322",
+      "queuedAt": "2026-07-16T06:18:19.431Z",
+      "acquiredAt": "2026-07-16T06:18:20.712Z",
+      "expiresAt": "2026-07-16T10:18:20.712Z",
+      "runnerId": "box-linux"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "18c1f54f-a059-4ca3-98dc-0d59ff813428",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29474122159",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29474122159",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-16T06:11:20.445Z",
-      "availableAt": "2026-07-16T06:17:20.445Z"
-    },
     {
       "reservationId": "776473f9-685f-44c7-abb2-1531e9fa90f0",
       "holderId": "Ambiguous-Interactive/unity-helpers:29474122159:unity-tests:6000.5.2f1-playmode",
@@ -37,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-16T06:17:04.259Z"
+  "updatedAt": "2026-07-16T06:18:20.713Z"
 }
