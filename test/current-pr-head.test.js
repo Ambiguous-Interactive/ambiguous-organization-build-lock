@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { requireCurrentPrHead } = require("../.github/dist/require-current-pr-head.js");
+const { requireCurrentPrHead, retryDelay } = require("../.github/dist/require-current-pr-head.js");
 
 const expectedSha = "a".repeat(40);
 const newerSha = "b".repeat(40);
@@ -19,10 +19,11 @@ function guardEnvironment(overrides = {}) {
   };
 }
 
-function response(status, body) {
+function response(status, body, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
     json: async () => body
   };
 }
@@ -83,6 +84,44 @@ test("current PR head guard rejects a superseded run and reports the new SHA", a
   assert.deepEqual(writes, [`is-current=false\n`, `current-head-sha=${newerSha}\n`]);
 });
 
+test("current PR head guard retries a transient lookup without a fixed long sleep", async () => {
+  const sleeps = [];
+  let discarded = 0;
+  let attempts = 0;
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return attempts === 1
+        ? { ...response(503, {}, { "retry-after": "0" }), body: { cancel: async () => { discarded += 1; } } }
+        : response(200, { state: "open", head: { sha: expectedSha } });
+    },
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    log: () => {}
+  });
+
+  assert.equal(result.isCurrent, true);
+  assert.equal(attempts, 2);
+  assert.equal(discarded, 1);
+  assert.deepEqual(sleeps, [0]);
+});
+
+test("current PR head guard honors HTTP-date Retry-After values within its bounded delay", () => {
+  const now = Date.UTC(2026, 6, 16, 12, 0, 0);
+  const retryAt = new Date(now + 7_000).toUTCString();
+  assert.equal(retryDelay(response(503, {}, { "retry-after": retryAt }), 1, now), 7_000);
+  assert.equal(retryDelay(response(503, {}, { "retry-after": new Date(now + 60_000).toUTCString() }), 1, now), 10_000);
+});
+
+test("current PR head guard backs off when Retry-After is absent or invalid", () => {
+  for (const retryAfter of [undefined, "", "not-a-delay", "-1"]) {
+    const headers = retryAfter === undefined ? {} : { "retry-after": retryAfter };
+    assert.equal(retryDelay(response(503, {}, headers), 1), 250);
+    assert.equal(retryDelay(response(503, {}, headers), 2), 500);
+  }
+});
+
 test("current PR head guard skips API access for non-PR events", async () => {
   let fetched = false;
   const writes = [];
@@ -128,6 +167,30 @@ test("current PR head guard fails closed for invalid inputs and API responses", 
       error: /full commit SHA/
     },
     {
+      name: "partial PR inputs",
+      env: { "INPUT_EXPECTED-HEAD-SHA": "" },
+      fetchImpl: async () => response(200, { state: "open", head: { sha: expectedSha } }),
+      error: /full commit SHA/
+    },
+    {
+      name: "invalid repository",
+      env: { GITHUB_REPOSITORY: "owner/repository/extra" },
+      fetchImpl: async () => response(200, { state: "open", head: { sha: expectedSha } }),
+      error: /owner\/name/
+    },
+    {
+      name: "invalid repository character",
+      env: { GITHUB_REPOSITORY: "owner/repository?ref=main" },
+      fetchImpl: async () => response(200, { state: "open", head: { sha: expectedSha } }),
+      error: /owner\/name/
+    },
+    {
+      name: "invalid owner double hyphen",
+      env: { GITHUB_REPOSITORY: "own--er/repository" },
+      fetchImpl: async () => response(200, { state: "open", head: { sha: expectedSha } }),
+      error: /owner\/name/
+    },
+    {
       name: "API failure",
       env: {},
       fetchImpl: async () => response(503, {}),
@@ -144,6 +207,18 @@ test("current PR head guard fails closed for invalid inputs and API responses", 
       env: {},
       fetchImpl: async () => response(200, { state: "open", head: {} }),
       error: /did not contain a full head SHA/
+    },
+    {
+      name: "invalid JSON response",
+      env: {},
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("invalid JSON"); } }),
+      error: /invalid JSON/
+    },
+    {
+      name: "aborted request",
+      env: {},
+      fetchImpl: async () => { throw new DOMException("aborted", "AbortError"); },
+      error: /aborted/
     }
   ];
 
@@ -154,6 +229,7 @@ test("current PR head guard fails closed for invalid inputs and API responses", 
           env: guardEnvironment(testCase.env),
           appendFile: () => {},
           fetchImpl: testCase.fetchImpl,
+          sleep: async () => {},
           log: () => {}
         }),
         testCase.error

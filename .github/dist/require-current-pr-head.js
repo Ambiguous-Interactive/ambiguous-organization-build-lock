@@ -1,6 +1,9 @@
 "use strict";
 
 const fs = require("node:fs");
+const { setTimeout: wait } = require("node:timers/promises");
+
+const MAX_ATTEMPTS = 3;
 
 function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, " ").trim();
@@ -10,11 +13,53 @@ function input(env, name) {
   return String(env[`INPUT_${name.toUpperCase()}`] || "").trim();
 }
 
+function validRepository(value) {
+  const [owner, repository, extra] = value.split("/");
+  return extra === undefined &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner || "") &&
+    !owner.includes("--") &&
+    /^[A-Za-z0-9._-]{1,100}$/.test(repository || "");
+}
+
 function writeOutput(env, name, value, appendFile = fs.appendFileSync) {
   if (!env.GITHUB_OUTPUT) {
     return;
   }
   appendFile(env.GITHUB_OUTPUT, `${name}=${value}\n`, "utf8");
+}
+
+function retryableResponse(response) {
+  if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
+    return true;
+  }
+  return response.status === 403 &&
+    (response.headers?.get?.("retry-after") || response.headers?.get?.("x-ratelimit-remaining") === "0");
+}
+
+function retryDelay(response, attempt, now = Date.now()) {
+  const retryAfterValue = response?.headers?.get?.("retry-after");
+  if (typeof retryAfterValue === "string" && retryAfterValue.trim() !== "") {
+    const normalized = retryAfterValue.trim();
+    if (/^[0-9]+$/.test(normalized)) {
+      return Math.min(10_000, Number(normalized) * 1_000);
+    }
+    if (/^[A-Za-z]/.test(normalized)) {
+      const retryAfterDate = Date.parse(normalized);
+      if (Number.isFinite(retryAfterDate)) {
+        return Math.min(10_000, Math.max(0, retryAfterDate - now));
+      }
+    }
+  }
+  return 250 * 2 ** (attempt - 1);
+}
+
+async function discardResponse(response) {
+  try {
+    await response?.body?.cancel?.();
+  } catch {
+    // The response is already known to be retryable; body cleanup must not
+    // replace the bounded fail-closed retry decision with a cleanup error.
+  }
 }
 
 async function requireCurrentPrHead(options = {}) {
@@ -38,6 +83,8 @@ async function requireCurrentPrHead(options = {}) {
   const token = input(env, "GITHUB-TOKEN");
   const repository = String(env.GITHUB_REPOSITORY || "").trim();
   const apiUrl = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
+  const signal = options.signal || AbortSignal.timeout(30_000);
+  const sleep = options.sleep || ((milliseconds) => wait(milliseconds, undefined, { signal }));
 
   if (!token) {
     throw new Error("github-token is required for pull request events");
@@ -48,19 +95,35 @@ async function requireCurrentPrHead(options = {}) {
   if (!/^[0-9a-f]{40}$/i.test(expectedHeadSha)) {
     throw new Error("expected-head-sha must be a full commit SHA for pull request events");
   }
-  if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
+  if (!validRepository(repository)) {
     throw new Error("GITHUB_REPOSITORY must be owner/name");
   }
 
-  const response = await fetchImpl(`${apiUrl}/repos/${repository}/pulls/${pullRequestNumber}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "ambiguous-organization-build-lock-current-pr-head",
-      "X-GitHub-Api-Version": "2022-11-28"
-    },
-    signal: options.signal || AbortSignal.timeout(30_000)
-  });
+  let response;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      response = await fetchImpl(`${apiUrl}/repos/${repository}/pulls/${pullRequestNumber}`, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "User-Agent": "ambiguous-organization-build-lock-current-pr-head",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        signal
+      });
+    } catch (error) {
+      if (attempt === MAX_ATTEMPTS || signal.aborted || error?.name === "AbortError") {
+        throw error;
+      }
+      await sleep(250 * 2 ** (attempt - 1));
+      continue;
+    }
+    if (response.ok || !retryableResponse(response) || attempt === MAX_ATTEMPTS) {
+      break;
+    }
+    await discardResponse(response);
+    await sleep(retryDelay(response, attempt));
+  }
   if (!response.ok) {
     throw new Error(`GitHub pull request lookup failed with HTTP ${response.status}`);
   }
@@ -100,4 +163,4 @@ if (require.main === module) {
   run();
 }
 
-module.exports = { oneLine, requireCurrentPrHead };
+module.exports = { oneLine, requireCurrentPrHead, retryDelay };
