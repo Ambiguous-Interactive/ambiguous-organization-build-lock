@@ -14,6 +14,16 @@ const expectedWorkflowJobs = new Map([
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["reap-stale-locks.yml", ["reap"]]
 ]);
+const expectedConsumerPolicySnapshots = [
+  ["Ambiguous-Interactive/unity-helpers", ".policy-consumers/unity-helpers", "af34f6f0234119100dde525d77c4a9f04315e736"],
+  ["Ambiguous-Interactive/DxMessaging", ".policy-consumers/DxMessaging", "282e38d156ff7611c68354e8f22aca275cb3b077"],
+  ["Ambiguous-Interactive/DoxReloaded", ".policy-consumers/DoxReloaded", "41177409036293a16c525017a571fe46d56f5325"],
+  ["Ambiguous-Interactive/IshoBoy", ".policy-consumers/IshoBoy", "3d8d4d9f6526aef2baa4a488024f5e79cd937a08"],
+  ["Ambiguous-Interactive/qora-redux", ".policy-consumers/qora-redux", "c9a1da99f06f9426fa6bc909e398effbc972ad44"],
+  ["Ambiguous-Interactive/DepartmentOfArrangements", ".policy-consumers/DepartmentOfArrangements", "70d7a3a6ba66f3703ac427be099d694cd64550ce"],
+  ["Ambiguous-Interactive/unity-builder", ".policy-consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
+];
+const expectedCurrentHeadGuardSHA = "8e1cf892f5ee710908fc14f09b3c8033edcb74f9";
 const expectedWorkflowRunScriptSignatures = new Map([
   [
     "auto-release.yml",
@@ -24,7 +34,9 @@ const expectedWorkflowRunScriptSignatures = new Map([
     [
       'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
       "set -euo pipefail\ngo run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
-      "node --test test/*.test.js"
+      "node --test test/*.test.js",
+      'go mod tidy -diff\ngo test ./...',
+      "set -euo pipefail\ngo run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha af34f6f0234119100dde525d77c4a9f04315e736 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9"
     ]
   ],
   [
@@ -1110,6 +1122,15 @@ function nestedScalarMap(lines, entry, endIndex) {
 }
 
 function workflowStepProperty(lines, entry, stepEnd) {
+  if (entry.key === "run") {
+    const result = collectRunScript(
+      lines,
+      entry.valueIndex ?? entry.index,
+      entry.valueIndent ?? entry.indent,
+      entry.value
+    );
+    return result.section.text;
+  }
   if (entry.key === "with" || entry.key === "env") {
     return nestedScalarMap(lines, entry, stepEnd);
   }
@@ -1154,6 +1175,19 @@ function workflowJobStepMaps(text, jobName) {
   return stepItems.map((item, index) => workflowStepMap(lines, item, stepItems[index + 1]?.index || stepsEnd));
 }
 
+function workflowJobPropertyNames(text, jobName) {
+  const lines = text.split(/\r?\n/);
+  const jobsEntry = findTopLevelMappingEntry(lines, "jobs");
+  assert.ok(jobsEntry, "workflow must define a top-level jobs block");
+  const jobsBlock = mappingValueBlock(lines, jobsEntry);
+  const jobEntries = directMappingEntries(lines, jobsBlock.start, jobsBlock.end, jobsBlock.indent);
+  const jobIndex = jobEntries.findIndex((entry) => entry.key === jobName);
+  assert.notEqual(jobIndex, -1, `workflow must define job ${jobName}`);
+  const job = jobEntries[jobIndex];
+  const jobEnd = jobEntries[jobIndex + 1] ? jobEntries[jobIndex + 1].index : jobsBlock.end;
+  return directMappingEntries(lines, job.index + 1, jobEnd, job.indent).map((entry) => entry.key);
+}
+
 function isGithubReleasePlugin(plugin) {
   return plugin === "@semantic-release/github" || (Array.isArray(plugin) && plugin[0] === "@semantic-release/github");
 }
@@ -1192,6 +1226,92 @@ test("workflow run script scanner covers every expected workflow run step", () =
   }
 });
 
+function normalizedRunLines(run) {
+  return run
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+}
+
+function assertConsumerPolicyWorkflow(workflow) {
+  assert.deepEqual(workflowJobPropertyNames(workflow, "validate"), ["name", "runs-on", "steps"]);
+  const steps = workflowJobStepMaps(workflow, "validate");
+  const checkoutReference = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
+  const primaryCheckout = steps.find((step) => step.name === "Checkout");
+  assert.ok(primaryCheckout, "CI must check out its own source");
+  assert.equal(primaryCheckout.uses, checkoutReference);
+  assert.deepEqual(primaryCheckout.with, { "persist-credentials": "false" });
+  const enrollmentStep = steps.find((step) => step.name === "Run enrollment policy tests");
+  assert.ok(enrollmentStep, "CI must run analyzer tests before auditing consumers");
+  assert.deepEqual(Object.keys(enrollmentStep).sort(), ["line", "name", "run"]);
+  assert.deepEqual(normalizedRunLines(enrollmentStep.run), ["go mod tidy -diff", "go test ./..."]);
+  const checkouts = steps
+    .filter((step) => String(step.name || "").endsWith(" policy snapshot"))
+    .map((step) => {
+      assert.equal(step.uses, checkoutReference, `${step.name} must pin the approved checkout action`);
+      assert.deepEqual(Object.keys(step.with).sort(), ["path", "persist-credentials", "ref", "repository"]);
+      assert.equal(step.with["persist-credentials"], "false", `${step.name} must not persist cross-repository credentials`);
+      return [step.with.repository, step.with.path, step.with.ref];
+    });
+  assert.deepEqual(checkouts, expectedConsumerPolicySnapshots);
+  assert.ok(
+    steps.findIndex((step) => String(step.name || "").endsWith(" policy snapshot")) >
+      steps.findIndex((step) => step.name === "Run enrollment policy tests"),
+    "remote policy snapshots must be fetched only after cheap local validation"
+  );
+
+  const auditStep = steps.find((step) => step.name === "Audit immutable consumer cancellation policy");
+  assert.ok(auditStep, "CI must keep a named consumer audit step");
+  assert.deepEqual(Object.keys(auditStep).sort(), ["line", "name", "run", "shell"]);
+  assert.equal(auditStep.shell, "bash");
+  assert.deepEqual(
+    normalizedRunLines(auditStep.run),
+    [
+      "set -euo pipefail",
+      ...expectedConsumerPolicySnapshots.map(
+        ([repository, directory, sha]) =>
+          `go run ./cmd/audit-cancellation-policy --git-dir ${directory} --repository ${repository} --sha ${sha} --required-guard-sha ${expectedCurrentHeadGuardSHA}`
+      )
+    ]
+  );
+}
+
+test("CI audits the complete immutable consumer inventory", () => {
+  assertConsumerPolicyWorkflow(readWorkflow("ci.yml"));
+});
+
+test("CI policy scripts remain bound to their protected step names", () => {
+  const workflow = readWorkflow("ci.yml");
+  const swapNames = (text, left, right) =>
+    text
+      .replace(`- name: ${left}`, "- name: __POLICY_NAME_SWAP__")
+      .replace(`- name: ${right}`, `- name: ${left}`)
+      .replace("- name: __POLICY_NAME_SWAP__", `- name: ${right}`);
+
+  for (const [left, right] of [
+    ["Check JavaScript syntax", "Run enrollment policy tests"],
+    ["Lint GitHub Actions workflows", "Audit immutable consumer cancellation policy"]
+  ]) {
+    assert.throws(
+      () => assertConsumerPolicyWorkflow(swapNames(workflow, left, right)),
+      undefined,
+      `swapping ${left} with ${right} must not preserve the CI policy gate`
+    );
+  }
+
+  for (const property of ["continue-on-error: true", "if: false"]) {
+    const mutated = workflow.replace(
+      "    runs-on: ubuntu-latest",
+      `    ${property}\n    runs-on: ubuntu-latest`
+    );
+    assert.throws(
+      () => assertConsumerPolicyWorkflow(mutated),
+      undefined,
+      `validate job must reject ${property}`
+    );
+  }
+});
+
 test("CI actionlint step uses a Dependabot-upgradable Go module pin", () => {
   const text = readWorkflow("ci.yml");
   const goMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
@@ -1201,7 +1321,7 @@ test("CI actionlint step uses a Dependabot-upgradable Go module pin", () => {
   const setupGoStep = steps.find((step) => /^actions\/setup-go@[a-f0-9]{40}$/.test(step.uses || ""));
   const lintScript = runScriptSections(text).find((section) => section.text.includes(`go run -mod=readonly ${expectedActionlintCommand}`));
   const actionlintRequire = new RegExp(
-    `^require ${escapeRegExp(expectedActionlintModule)} (v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\\s+// indirect)?$`,
+    `^[ \\t]*(?:require[ \\t]+)?${escapeRegExp(expectedActionlintModule)} (v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\\s+// indirect)?$`,
     "m"
   ).exec(goMod);
 

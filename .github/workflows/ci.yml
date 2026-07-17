@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -46,3 +48,76 @@ jobs:
 
       - name: Run fast action tests
         run: node --test test/*.test.js
+
+      - name: Run enrollment policy tests
+        run: |
+          go mod tidy -diff
+          go test ./...
+
+      - name: Checkout unity-helpers policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/unity-helpers
+          ref: af34f6f0234119100dde525d77c4a9f04315e736
+          path: .policy-consumers/unity-helpers
+          persist-credentials: false
+
+      - name: Checkout DxMessaging policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DxMessaging
+          ref: 282e38d156ff7611c68354e8f22aca275cb3b077
+          path: .policy-consumers/DxMessaging
+          persist-credentials: false
+
+      - name: Checkout DoxReloaded policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DoxReloaded
+          ref: 41177409036293a16c525017a571fe46d56f5325
+          path: .policy-consumers/DoxReloaded
+          persist-credentials: false
+
+      - name: Checkout IshoBoy policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/IshoBoy
+          ref: 3d8d4d9f6526aef2baa4a488024f5e79cd937a08
+          path: .policy-consumers/IshoBoy
+          persist-credentials: false
+
+      - name: Checkout qora-redux policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/qora-redux
+          ref: c9a1da99f06f9426fa6bc909e398effbc972ad44
+          path: .policy-consumers/qora-redux
+          persist-credentials: false
+
+      - name: Checkout DepartmentOfArrangements policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DepartmentOfArrangements
+          ref: 70d7a3a6ba66f3703ac427be099d694cd64550ce
+          path: .policy-consumers/DepartmentOfArrangements
+          persist-credentials: false
+
+      - name: Checkout unity-builder policy snapshot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/unity-builder
+          ref: bb2ff53bc0855f97da41a71c93bf0f4b37e60efa
+          path: .policy-consumers/unity-builder
+          persist-credentials: false
+
+      - name: Audit immutable consumer cancellation policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha af34f6f0234119100dde525d77c4a9f04315e736 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/DxMessaging --repository Ambiguous-Interactive/DxMessaging --sha 282e38d156ff7611c68354e8f22aca275cb3b077 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/DoxReloaded --repository Ambiguous-Interactive/DoxReloaded --sha 41177409036293a16c525017a571fe46d56f5325 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/IshoBoy --repository Ambiguous-Interactive/IshoBoy --sha 3d8d4d9f6526aef2baa4a488024f5e79cd937a08 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/qora-redux --repository Ambiguous-Interactive/qora-redux --sha c9a1da99f06f9426fa6bc909e398effbc972ad44 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/DepartmentOfArrangements --repository Ambiguous-Interactive/DepartmentOfArrangements --sha 70d7a3a6ba66f3703ac427be099d694cd64550ce --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/unity-builder --repository Ambiguous-Interactive/unity-builder --sha bb2ff53bc0855f97da41a71c93bf0f4b37e60efa --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9

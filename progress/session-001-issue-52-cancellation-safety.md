@@ -35,12 +35,60 @@ commit cascade.
 4. Cursor Bugbot identified a `pull_request_target` bypass in the first pushed
    guard. The guard now treats both PR event types as live checks and also checks
    reusable-workflow calls when PR number/SHA inputs are supplied.
+5. Added an exact-SHA snapshot analyzer for cancellation safety. It propagates
+   lock capability through local reusable workflows and nested composites,
+   rejects non-literal-false cancellation at every licensed workflow/job scope,
+   retains cancellation for unrelated static/preflight jobs, rejects mutable
+   acquire pins, and fails closed on malformed or cyclic local graphs.
+6. The second adversarial review found early-return traversal, incomplete graph
+   shape validation, and a vacuous self-repository CI audit. Traversal and shape
+   checks now inspect the complete reachable graph; the self-audit was removed
+   until immutable consumer commits can be enrolled as the real gate.
+7. Published reviewed consumer commits for unity-helpers, DxMessaging,
+   DoxReloaded, IshoBoy, qora-redux, and DepartmentOfArrangements. The archived
+   Department repository was temporarily reopened for maintenance; Cursor's
+   permission-scope finding was fixed by preserving workflow-wide read access.
+8. Enrolled those six exact commits and the unchanged unity-builder canary in
+   central CI. Each tree is checked out without persisted credentials and
+   audited from its immutable commit object.
+9. The final adversarial pass caught a zero-delay retry bug, a shrinkable CI
+   inventory, and the fact that consumers still pinned the pre-retry guard.
+   Retry parsing now falls back to bounded exponential delay, the inventory is
+   an exact data-driven invariant, and all consumers pin reviewed guard commit
+   `8e1cf892f5ee710908fc14f09b3c8033edcb74f9`.
+10. Extended the exact-SHA analyzer to enforce current-head guards across
+    PR-reachable licensed jobs, called workflows, and nested local composite
+    lock frontiers. Conservative event-condition analysis only excludes jobs
+    when every PR trigger is provably impossible.
+11. The closing adversarial pass found that CI-step modifiers could bypass the
+    immutable audit and that guard implication omitted GitHub's implicit
+    `success()`. CI now constrains both enrollment and audit steps to exact
+    executable shapes. Guard conditions model implicit status semantics,
+    including `always()`, `failure()`, and `cancelled()`, without mistaking
+    status-function text inside quoted strings for a function call. Every
+    acquire path must retain a top-level `success()` gate so a failing stale-head
+    guard cannot be bypassed by a matching status condition. Mixed top-level
+    `&&`/`||` expressions with status functions fail closed, preventing both
+    status-gate and PR-event precedence bypasses. Status-free top-level OR is
+    compared atomically with GitHub's implicit success gate; parenthesized OR
+    remains usable as one conjunct.
+    Enrollment and audit checks bind exact executable scripts to their exact
+    named step objects; adversarial name swaps cannot satisfy the gate by
+    separating a safe step shape from the policy command it is meant to run.
+    Direct acquire references are matched case-insensitively across every fixed
+    path segment, closing mixed-case lookup bypasses on Windows runners.
+    Conditional pre-acquire guards cannot define an `id`, preventing their
+    condition from changing truth value after the guard records its own
+    `outcome` or `conclusion`; unconditional first guards may still export the
+    reviewed action result. Guard steps use a strict top-level key allowlist,
+    rejecting `env`/`NODE_OPTIONS` injection, and conditional guards cannot
+    reference the step-specific `env` or `github` contexts.
+    Licensed matrix jobs require literal `strategy.fail-fast: false`, covering
+    GitHub's second automatic-cancellation mechanism in addition to concurrency.
+    The unity-helpers manual abort option was removed and all three licensed
+    matrices were republished at `af34f6f0234119100dde525d77c4a9f04315e736`.
 
 ## Next tasks
 
-- Commit and publish the immutable guard SHA.
-- Apply non-cancellable licensed scopes and two live head checks in every affected
-  consumer without changing static-only cancellation behavior.
-- Add the exact-SHA transitive cancellation policy analyzer and fixtures.
 - Run local workflow contracts, then live pre-/post-acquire/manual-cancel canaries.
 - Await CI and Copilot/Cursor Bugbot review after every pushed task.

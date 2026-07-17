@@ -53,6 +53,23 @@ aggregate job must fail if the preflight or licensed job fails, is cancelled,
 or is unexpectedly skipped. Only explicitly modeled cases such as fork-secret
 safety or a documented no-change path may accept a skipped licensed job.
 
+Every workflow or job concurrency scope that can reach acquire must set
+`cancel-in-progress: false`. For pull requests, run the current-head guard both
+before expensive setup and immediately before acquire. Supplying empty PR inputs
+on push or dispatch skips the API call; PR inputs require `pull-requests: read`:
+
+```yaml
+- name: Require current PR head
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/require-current-pr-head@IMMUTABLE_COMMIT_SHA
+  with:
+    github-token: ${{ github.token }}
+    pull-request-number: ${{ github.event.pull_request.number }}
+    expected-head-sha: ${{ github.event.pull_request.head.sha }}
+```
+
+Licensed matrix jobs must also set `strategy.fail-fast: false`; GitHub's default
+matrix fail-fast behavior can cancel a sibling while it holds a Unity license.
+
 Validate local secret shape first, acquire immediately before the licensed Unity
 section, guard every licensed step on the acquire output, and release with
 `if: always()`:
@@ -151,6 +168,29 @@ cannot prove external resource cleanup.
 
 Keep `runs-on` broad enough for all eligible Unity runners. The lock serializes
 only the licensed section; it should not be replaced with a single-runner label.
+
+### Exact-SHA cancellation audit
+
+Audit a checked-out consumer at an immutable commit object, never its mutable
+working tree:
+
+```bash
+go run ./cmd/audit-cancellation-policy \
+  --git-dir /path/to/consumer \
+  --repository Ambiguous-Interactive/consumer \
+  --sha 0123456789abcdef0123456789abcdef01234567 \
+  --required-guard-sha 89abcdef0123456789abcdef0123456789abcdef
+```
+
+Exit code `0` means clean, `1` means sanitized policy findings were emitted,
+and `2` means the snapshot or graph could not be audited completely. The audit
+traverses local called workflows and composite actions. External reusable
+workflows are deliberately rejected as unresolved because a single-repository
+snapshot cannot prove their contents; they never pass by assumption. Central CI
+checks out every registered consumer at an explicit commit and audits each tree.
+When `--required-guard-sha` is supplied, PR-reachable licensed jobs must start
+with that exact unconditional guard and run it again on every path into a direct
+or nested local lock acquisition.
 
 ## State
 

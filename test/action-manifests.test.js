@@ -300,6 +300,15 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /Keep the explicit\s+release step/);
   assert.match(readme, /stable `v1` contract/);
   assert.match(readme, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
+  assert.ok(
+    readme.includes(`- name: Require current PR head
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/require-current-pr-head@IMMUTABLE_COMMIT_SHA
+  with:
+    github-token: \${{ github.token }}
+    pull-request-number: \${{ github.event.pull_request.number }}
+    expected-head-sha: \${{ github.event.pull_request.head.sha }}`),
+    "current-head guard example must keep all exact inputs nested under with"
+  );
 });
 
 test("README documents configurable parallelism and transient-auth handling", () => {
