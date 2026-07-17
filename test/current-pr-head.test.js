@@ -48,6 +48,26 @@ test("current PR head guard accepts the exact event SHA without exposing its tok
   assert.doesNotMatch(JSON.stringify(result), /test-token/);
 });
 
+test("current PR head guard checks every PR-shaped trigger", async (t) => {
+  for (const eventName of ["pull_request_target", "workflow_call"]) {
+    await t.test(eventName, async () => {
+      let fetched = false;
+      const result = await requireCurrentPrHead({
+        env: guardEnvironment({ GITHUB_EVENT_NAME: eventName }),
+        appendFile: () => {},
+        fetchImpl: async () => {
+          fetched = true;
+          return response(200, { state: "open", head: { sha: expectedSha } });
+        },
+        log: () => {}
+      });
+
+      assert.equal(fetched, true);
+      assert.equal(result.isCurrent, true);
+    });
+  }
+});
+
 test("current PR head guard rejects a superseded run and reports the new SHA", async () => {
   const writes = [];
 
@@ -71,7 +91,8 @@ test("current PR head guard skips API access for non-PR events", async () => {
     env: guardEnvironment({
       GITHUB_EVENT_NAME: "push",
       "INPUT_GITHUB-TOKEN": "",
-      "INPUT_PULL-REQUEST-NUMBER": ""
+      "INPUT_PULL-REQUEST-NUMBER": "",
+      "INPUT_EXPECTED-HEAD-SHA": ""
     }),
     appendFile: (_path, value) => writes.push(value),
     fetchImpl: async () => {
@@ -82,8 +103,8 @@ test("current PR head guard skips API access for non-PR events", async () => {
   });
 
   assert.equal(fetched, false);
-  assert.deepEqual(result, { isCurrent: true, currentHeadSha: expectedSha });
-  assert.deepEqual(writes, [`is-current=true\n`, `current-head-sha=${expectedSha}\n`]);
+  assert.deepEqual(result, { isCurrent: true, currentHeadSha: "" });
+  assert.deepEqual(writes, [`is-current=true\n`, `current-head-sha=\n`]);
 });
 
 test("current PR head guard fails closed for invalid inputs and API responses", async (t) => {

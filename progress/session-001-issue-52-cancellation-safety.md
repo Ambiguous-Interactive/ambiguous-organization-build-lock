@@ -32,6 +32,9 @@ commit cascade.
    closed-PR, HTTP-failure, and malformed-response behavior.
 3. Targeted validation: `node --test test/current-pr-head.test.js
    test/action-manifests.test.js` — 38 tests passed.
+4. Cursor Bugbot identified a `pull_request_target` bypass in the first pushed
+   guard. The guard now treats both PR event types as live checks and also checks
+   reusable-workflow calls when PR number/SHA inputs are supplied.
 
 ## Next tasks
 

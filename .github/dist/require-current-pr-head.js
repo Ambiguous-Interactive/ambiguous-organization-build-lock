@@ -24,8 +24,11 @@ async function requireCurrentPrHead(options = {}) {
   const log = options.log || console.log;
   const eventName = String(env.GITHUB_EVENT_NAME || "").trim();
   const expectedHeadSha = input(env, "EXPECTED-HEAD-SHA");
+  const pullRequestNumber = input(env, "PULL-REQUEST-NUMBER");
+  const hasPullRequestInputs = Boolean(pullRequestNumber || expectedHeadSha);
+  const isPullRequestEvent = eventName === "pull_request" || eventName === "pull_request_target";
 
-  if (eventName !== "pull_request") {
+  if (!isPullRequestEvent && !hasPullRequestInputs) {
     writeOutput(env, "is-current", "true", appendFile);
     writeOutput(env, "current-head-sha", expectedHeadSha, appendFile);
     log(`::notice::Current-head guard skipped for ${oneLine(eventName || "unknown")} event.`);
@@ -33,7 +36,6 @@ async function requireCurrentPrHead(options = {}) {
   }
 
   const token = input(env, "GITHUB-TOKEN");
-  const pullRequestNumber = input(env, "PULL-REQUEST-NUMBER");
   const repository = String(env.GITHUB_REPOSITORY || "").trim();
   const apiUrl = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
 
