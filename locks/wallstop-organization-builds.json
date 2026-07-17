@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29542220221:platform-build-linux:platform-build-linux-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-linux",
+    "runId": "29542220221",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29542220221",
+    "queuedAt": "2026-07-17T00:49:44.759Z",
+    "acquiredAt": "2026-07-17T01:11:32.585Z",
+    "expiresAt": "2026-07-17T05:11:32.585Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29542220221:platform-build-linux:platform-build-linux-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29542220221",
       "queuedAt": "2026-07-17T00:49:44.759Z",
+      "acquiredAt": "2026-07-17T01:11:32.585Z",
+      "expiresAt": "2026-07-17T05:11:32.585Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29543829075:perf-benchmarks:perf-6000.3.16f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -51,21 +66,6 @@
   ],
   "reservations": [
     {
-      "reservationId": "8f150cda-e51b-4276-9cb6-b6a4bb6b59e7",
-      "holderId": "Ambiguous-Interactive/DepartmentOfArrangements:29541225046:unity-build:unity-ci-compile",
-      "repository": "Ambiguous-Interactive/DepartmentOfArrangements",
-      "workflow": "Unity CI Validation",
-      "job": "unity-build",
-      "runId": "29541225046",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DepartmentOfArrangements/actions/runs/29541225046",
-      "runnerId": "GitHub Actions 1000109291",
-      "state": "cooldown",
-      "reason": "operator confirmed external resource cleanup",
-      "createdAt": "2026-07-17T00:18:30.494Z",
-      "availableAt": "2026-07-17T01:11:30.371Z"
-    },
-    {
       "reservationId": "9b6f816b-c8a9-46b8-9697-8379687a2a3e",
       "holderId": "Ambiguous-Interactive/DxMessaging:29543828846:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -82,5 +82,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T01:08:44.414Z"
+  "updatedAt": "2026-07-17T01:11:32.586Z"
 }
