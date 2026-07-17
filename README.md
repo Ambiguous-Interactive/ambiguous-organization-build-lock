@@ -186,11 +186,27 @@ Exit code `0` means clean, `1` means sanitized policy findings were emitted,
 and `2` means the snapshot or graph could not be audited completely. The audit
 traverses local called workflows and composite actions. External reusable
 workflows are deliberately rejected as unresolved because a single-repository
-snapshot cannot prove their contents; they never pass by assumption. Central CI
-checks out every registered consumer at an explicit commit and audits each tree.
+snapshot cannot prove their contents; they never pass by assumption. Ordinary
+pull-request CI is local and secretless. After it completes, a separate
+`workflow_run` job defined on protected `main` runs only trusted parser and
+analyzer code. This trusted second stage also works for Dependabot PRs without
+exposing secrets to their untrusted first-stage jobs. It reads the candidate's
+`consumer-policy.json` directly from the exact commit object, requires a regular
+`100644` blob with the fixed seven-repository schema, and checks out each named
+immutable commit. Candidate and consumer code is never executed.
+Each manifest pin must equal that repository's live default-branch head both
+before and after analysis. This is a point-in-time attestation: after any
+consumer default-branch change, update the manifest and rerun source CI, and
+rerun it immediately before merging the central PR.
 When `--required-guard-sha` is supplied, PR-reachable licensed jobs must start
 with that exact unconditional guard and run it again on every path into a direct
 or nested local lock acquisition.
+
+The trusted job uses a dedicated policy-reader App, installed only on the seven
+enrolled repositories, to mint a short-lived token restricted to those names and
+`contents: read`; checkout never persists it. The job re-queries the live PR
+head and publishes one fixed-name terminal Check Run on the exact candidate SHA.
+If the candidate advances, the newer source-CI run performs its own audit.
 
 ## State
 
@@ -285,6 +301,13 @@ reaper requests only `actions: read` and `metadata: read`, while hosted runner
 preflights request only organization self-hosted-runner inventory. Acquire and
 release never read cross-repository Actions state; an unreaped holder remains
 authoritative and admission fails closed.
+
+The trusted consumer-policy audit uses repository-scoped secrets
+`BUILD_LOCK_POLICY_READER_APP_ID` and
+`BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY`. Its separate App has only Contents
+read and is installed only on the exact seven audited repositories. These
+credentials must be exposed only to this central repository; they are never
+shared with consumers.
 
 During the compatibility cutover only, if the dedicated reader credentials are
 absent, the scheduled reaper may mint the same consumer-only Actions/Metadata

@@ -40,13 +40,17 @@ authorization boundary.
    all-repository access in the registered organization. This read-only
    installation makes future organization repositories reaper-visible and lets
    hosted preflights fail closed on runner outages without changing App scope.
-3. Verify compatibility while the writer App still has its old installation.
-4. Restrict the writer App installation to only this lock repository, with
+3. Create a separate policy-reader App with only Contents read. Install it only
+   on the exact enrolled consumer inventory, and expose its private key only as
+   repository secrets on this central lock repository.
+4. Verify compatibility while the writer App still has its old installation.
+5. Restrict the writer App installation to only this lock repository, with
    Contents write. Rotate its key and update the organization writer secret
    exposed to enrolled repositories.
-5. Prove the reader token cannot read contents and the writer token cannot
-   access a consumer repository. The unit suite verifies requested token scope;
-   the tracking issue must record live negative API probes.
+6. Prove the reaper's reader token cannot read contents and the writer
+   token cannot access a consumer repository. Prove the policy-audit token can
+   read only the seven enrolled repositories. The unit suite verifies requested
+   token scope; the tracking issue must record live negative API probes.
 
 If the compatibility release lands before reader credentials are provisioned,
 the reaper temporarily mints its consumer-only Actions/Metadata token from the

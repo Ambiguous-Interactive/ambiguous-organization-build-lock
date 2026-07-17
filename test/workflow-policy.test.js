@@ -11,17 +11,18 @@ const unparsedJobsName = "<unparsed-flow-jobs>";
 const expectedWorkflowJobs = new Map([
   ["auto-release.yml", ["release"]],
   ["ci.yml", ["validate"]],
+  ["consumer-policy-audit.yml", ["audit"]],
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedConsumerPolicySnapshots = [
-  ["Ambiguous-Interactive/unity-helpers", ".policy-consumers/unity-helpers", "af34f6f0234119100dde525d77c4a9f04315e736"],
-  ["Ambiguous-Interactive/DxMessaging", ".policy-consumers/DxMessaging", "282e38d156ff7611c68354e8f22aca275cb3b077"],
-  ["Ambiguous-Interactive/DoxReloaded", ".policy-consumers/DoxReloaded", "41177409036293a16c525017a571fe46d56f5325"],
-  ["Ambiguous-Interactive/IshoBoy", ".policy-consumers/IshoBoy", "3d8d4d9f6526aef2baa4a488024f5e79cd937a08"],
-  ["Ambiguous-Interactive/qora-redux", ".policy-consumers/qora-redux", "c9a1da99f06f9426fa6bc909e398effbc972ad44"],
-  ["Ambiguous-Interactive/DepartmentOfArrangements", ".policy-consumers/DepartmentOfArrangements", "70d7a3a6ba66f3703ac427be099d694cd64550ce"],
-  ["Ambiguous-Interactive/unity-builder", ".policy-consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
+  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "af34f6f0234119100dde525d77c4a9f04315e736"],
+  ["Ambiguous-Interactive/DxMessaging", "consumers/DxMessaging", "282e38d156ff7611c68354e8f22aca275cb3b077"],
+  ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "41177409036293a16c525017a571fe46d56f5325"],
+  ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d8d4d9f6526aef2baa4a488024f5e79cd937a08"],
+  ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "c9a1da99f06f9426fa6bc909e398effbc972ad44"],
+  ["Ambiguous-Interactive/DepartmentOfArrangements", "consumers/DepartmentOfArrangements", "70d7a3a6ba66f3703ac427be099d694cd64550ce"],
+  ["Ambiguous-Interactive/unity-builder", "consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
 ];
 const expectedCurrentHeadGuardSHA = "8e1cf892f5ee710908fc14f09b3c8033edcb74f9";
 const expectedWorkflowRunScriptSignatures = new Map([
@@ -35,8 +36,19 @@ const expectedWorkflowRunScriptSignatures = new Map([
       'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
       "set -euo pipefail\ngo run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
       "node --test test/*.test.js",
-      'go mod tidy -diff\ngo test ./...',
-      "set -euo pipefail\ngo run ./cmd/audit-cancellation-policy --git-dir .policy-consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha af34f6f0234119100dde525d77c4a9f04315e736 --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9"
+      'go mod tidy -diff\ngo test ./...'
+    ]
+  ],
+  [
+    "consumer-policy-audit.yml",
+    [
+      "set -euo pipefail\nif ! [[ \"${SOURCE_HEAD_REPOSITORY}\" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||",
+      "go run ./cmd/resolve-consumer-policy-candidate\n--event \"${SOURCE_EVENT}\"",
+      "go run ./cmd/validate-consumer-policy-manifest\n--git-dir \"${CANDIDATE_GIT_DIR}\"",
+      "set -euo pipefail\nverify_head() {",
+      "set -euo pipefail\ngo run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha \"${{ steps.manifest.outputs.unity_helpers_sha }}\" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9",
+      "set -euo pipefail\nverify_head() {",
+      "set -euo pipefail\nlive_identity_ok=false"
     ]
   ],
   [
@@ -1233,7 +1245,7 @@ function normalizedRunLines(run) {
     .map((line) => line.trim());
 }
 
-function assertConsumerPolicyWorkflow(workflow) {
+function assertLocalCIWorkflow(workflow) {
   assert.deepEqual(workflowJobPropertyNames(workflow, "validate"), ["name", "runs-on", "steps"]);
   const steps = workflowJobStepMaps(workflow, "validate");
   const checkoutReference = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
@@ -1242,72 +1254,360 @@ function assertConsumerPolicyWorkflow(workflow) {
   assert.equal(primaryCheckout.uses, checkoutReference);
   assert.deepEqual(primaryCheckout.with, { "persist-credentials": "false" });
   const enrollmentStep = steps.find((step) => step.name === "Run enrollment policy tests");
-  assert.ok(enrollmentStep, "CI must run analyzer tests before auditing consumers");
+  assert.ok(enrollmentStep, "CI must run analyzer tests");
   assert.deepEqual(Object.keys(enrollmentStep).sort(), ["line", "name", "run"]);
   assert.deepEqual(normalizedRunLines(enrollmentStep.run), ["go mod tidy -diff", "go test ./..."]);
-  const checkouts = steps
-    .filter((step) => String(step.name || "").endsWith(" policy snapshot"))
-    .map((step) => {
-      assert.equal(step.uses, checkoutReference, `${step.name} must pin the approved checkout action`);
-      assert.deepEqual(Object.keys(step.with).sort(), ["path", "persist-credentials", "ref", "repository"]);
-      assert.equal(step.with["persist-credentials"], "false", `${step.name} must not persist cross-repository credentials`);
-      return [step.with.repository, step.with.path, step.with.ref];
-    });
-  assert.deepEqual(checkouts, expectedConsumerPolicySnapshots);
-  assert.ok(
-    steps.findIndex((step) => String(step.name || "").endsWith(" policy snapshot")) >
-      steps.findIndex((step) => step.name === "Run enrollment policy tests"),
-    "remote policy snapshots must be fetched only after cheap local validation"
-  );
-
-  const auditStep = steps.find((step) => step.name === "Audit immutable consumer cancellation policy");
-  assert.ok(auditStep, "CI must keep a named consumer audit step");
-  assert.deepEqual(Object.keys(auditStep).sort(), ["line", "name", "run", "shell"]);
-  assert.equal(auditStep.shell, "bash");
-  assert.deepEqual(
-    normalizedRunLines(auditStep.run),
-    [
-      "set -euo pipefail",
-      ...expectedConsumerPolicySnapshots.map(
-        ([repository, directory, sha]) =>
-          `go run ./cmd/audit-cancellation-policy --git-dir ${directory} --repository ${repository} --sha ${sha} --required-guard-sha ${expectedCurrentHeadGuardSHA}`
-      )
-    ]
-  );
+  assert.doesNotMatch(workflow, /secrets\.|consumer-policy|policy commit/, "ordinary CI must remain local and secretless");
 }
 
-test("CI audits the complete immutable consumer inventory", () => {
-  assertConsumerPolicyWorkflow(readWorkflow("ci.yml"));
+function assertPrivilegedConsumerPolicyWorkflow(workflow) {
+  assert.match(
+    workflow,
+    /^name: Consumer cancellation policy audit\n\non:\n  workflow_run:\n    workflows: \[Build lock CI\]\n    types: \[completed\]\n\npermissions:\n  checks: write\n  contents: read\n  pull-requests: read\n\nconcurrency:\n  group: consumer-policy-\$\{\{ github\.event\.workflow_run\.head_repository\.id \}\}-\$\{\{ github\.event\.workflow_run\.head_branch \}\}\n  cancel-in-progress: true\n\njobs:\n  audit:\n    name: Consumer cancellation policy audit\n    if: >-\n      github\.event\.workflow_run\.path == '\.github\/workflows\/ci\.yml' &&\n      \(github\.event\.workflow_run\.event == 'pull_request' \|\|\n      \(github\.event\.workflow_run\.event == 'push' && github\.event\.workflow_run\.head_branch == 'main'\)\)\n    runs-on: ubuntu-latest\n    timeout-minutes: 60\n    steps:/,
+    "privileged workflow triggers and permissions must retain their exact trusted shape"
+  );
+  assert.deepEqual(workflowJobPropertyNames(workflow, "audit"), ["name", "if", "runs-on", "timeout-minutes", "steps"]);
+  const steps = workflowJobStepMaps(workflow, "audit");
+  assert.deepEqual(
+    steps.map((step) => step.name),
+    [
+      "Record exact source candidate identity",
+      "Checkout trusted policy code",
+      "Setup Go from trusted dependency metadata",
+      "Resolve current candidate association",
+      "Checkout candidate manifest object",
+      "Validate candidate manifest from exact Git object",
+      "Mint repository-scoped read token",
+      "Verify manifest pins current consumer heads",
+      "Checkout unity-helpers policy commit",
+      "Checkout DxMessaging policy commit",
+      "Checkout unity-builder policy commit",
+      "Checkout DoxReloaded policy commit",
+      "Checkout IshoBoy policy commit",
+      "Checkout qora-redux policy commit",
+      "Checkout DepartmentOfArrangements policy commit",
+      "Audit exact consumer commits with trusted analyzer",
+      "Revalidate current consumer heads",
+      "Publish terminal candidate policy check"
+    ],
+    "privileged workflow must not admit unreviewed steps"
+  );
+  const candidateIdentity = steps.find((step) => step.name === "Record exact source candidate identity");
+  assert.deepEqual(Object.keys(candidateIdentity).sort(), ["env", "id", "line", "name", "run", "shell"]);
+  assert.equal(candidateIdentity.id, "candidate");
+  assert.equal(candidateIdentity.shell, "bash");
+  assert.deepEqual(candidateIdentity.env, {
+    SOURCE_HEAD_REPOSITORY: "${{ github.event.workflow_run.head_repository.full_name }}",
+    SOURCE_HEAD_REPOSITORY_ID: "${{ github.event.workflow_run.head_repository.id }}",
+    SOURCE_HEAD_SHA: "${{ github.event.workflow_run.head_sha }}"
+  });
+  assert.deepEqual(normalizedRunLines(candidateIdentity.run), [
+    "set -euo pipefail",
+    'if ! [[ "${SOURCE_HEAD_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||',
+    '! [[ "${SOURCE_HEAD_REPOSITORY_ID}" =~ ^[1-9][0-9]*$ ]] ||',
+    '! [[ "${SOURCE_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then',
+    'echo "::error::The completed source run has an invalid candidate identity."',
+    "exit 1",
+    "fi",
+    "{",
+    'echo "candidate-identifiable=true"',
+    'echo "repository=${SOURCE_HEAD_REPOSITORY}"',
+    'echo "sha=${SOURCE_HEAD_SHA}"',
+    '} >> "${GITHUB_OUTPUT}"'
+  ]);
+  const checkoutReference = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
+  const trusted = steps.find((step) => step.name === "Checkout trusted policy code");
+  assert.deepEqual(Object.keys(trusted).sort(), ["if", "line", "name", "uses", "with"]);
+  assert.equal(trusted.uses, checkoutReference);
+  assert.equal(trusted.if, "${{ steps.candidate.outputs.candidate-identifiable == 'true' }}");
+  assert.deepEqual(trusted.with, {
+    ref: "${{ github.workflow_sha }}",
+    path: "trusted",
+    "persist-credentials": "false",
+    lfs: "false",
+    submodules: "false"
+  });
+  const setupGo = steps.find((step) => step.name === "Setup Go from trusted dependency metadata");
+  assert.deepEqual(Object.keys(setupGo).sort(), ["if", "line", "name", "uses", "with"]);
+  assert.equal(setupGo.if, "${{ steps.candidate.outputs.candidate-identifiable == 'true' }}");
+  assert.equal(setupGo.uses, "actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16");
+  assert.deepEqual(setupGo.with, {
+    "go-version-file": "trusted/go.mod",
+    cache: "false"
+  });
+  const association = steps.find((step) => step.name === "Resolve current candidate association");
+  assert.deepEqual(Object.keys(association).sort(), ["env", "id", "if", "line", "name", "run", "working-directory"]);
+  assert.equal(association.id, "association");
+  assert.equal(association.if, "${{ steps.candidate.outputs.candidate-identifiable == 'true' }}");
+  assert.equal(association["working-directory"], "trusted");
+  assert.deepEqual(association.env, {
+    GH_TOKEN: "${{ github.token }}",
+    SOURCE_EVENT: "${{ github.event.workflow_run.event }}",
+    SOURCE_HEAD_BRANCH: "${{ github.event.workflow_run.head_branch }}",
+    SOURCE_HEAD_REPOSITORY: "${{ github.event.workflow_run.head_repository.full_name }}",
+    SOURCE_HEAD_REPOSITORY_ID: "${{ github.event.workflow_run.head_repository.id }}",
+    SOURCE_HEAD_SHA: "${{ github.event.workflow_run.head_sha }}",
+    BASE_REPOSITORY_ID: "${{ github.repository_id }}"
+  });
+  assert.deepEqual(normalizedRunLines(association.run), [
+    "go run ./cmd/resolve-consumer-policy-candidate",
+    '--event "${SOURCE_EVENT}"',
+    '--repository "${GITHUB_REPOSITORY}"',
+    '--repository-id "${BASE_REPOSITORY_ID}"',
+    '--head-repository "${SOURCE_HEAD_REPOSITORY}"',
+    '--head-repository-id "${SOURCE_HEAD_REPOSITORY_ID}"',
+    '--head-sha "${SOURCE_HEAD_SHA}"',
+    '--head-branch "${SOURCE_HEAD_BRANCH}"',
+    '--github-output "${GITHUB_OUTPUT}"'
+  ]);
+  const candidate = steps.find((step) => step.name === "Checkout candidate manifest object");
+  assert.deepEqual(Object.keys(candidate).sort(), ["if", "line", "name", "uses", "with"]);
+  assert.equal(candidate.uses, checkoutReference);
+  assert.equal(candidate.if, "${{ steps.association.outputs.should-audit == 'true' }}");
+  assert.deepEqual(candidate.with, {
+    "allow-unsafe-pr-checkout": "true",
+    repository: "${{ steps.candidate.outputs.repository }}",
+    ref: "${{ steps.candidate.outputs.sha }}",
+    path: "candidate",
+    token: "${{ github.token }}",
+    "persist-credentials": "false",
+    lfs: "false",
+    submodules: "false",
+    "sparse-checkout": "consumer-policy.json",
+    "sparse-checkout-cone-mode": "false"
+  });
+  const parser = steps.find((step) => step.name === "Validate candidate manifest from exact Git object");
+  assert.deepEqual(Object.keys(parser).sort(), ["env", "id", "if", "line", "name", "run", "working-directory"]);
+  assert.equal(parser.if, "${{ steps.association.outputs.should-audit == 'true' }}");
+  assert.equal(parser["working-directory"], "trusted");
+  assert.deepEqual(normalizedRunLines(parser.run), [
+    "go run ./cmd/validate-consumer-policy-manifest",
+    '--git-dir "${CANDIDATE_GIT_DIR}"',
+    '--sha "${CANDIDATE_SHA}"',
+    '--github-output "${GITHUB_OUTPUT}"'
+  ]);
+  assert.deepEqual(parser.env, {
+    CANDIDATE_GIT_DIR: "../candidate/.git",
+    CANDIDATE_SHA: "${{ steps.candidate.outputs.sha }}"
+  });
+
+  const token = steps.find((step) => step.name === "Mint repository-scoped read token");
+  assert.deepEqual(Object.keys(token).sort(), ["id", "if", "line", "name", "uses", "with"]);
+  assert.equal(token.id, "consumer-token");
+  assert.equal(token.if, "${{ steps.association.outputs.should-audit == 'true' && steps.manifest.outcome == 'success' }}");
+  assert.equal(token.uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1");
+  assert.deepEqual(token.with, {
+    "app-id": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}",
+    "private-key": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}",
+    owner: "Ambiguous-Interactive",
+    repositories: "unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,DepartmentOfArrangements,unity-builder",
+    "permission-contents": "read"
+  });
+
+  const expectedHeadEnvironment = {
+    GH_TOKEN: "${{ steps.consumer-token.outputs.token }}",
+    UNITY_HELPERS_SHA: "${{ steps.manifest.outputs.unity_helpers_sha }}",
+    DX_MESSAGING_SHA: "${{ steps.manifest.outputs.dx_messaging_sha }}",
+    DOX_RELOADED_SHA: "${{ steps.manifest.outputs.dox_reloaded_sha }}",
+    ISHO_BOY_SHA: "${{ steps.manifest.outputs.isho_boy_sha }}",
+    QORA_REDUX_SHA: "${{ steps.manifest.outputs.qora_redux_sha }}",
+    DEPARTMENT_OF_ARRANGEMENTS_SHA: "${{ steps.manifest.outputs.department_of_arrangements_sha }}",
+    UNITY_BUILDER_SHA: "${{ steps.manifest.outputs.unity_builder_sha }}"
+  };
+  const expectedHeadCalls = [
+    'verify_head Ambiguous-Interactive/unity-helpers "${UNITY_HELPERS_SHA}"',
+    'verify_head Ambiguous-Interactive/DxMessaging "${DX_MESSAGING_SHA}"',
+    'verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"',
+    'verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"',
+    'verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"',
+    'verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"',
+    'verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"'
+  ];
+  const assertHeadVerification = (step, id, condition, diagnostic) => {
+    assert.deepEqual(Object.keys(step).sort(), ["env", "id", "if", "line", "name", "run", "shell"]);
+    assert.equal(step.id, id);
+    assert.equal(step.if, condition);
+    assert.equal(step.shell, "bash");
+    assert.deepEqual(step.env, expectedHeadEnvironment);
+    assert.deepEqual(normalizedRunLines(step.run), [
+      "set -euo pipefail",
+      "verify_head() {",
+      'local repository="$1"',
+      'local expected_sha="$2"',
+      "local default_branch",
+      "local current_sha",
+      'default_branch="$(gh api "repos/${repository}" --jq .default_branch)"',
+      'current_sha="$(gh api "repos/${repository}/commits/${default_branch}" --jq .sha)"',
+      'if [ "${current_sha}" != "${expected_sha}" ]; then',
+      `echo "::error::\${repository} ${diagnostic}"`,
+      "return 1",
+      "fi",
+      "}",
+      ...expectedHeadCalls
+    ]);
+  };
+  assertHeadVerification(
+    steps.find((step) => step.name === "Verify manifest pins current consumer heads"),
+    "initial-heads",
+    "${{ steps.consumer-token.outcome == 'success' }}",
+    "policy pin is not its current default-branch head."
+  );
+  assertHeadVerification(
+    steps.find((step) => step.name === "Revalidate current consumer heads"),
+    "final-heads",
+    "${{ steps.audit.outcome == 'success' }}",
+    "advanced during the policy audit."
+  );
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, "consumer-policy.json"), "utf8"));
+  assert.deepEqual(
+    Object.entries(manifest).sort(([left], [right]) => left.localeCompare(right)),
+    expectedConsumerPolicySnapshots.map(([repository, , sha]) => [repository, sha]).sort(([left], [right]) => left.localeCompare(right)),
+    "candidate manifest must exactly match the reviewed consumer inventory"
+  );
+
+  const consumerCheckouts = steps.filter((step) => String(step.name || "").endsWith(" policy commit"));
+  assert.equal(consumerCheckouts.length, expectedConsumerPolicySnapshots.length);
+  const outputByRepository = new Map([
+    ["Ambiguous-Interactive/unity-helpers", "unity_helpers_sha"],
+    ["Ambiguous-Interactive/DxMessaging", "dx_messaging_sha"],
+    ["Ambiguous-Interactive/DoxReloaded", "dox_reloaded_sha"],
+    ["Ambiguous-Interactive/IshoBoy", "isho_boy_sha"],
+    ["Ambiguous-Interactive/qora-redux", "qora_redux_sha"],
+    ["Ambiguous-Interactive/DepartmentOfArrangements", "department_of_arrangements_sha"],
+    ["Ambiguous-Interactive/unity-builder", "unity_builder_sha"]
+  ]);
+  for (const [repository, directory] of expectedConsumerPolicySnapshots) {
+    const step = consumerCheckouts.find((candidateStep) => candidateStep.with.repository === repository);
+    assert.ok(step, `missing checkout for ${repository}`);
+    assert.deepEqual(Object.keys(step).sort(), ["if", "line", "name", "uses", "with"]);
+    assert.equal(step.if, "${{ steps.initial-heads.outcome == 'success' }}");
+    assert.equal(step.uses, checkoutReference);
+    const expectedWith = {
+      repository,
+      ref: `\${{ steps.manifest.outputs.${outputByRepository.get(repository)} }}`,
+      path: directory,
+      token: "${{ steps.consumer-token.outputs.token }}",
+      "persist-credentials": "false",
+      lfs: "false",
+      submodules: "false"
+    };
+    assert.deepEqual(step.with, expectedWith, `${repository} checkout must retain exact immutable least-privilege inputs`);
+  }
+  for (const step of steps.filter((candidateStep) => candidateStep.run)) {
+    assert.notEqual(step["working-directory"], "candidate", "candidate code must never execute");
+    assert.equal(String(step["working-directory"] || "trusted").includes("consumers/"), false, "consumer code must never execute");
+  }
+  const audit = steps.find((step) => step.name === "Audit exact consumer commits with trusted analyzer");
+  assert.deepEqual(Object.keys(audit).sort(), ["id", "if", "line", "name", "run", "shell", "working-directory"]);
+  assert.equal(audit.id, "audit");
+  assert.equal(audit.if, "${{ steps.initial-heads.outcome == 'success' }}");
+  assert.equal(audit.shell, "bash");
+  assert.equal(audit["working-directory"], "trusted");
+  assert.deepEqual(normalizedRunLines(audit.run), [
+    "set -euo pipefail",
+    ...expectedConsumerPolicySnapshots.map(([repository, directory]) => {
+      const output = outputByRepository.get(repository);
+      return `go run ./cmd/audit-cancellation-policy --git-dir ../${directory} --repository ${repository} --sha "\${{ steps.manifest.outputs.${output} }}" --required-guard-sha ${expectedCurrentHeadGuardSHA}`;
+    })
+  ]);
+
+  const publish = steps.find((step) => step.name === "Publish terminal candidate policy check");
+  assert.deepEqual(Object.keys(publish).sort(), ["env", "if", "line", "name", "run", "shell"]);
+  assert.equal(publish.if, "${{ always() && steps.candidate.outputs.candidate-identifiable == 'true' }}");
+  assert.equal(publish.shell, "bash");
+  assert.deepEqual(publish.env, {
+    GH_TOKEN: "${{ github.token }}",
+    SOURCE_EVENT: "${{ github.event.workflow_run.event }}",
+    CANDIDATE_SHA: "${{ steps.candidate.outputs.sha }}",
+    PR_NUMBER: "${{ steps.association.outputs.pr-number }}",
+    AUDIT_OUTCOME: "${{ steps.audit.outcome }}",
+    HEADS_OUTCOME: "${{ steps.final-heads.outcome }}",
+    SHOULD_AUDIT: "${{ steps.association.outputs.should-audit }}",
+    SOURCE_HEAD_REPOSITORY_ID: "${{ github.event.workflow_run.head_repository.id }}",
+    BASE_REPOSITORY_ID: "${{ github.repository_id }}",
+    CHECK_NAME: "Consumer cancellation policy audit"
+  });
+  assert.deepEqual(normalizedRunLines(publish.run), [
+    "set -euo pipefail",
+    "live_identity_ok=false",
+    'if [ "${SOURCE_EVENT}" = "pull_request" ] && [ -n "${PR_NUMBER}" ]; then',
+    'if pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")" &&',
+    '[ "$(jq -r \'.state\' <<<"${pr_json}")" = "open" ] &&',
+    '[ "$(jq -r \'.base.ref\' <<<"${pr_json}")" = "main" ] &&',
+    '[ "$(jq -r \'.base.repo.id\' <<<"${pr_json}")" = "${BASE_REPOSITORY_ID}" ] &&',
+    '[ "$(jq -r \'.head.repo.id\' <<<"${pr_json}")" = "${SOURCE_HEAD_REPOSITORY_ID}" ] &&',
+    '[ "$(jq -r \'.head.sha\' <<<"${pr_json}")" = "${CANDIDATE_SHA}" ]; then',
+    "live_identity_ok=true",
+    "else",
+    'echo "::error::Pull request identity changed during the policy audit."',
+    "fi",
+    'elif [ "${SOURCE_EVENT}" = "push" ]; then',
+    "live_identity_ok=true",
+    "fi",
+    "conclusion=failure",
+    'if [ "${SHOULD_AUDIT}" = "true" ] && [ "${AUDIT_OUTCOME}" = "success" ] &&',
+    '[ "${HEADS_OUTCOME}" = "success" ] && [ "${live_identity_ok}" = "true" ]; then',
+    "conclusion=success",
+    "fi",
+    'gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \\',
+    '-H "Accept: application/vnd.github+json" \\',
+    '-f name="${CHECK_NAME}" \\',
+    '-f head_sha="${CANDIDATE_SHA}" \\',
+    "-f status=completed \\",
+    '-f conclusion="${conclusion}" \\',
+    '-f completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\',
+    '-f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \\',
+    '-f external_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"'
+  ]);
+}
+
+test("ordinary CI stays local while the trusted workflow audits the complete consumer inventory", () => {
+  assertLocalCIWorkflow(readWorkflow("ci.yml"));
+  assertPrivilegedConsumerPolicyWorkflow(readWorkflow("consumer-policy-audit.yml"));
 });
 
-test("CI policy scripts remain bound to their protected step names", () => {
-  const workflow = readWorkflow("ci.yml");
-  const swapNames = (text, left, right) =>
-    text
-      .replace(`- name: ${left}`, "- name: __POLICY_NAME_SWAP__")
-      .replace(`- name: ${right}`, `- name: ${left}`)
-      .replace("- name: __POLICY_NAME_SWAP__", `- name: ${right}`);
-
-  for (const [left, right] of [
-    ["Check JavaScript syntax", "Run enrollment policy tests"],
-    ["Lint GitHub Actions workflows", "Audit immutable consumer cancellation policy"]
-  ]) {
-    assert.throws(
-      () => assertConsumerPolicyWorkflow(swapNames(workflow, left, right)),
-      undefined,
-      `swapping ${left} with ${right} must not preserve the CI policy gate`
-    );
-  }
-
+test("consumer policy jobs reject fail-open job controls", () => {
   for (const property of ["continue-on-error: true", "if: false"]) {
-    const mutated = workflow.replace(
+    const mutated = readWorkflow("consumer-policy-audit.yml").replace(
       "    runs-on: ubuntu-latest",
       `    ${property}\n    runs-on: ubuntu-latest`
     );
     assert.throws(
-      () => assertConsumerPolicyWorkflow(mutated),
+      () => assertPrivilegedConsumerPolicyWorkflow(mutated),
       undefined,
-      `validate job must reject ${property}`
+      `audit job must reject ${property}`
+    );
+  }
+});
+
+test("privileged consumer audit rejects trust-boundary mutations", () => {
+  const workflow = readWorkflow("consumer-policy-audit.yml");
+  const mutations = [
+    ["workflow_run:", "pull_request_target:"],
+    ["workflow_run.path == '.github/workflows/ci.yml'", "workflow_run.path != '.github/workflows/ci.yml'"],
+    ['--repository-id "${BASE_REPOSITORY_ID}"', '--repository-id "${SOURCE_HEAD_REPOSITORY_ID}"'],
+    ["ref: ${{ github.workflow_sha }}", "ref: ${{ github.sha }}"],
+    ["cache: false", "cache: true"],
+    ["CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}", "CANDIDATE_SHA: ${{ github.sha }}"],
+    ["BUILD_LOCK_POLICY_READER_APP_ID", "BUILD_LOCK_READER_APP_ID"],
+    ["CHECK_NAME: Consumer cancellation policy audit", "CHECK_NAME: Build lock audit"],
+    ['-f head_sha="${CANDIDATE_SHA}"', '-f head_sha="${GITHUB_SHA}"'],
+    ["-f status=completed", "-f status=in_progress"],
+    ['-f conclusion="${conclusion}"', "-f conclusion=neutral"],
+    ["actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16", "attacker/setup-go@0123456789abcdef0123456789abcdef01234567"],
+    [
+      "uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\n        with:\n          repository: Ambiguous-Interactive/unity-helpers",
+      "uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\n        env:\n          NODE_OPTIONS: --require candidate/payload.js\n        with:\n          repository: Ambiguous-Interactive/unity-helpers"
+    ]
+  ];
+
+  for (const [search, replacement] of mutations) {
+    assert.ok(workflow.includes(search), `mutation fixture must contain ${search}`);
+    assert.throws(
+      () => assertPrivilegedConsumerPolicyWorkflow(workflow.replace(search, replacement)),
+      undefined,
+      `privileged contract must reject ${replacement}`
     );
   }
 });
@@ -1498,26 +1798,13 @@ function policySensitiveAliasLines(text) {
   return [...new Set(aliases)];
 }
 
-test("workflows that query Actions REST APIs declare actions read permission", () => {
-  const checkedJobs = [];
-
-  for (const workflow of listWorkflows()) {
-    const text = readWorkflow(workflow);
-
-    for (const job of jobSections(text)) {
-      if (!/gh api[\s\S]*\/actions\/(?:runs|workflows)\b/.test(job.text)) {
-        continue;
-      }
-
-      checkedJobs.push(`${workflow}:${job.name}`);
-      assert.ok(
-        hasEffectivePermission(text, job.text, "actions", "read"),
-        `${workflow} job ${job.name} must grant actions: read/write in its effective permissions`
-      );
-    }
-  }
-
-  assert.deepEqual(checkedJobs, ["dependabot-auto-merge.yml:dependabot"]);
+test("Dependabot Actions API polling retains actions read permission", () => {
+  const workflow = readWorkflow("dependabot-auto-merge.yml");
+  const job = jobSections(workflow).find((candidate) => candidate.name === "dependabot");
+  assert.ok(job, "Dependabot workflow must keep its trusted polling job");
+  assert.ok(hasEffectivePermission(workflow, job.text, "actions", "read"));
+  assert.match(job.text, /gh api "repos\/\$\{REPOSITORY\}\/actions\/workflows\/\$\{CI_WORKFLOW_FILE\}"/);
+  assert.match(job.text, /gh api -X GET "repos\/\$\{REPOSITORY\}\/actions\/runs"/);
 });
 
 test("permission parser handles flow maps and fails closed on narrowed job overrides", () => {

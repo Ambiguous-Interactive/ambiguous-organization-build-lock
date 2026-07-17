@@ -87,6 +87,33 @@ commit cascade.
     GitHub's second automatic-cancellation mechanism in addition to concurrency.
     The unity-helpers manual abort option was removed and all three licensed
     matrices were republished at `af34f6f0234119100dde525d77c4a9f04315e736`.
+12. The first immutable-inventory CI run proved the default repository token
+    cannot read private sibling repositories. Organization policy deliberately
+    disables repository deploy keys, so the audit does not weaken that policy or
+    embed private consumer snapshots.
+13. The privileged inventory audit is now a trusted `workflow_run` second
+    stage. Ordinary PR CI stays local, secretless, and safe for forks and
+    Dependabot. The second stage checks out the exact protected workflow commit,
+    disables cross-trust dependency caching, reads only a strict seven-repository
+    manifest from the candidate's exact regular Git blob, and never executes
+    candidate or consumer content. A separate policy-reader App, whose key is
+    central-repository-only and whose installation is limited to the seven
+    consumers, mints `contents: read` tokens and revokes them at job completion.
+    The exact event repository IDs and live PR head are both checked. One terminal
+    fixed-name Check Run is published on the candidate SHA, avoiding both
+    base-SHA false positives and orphaned in-progress checks.
+14. The source run's optional PR-association array is not trusted or required.
+    A tested resolver lists open `main` PRs and requires exactly one match for the
+    event's head repository ID and SHA, covering empty associations, forks,
+    Dependabot, stale heads, and ambiguous matches. Candidate identity is recorded
+    before the fallible lookup so a resolution failure can still publish a red
+    terminal check on the exact source SHA.
+15. Immutable manifest pins must also equal every consumer's live default-branch
+    head. The policy App verifies all seven before checkout and again after the
+    analyzer, so historical passing commits cannot be used as downgrade pins and
+    a consumer advance during the audit cannot produce a stale success. The
+    Check Run is explicitly a point-in-time attestation; source CI must be rerun
+    after consumer changes and immediately before central merge.
 
 ## Next tasks
 

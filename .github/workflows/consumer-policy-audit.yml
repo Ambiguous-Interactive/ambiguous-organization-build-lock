@@ -1,0 +1,341 @@
+name: Consumer cancellation policy audit
+
+on:
+  workflow_run:
+    workflows: [Build lock CI]
+    types: [completed]
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: consumer-policy-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Consumer cancellation policy audit
+    if: >-
+      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Record exact source candidate identity
+        id: candidate
+        shell: bash
+        env:
+          SOURCE_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          SOURCE_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
+          SOURCE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${SOURCE_HEAD_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
+            ! [[ "${SOURCE_HEAD_REPOSITORY_ID}" =~ ^[1-9][0-9]*$ ]] ||
+            ! [[ "${SOURCE_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The completed source run has an invalid candidate identity."
+            exit 1
+          fi
+          {
+            echo "candidate-identifiable=true"
+            echo "repository=${SOURCE_HEAD_REPOSITORY}"
+            echo "sha=${SOURCE_HEAD_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout trusted policy code
+        if: ${{ steps.candidate.outputs.candidate-identifiable == 'true' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Setup Go from trusted dependency metadata
+        if: ${{ steps.candidate.outputs.candidate-identifiable == 'true' }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: trusted/go.mod
+          cache: false
+
+      - name: Resolve current candidate association
+        id: association
+        if: ${{ steps.candidate.outputs.candidate-identifiable == 'true' }}
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          SOURCE_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          SOURCE_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
+          SOURCE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BASE_REPOSITORY_ID: ${{ github.repository_id }}
+        run: >-
+          go run ./cmd/resolve-consumer-policy-candidate
+          --event "${SOURCE_EVENT}"
+          --repository "${GITHUB_REPOSITORY}"
+          --repository-id "${BASE_REPOSITORY_ID}"
+          --head-repository "${SOURCE_HEAD_REPOSITORY}"
+          --head-repository-id "${SOURCE_HEAD_REPOSITORY_ID}"
+          --head-sha "${SOURCE_HEAD_SHA}"
+          --head-branch "${SOURCE_HEAD_BRANCH}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Checkout candidate manifest object
+        if: ${{ steps.association.outputs.should-audit == 'true' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # Only trusted Git plumbing reads this exact object; no candidate file executes.
+          allow-unsafe-pr-checkout: true
+          repository: ${{ steps.candidate.outputs.repository }}
+          ref: ${{ steps.candidate.outputs.sha }}
+          path: candidate
+          token: ${{ github.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+          sparse-checkout: consumer-policy.json
+          sparse-checkout-cone-mode: false
+
+      - name: Validate candidate manifest from exact Git object
+        id: manifest
+        if: ${{ steps.association.outputs.should-audit == 'true' }}
+        working-directory: trusted
+        env:
+          CANDIDATE_GIT_DIR: ../candidate/.git
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: >-
+          go run ./cmd/validate-consumer-policy-manifest
+          --git-dir "${CANDIDATE_GIT_DIR}"
+          --sha "${CANDIDATE_SHA}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Mint repository-scoped read token
+        id: consumer-token
+        if: ${{ steps.association.outputs.should-audit == 'true' && steps.manifest.outcome == 'success' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}
+          owner: Ambiguous-Interactive
+          repositories: unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,DepartmentOfArrangements,unity-builder
+          permission-contents: read
+
+      - name: Verify manifest pins current consumer heads
+        id: initial-heads
+        if: ${{ steps.consumer-token.outcome == 'success' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          UNITY_HELPERS_SHA: ${{ steps.manifest.outputs.unity_helpers_sha }}
+          DX_MESSAGING_SHA: ${{ steps.manifest.outputs.dx_messaging_sha }}
+          DOX_RELOADED_SHA: ${{ steps.manifest.outputs.dox_reloaded_sha }}
+          ISHO_BOY_SHA: ${{ steps.manifest.outputs.isho_boy_sha }}
+          QORA_REDUX_SHA: ${{ steps.manifest.outputs.qora_redux_sha }}
+          DEPARTMENT_OF_ARRANGEMENTS_SHA: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
+          UNITY_BUILDER_SHA: ${{ steps.manifest.outputs.unity_builder_sha }}
+        run: |
+          set -euo pipefail
+          verify_head() {
+            local repository="$1"
+            local expected_sha="$2"
+            local default_branch
+            local current_sha
+            default_branch="$(gh api "repos/${repository}" --jq .default_branch)"
+            current_sha="$(gh api "repos/${repository}/commits/${default_branch}" --jq .sha)"
+            if [ "${current_sha}" != "${expected_sha}" ]; then
+              echo "::error::${repository} policy pin is not its current default-branch head."
+              return 1
+            fi
+          }
+          verify_head Ambiguous-Interactive/unity-helpers "${UNITY_HELPERS_SHA}"
+          verify_head Ambiguous-Interactive/DxMessaging "${DX_MESSAGING_SHA}"
+          verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"
+          verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"
+          verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"
+          verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"
+          verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"
+
+      - name: Checkout unity-helpers policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/unity-helpers
+          ref: ${{ steps.manifest.outputs.unity_helpers_sha }}
+          path: consumers/unity-helpers
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout DxMessaging policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DxMessaging
+          ref: ${{ steps.manifest.outputs.dx_messaging_sha }}
+          path: consumers/DxMessaging
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout unity-builder policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/unity-builder
+          ref: ${{ steps.manifest.outputs.unity_builder_sha }}
+          path: consumers/unity-builder
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout DoxReloaded policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DoxReloaded
+          ref: ${{ steps.manifest.outputs.dox_reloaded_sha }}
+          path: consumers/DoxReloaded
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout IshoBoy policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/IshoBoy
+          ref: ${{ steps.manifest.outputs.isho_boy_sha }}
+          path: consumers/IshoBoy
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout qora-redux policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/qora-redux
+          ref: ${{ steps.manifest.outputs.qora_redux_sha }}
+          path: consumers/qora-redux
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Checkout DepartmentOfArrangements policy commit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DepartmentOfArrangements
+          ref: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
+          path: consumers/DepartmentOfArrangements
+          token: ${{ steps.consumer-token.outputs.token }}
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Audit exact consumer commits with trusted analyzer
+        id: audit
+        if: ${{ steps.initial-heads.outcome == 'success' }}
+        working-directory: trusted
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha "${{ steps.manifest.outputs.unity_helpers_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DxMessaging --repository Ambiguous-Interactive/DxMessaging --sha "${{ steps.manifest.outputs.dx_messaging_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DoxReloaded --repository Ambiguous-Interactive/DoxReloaded --sha "${{ steps.manifest.outputs.dox_reloaded_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/IshoBoy --repository Ambiguous-Interactive/IshoBoy --sha "${{ steps.manifest.outputs.isho_boy_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/qora-redux --repository Ambiguous-Interactive/qora-redux --sha "${{ steps.manifest.outputs.qora_redux_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DepartmentOfArrangements --repository Ambiguous-Interactive/DepartmentOfArrangements --sha "${{ steps.manifest.outputs.department_of_arrangements_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-builder --repository Ambiguous-Interactive/unity-builder --sha "${{ steps.manifest.outputs.unity_builder_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+
+      - name: Revalidate current consumer heads
+        id: final-heads
+        if: ${{ steps.audit.outcome == 'success' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          UNITY_HELPERS_SHA: ${{ steps.manifest.outputs.unity_helpers_sha }}
+          DX_MESSAGING_SHA: ${{ steps.manifest.outputs.dx_messaging_sha }}
+          DOX_RELOADED_SHA: ${{ steps.manifest.outputs.dox_reloaded_sha }}
+          ISHO_BOY_SHA: ${{ steps.manifest.outputs.isho_boy_sha }}
+          QORA_REDUX_SHA: ${{ steps.manifest.outputs.qora_redux_sha }}
+          DEPARTMENT_OF_ARRANGEMENTS_SHA: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
+          UNITY_BUILDER_SHA: ${{ steps.manifest.outputs.unity_builder_sha }}
+        run: |
+          set -euo pipefail
+          verify_head() {
+            local repository="$1"
+            local expected_sha="$2"
+            local default_branch
+            local current_sha
+            default_branch="$(gh api "repos/${repository}" --jq .default_branch)"
+            current_sha="$(gh api "repos/${repository}/commits/${default_branch}" --jq .sha)"
+            if [ "${current_sha}" != "${expected_sha}" ]; then
+              echo "::error::${repository} advanced during the policy audit."
+              return 1
+            fi
+          }
+          verify_head Ambiguous-Interactive/unity-helpers "${UNITY_HELPERS_SHA}"
+          verify_head Ambiguous-Interactive/DxMessaging "${DX_MESSAGING_SHA}"
+          verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"
+          verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"
+          verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"
+          verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"
+          verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"
+
+      - name: Publish terminal candidate policy check
+        if: ${{ always() && steps.candidate.outputs.candidate-identifiable == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          PR_NUMBER: ${{ steps.association.outputs.pr-number }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          HEADS_OUTCOME: ${{ steps.final-heads.outcome }}
+          SHOULD_AUDIT: ${{ steps.association.outputs.should-audit }}
+          SOURCE_HEAD_REPOSITORY_ID: ${{ github.event.workflow_run.head_repository.id }}
+          BASE_REPOSITORY_ID: ${{ github.repository_id }}
+          CHECK_NAME: Consumer cancellation policy audit
+        run: |
+          set -euo pipefail
+          live_identity_ok=false
+          if [ "${SOURCE_EVENT}" = "pull_request" ] && [ -n "${PR_NUMBER}" ]; then
+            if pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")" &&
+              [ "$(jq -r '.state' <<<"${pr_json}")" = "open" ] &&
+              [ "$(jq -r '.base.ref' <<<"${pr_json}")" = "main" ] &&
+              [ "$(jq -r '.base.repo.id' <<<"${pr_json}")" = "${BASE_REPOSITORY_ID}" ] &&
+              [ "$(jq -r '.head.repo.id' <<<"${pr_json}")" = "${SOURCE_HEAD_REPOSITORY_ID}" ] &&
+              [ "$(jq -r '.head.sha' <<<"${pr_json}")" = "${CANDIDATE_SHA}" ]; then
+              live_identity_ok=true
+            else
+              echo "::error::Pull request identity changed during the policy audit."
+            fi
+          elif [ "${SOURCE_EVENT}" = "push" ]; then
+            live_identity_ok=true
+          fi
+          conclusion=failure
+          if [ "${SHOULD_AUDIT}" = "true" ] && [ "${AUDIT_OUTCOME}" = "success" ] &&
+            [ "${HEADS_OUTCOME}" = "success" ] && [ "${live_identity_ok}" = "true" ]; then
+            conclusion=success
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -H "Accept: application/vnd.github+json" \
+            -f name="${CHECK_NAME}" \
+            -f head_sha="${CANDIDATE_SHA}" \
+            -f status=completed \
+            -f conclusion="${conclusion}" \
+            -f completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            -f external_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
