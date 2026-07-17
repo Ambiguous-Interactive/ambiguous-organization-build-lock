@@ -1396,8 +1396,8 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
   assert.equal(token.if, "${{ steps.association.outputs.should-audit == 'true' && steps.manifest.outcome == 'success' }}");
   assert.equal(token.uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1");
   assert.deepEqual(token.with, {
-    "app-id": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}",
-    "private-key": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}",
+    "app-id": "${{ secrets.BUILD_LOCK_READER_APP_ID }}",
+    "private-key": "${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}",
     owner: "Ambiguous-Interactive",
     repositories: "unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,unity-builder",
     "permission-contents": "read"
@@ -1586,7 +1586,7 @@ test("privileged consumer audit rejects trust-boundary mutations", () => {
     ["ref: ${{ github.workflow_sha }}", "ref: ${{ github.sha }}"],
     ["cache: false", "cache: true"],
     ["CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}", "CANDIDATE_SHA: ${{ github.sha }}"],
-    ["BUILD_LOCK_POLICY_READER_APP_ID", "BUILD_LOCK_READER_APP_ID"],
+    ["BUILD_LOCK_READER_APP_ID", "BUILD_LOCK_APP_ID"],
     ["CHECK_NAME: Consumer cancellation policy audit", "CHECK_NAME: Build lock audit"],
     ['-f head_sha="${CANDIDATE_SHA}"', '-f head_sha="${GITHUB_SHA}"'],
     ["-f status=completed", "-f status=in_progress"],

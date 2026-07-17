@@ -5,18 +5,17 @@ lock action. The protected writer credential remains the authorization boundary.
 
 ## Repository setup
 
-1. Confirm the dedicated reader GitHub App is installed with all-repository access
-   in the registered organization. The App has Actions read, Metadata read, and
-   organization Self-hosted runners read, with no Contents permission, so future
-   organization repositories require no reader installation change. Each
-   operation still mints a token with only the subset it needs.
+1. Confirm the reader GitHub App is installed only on the exact active consumer
+   inventory. The App has Actions read, Contents read, Metadata read, and
+   organization Self-hosted runners read. Each operation mints a token with only
+   the subset it needs.
 2. Confirm the organization-level writer, reader, and Unity secrets are visible
    to the repository. Do not add per-repository environments or approval gates.
    The writer App itself stays installed only on
    `ambiguous-organization-build-lock` with Contents write.
-3. Do not expose the separate policy-reader App credentials to consumers. That
-   Contents-read App is installed only on the enrolled inventory and its secrets
-   exist only on the central lock repository.
+3. Treat the shared reader private key as a cross-repository read boundary.
+   Restrict organization-secret visibility to the active trusted consumers and
+   this central repository; do not make it organization-wide.
 4. Pin acquire and release actions to one reviewed immutable commit SHA.
 5. Restrict licensed pull-request jobs to same-repository heads. Reject fork and
    Dependabot pull requests before the job can enter `unity-license`.

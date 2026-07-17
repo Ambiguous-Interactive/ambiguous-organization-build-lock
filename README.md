@@ -212,9 +212,9 @@ When `--required-guard-sha` is supplied, PR-reachable licensed jobs must start
 with that exact unconditional guard and run it again on every path into a direct
 or nested local lock acquisition.
 
-The trusted job uses a dedicated policy-reader App, installed only on the six
-enrolled repositories, to mint a short-lived token restricted to those names and
-`contents: read`; checkout never persists it. The job re-queries the live PR
+The trusted job uses the reader App to mint a short-lived token restricted to
+the six enrolled repositories and `contents: read`; checkout never persists it.
+The job re-queries the live PR
 head and publishes one fixed-name terminal Check Run on the exact candidate SHA.
 If the candidate advances, the newer source-CI run performs its own audit.
 
@@ -301,23 +301,21 @@ registered organization can enroll without a lock-action code change; App-key
 possession and organization-secret repository access remain the authorization
 boundary.
 
-The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
-`BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App with all-repository
-access in the registered organization so newly created organization repositories
-are reaper-visible without an App installation change. The reader has Actions
-read, Metadata read, and organization Self-hosted runners read; it has no
-Contents permission. Each use mints a token restricted to the operation: the
-reaper requests only `actions: read` and `metadata: read`, while hosted runner
-preflights request only organization self-hosted-runner inventory. Acquire and
-release never read cross-repository Actions state; an unreaped holder remains
-authoritative and admission fails closed.
+The reaper, hosted runner preflight, and trusted consumer-policy audit use
+`BUILD_LOCK_READER_APP_ID` and `BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that
+reader App only on the exact six active consumers. It has Actions read, Contents
+read, Metadata read, and organization Self-hosted runners read. Each operation
+still mints a narrower token: the reaper requests only `actions: read` and
+`metadata: read`; hosted preflights request only organization runner inventory;
+and the policy audit requests `contents: read` for the fixed six-repository
+inventory. Acquire and release never read cross-repository Actions state; an
+unreaped holder remains authoritative and admission fails closed.
 
-The trusted consumer-policy audit uses repository-scoped secrets
-`BUILD_LOCK_POLICY_READER_APP_ID` and
-`BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY`. Its separate App has only Contents
-read and is installed only on the exact six audited repositories. These
-credentials must be exposed only to this central repository; they are never
-shared with consumers.
+The shared private key is a broader trust boundary than any individual minted
+token. Restrict its organization-secret visibility to the active trusted
+consumer repositories and this central repository. Adding another consumer
+requires an explicit App-installation, secret-visibility, and policy-manifest
+change.
 
 During the compatibility cutover only, if the dedicated reader credentials are
 absent, the scheduled reaper may mint the same consumer-only Actions/Metadata

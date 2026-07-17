@@ -31,22 +31,19 @@ organization may enroll; the protected writer credential is the actual
 authorization boundary.
 
 1. Release the schema-4-compatible authorization change at an immutable SHA.
-2. Create the reader App with Metadata read, Actions read, and organization
-   Self-hosted runners read, with no Contents access, and install it with
-   all-repository access in the registered organization. This read-only
-   installation makes future organization repositories reaper-visible and lets
-   hosted preflights fail closed on runner outages without changing App scope.
-3. Create a separate policy-reader App with only Contents read. Install it only
-   on the exact enrolled consumer inventory, and expose its private key only as
-   repository secrets on this central lock repository.
-4. Verify compatibility while the writer App still has its old installation.
-5. Restrict the writer App installation to only this lock repository, with
+2. Configure the reader App with Metadata read, Actions read, Contents read, and
+   organization Self-hosted runners read. Install it only on the exact six
+   active consumers, and restrict organization-secret visibility to those
+   trusted consumers plus this central repository.
+3. Verify compatibility while the writer App still has its old installation.
+4. Restrict the writer App installation to only this lock repository, with
    Contents write. Rotate its key and update the organization writer secret
    exposed to enrolled repositories.
-6. Prove the reaper's reader token cannot read contents and the writer
-   token cannot access a consumer repository. Prove the policy-audit token can
-   read only the six enrolled repositories. The unit suite verifies requested
-   token scope; the tracking issue must record live negative API probes.
+5. Prove the reaper's operation-scoped reader token cannot read contents and the
+   writer token cannot access a consumer repository. Prove the policy-audit
+   token can read only the six enrolled repositories. The unit suite verifies
+   requested token scope; the tracking issue must record live negative API
+   probes.
 
 If the compatibility release lands before reader credentials are provisioned,
 the reaper temporarily mints its consumer-only Actions/Metadata token from the

@@ -94,9 +94,8 @@ commit cascade.
     Dependabot. The second stage checks out the exact protected workflow commit,
     disables cross-trust dependency caching, reads only a strict six-repository
     manifest from the candidate's exact regular Git blob, and never executes
-    candidate or consumer content. A separate policy-reader App, whose key is
-    central-repository-only and whose installation is limited to the six
-    consumers, mints `contents: read` tokens and revokes them at job completion.
+    candidate or consumer content. The shared reader App mints a token restricted
+    to the six consumers and `contents: read`, then revokes it at job completion.
     The exact event repository IDs and live PR head are both checked. One terminal
     fixed-name Check Run is published on the candidate SHA, avoiding both
     base-SHA false positives and orphaned in-progress checks.
@@ -164,20 +163,20 @@ commit cascade.
     exact-head quota response, and green hosted CI. Licensed Unity matrices are
     still waiting on the two self-hosted runners occupied by pre-existing Qora
     PR #39 jobs; those active holders were not cancelled.
-19. Verified the existing organization-wide `BUILD_LOCK_READER_*` App is the
-    Actions/runner-inventory reader: it intentionally has no Contents access and
-    its credentials are available to consumer preflights. It cannot safely back
-    the trusted policy audit. Adding Contents permission would let any consumer
-    key holder mint a contents token across the App's all-repository
-    installation; per-workflow token narrowing does not constrain other key
-    holders. The central-only `BUILD_LOCK_POLICY_READER_*` App therefore remains
-    a required, separate boundary: Contents read only, installed on exactly the
-    six active consumers. Documentation and validator diagnostics now use the
-    current six-repository inventory.
+19. The existing `BUILD_LOCK_READER_*` App was granted Contents read. A live
+    token probe restricted it to the six active consumers, read every exact
+    public/private/internal commit successfully, and revoked the token. The
+    policy audit now reuses those credentials and still requests only Contents
+    read for the fixed inventory. Because consumer preflights also hold this
+    private key, the App installation and organization-secret visibility must
+    be reduced from organization-wide to exactly the six active trusted
+    consumers plus this central repository before merge. Documentation and
+    validator diagnostics use the current six-repository inventory.
 
 ## Next tasks
 
 - Await every licensed consumer matrix, merge the five consumer PRs, and then
   publish the prepared exact consumer manifest plus required acquire-SHA audit.
-- Provision the scoped policy-reader App, run live pre-/post-acquire and manual
-  cancellation canaries, then merge and release the central policy.
+- Restrict the reader App installation and secret visibility, run live
+  pre-/post-acquire and manual cancellation canaries, then merge and release the
+  central policy.

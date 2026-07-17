@@ -119,8 +119,8 @@ jobs:
         if: ${{ steps.association.outputs.should-audit == 'true' && steps.manifest.outcome == 'success' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
-          app-id: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}
-          private-key: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}
           owner: Ambiguous-Interactive
           repositories: unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,unity-builder
           permission-contents: read
