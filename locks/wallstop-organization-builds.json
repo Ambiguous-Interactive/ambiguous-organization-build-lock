@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29543829075:perf-benchmarks:perf-6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Performance Numbers",
+    "job": "perf-benchmarks",
+    "runId": "29543829075",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29543829075",
+    "queuedAt": "2026-07-17T01:24:54.520Z",
+    "acquiredAt": "2026-07-17T01:40:59.116Z",
+    "expiresAt": "2026-07-17T05:40:59.116Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29543829075:perf-benchmarks:perf-6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29543829075",
       "queuedAt": "2026-07-17T01:24:54.520Z",
+      "acquiredAt": "2026-07-17T01:40:59.116Z",
+      "expiresAt": "2026-07-17T05:40:59.116Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -41,23 +56,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T01:33:15.447Z"
-    },
-    {
-      "reservationId": "06d5776a-f191-4636-9d0a-3f66cf5b1966",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29544231110",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29544231110",
-      "runnerId": "tiny-box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-17T01:34:53.434Z",
-      "availableAt": "2026-07-17T01:40:53.434Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T01:34:53.436Z"
+  "updatedAt": "2026-07-17T01:40:59.116Z"
 }
