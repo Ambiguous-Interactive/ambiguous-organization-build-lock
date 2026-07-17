@@ -1,0 +1,20 @@
+name: Require current pull request head
+description: Fail closed when a pull request run no longer targets the pull request's current head SHA.
+inputs:
+  github-token:
+    description: GitHub token with pull request read access.
+    required: true
+  pull-request-number:
+    description: Pull request number from the triggering event. Ignored for non-pull-request events.
+    required: false
+  expected-head-sha:
+    description: Pull request head SHA captured by the triggering event. Ignored for non-pull-request events.
+    required: false
+outputs:
+  is-current:
+    description: Whether this run is current. Non-pull-request events always report true.
+  current-head-sha:
+    description: Current pull request head SHA, or the expected SHA for non-pull-request events.
+runs:
+  using: node24
+  main: ../../dist/require-current-pr-head.js
