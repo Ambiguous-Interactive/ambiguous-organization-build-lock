@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:unity-tests:unity-tests-1",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "29560830944",
-    "runAttempt": "2",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
-    "queuedAt": "2026-07-17T19:10:55.104Z",
-    "acquiredAt": "2026-07-17T19:20:25.568Z",
-    "expiresAt": "2026-07-17T23:20:25.568Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29560830944",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
-      "queuedAt": "2026-07-17T19:10:55.104Z",
-      "acquiredAt": "2026-07-17T19:20:25.568Z",
-      "expiresAt": "2026-07-17T23:20:25.568Z",
-      "runnerId": "box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29606842055:unity:qora-EditMode",
@@ -67,8 +41,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "efa77d8e-822f-43ee-9b6a-2179f4823908",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:unity-tests:unity-tests-1",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "29560830944",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-17T19:25:09.113Z",
+      "availableAt": "2026-07-17T19:31:09.113Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T19:20:25.569Z"
+  "updatedAt": "2026-07-17T19:25:09.113Z"
 }
