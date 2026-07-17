@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "29544231110",
-    "runAttempt": "2",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29544231110",
-    "queuedAt": "2026-07-17T02:37:09.545Z",
-    "acquiredAt": "2026-07-17T02:42:58.603Z",
-    "expiresAt": "2026-07-17T06:42:58.603Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29544231110",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29544231110",
-      "queuedAt": "2026-07-17T02:37:09.545Z",
-      "acquiredAt": "2026-07-17T02:42:58.603Z",
-      "expiresAt": "2026-07-17T06:42:58.603Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests:2021.3.45f1-editmode",
@@ -57,8 +31,23 @@
       "reason": "cleanup-confirmed",
       "createdAt": "2026-07-17T02:45:40.352Z",
       "availableAt": "2026-07-17T02:51:40.352Z"
+    },
+    {
+      "reservationId": "be0d9b6e-6440-48ac-b9d9-9bc20b00d66d",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29544231110",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29544231110",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-17T02:49:12.018Z",
+      "availableAt": "2026-07-17T02:55:12.018Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T02:47:09.267Z"
+  "updatedAt": "2026-07-17T02:49:12.019Z"
 }
