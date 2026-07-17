@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29549985669",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29549985669",
+    "queuedAt": "2026-07-17T02:30:43.180Z",
+    "acquiredAt": "2026-07-17T02:38:50.498Z",
+    "expiresAt": "2026-07-17T06:38:50.498Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29549985669",
       "queuedAt": "2026-07-17T02:30:43.180Z",
+      "acquiredAt": "2026-07-17T02:38:50.498Z",
+      "expiresAt": "2026-07-17T06:38:50.498Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29544231110:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -45,5 +60,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T02:38:54.427Z"
+  "updatedAt": "2026-07-17T02:38:50.499Z"
 }
