@@ -13,9 +13,8 @@ commit cascade.
 - Central issue: `Ambiguous-Interactive/ambiguous-organization-build-lock#52`.
 - Related cascade: `Ambiguous-Interactive/DxMessaging#279`.
 - Default-branch audit began at build-lock `59a2fa98` (`v1.8.3`).
-- The registered paid-serial inventory is unity-helpers, DepartmentOfArrangements,
-  DxMessaging, DoxReloaded, IshoBoy, qora-redux, and the controlled unity-builder
-  canary.
+- The active paid-serial inventory is unity-helpers, DxMessaging, DoxReloaded,
+  IshoBoy, qora-redux, and the controlled unity-builder canary.
 - GitHub concurrency with `cancel-in-progress: false` protects a running holder;
   the default single pending slot may still replace a not-yet-running stale run.
   That is compatible with the required pre-acquire supersession behavior.
@@ -45,10 +44,9 @@ commit cascade.
    checks now inspect the complete reachable graph; the self-audit was removed
    until immutable consumer commits can be enrolled as the real gate.
 7. Published reviewed consumer commits for unity-helpers, DxMessaging,
-   DoxReloaded, IshoBoy, qora-redux, and DepartmentOfArrangements. The archived
-   Department repository was temporarily reopened for maintenance; Cursor's
-   permission-scope finding was fixed by preserving workflow-wide read access.
-8. Enrolled those six exact commits and the unchanged unity-builder canary in
+   DoxReloaded, IshoBoy, and qora-redux. Cursor's permission-scope finding was
+   fixed by preserving workflow-wide read access.
+8. Enrolled those five exact commits and the unchanged unity-builder canary in
    central CI. Each tree is checked out without persisted credentials and
    audited from its immutable commit object.
 9. The final adversarial pass caught a zero-delay retry bug, a shrinkable CI
@@ -94,10 +92,10 @@ commit cascade.
 13. The privileged inventory audit is now a trusted `workflow_run` second
     stage. Ordinary PR CI stays local, secretless, and safe for forks and
     Dependabot. The second stage checks out the exact protected workflow commit,
-    disables cross-trust dependency caching, reads only a strict seven-repository
+    disables cross-trust dependency caching, reads only a strict six-repository
     manifest from the candidate's exact regular Git blob, and never executes
     candidate or consumer content. A separate policy-reader App, whose key is
-    central-repository-only and whose installation is limited to the seven
+    central-repository-only and whose installation is limited to the six
     consumers, mints `contents: read` tokens and revokes them at job completion.
     The exact event repository IDs and live PR head are both checked. One terminal
     fixed-name Check Run is published on the candidate SHA, avoiding both
@@ -109,7 +107,7 @@ commit cascade.
     before the fallible lookup so a resolution failure can still publish a red
     terminal check on the exact source SHA.
 15. Immutable manifest pins must also equal every consumer's live default-branch
-    head. The policy App verifies all seven before checkout and again after the
+    head. The policy App verifies all six before checkout and again after the
     analyzer, so historical passing commits cannot be used as downgrade pins and
     a consumer advance during the audit cannot produce a stale success. The
     Check Run is explicitly a point-in-time attestation; source CI must be rerun
@@ -144,16 +142,16 @@ commit cascade.
     container runtime injection. The complete local gate and zero-issue final
     adversarial pass are green at 406 Node tests,
     all Go tests and vet, actionlint, and whitespace validation.
-18. Repinned all 33 acquire-action sites across the six modified consumers to
-    reviewed implementation `6b2147a1d158c770f213d216f4eea0c313be370a`.
+18. Repinned every acquire-action site across the five modified active
+    consumers to reviewed implementation
+    `6b2147a1d158c770f213d216f4eea0c313be370a`.
     Every PR-reachable licensed job now passes the exact GitHub token, pull
     request number, expected head SHA, and two App credential bindings. The
-    final consumer heads are unity-helpers `04f640145fa959f566eeed395e9294e93476b69b`,
+    final consumer heads are unity-helpers `aa5425343db714bafc2b0f2c14db579427b75937`,
     DxMessaging `431c8bcb4453e33d04c289c479f85fc493e8ba4f`, DoxReloaded
     `b7037932ddde050963d748dc816161debae9fb3e`, IshoBoy
-    `3d2ea5a149a790d2528e5412f524cee582fe3606`, qora-redux
-    `ae8ec8d16d6dd120e159dbdc2d77a400135a92ca`, and DepartmentOfArrangements
-    `95f049bd6c846913b009f0e3ee1b5a14b6510750`; unchanged unity-builder commit
+    `3d2ea5a149a790d2528e5412f524cee582fe3606`, and qora-redux
+    `3cb77f47d83289b18c464e2c50ce6bc1cae27a9b`; unchanged unity-builder commit
     `bb2ff53bc0855f97da41a71c93bf0f4b37e60efa` also passes exact acquire-SHA
     analysis. The consumer adversarial loop caught and removed acquire inputs
     from one Dox release step. Hosted CI then exposed three useful contract
@@ -166,10 +164,20 @@ commit cascade.
     exact-head quota response, and green hosted CI. Licensed Unity matrices are
     still waiting on the two self-hosted runners occupied by pre-existing Qora
     PR #39 jobs; those active holders were not cancelled.
+19. Verified the existing organization-wide `BUILD_LOCK_READER_*` App is the
+    Actions/runner-inventory reader: it intentionally has no Contents access and
+    its credentials are available to consumer preflights. It cannot safely back
+    the trusted policy audit. Adding Contents permission would let any consumer
+    key holder mint a contents token across the App's all-repository
+    installation; per-workflow token narrowing does not constrain other key
+    holders. The central-only `BUILD_LOCK_POLICY_READER_*` App therefore remains
+    a required, separate boundary: Contents read only, installed on exactly the
+    six active consumers. Documentation and validator diagnostics now use the
+    current six-repository inventory.
 
 ## Next tasks
 
-- Await every licensed consumer matrix, merge the six consumer PRs, and then
+- Await every licensed consumer matrix, merge the five consumer PRs, and then
   publish the prepared exact consumer manifest plus required acquire-SHA audit.
 - Provision the scoped policy-reader App, run live pre-/post-acquire and manual
-  cancellation canaries, merge central policy, release, and rearchive Department.
+  cancellation canaries, then merge and release the central policy.

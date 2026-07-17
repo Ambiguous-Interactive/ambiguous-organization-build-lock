@@ -7,8 +7,6 @@ logs, ZIP files, or credential values to the issue or repository.
 
 ## Evidence and containment
 
-- Disable every Unity-capable DepartmentOfArrangements workflow, including its
-  credential watch, Unity CI, and WebGL jobs. Freeze all licensed canaries.
 - Before rotation, account for every in-flight holder and allow its exact
   activation identity to return the license.
 - Preserve sanitized event/run metadata, artifact hashes, machine IDs, App
@@ -20,11 +18,9 @@ logs, ZIP files, or credential values to the issue or repository.
 - In the Unity portal, clear unexplained activations and record a zero-unexplained
   baseline. Do not claim an exact exfiltration path without direct evidence.
 
-The confirmed root cause for this rollout is untracked activation capacity:
-DepartmentOfArrangements activated outside the central lock; its credential
-watch did not return a randomized machine identity; and other jobs attempted
-return from a different stock image. Those activations exhausted two seats while
-the lock state remained internally consistent.
+The rollout treats any activation outside the central lock, mismatched
+activation/return identity, or unexplained portal seat as unsafe even when lock
+state is internally consistent.
 
 ## Authorization cutover
 
@@ -49,7 +45,7 @@ authorization boundary.
    exposed to enrolled repositories.
 6. Prove the reaper's reader token cannot read contents and the writer
    token cannot access a consumer repository. Prove the policy-audit token can
-   read only the seven enrolled repositories. The unit suite verifies requested
+   read only the six enrolled repositories. The unit suite verifies requested
    token scope; the tracking issue must record live negative API probes.
 
 If the compatibility release lands before reader credentials are provisioned,
@@ -66,10 +62,9 @@ would require an OIDC broker.
 
 ## Consumer sequence
 
-Migrate one repository at a time: unity-helpers,
-DepartmentOfArrangements, DxMessaging, DoxReloaded, then IshoBoy. Do not start
-the next PR until the prior PR is merged, reviewed at its exact SHA, green, and
-canaried.
+Migrate one repository at a time: unity-helpers, DxMessaging, DoxReloaded,
+IshoBoy, qora-redux, then unity-builder. Do not start the next PR until the prior
+PR is merged, reviewed at its exact SHA, green, and canaried.
 
 Each repository must have a data-driven policy test enumerating every Unity
 secret, GameCI use, and activation reference. Licensed jobs must use the
@@ -127,8 +122,8 @@ and enterprise owners, 2FA and SAML/SCIM posture, dormant access, Apps, OAuth
 Apps, PAT approvals, deploy/SSH keys, runner groups, environments, ruleset
 bypasses, and secret names/scopes/update times (never values).
 
-Verify owner recovery, then enable organization 2FA. Move all seven all-
-repository Apps to selected repositories and least privilege or uninstall them,
+Verify owner recovery, then enable organization 2FA. Move every all-repository
+App to selected repositories and least privilege or uninstall it,
 while preserving Cursor Bugbot and Copilot on the review-loop repositories.
 Stage rulesets in evaluate mode, validate required App bypasses, then enforce.
 Only the writer App may bypass `lock-state`; administrators may not. Enable and

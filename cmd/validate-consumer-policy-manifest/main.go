@@ -73,7 +73,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cannot close GitHub output file")
 		return 2
 	}
-	fmt.Fprintln(stdout, "Validated exact seven-repository consumer policy manifest.")
+	fmt.Fprintln(stdout, "Validated exact six-repository consumer policy manifest.")
 	return 0
 }
 
