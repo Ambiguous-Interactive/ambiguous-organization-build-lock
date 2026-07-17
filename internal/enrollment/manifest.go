@@ -16,7 +16,6 @@ type ConsumerPolicyRepository struct {
 }
 
 var ConsumerPolicyRepositories = []ConsumerPolicyRepository{
-	{Repository: "Ambiguous-Interactive/DepartmentOfArrangements", Output: "department_of_arrangements_sha"},
 	{Repository: "Ambiguous-Interactive/DoxReloaded", Output: "dox_reloaded_sha"},
 	{Repository: "Ambiguous-Interactive/DxMessaging", Output: "dx_messaging_sha"},
 	{Repository: "Ambiguous-Interactive/IshoBoy", Output: "isho_boy_sha"},

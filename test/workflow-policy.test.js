@@ -21,7 +21,6 @@ const expectedConsumerPolicySnapshots = [
   ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "b7037932ddde050963d748dc816161debae9fb3e"],
   ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d2ea5a149a790d2528e5412f524cee582fe3606"],
   ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "ae8ec8d16d6dd120e159dbdc2d77a400135a92ca"],
-  ["Ambiguous-Interactive/DepartmentOfArrangements", "consumers/DepartmentOfArrangements", "95f049bd6c846913b009f0e3ee1b5a14b6510750"],
   ["Ambiguous-Interactive/unity-builder", "consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
 ];
 const expectedCurrentHeadGuardSHA = "8e1cf892f5ee710908fc14f09b3c8033edcb74f9";
@@ -1286,7 +1285,6 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
       "Checkout DoxReloaded policy commit",
       "Checkout IshoBoy policy commit",
       "Checkout qora-redux policy commit",
-      "Checkout DepartmentOfArrangements policy commit",
       "Audit exact consumer commits with trusted analyzer",
       "Revalidate current consumer heads",
       "Publish terminal candidate policy check"
@@ -1401,7 +1399,7 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
     "app-id": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}",
     "private-key": "${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}",
     owner: "Ambiguous-Interactive",
-    repositories: "unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,DepartmentOfArrangements,unity-builder",
+    repositories: "unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,unity-builder",
     "permission-contents": "read"
   });
 
@@ -1412,7 +1410,6 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
     DOX_RELOADED_SHA: "${{ steps.manifest.outputs.dox_reloaded_sha }}",
     ISHO_BOY_SHA: "${{ steps.manifest.outputs.isho_boy_sha }}",
     QORA_REDUX_SHA: "${{ steps.manifest.outputs.qora_redux_sha }}",
-    DEPARTMENT_OF_ARRANGEMENTS_SHA: "${{ steps.manifest.outputs.department_of_arrangements_sha }}",
     UNITY_BUILDER_SHA: "${{ steps.manifest.outputs.unity_builder_sha }}"
   };
   const expectedHeadCalls = [
@@ -1421,7 +1418,6 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
     'verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"',
     'verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"',
     'verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"',
-    'verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"',
     'verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"'
   ];
   const assertHeadVerification = (step, id, condition, diagnostic) => {
@@ -1475,7 +1471,6 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
     ["Ambiguous-Interactive/DoxReloaded", "dox_reloaded_sha"],
     ["Ambiguous-Interactive/IshoBoy", "isho_boy_sha"],
     ["Ambiguous-Interactive/qora-redux", "qora_redux_sha"],
-    ["Ambiguous-Interactive/DepartmentOfArrangements", "department_of_arrangements_sha"],
     ["Ambiguous-Interactive/unity-builder", "unity_builder_sha"]
   ]);
   for (const [repository, directory] of expectedConsumerPolicySnapshots) {

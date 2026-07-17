@@ -882,7 +882,6 @@ test("authorization accepts canonical repositories owned by the organization", a
     ["Ambiguous-Interactive/unity-helpers", "737391131"],
     ["Ambiguous-Interactive/DoxReloaded", "825469040"],
     ["Ambiguous-Interactive/IshoBoy", "885525263"],
-    ["Ambiguous-Interactive/DepartmentOfArrangements", "1079492096"],
     ["Ambiguous-Interactive/qora-redux", "1290240478"],
     ["Ambiguous-Interactive/future-unity-project", "9999999999"],
     ["Ambiguous-Interactive/ambiguous-organization-build-lock", "1244796436"]
@@ -1015,7 +1014,7 @@ test("reaper compatibility fallback mints a reader-scoped token from the writer 
   });
   assert.equal(requests[0].path, "/orgs/Ambiguous-Interactive/installation");
   assert.deepEqual(requests[1].body, {
-    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy", "DepartmentOfArrangements"],
+    repositories: ["DxMessaging", "unity-helpers", "DoxReloaded", "IshoBoy"],
     permissions: { actions: "read", metadata: "read" }
   });
   assert.equal(requests[1].body.repositories.includes("ambiguous-organization-build-lock"), false);

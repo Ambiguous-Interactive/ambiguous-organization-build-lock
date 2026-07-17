@@ -122,7 +122,7 @@ jobs:
           app-id: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_ID }}
           private-key: ${{ secrets.BUILD_LOCK_POLICY_READER_APP_PRIVATE_KEY }}
           owner: Ambiguous-Interactive
-          repositories: unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,DepartmentOfArrangements,unity-builder
+          repositories: unity-helpers,DxMessaging,DoxReloaded,IshoBoy,qora-redux,unity-builder
           permission-contents: read
 
       - name: Verify manifest pins current consumer heads
@@ -136,7 +136,6 @@ jobs:
           DOX_RELOADED_SHA: ${{ steps.manifest.outputs.dox_reloaded_sha }}
           ISHO_BOY_SHA: ${{ steps.manifest.outputs.isho_boy_sha }}
           QORA_REDUX_SHA: ${{ steps.manifest.outputs.qora_redux_sha }}
-          DEPARTMENT_OF_ARRANGEMENTS_SHA: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
           UNITY_BUILDER_SHA: ${{ steps.manifest.outputs.unity_builder_sha }}
         run: |
           set -euo pipefail
@@ -157,7 +156,6 @@ jobs:
           verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"
           verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"
           verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"
-          verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"
           verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"
 
       - name: Checkout unity-helpers policy commit
@@ -232,18 +230,6 @@ jobs:
           lfs: false
           submodules: false
 
-      - name: Checkout DepartmentOfArrangements policy commit
-        if: ${{ steps.initial-heads.outcome == 'success' }}
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          repository: Ambiguous-Interactive/DepartmentOfArrangements
-          ref: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
-          path: consumers/DepartmentOfArrangements
-          token: ${{ steps.consumer-token.outputs.token }}
-          persist-credentials: false
-          lfs: false
-          submodules: false
-
       - name: Audit exact consumer commits with trusted analyzer
         id: audit
         if: ${{ steps.initial-heads.outcome == 'success' }}
@@ -256,7 +242,6 @@ jobs:
           go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DoxReloaded --repository Ambiguous-Interactive/DoxReloaded --sha "${{ steps.manifest.outputs.dox_reloaded_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
           go run ./cmd/audit-cancellation-policy --git-dir ../consumers/IshoBoy --repository Ambiguous-Interactive/IshoBoy --sha "${{ steps.manifest.outputs.isho_boy_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
           go run ./cmd/audit-cancellation-policy --git-dir ../consumers/qora-redux --repository Ambiguous-Interactive/qora-redux --sha "${{ steps.manifest.outputs.qora_redux_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DepartmentOfArrangements --repository Ambiguous-Interactive/DepartmentOfArrangements --sha "${{ steps.manifest.outputs.department_of_arrangements_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
           go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-builder --repository Ambiguous-Interactive/unity-builder --sha "${{ steps.manifest.outputs.unity_builder_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
 
       - name: Revalidate current consumer heads
@@ -270,7 +255,6 @@ jobs:
           DOX_RELOADED_SHA: ${{ steps.manifest.outputs.dox_reloaded_sha }}
           ISHO_BOY_SHA: ${{ steps.manifest.outputs.isho_boy_sha }}
           QORA_REDUX_SHA: ${{ steps.manifest.outputs.qora_redux_sha }}
-          DEPARTMENT_OF_ARRANGEMENTS_SHA: ${{ steps.manifest.outputs.department_of_arrangements_sha }}
           UNITY_BUILDER_SHA: ${{ steps.manifest.outputs.unity_builder_sha }}
         run: |
           set -euo pipefail
@@ -291,7 +275,6 @@ jobs:
           verify_head Ambiguous-Interactive/DoxReloaded "${DOX_RELOADED_SHA}"
           verify_head Ambiguous-Interactive/IshoBoy "${ISHO_BOY_SHA}"
           verify_head Ambiguous-Interactive/qora-redux "${QORA_REDUX_SHA}"
-          verify_head Ambiguous-Interactive/DepartmentOfArrangements "${DEPARTMENT_OF_ARRANGEMENTS_SHA}"
           verify_head Ambiguous-Interactive/unity-builder "${UNITY_BUILDER_SHA}"
 
       - name: Publish terminal candidate policy check

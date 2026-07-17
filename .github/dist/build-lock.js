@@ -37,8 +37,7 @@ const COMPATIBILITY_READER_REPOSITORY_NAMES = [
   "DxMessaging",
   "unity-helpers",
   "DoxReloaded",
-  "IshoBoy",
-  "DepartmentOfArrangements"
+  "IshoBoy"
 ];
 const RESOURCE_REASON_CODES = new Set([
   "cleanup-confirmed",
