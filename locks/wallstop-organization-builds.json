@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests-standalone:6000.5.2f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "29549985669",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29549985669",
+    "queuedAt": "2026-07-17T15:58:51.369Z",
+    "acquiredAt": "2026-07-17T15:58:52.492Z",
+    "expiresAt": "2026-07-17T19:58:52.492Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests-standalone:6000.5.2f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29549985669",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29549985669",
+      "queuedAt": "2026-07-17T15:58:51.369Z",
+      "acquiredAt": "2026-07-17T15:58:52.492Z",
+      "expiresAt": "2026-07-17T19:58:52.492Z",
+      "runnerId": "ELI-MACHINE"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "a0f4d399-a4db-48eb-b1ce-b5818cc63e99",
-      "holderId": "Ambiguous-Interactive/IshoBoy:29555404577:unity-tests:unity-ci-tests-EditMode",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29555404577",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29555404577",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "return-missing-positive-evidence",
-      "createdAt": "2026-07-17T15:57:12.794Z"
-    },
     {
       "reservationId": "d44708e7-58f6-4632-867c-f09d3d785851",
       "holderId": "Ambiguous-Interactive/DxMessaging:29548577722:unity-tests:6000.3.16f1-playmode",
@@ -36,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T15:57:48.455Z"
+  "updatedAt": "2026-07-17T15:58:52.492Z"
 }
