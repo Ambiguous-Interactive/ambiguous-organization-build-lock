@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:29606842055:unity:qora-PlayMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "29606842055",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29606842055",
+    "queuedAt": "2026-07-17T19:16:21.934Z",
+    "acquiredAt": "2026-07-17T19:43:24.289Z",
+    "expiresAt": "2026-07-17T23:43:24.289Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29606842055:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29606842055",
       "queuedAt": "2026-07-17T19:16:21.934Z",
+      "acquiredAt": "2026-07-17T19:43:24.289Z",
+      "expiresAt": "2026-07-17T23:43:24.289Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -52,23 +67,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
-    },
-    {
-      "reservationId": "faa16f2d-e0e3-4a09-a3b5-36f53ce48f55",
-      "holderId": "Ambiguous-Interactive/IshoBoy:29607105599:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "29607105599",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29607105599",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-17T19:37:12.259Z",
-      "availableAt": "2026-07-17T19:43:12.259Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T19:40:49.982Z"
+  "updatedAt": "2026-07-17T19:43:24.289Z"
 }
