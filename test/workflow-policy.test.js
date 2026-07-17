@@ -16,7 +16,7 @@ const expectedWorkflowJobs = new Map([
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedConsumerPolicySnapshots = [
-  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "48a3112541ba4640b7f697ba9467fd96c59932af"],
+  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "aa5425343db714bafc2b0f2c14db579427b75937"],
   ["Ambiguous-Interactive/DxMessaging", "consumers/DxMessaging", "431c8bcb4453e33d04c289c479f85fc493e8ba4f"],
   ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "b7037932ddde050963d748dc816161debae9fb3e"],
   ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d2ea5a149a790d2528e5412f524cee582fe3606"],
