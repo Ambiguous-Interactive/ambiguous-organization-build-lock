@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29555329700:unity-tests:unity-tests-0",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29555329700:unity-tests:unity-tests-1",
     "repository": "Ambiguous-Interactive/DoxReloaded",
     "workflow": "Build and Deploy",
     "job": "unity-tests",
     "runId": "29555329700",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29555329700",
-    "queuedAt": "2026-07-17T04:39:48.378Z",
-    "acquiredAt": "2026-07-17T04:48:33.841Z",
-    "expiresAt": "2026-07-17T08:48:33.841Z",
-    "runnerId": "tiny-box-linux"
+    "queuedAt": "2026-07-17T04:40:19.582Z",
+    "acquiredAt": "2026-07-17T04:48:43.129Z",
+    "expiresAt": "2026-07-17T08:48:43.129Z",
+    "runnerId": "box-linux"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29555329700:unity-tests:unity-tests-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29555329700",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29555329700",
-      "queuedAt": "2026-07-17T04:39:48.378Z",
-      "acquiredAt": "2026-07-17T04:48:33.841Z",
-      "expiresAt": "2026-07-17T08:48:33.841Z",
-      "runnerId": "tiny-box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29555329700:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -66,7 +53,23 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "a240e66e-3caf-4c91-b6f8-7d7b85c7f8a0",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29555329700:unity-tests:unity-tests-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "29555329700",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29555329700",
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-17T04:50:15.673Z",
+      "availableAt": "2026-07-17T04:56:15.673Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T04:48:43.129Z"
+  "updatedAt": "2026-07-17T04:50:15.674Z"
 }
