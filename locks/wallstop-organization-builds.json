@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:29551899683:unity-compile-check:unity-ci-compile-check",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-compile-check",
+    "runId": "29551899683",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29551899683",
+    "queuedAt": "2026-07-17T03:33:34.426Z",
+    "acquiredAt": "2026-07-17T03:48:41.703Z",
+    "expiresAt": "2026-07-17T07:48:41.703Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29551899683:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29551899683",
       "queuedAt": "2026-07-17T03:33:34.426Z",
+      "acquiredAt": "2026-07-17T03:48:41.703Z",
+      "expiresAt": "2026-07-17T07:48:41.703Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "3a4d930c-d6ac-4e3a-97f8-5ca2817a4019",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29551506597:build-webgl:build-webgl",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "build-webgl",
-      "runId": "29551506597",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29551506597",
-      "runnerId": "tiny-box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-17T03:42:35.356Z",
-      "availableAt": "2026-07-17T03:48:35.356Z"
-    },
     {
       "reservationId": "ee2beb2f-4ad1-4514-bea6-556ff039bb58",
       "holderId": "Ambiguous-Interactive/unity-helpers:29549985669:unity-tests:2021.3.45f1-playmode",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T03:48:09.264Z"
+  "updatedAt": "2026-07-17T03:48:41.703Z"
 }
