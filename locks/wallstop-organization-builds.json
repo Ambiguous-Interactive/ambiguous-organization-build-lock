@@ -1,21 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unitypackage-smoke:unitypackage-smoke-29600000212",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "29600000212",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
-    "queuedAt": "2026-07-17T18:57:02.585Z",
-    "acquiredAt": "2026-07-17T19:02:01.019Z",
-    "expiresAt": "2026-07-17T23:02:01.019Z",
-    "runnerId": "GitHub Actions 1000111524"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "32aee8cc-071b-43b8-bf25-48463f294ea0",
       "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unitypackage-smoke:unitypackage-smoke-29600000212",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
@@ -23,30 +14,12 @@
       "runId": "29600000212",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
-      "queuedAt": "2026-07-17T18:57:02.585Z",
-      "acquiredAt": "2026-07-17T19:02:01.019Z",
-      "expiresAt": "2026-07-17T23:02:01.019Z",
-      "runnerId": "GitHub Actions 1000111524"
-    }
-  ],
-  "queue": [],
-  "reservations": [
-    {
-      "reservationId": "d430d486-d47a-4655-9ec9-aa787ad1c496",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "29600000212",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-17T18:56:26.917Z",
-      "availableAt": "2026-07-17T19:02:26.917Z"
+      "runnerId": "GitHub Actions 1000111524",
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-07-17T19:03:14.795Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T19:02:01.019Z"
+  "updatedAt": "2026-07-17T19:03:14.796Z"
 }
