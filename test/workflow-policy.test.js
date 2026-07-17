@@ -16,11 +16,11 @@ const expectedWorkflowJobs = new Map([
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedConsumerPolicySnapshots = [
-  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "04f640145fa959f566eeed395e9294e93476b69b"],
+  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "48a3112541ba4640b7f697ba9467fd96c59932af"],
   ["Ambiguous-Interactive/DxMessaging", "consumers/DxMessaging", "431c8bcb4453e33d04c289c479f85fc493e8ba4f"],
   ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "b7037932ddde050963d748dc816161debae9fb3e"],
   ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d2ea5a149a790d2528e5412f524cee582fe3606"],
-  ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "ae8ec8d16d6dd120e159dbdc2d77a400135a92ca"],
+  ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "3cb77f47d83289b18c464e2c50ce6bc1cae27a9b"],
   ["Ambiguous-Interactive/unity-builder", "consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
 ];
 const expectedCurrentHeadGuardSHA = "8e1cf892f5ee710908fc14f09b3c8033edcb74f9";
