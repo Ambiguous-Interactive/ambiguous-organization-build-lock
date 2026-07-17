@@ -485,7 +485,7 @@ func (a *analyzer) validAcquirePRInputs(step *yaml.Node) bool {
 		return false
 	}
 	allowed := map[string]bool{
-		"name": true, "id": true, "if": true, "uses": true, "with": true, "timeout-minutes": true,
+		"name": true, "id": true, "if": true, "uses": true, "with": true, "env": true, "timeout-minutes": true,
 	}
 	for index := 0; index < len(step.Content); index += 2 {
 		if !allowed[step.Content[index].Value] {
@@ -512,6 +512,20 @@ func (a *analyzer) validAcquirePRInputs(step *yaml.Node) bool {
 	for key, value := range want {
 		input := mappingValue(with, key)
 		if input == nil || input.Kind != yaml.ScalarNode || input.Value != value {
+			return false
+		}
+	}
+	env := mappingValue(step, "env")
+	if env == nil || env.Kind != yaml.MappingNode || len(env.Content) != 4 {
+		return false
+	}
+	credentialEnv := map[string]string{
+		"BUILD_LOCK_APP_ID":          "${{ secrets.BUILD_LOCK_APP_ID }}",
+		"BUILD_LOCK_APP_PRIVATE_KEY": "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}",
+	}
+	for key, value := range credentialEnv {
+		binding := mappingValue(env, key)
+		if binding == nil || binding.Kind != yaml.ScalarNode || binding.Value != value {
 			return false
 		}
 	}

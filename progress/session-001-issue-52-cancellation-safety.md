@@ -144,9 +144,32 @@ commit cascade.
     container runtime injection. The complete local gate and zero-issue final
     adversarial pass are green at 406 Node tests,
     all Go tests and vet, actionlint, and whitespace validation.
+18. Repinned all 33 acquire-action sites across the six modified consumers to
+    reviewed implementation `6b2147a1d158c770f213d216f4eea0c313be370a`.
+    Every PR-reachable licensed job now passes the exact GitHub token, pull
+    request number, expected head SHA, and two App credential bindings. The
+    final consumer heads are unity-helpers `04f640145fa959f566eeed395e9294e93476b69b`,
+    DxMessaging `431c8bcb4453e33d04c289c479f85fc493e8ba4f`, DoxReloaded
+    `b7037932ddde050963d748dc816161debae9fb3e`, IshoBoy
+    `3d2ea5a149a790d2528e5412f524cee582fe3606`, qora-redux
+    `ae8ec8d16d6dd120e159dbdc2d77a400135a92ca`, and DepartmentOfArrangements
+    `95f049bd6c846913b009f0e3ee1b5a14b6510750`; unchanged unity-builder commit
+    `bb2ff53bc0855f97da41a71c93bf0f4b37e60efa` also passes exact acquire-SHA
+    analysis. The consumer adversarial loop caught and removed acquire inputs
+    from one Dox release step. Hosted CI then exposed three useful contract
+    gaps: Dx's repeated documentation assertions exceeded its JavaScript budget
+    and were consolidated data-first without dropping coverage; Cursor found
+    that Dox's local policy did not yet enforce the acquire inputs and the
+    complete three-job PR inventory is now checked; Isho's strict yamllint
+    required two spaces before all eight repin comments. Each correction has a
+    zero-issue adversarial re-review, exact Cursor zero-issue review, Copilot's
+    exact-head quota response, and green hosted CI. Licensed Unity matrices are
+    still waiting on the two self-hosted runners occupied by pre-existing Qora
+    PR #39 jobs; those active holders were not cancelled.
 
 ## Next tasks
 
-- Publish and repin the reviewed acquire boundary in every consumer, then run
-  local workflow contracts and live pre-/post-acquire/manual-cancel canaries.
-- Await CI and Copilot/Cursor Bugbot review after every pushed task.
+- Await every licensed consumer matrix, merge the six consumer PRs, and then
+  publish the prepared exact consumer manifest plus required acquire-SHA audit.
+- Provision the scoped policy-reader App, run live pre-/post-acquire and manual
+  cancellation canaries, merge central policy, release, and rearchive Department.

@@ -16,15 +16,16 @@ const expectedWorkflowJobs = new Map([
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedConsumerPolicySnapshots = [
-  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "af34f6f0234119100dde525d77c4a9f04315e736"],
-  ["Ambiguous-Interactive/DxMessaging", "consumers/DxMessaging", "282e38d156ff7611c68354e8f22aca275cb3b077"],
-  ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "41177409036293a16c525017a571fe46d56f5325"],
-  ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d8d4d9f6526aef2baa4a488024f5e79cd937a08"],
-  ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "c9a1da99f06f9426fa6bc909e398effbc972ad44"],
-  ["Ambiguous-Interactive/DepartmentOfArrangements", "consumers/DepartmentOfArrangements", "70d7a3a6ba66f3703ac427be099d694cd64550ce"],
+  ["Ambiguous-Interactive/unity-helpers", "consumers/unity-helpers", "04f640145fa959f566eeed395e9294e93476b69b"],
+  ["Ambiguous-Interactive/DxMessaging", "consumers/DxMessaging", "431c8bcb4453e33d04c289c479f85fc493e8ba4f"],
+  ["Ambiguous-Interactive/DoxReloaded", "consumers/DoxReloaded", "b7037932ddde050963d748dc816161debae9fb3e"],
+  ["Ambiguous-Interactive/IshoBoy", "consumers/IshoBoy", "3d2ea5a149a790d2528e5412f524cee582fe3606"],
+  ["Ambiguous-Interactive/qora-redux", "consumers/qora-redux", "ae8ec8d16d6dd120e159dbdc2d77a400135a92ca"],
+  ["Ambiguous-Interactive/DepartmentOfArrangements", "consumers/DepartmentOfArrangements", "95f049bd6c846913b009f0e3ee1b5a14b6510750"],
   ["Ambiguous-Interactive/unity-builder", "consumers/unity-builder", "bb2ff53bc0855f97da41a71c93bf0f4b37e60efa"]
 ];
 const expectedCurrentHeadGuardSHA = "8e1cf892f5ee710908fc14f09b3c8033edcb74f9";
+const expectedAcquireSHA = "6b2147a1d158c770f213d216f4eea0c313be370a";
 const expectedWorkflowRunScriptSignatures = new Map([
   [
     "auto-release.yml",
@@ -46,7 +47,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "go run ./cmd/resolve-consumer-policy-candidate\n--event \"${SOURCE_EVENT}\"",
       "go run ./cmd/validate-consumer-policy-manifest\n--git-dir \"${CANDIDATE_GIT_DIR}\"",
       "set -euo pipefail\nverify_head() {",
-      "set -euo pipefail\ngo run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha \"${{ steps.manifest.outputs.unity_helpers_sha }}\" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9",
+      "set -euo pipefail\ngo run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha \"${{ steps.manifest.outputs.unity_helpers_sha }}\" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a",
       "set -euo pipefail\nverify_head() {",
       "set -euo pipefail\nlive_identity_ok=false"
     ]
@@ -1508,7 +1509,7 @@ function assertPrivilegedConsumerPolicyWorkflow(workflow) {
     "set -euo pipefail",
     ...expectedConsumerPolicySnapshots.map(([repository, directory]) => {
       const output = outputByRepository.get(repository);
-      return `go run ./cmd/audit-cancellation-policy --git-dir ../${directory} --repository ${repository} --sha "\${{ steps.manifest.outputs.${output} }}" --required-guard-sha ${expectedCurrentHeadGuardSHA}`;
+      return `go run ./cmd/audit-cancellation-policy --git-dir ../${directory} --repository ${repository} --sha "\${{ steps.manifest.outputs.${output} }}" --required-guard-sha ${expectedCurrentHeadGuardSHA} --required-acquire-sha ${expectedAcquireSHA}`;
     })
   ]);
 

@@ -251,13 +251,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha "${{ steps.manifest.outputs.unity_helpers_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DxMessaging --repository Ambiguous-Interactive/DxMessaging --sha "${{ steps.manifest.outputs.dx_messaging_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DoxReloaded --repository Ambiguous-Interactive/DoxReloaded --sha "${{ steps.manifest.outputs.dox_reloaded_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/IshoBoy --repository Ambiguous-Interactive/IshoBoy --sha "${{ steps.manifest.outputs.isho_boy_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/qora-redux --repository Ambiguous-Interactive/qora-redux --sha "${{ steps.manifest.outputs.qora_redux_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DepartmentOfArrangements --repository Ambiguous-Interactive/DepartmentOfArrangements --sha "${{ steps.manifest.outputs.department_of_arrangements_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
-          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-builder --repository Ambiguous-Interactive/unity-builder --sha "${{ steps.manifest.outputs.unity_builder_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-helpers --repository Ambiguous-Interactive/unity-helpers --sha "${{ steps.manifest.outputs.unity_helpers_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DxMessaging --repository Ambiguous-Interactive/DxMessaging --sha "${{ steps.manifest.outputs.dx_messaging_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DoxReloaded --repository Ambiguous-Interactive/DoxReloaded --sha "${{ steps.manifest.outputs.dox_reloaded_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/IshoBoy --repository Ambiguous-Interactive/IshoBoy --sha "${{ steps.manifest.outputs.isho_boy_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/qora-redux --repository Ambiguous-Interactive/qora-redux --sha "${{ steps.manifest.outputs.qora_redux_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/DepartmentOfArrangements --repository Ambiguous-Interactive/DepartmentOfArrangements --sha "${{ steps.manifest.outputs.department_of_arrangements_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
+          go run ./cmd/audit-cancellation-policy --git-dir ../consumers/unity-builder --repository Ambiguous-Interactive/unity-builder --sha "${{ steps.manifest.outputs.unity_builder_sha }}" --required-guard-sha 8e1cf892f5ee710908fc14f09b3c8033edcb74f9 --required-acquire-sha 6b2147a1d158c770f213d216f4eea0c313be370a
 
       - name: Revalidate current consumer heads
         id: final-heads

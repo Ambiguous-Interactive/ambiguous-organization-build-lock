@@ -29,7 +29,10 @@ func acquireStep(indent string) string {
 		indent + "  with:\n" +
 		indent + "    github-token: ${{ github.token }}\n" +
 		indent + "    pull-request-number: ${{ github.event.pull_request.number }}\n" +
-		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n"
+		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n" +
+		indent + "  env:\n" +
+		indent + "    BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n" +
+		indent + "    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n"
 }
 
 func conditionalAcquireStep(indent, condition string) string {
@@ -38,7 +41,10 @@ func conditionalAcquireStep(indent, condition string) string {
 		indent + "  with:\n" +
 		indent + "    github-token: ${{ github.token }}\n" +
 		indent + "    pull-request-number: ${{ github.event.pull_request.number }}\n" +
-		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n"
+		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n" +
+		indent + "  env:\n" +
+		indent + "    BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n" +
+		indent + "    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n"
 }
 
 func currentHeadGuard(indent, sha string) string {
@@ -298,6 +304,20 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
+			name: "PR acquire requires exact App credential environment",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "        env:\n          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n", "", 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "PR acquire rejects a different App credential binding",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ secrets.BUILD_LOCK_APP_ID }}", "${{ secrets.OTHER_APP_ID }}", 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
 			name: "PR acquire rejects an older immutable implementation",
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), testSHA, strings.Repeat("b", 40), 1),
@@ -307,7 +327,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "PR acquire rejects step environment injection",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "      - uses:", "      - env:\n          NODE_OPTIONS: --require ./payload.js\n        uses:", 1),
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "          BUILD_LOCK_APP_ID:", "          NODE_OPTIONS: --require ./payload.js\n          BUILD_LOCK_APP_ID:", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
@@ -544,7 +564,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			name: "nested composite acquire rejects environment injection",
 			files: map[string]string{
 				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
-				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + strings.Replace(acquireStep("    "), "    - uses:", "    - env:\n        NODE_OPTIONS: --require ./payload.js\n      uses:", 1),
+				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + strings.Replace(acquireStep("    "), "        BUILD_LOCK_APP_ID:", "        NODE_OPTIONS: --require ./payload.js\n        BUILD_LOCK_APP_ID:", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
