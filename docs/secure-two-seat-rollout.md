@@ -48,9 +48,10 @@ authorization boundary.
 If the compatibility release lands before reader credentials are provisioned,
 the reaper temporarily mints its consumer-only Actions/Metadata token from the
 existing broad writer App. This fallback is valid only while that App remains
-installed on the five original consumers. Provision and verify the dedicated reader App
-before narrowing the writer installation; operator quarantine/incident recovery
-does not require the reader because it never reads workflow-run status.
+installed on the four legacy active consumers. Provision and verify the
+dedicated reader App before narrowing the writer installation; operator
+quarantine/incident recovery does not require the reader because it never reads
+workflow-run status.
 
 Repository-ID validation is defense in depth. In this GitHub-only design, the
 shared writer App private key is the ultimate authorization boundary; a stolen

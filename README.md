@@ -5,9 +5,10 @@ build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share one Unity Pro seat must use this lock before invoking Unity.
 > [!NOTE]
 > Consumer jobs use a state-writer GitHub App restricted to this repository with
-> `contents: write`. A separate all-repository reader App has `actions: read`,
-> `metadata: read`, and organization `self-hosted runners: read`; each operation
-> requests only the permission subset it needs.
+> `contents: write`. A shared reader App installed on the exact six active
+> consumers has `actions: read`, `contents: read`, `metadata: read`, and
+> organization `self-hosted runners: read`; each operation requests only the
+> permission and repository subset it needs.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -320,7 +321,7 @@ change.
 During the compatibility cutover only, if the dedicated reader credentials are
 absent, the scheduled reaper may mint the same consumer-only Actions/Metadata
 token from the existing broad writer App. The token remains restricted to the
-five original consumers and has no Contents permission. Provision the reader
+four legacy active consumers and has no Contents permission. Provision the reader
 App before narrowing the writer installation, then remove reliance on this
 fallback. Operator `recover` and `recover-incident` operations do not inspect
 workflow runs and therefore do not require reader credentials.

@@ -52,6 +52,6 @@ Before making the Unity check required or raising lock capacity:
 
 If credential validation fails, update the `unity-license` environment secrets
 in that repository. If reaper lookup fails, verify the dedicated reader secrets
-exist on the lock repository and that its all-repository installation includes
-the repository; do not broaden the contents-writing App. Never copy credential
+exist on the lock repository and that its selected installation includes the
+repository; do not broaden the contents-writing App. Never copy credential
 values into repository files or diagnostic output.
