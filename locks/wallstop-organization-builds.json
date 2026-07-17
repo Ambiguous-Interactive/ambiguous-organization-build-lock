@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "29560830944",
-    "runAttempt": "3",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
-    "queuedAt": "2026-07-17T22:05:40.441Z",
-    "acquiredAt": "2026-07-17T22:11:08.675Z",
-    "expiresAt": "2026-07-18T02:11:08.675Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29560830944",
-      "runAttempt": "3",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
-      "queuedAt": "2026-07-17T22:05:40.441Z",
-      "acquiredAt": "2026-07-17T22:11:08.675Z",
-      "expiresAt": "2026-07-18T02:11:08.675Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29611683299:unity:qora-EditMode",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "d97bc0d9-055e-4849-9583-fc42ffafeeb9",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29560830944:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29560830944",
+      "runAttempt": "3",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29560830944",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-17T22:19:54.230Z",
+      "availableAt": "2026-07-17T22:25:54.230Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T22:11:08.675Z"
+  "updatedAt": "2026-07-17T22:19:54.230Z"
 }
