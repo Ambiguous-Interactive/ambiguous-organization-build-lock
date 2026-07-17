@@ -32,7 +32,8 @@ type Finding struct {
 // Policy selects optional enrollment rules that require an organization-wide
 // immutable implementation in addition to cancellation safety.
 type Policy struct {
-	RequiredGuardSHA string
+	RequiredGuardSHA   string
+	RequiredAcquireSHA string
 }
 
 // AnalyzeCancellationSafety rejects automatic cancellation on every workflow or
@@ -53,18 +54,22 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 	if policy.RequiredGuardSHA != "" && !isSHA(policy.RequiredGuardSHA) {
 		return nil, fmt.Errorf("required guard SHA must be a full immutable commit SHA")
 	}
+	if policy.RequiredAcquireSHA != "" && !isSHA(policy.RequiredAcquireSHA) {
+		return nil, fmt.Errorf("required acquire SHA must be a full immutable commit SHA")
+	}
 
 	a := &analyzer{
-		snapshot:         snapshot,
-		nodes:            make(map[string]*yaml.Node),
-		jobMemo:          make(map[string]bool),
-		actionMemo:       make(map[string]bool),
-		jobVisiting:      make(map[string]bool),
-		actionVisit:      make(map[string]bool),
-		guardAction:      make(map[string]bool),
-		requiredGuardSHA: policy.RequiredGuardSHA,
-		findings:         make([]Finding, 0),
-		findingSet:       make(map[string]bool),
+		snapshot:           snapshot,
+		nodes:              make(map[string]*yaml.Node),
+		jobMemo:            make(map[string]bool),
+		actionMemo:         make(map[string]bool),
+		jobVisiting:        make(map[string]bool),
+		actionVisit:        make(map[string]bool),
+		guardAction:        make(map[string]bool),
+		requiredGuardSHA:   policy.RequiredGuardSHA,
+		requiredAcquireSHA: policy.RequiredAcquireSHA,
+		findings:           make([]Finding, 0),
+		findingSet:         make(map[string]bool),
 	}
 	workflowPaths := make([]string, 0)
 	for file := range snapshot.Files {
@@ -112,7 +117,7 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 			if unsafeFailFast {
 				a.add("unsafe-matrix-fail-fast", workflowPath, jobName)
 			}
-			if a.requiredGuardSHA != "" {
+			if a.requiredGuardSHA != "" || a.requiredAcquireSHA != "" {
 				prEvents, err := workflowPREvents(workflow)
 				if err != nil {
 					return nil, fmt.Errorf("%s trigger: %w", workflowPath, err)
@@ -140,16 +145,17 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 }
 
 type analyzer struct {
-	snapshot         Snapshot
-	nodes            map[string]*yaml.Node
-	jobMemo          map[string]bool
-	actionMemo       map[string]bool
-	jobVisiting      map[string]bool
-	actionVisit      map[string]bool
-	guardAction      map[string]bool
-	requiredGuardSHA string
-	findings         []Finding
-	findingSet       map[string]bool
+	snapshot           Snapshot
+	nodes              map[string]*yaml.Node
+	jobMemo            map[string]bool
+	actionMemo         map[string]bool
+	jobVisiting        map[string]bool
+	actionVisit        map[string]bool
+	guardAction        map[string]bool
+	requiredGuardSHA   string
+	requiredAcquireSHA string
+	findings           []Finding
+	findingSet         map[string]bool
 }
 
 func (a *analyzer) add(code, file, job string) {
@@ -273,6 +279,12 @@ func (a *analyzer) validatePRJobGuards(workflowPath, jobName string, prEvents ma
 	if jobExcludedFromEvents(mappingValue(job, "if"), prEvents) {
 		return nil
 	}
+	if envHasNodeOptions(workflow) || envHasNodeOptions(job) {
+		a.add("unsafe-node-options", workflowPath, jobName)
+	}
+	if mappingValue(job, "container") != nil {
+		a.add("unsafe-job-container", workflowPath, jobName)
+	}
 
 	if callNode := mappingValue(job, "uses"); callNode != nil {
 		call, err := requiredScalar(callNode, workflowPath+":"+jobName+" uses")
@@ -310,7 +322,7 @@ func (a *analyzer) validatePRJobGuards(workflowPath, jobName string, prEvents ma
 	if len(steps) == 0 {
 		return fmt.Errorf("%s:%s licensed PR job has no steps", workflowPath, jobName)
 	}
-	if !a.validGuardStep(steps[0]) {
+	if a.requiredGuardSHA != "" && !a.validGuardStep(steps[0]) {
 		a.add(guardFindingCode(steps[0], "missing-initial-current-head-guard"), workflowPath, jobName)
 	}
 	for index, step := range steps {
@@ -321,12 +333,15 @@ func (a *analyzer) validatePRJobGuards(workflowPath, jobName string, prEvents ma
 		if !entry {
 			continue
 		}
-		if index == 0 || !a.validGuardBefore(steps[index-1], step) {
+		if a.requiredGuardSHA != "" && (index == 0 || !a.validGuardBefore(steps[index-1], step)) {
 			candidate := (*yaml.Node)(nil)
 			if index > 0 {
 				candidate = steps[index-1]
 			}
 			a.add(guardFindingCode(candidate, "missing-pre-lock-current-head-guard"), workflowPath, jobName)
+		}
+		if localAction == "" && !a.validAcquirePRInputs(step) {
+			a.add("invalid-acquire-pr-head-revalidation", workflowPath, jobName)
 		}
 		if localAction != "" {
 			if err := a.validateCompositeGuards(localAction); err != nil {
@@ -360,12 +375,15 @@ func (a *analyzer) validateCompositeGuards(actionPath string) error {
 		if !entry {
 			continue
 		}
-		if index == 0 || !a.validGuardBefore(steps[index-1], step) {
+		if a.requiredGuardSHA != "" && (index == 0 || !a.validGuardBefore(steps[index-1], step)) {
 			candidate := (*yaml.Node)(nil)
 			if index > 0 {
 				candidate = steps[index-1]
 			}
 			a.add(guardFindingCode(candidate, "missing-pre-lock-current-head-guard"), manifestPath, "")
+		}
+		if localAction == "" && !a.validAcquirePRInputs(step) {
+			a.add("invalid-acquire-pr-head-revalidation", manifestPath, "")
 		}
 		if localAction != "" {
 			if err := a.validateCompositeGuards(localAction); err != nil {
@@ -460,6 +478,60 @@ func (a *analyzer) validGuardCore(step *yaml.Node) bool {
 		}
 	}
 	return true
+}
+
+func (a *analyzer) validAcquirePRInputs(step *yaml.Node) bool {
+	if step == nil || step.Kind != yaml.MappingNode {
+		return false
+	}
+	allowed := map[string]bool{
+		"name": true, "id": true, "if": true, "uses": true, "with": true, "timeout-minutes": true,
+	}
+	for index := 0; index < len(step.Content); index += 2 {
+		if !allowed[step.Content[index].Value] {
+			return false
+		}
+	}
+	uses := mappingValue(step, "uses")
+	if uses == nil || uses.Kind != yaml.ScalarNode {
+		return false
+	}
+	acquire, ref := acquireReference(uses.Value)
+	if !acquire || (a.requiredAcquireSHA != "" && !strings.EqualFold(ref, a.requiredAcquireSHA)) {
+		return false
+	}
+	with := mappingValue(step, "with")
+	if with == nil || with.Kind != yaml.MappingNode {
+		return false
+	}
+	want := map[string]string{
+		"github-token":        "${{ github.token }}",
+		"pull-request-number": "${{ github.event.pull_request.number }}",
+		"expected-head-sha":   "${{ github.event.pull_request.head.sha }}",
+	}
+	for key, value := range want {
+		input := mappingValue(with, key)
+		if input == nil || input.Kind != yaml.ScalarNode || input.Value != value {
+			return false
+		}
+	}
+	return true
+}
+
+func envHasNodeOptions(node *yaml.Node) bool {
+	env := mappingValue(node, "env")
+	if env == nil {
+		return false
+	}
+	if env.Kind != yaml.MappingNode {
+		return true
+	}
+	for index := 0; index < len(env.Content); index += 2 {
+		if strings.EqualFold(env.Content[index].Value, "NODE_OPTIONS") {
+			return true
+		}
+	}
+	return false
 }
 
 func guardFindingCode(step *yaml.Node, missing string) string {

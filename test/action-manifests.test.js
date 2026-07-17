@@ -15,6 +15,9 @@ const acquireInputKeys = [
   "lock-name",
   "holder-id-suffix",
   "runner-id",
+  "github-token",
+  "pull-request-number",
+  "expected-head-sha",
   "lock-repository",
   "state-branch",
   "timeout-minutes",
@@ -308,6 +311,19 @@ test("README documents guarded acquire usage and unconditional release cleanup",
     pull-request-number: \${{ github.event.pull_request.number }}
     expected-head-sha: \${{ github.event.pull_request.head.sha }}`),
     "current-head guard example must keep all exact inputs nested under with"
+  );
+  assert.ok(
+    readme.includes(`- name: Acquire organization Unity lock
+  id: acquire-build-lock
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@COMPATIBILITY_COMMIT_SHA
+  with:
+    lock-name: wallstop-organization-builds
+    holder-id-suffix: \${{ matrix.unity-version }}-\${{ matrix.test-mode }}
+    runner-id: \${{ runner.name }}
+    github-token: \${{ github.token }}
+    pull-request-number: \${{ github.event.pull_request.number }}
+    expected-head-sha: \${{ github.event.pull_request.head.sha }}`),
+    "acquire example must revalidate the exact PR head throughout its FIFO wait"
   );
 });
 

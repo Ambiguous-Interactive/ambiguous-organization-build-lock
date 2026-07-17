@@ -22,6 +22,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	sha := flags.String("sha", "", "exact 40-character commit SHA to audit")
 	repositoryRoot := flags.String("git-dir", ".", "path to the Git repository")
 	requiredGuardSHA := flags.String("required-guard-sha", "", "exact approved current-head guard commit SHA")
+	requiredAcquireSHA := flags.String("required-acquire-sha", "", "exact approved acquire action commit SHA")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -35,7 +36,10 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "audit snapshot: %v\n", err)
 		return 2
 	}
-	findings, err := enrollment.AnalyzePolicy(snapshot, enrollment.Policy{RequiredGuardSHA: *requiredGuardSHA})
+	findings, err := enrollment.AnalyzePolicy(snapshot, enrollment.Policy{
+		RequiredGuardSHA:   *requiredGuardSHA,
+		RequiredAcquireSHA: *requiredAcquireSHA,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "audit policy: %v\n", err)
 		return 2

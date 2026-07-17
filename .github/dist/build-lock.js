@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const crypto = require("crypto");
+const { requireCurrentPrHead } = require("./require-current-pr-head.js");
 
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
@@ -20,6 +21,7 @@ const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
+const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
@@ -1838,14 +1840,17 @@ async function cleanupIdentity(config, identity, options = {}) {
     }
     const queueCleaned = state.queue.some(ownsEntry);
     state.queue = state.queue.filter((entry) => !ownsEntry(entry));
-    const removedHolders = state.holders.filter(ownsEntry);
-    const remainingHolders = state.holders.filter((holder) => !ownsEntry(holder));
+    const removedHolders = options.queueOnly === true ? [] : state.holders.filter(ownsEntry);
+    const remainingHolders = options.queueOnly === true
+      ? state.holders
+      : state.holders.filter((holder) => !ownsEntry(holder));
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
     let reservation = null;
     if (
       state.schemaVersion >= 4 &&
       removedHolders.length &&
+      options.preActivationCleanup !== true &&
       !(state.schemaVersion >= 5 && options.resourceHealth === "blocked")
     ) {
       const reservationState = options.resourceSafe === true ? "cooldown" : "quarantine";
@@ -1858,6 +1863,25 @@ async function cleanupIdentity(config, identity, options = {}) {
         options.releaseCooldownSeconds || DEFAULT_RELEASE_COOLDOWN_SECONDS
       );
       state.reservations.push(reservation);
+    }
+    if (
+      state.schemaVersion >= 4 &&
+      removedHolders.length &&
+      options.preActivationCleanup === true &&
+      options.preActivationReservation
+    ) {
+      const restored = structuredClone(options.preActivationReservation);
+      if (
+        restored.runnerId !== removedHolders[0].runnerId ||
+        restored.state !== "quarantine"
+      ) {
+        throw new Error("Pre-activation cleanup reservation provenance does not match the admitted holder.");
+      }
+      if (state.reservations.some((candidate) => candidate.reservationId === restored.reservationId)) {
+        throw new Error(`Pre-activation cleanup reservation ${restored.reservationId} already exists.`);
+      }
+      state.reservations.push(restored);
+      reservation = restored;
     }
     // Public release outputs are singular; report the same first holder that legacy
     // clients see through the mirrored `holder` field.
@@ -2009,7 +2033,7 @@ function cancellationApiOptions(cancellation) {
 }
 
 function isCancellationError(error, cancellation) {
-  return cancellation.requested || isAbortError(error, cancellation.abortController.signal);
+  return cancellation.requested || cancellation.abortController.signal.aborted;
 }
 
 function throwIfCancellation(cancellation) {
@@ -2099,17 +2123,208 @@ async function acquire(config) {
   const recordPostCleanupNeeded = createPostCleanupRecorder(config);
 
   try {
-    let lockConfig = await readLockConfig(config, { apiOptions });
-    assertAcquireConfigRequirements(config, lockConfig);
-    await ensureStateBranch(config, { apiOptions });
-    let lockConfigReadAt = Date.now();
-    const started = Date.now();
-    const deadline = started + config.timeoutMinutes * 60 * 1000;
+    let lockConfig = null;
+    let started = Date.now();
+    let deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
     const staleRecovered = false;
     let quarantineRecovered = false;
     let lastObservation = null;
     let authFailureSince = null;
+    let lastPrHeadCheckAt = 0;
+    let lockStateMayNeedCleanup = false;
+    let admissionMayHaveBeenWrittenByThisInvocation = false;
+    let preActivationReservation = null;
+
+    const cleanupBeforeActivation = async (reason, options = {}) => {
+      const result = await cleanupIdentity(config, identity, {
+        maxAttempts: 3,
+        conflictDelayMs: 500,
+        queueOnly: options.queueOnly === true,
+        preActivationCleanup: admissionMayHaveBeenWrittenByThisInvocation,
+        preActivationReservation,
+        resourceSafe: false,
+        releaseCooldownSeconds: lockConfig?.releaseCooldownSeconds || DEFAULT_RELEASE_COOLDOWN_SECONDS,
+        reason,
+        apiOptions: { signal: apiOptions.signal }
+      });
+      const cleanupResult = cleanupResultName(result);
+      console.log(`::notice::Build-lock cleanup before activation: ${cleanupResult}.`);
+      return result;
+    };
+
+    const rejectForActiveIncident = async (incident, observedStateSha, options = {}) => {
+      let cleanupResult = null;
+      if (lockStateMayNeedCleanup) {
+        try {
+          cleanupResult = await cleanupBeforeActivation(
+            "global account incident blocked admission",
+            { queueOnly: options.queueOnly === true }
+          );
+        } catch (cleanupError) {
+          const waitMs = Date.now() - started;
+          writeAcquireOutputs({
+            acquired: false,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            waitMs,
+            attempts,
+            admissionResult: "account-blocked-cleanup-failed",
+            incidentId: incident.incidentId,
+            resourceHealth: "blocked",
+            resourceReason: incident.reason
+          });
+          throw new Error(
+            `Global account incident ${incident.incidentId} blocks new ${config.lockName} admission, ` +
+            `and exact build-lock cleanup could not be confirmed (${oneLine(cleanupError.message)}).`,
+            { cause: cleanupError }
+          );
+        }
+      }
+      const waitMs = Date.now() - started;
+      writeAcquireOutputs({
+        acquired: false,
+        lockName: config.lockName,
+        holderId: identity.holderId,
+        stateSha: cleanupResult?.sha || observedStateSha || "",
+        waitMs,
+        attempts,
+        admissionResult: "account-blocked",
+        incidentId: incident.incidentId,
+        resourceHealth: "blocked",
+        resourceReason: incident.reason
+      });
+      appendSummary(`Admission blocked for ${config.lockName} by global incident ${incident.incidentId}.`);
+      console.log(`::error::Global account incident ${incident.incidentId} blocks new ${config.lockName} admission.`);
+      console.log("::endgroup::");
+      throw new Error(`Global account incident ${incident.incidentId} blocks new ${config.lockName} admission.`);
+    };
+
+    const hasPrScope = ["pull_request", "pull_request_target"].includes(
+      String(process.env.GITHUB_EVENT_NAME || "").trim()
+    ) || Boolean(config.pullRequestNumber || config.expectedHeadSha);
+    const revalidatePrHead = async ({ force = false, cleanup = false } = {}) => {
+      if (!hasPrScope) {
+        return;
+      }
+      const now = Date.now();
+      if (!force && lastPrHeadCheckAt && now - lastPrHeadCheckAt < DEFAULT_PR_HEAD_TTL_MS) {
+        return;
+      }
+
+      let result;
+      try {
+        result = await requireCurrentPrHead({
+          env: {
+            ...process.env,
+            "INPUT_GITHUB-TOKEN": config.githubToken || "",
+            "INPUT_PULL-REQUEST-NUMBER": config.pullRequestNumber || "",
+            "INPUT_EXPECTED-HEAD-SHA": config.expectedHeadSha || ""
+          },
+          signal: apiOptions.signal,
+          writeOutputs: false,
+          throwOnStale: false,
+          log: () => {}
+        });
+        lastPrHeadCheckAt = Date.now();
+      } catch (error) {
+        let cleanupResult = null;
+        if (cleanup && lockStateMayNeedCleanup) {
+          try {
+            cleanupResult = await cleanupBeforeActivation(
+              "pull request identity became unverifiable before activation"
+            );
+          } catch (cleanupError) {
+            const waitMs = Date.now() - started;
+            writeAcquireOutputs({
+              acquired: false,
+              lockName: config.lockName,
+              holderId: identity.holderId,
+              waitMs,
+              attempts,
+              staleRecovered,
+              quarantineRecovered,
+              admissionResult: "pr-head-cleanup-failed"
+            });
+            const message =
+              `Pull request head validation failed (${oneLine(error.message)}), and exact pre-activation ` +
+              `build-lock cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
+            appendSummary(message);
+            throw new Error(message, { cause: cleanupError });
+          }
+        }
+        const waitMs = Date.now() - started;
+        writeAcquireOutputs({
+          acquired: false,
+          lockName: config.lockName,
+          holderId: identity.holderId,
+          waitMs,
+          attempts,
+          staleRecovered,
+          quarantineRecovered,
+          stateSha: cleanupResult?.sha || "",
+          admissionResult: "pr-head-check-failed"
+        });
+        const message = `Pull request head validation failed before ${config.lockName} admission: ${oneLine(error.message)}.`;
+        appendSummary(message);
+        const terminalError = new Error(message, { cause: error });
+        terminalError.prHeadValidationFailed = true;
+        throw terminalError;
+      }
+
+      if (result.isCurrent) {
+        return;
+      }
+
+      let cleanupResult = null;
+      if (cleanup && lockStateMayNeedCleanup) {
+        try {
+          cleanupResult = await cleanupBeforeActivation("pull request superseded before activation");
+        } catch (cleanupError) {
+          const waitMs = Date.now() - started;
+          writeAcquireOutputs({
+            acquired: false,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            waitMs,
+            attempts,
+            staleRecovered,
+            quarantineRecovered,
+            admissionResult: "pr-head-cleanup-failed"
+          });
+          const message =
+            `Pull request ${config.pullRequestNumber} was superseded, and exact pre-activation build-lock ` +
+            `cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
+          appendSummary(message);
+          throw new Error(message, { cause: cleanupError });
+        }
+      }
+      const waitMs = Date.now() - started;
+      writeAcquireOutputs({
+        acquired: false,
+        lockName: config.lockName,
+        holderId: identity.holderId,
+        waitMs,
+        attempts,
+        staleRecovered,
+        quarantineRecovered,
+        stateSha: cleanupResult?.sha || "",
+        admissionResult: "superseded"
+      });
+      const message =
+        `Stale pull request run for ${config.expectedHeadSha}; pull request #${config.pullRequestNumber} ` +
+        `now points to ${result.currentHeadSha}`;
+      appendSummary(`${message}. No licensed work was admitted.`);
+      throw new Error(message);
+    };
+
+    await revalidatePrHead({ force: true });
+    lockConfig = await readLockConfig(config, { apiOptions });
+    assertAcquireConfigRequirements(config, lockConfig);
+    await ensureStateBranch(config, { apiOptions });
+    let lockConfigReadAt = Date.now();
+    started = Date.now();
+    deadline = started + config.timeoutMinutes * 60 * 1000;
 
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
@@ -2120,6 +2335,7 @@ async function acquire(config) {
       throwIfCancellation(cancellation);
       attempts++;
       try {
+        await revalidatePrHead({ cleanup: true });
         // Re-read the parallelism config on a TTL so long waits pick up limit changes
         // without adding a contents read to every poll.
         const configTtlMs = integerEnvironment("BUILD_LOCK_CONFIG_TTL_MS", DEFAULT_CONFIG_TTL_MS);
@@ -2187,27 +2403,12 @@ async function acquire(config) {
         }
         const resourceLifecycle = state.schemaVersion >= 4;
         if (state.schemaVersion >= 5 && state.activeIncident) {
-          const waitMs = Date.now() - started;
-          writeAcquireOutputs({
-            acquired: false,
-            lockName: config.lockName,
-            holderId: identity.holderId,
-            stateSha: sha || "",
-            waitMs,
-            attempts,
-            admissionResult: "account-blocked",
-            incidentId: state.activeIncident.incidentId,
-            resourceHealth: "blocked",
-            resourceReason: state.activeIncident.reason
+          if (state.queue.some((entry) => entry.holderId === identity.holderId)) {
+            lockStateMayNeedCleanup = true;
+          }
+          await rejectForActiveIncident(state.activeIncident, sha, {
+            queueOnly: !admissionMayHaveBeenWrittenByThisInvocation
           });
-          appendSummary(
-            `Admission blocked for ${config.lockName} by global incident ${state.activeIncident.incidentId}.`
-          );
-          console.log(
-            `::error::Global account incident ${state.activeIncident.incidentId} blocks new ${config.lockName} admission.`
-          );
-          console.log("::endgroup::");
-          return;
         }
         const expiredCooldowns = pruneExpiredCooldowns(state);
         if (expiredCooldowns.length) {
@@ -2236,6 +2437,8 @@ async function acquire(config) {
           }
         }
         if (myHolder) {
+          lockStateMayNeedCleanup = true;
+          await revalidatePrHead({ force: true, cleanup: true });
           recordPostCleanupNeeded();
           const waitMs = Date.now() - started;
           const position = queuePosition(state, identity.holderId);
@@ -2285,6 +2488,7 @@ async function acquire(config) {
           state.queue.push(identity);
           changed = true;
         } else {
+          lockStateMayNeedCleanup = true;
           recordPostCleanupNeeded();
         }
 
@@ -2360,6 +2564,8 @@ async function acquire(config) {
           : state.queue.slice(0, Math.max(0, freeSlots));
         const eligible = canRecoverQuarantine || eligibleEntries.some((entry) => entry.holderId === identity.holderId);
         if ((freeSlots > 0 || canRecoverQuarantine) && eligible) {
+          await revalidatePrHead({ force: true, cleanup: true });
+          const admissionReservation = canRecoverQuarantine ? structuredClone(matchingQuarantine) : null;
           if (canRecoverQuarantine) {
             console.log(
               `Recovering quarantine ${matchingQuarantine.reservationId} on original runner ${identity.runnerId}.`
@@ -2375,9 +2581,14 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
           if (write.conflict) {
-            if (canRecoverQuarantine && write.ambiguous) {
-              quarantineRecovered = true;
+            if (write.ambiguous) {
+              admissionMayHaveBeenWrittenByThisInvocation = true;
+              lockStateMayNeedCleanup = true;
+              preActivationReservation = admissionReservation;
               recordPostCleanupNeeded();
+              if (canRecoverQuarantine) {
+                quarantineRecovered = true;
+              }
             }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
@@ -2385,9 +2596,15 @@ async function acquire(config) {
           if (canRecoverQuarantine) {
             quarantineRecovered = true;
           }
+          admissionMayHaveBeenWrittenByThisInvocation = true;
+          lockStateMayNeedCleanup = true;
+          preActivationReservation = admissionReservation;
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
           const verified = await readState(config, { apiOptions });
+          if (verified.state.schemaVersion >= 5 && verified.state.activeIncident) {
+            await rejectForActiveIncident(verified.state.activeIncident, verified.sha);
+          }
           const verifiedHolder = verified.state.holders.find((holder) => holder.holderId === identity.holderId);
           if (
             !verifiedHolder ||
@@ -2399,6 +2616,7 @@ async function acquire(config) {
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
+          await revalidatePrHead({ force: true, cleanup: true });
           const waitMs = Date.now() - started;
           writeAcquireOutputs({
             acquired: true,
@@ -2420,9 +2638,14 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
           if (write.conflict) {
+            if (write.ambiguous) {
+              lockStateMayNeedCleanup = true;
+              recordPostCleanupNeeded();
+            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
+          lockStateMayNeedCleanup = true;
           recordPostCleanupNeeded();
         }
 
@@ -2792,6 +3015,9 @@ function config() {
     holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
+    githubToken: input("github-token"),
+    pullRequestNumber: input("pull-request-number"),
+    expectedHeadSha: input("expected-head-sha"),
     resourceSafe: resourceReport.cleanupStatus === "confirmed",
     resourceReport,
     operation,

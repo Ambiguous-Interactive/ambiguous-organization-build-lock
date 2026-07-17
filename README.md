@@ -85,6 +85,9 @@ section, guard every licensed step on the acquire output, and release with
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
+    github-token: ${{ github.token }}
+    pull-request-number: ${{ github.event.pull_request.number }}
+    expected-head-sha: ${{ github.event.pull_request.head.sha }}
     timeout-minutes: "180"
     require-resource-lifecycle: "true"
     minimum-release-cooldown-seconds: "360"
@@ -122,6 +125,13 @@ snapshot it actually uses, including periodic refreshes while queued, and fails
 before reading or mutating lock state if the initial snapshot cannot satisfy them.
 This also makes a missing, malformed, or temporarily unreadable config fail closed
 for consumers that require lifecycle protection.
+
+The PR identity inputs close the race after the standalone current-head guard:
+acquire revalidates periodically while queued, immediately before its admission
+write, and again after verified admission but before returning control to Unity.
+A superseded or unverifiable PR removes its own queued or just-admitted identity
+and fails without running licensed work. Empty PR inputs on push and dispatch do
+not perform PR API calls.
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The Unity return

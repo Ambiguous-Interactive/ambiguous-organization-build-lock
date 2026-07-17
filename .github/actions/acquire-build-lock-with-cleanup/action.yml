@@ -11,6 +11,15 @@ inputs:
   runner-id:
     description: Stable physical runner identity. Required when runner serialization is activated.
     required: false
+  github-token:
+    description: GitHub token with pull request read access. Required for pull request runs so queued admission remains bound to the event head.
+    required: false
+  pull-request-number:
+    description: Pull request number to revalidate throughout the FIFO wait. Required for pull request runs.
+    required: false
+  expected-head-sha:
+    description: Exact pull request event head SHA. Required for pull request runs.
+    required: false
   lock-repository:
     description: Repository that stores lock state.
     required: false
@@ -57,7 +66,7 @@ outputs:
   quarantine-recovered:
     description: "true when this acquire atomically reclaimed a quarantine on the same physical runner."
   admission-result:
-    description: "acquired, timeout, or account-blocked."
+    description: "acquired, timeout, account-blocked, account-blocked-cleanup-failed, superseded, pr-head-check-failed, or pr-head-cleanup-failed."
   incident-id:
     description: Active global incident ID when admission is account-blocked.
   resource-health:

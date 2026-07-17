@@ -114,8 +114,39 @@ commit cascade.
     a consumer advance during the audit cannot produce a stale success. The
     Check Run is explicitly a point-in-time attestation; source CI must be rerun
     after consumer changes and immediately before central merge.
+16. Live FIFO observation exposed a time-of-check/time-of-use gap in the
+    standalone current-head guard: a PR could pass the guard, wait behind a
+    licensed holder, then be superseded before admission. Acquire now performs
+    its own fail-closed PR-head validation before any lock read, periodically
+    while queued, immediately before the admission CAS, and after verified CAS
+    success before licensed work can start. A stale or unverifiable run removes
+    its exact queue/holder identity; a just-admitted stale holder is retracted
+    without creating a lifecycle reservation because the action has not yet
+    returned control to Unity. Cleanup ambiguity is a distinct terminal failure,
+    and the enrollment analyzer requires the exact three PR identity inputs on
+    every PR-reachable direct or composite acquire frontier. Data-driven tests
+    cover capacity-held periodic checks, the admission boundary, CAS conflicts,
+    API failure ordering, and truthful blocked-account failure behavior.
+17. The adversarial implementation pass found five additional boundary flaws:
+    quarantine recovery provenance could be discarded, request timeouts could
+    be mistaken for process cancellation, inert inputs on an older immutable
+    acquire pin could satisfy policy, `NODE_OPTIONS` could alter pinned action
+    execution, and an account incident appearing mid-wait could strand the
+    caller in FIFO. The revised implementation restores an original quarantine
+    atomically, quarantines unknown pre-existing holders, classifies only the
+    acquire controller as signal cancellation, makes PR failures terminal
+    outside lock-auth grace, supports an exact required acquire SHA, rejects
+    direct and inherited Node preload injection, and performs exact queue-only
+    incident cleanup. A separate periodic-401 regression closes the same
+    terminal-error class. Follow-up adversarial interleavings also close incident
+    publication after the admission CAS, ambiguous queue-write post cleanup,
+    clean-conflict provenance carryover, preexisting queued retries, and job
+    container runtime injection. The complete local gate and zero-issue final
+    adversarial pass are green at 406 Node tests,
+    all Go tests and vet, actionlint, and whitespace validation.
 
 ## Next tasks
 
-- Run local workflow contracts, then live pre-/post-acquire/manual-cancel canaries.
+- Publish and repin the reviewed acquire boundary in every consumer, then run
+  local workflow contracts and live pre-/post-acquire/manual-cancel canaries.
 - Await CI and Copilot/Cursor Bugbot review after every pushed task.

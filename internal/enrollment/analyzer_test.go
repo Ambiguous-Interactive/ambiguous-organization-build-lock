@@ -21,7 +21,24 @@ func workflow(workflowConcurrency, jobConcurrency, steps string) string {
 }
 
 func directAcquireStep() string {
-	return "      - uses: " + acquire + "\n"
+	return acquireStep("      ")
+}
+
+func acquireStep(indent string) string {
+	return indent + "- uses: " + acquire + "\n" +
+		indent + "  with:\n" +
+		indent + "    github-token: ${{ github.token }}\n" +
+		indent + "    pull-request-number: ${{ github.event.pull_request.number }}\n" +
+		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n"
+}
+
+func conditionalAcquireStep(indent, condition string) string {
+	return indent + "- if: " + condition + "\n" +
+		indent + "  uses: " + acquire + "\n" +
+		indent + "  with:\n" +
+		indent + "    github-token: ${{ github.token }}\n" +
+		indent + "    pull-request-number: ${{ github.event.pull_request.number }}\n" +
+		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n"
 }
 
 func currentHeadGuard(indent, sha string) string {
@@ -220,7 +237,7 @@ func TestCancellationPolicyTransitiveBoundaries(t *testing.T) {
 
 func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 	guard := currentHeadGuard("      ", testSHA)
-	acquireStep := directAcquireStep()
+	acquireDirect := directAcquireStep()
 	tests := []struct {
 		name     string
 		files    map[string]string
@@ -229,49 +246,98 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "direct PR job is guarded at both boundaries",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + guard + acquireStep,
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + guard + acquireDirect,
 			},
 		},
 		{
 			name: "push-only workflow needs no PR guard",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: push\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + acquireStep,
+				".github/workflows/main.yml": "on: push\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 		},
 		{
 			name: "missing initial guard",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo setup\n" + guard + acquireStep,
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo setup\n" + guard + acquireDirect,
 			},
 			wantCode: "missing-initial-current-head-guard",
 		},
 		{
 			name: "wrong immutable guard is invalid",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + currentHeadGuard("      ", strings.Repeat("b", 40)) + acquireStep,
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + currentHeadGuard("      ", strings.Repeat("b", 40)) + acquireDirect,
 			},
 			wantCode: "invalid-current-head-guard",
 		},
 		{
 			name: "conditional guard is invalid",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(guard, "      - uses:", "      - if: success()\n        uses:", 1) + acquireStep,
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(guard, "      - uses:", "      - if: success()\n        uses:", 1) + acquireDirect,
 			},
 			wantCode: "invalid-current-head-guard",
 		},
 		{
 			name: "missing guard immediately before acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + acquireStep,
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + acquireDirect,
 			},
 			wantCode: "missing-pre-lock-current-head-guard",
+		},
+		{
+			name: "PR acquire must embed exact FIFO head revalidation inputs",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + "      - uses: " + acquire + "\n",
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "PR acquire rejects a different token expression",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ github.token }}", "${{ secrets.OTHER_TOKEN }}", 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "PR acquire rejects an older immutable implementation",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), testSHA, strings.Repeat("b", 40), 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "PR acquire rejects step environment injection",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "      - uses:", "      - env:\n          NODE_OPTIONS: --require ./payload.js\n        uses:", 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "PR licensed job rejects inherited NODE_OPTIONS",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\nenv:\n  node_options: --require ./payload.js\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + directAcquireStep(),
+			},
+			wantCode: "unsafe-node-options",
+		},
+		{
+			name: "PR licensed container rejects inherited NODE_OPTIONS",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    container:\n      image: unity:latest\n      env:\n        NODE_OPTIONS: --require ./payload.js\n    steps:\n" + guard + guard + directAcquireStep(),
+			},
+			wantCode: "unsafe-job-container",
+		},
+		{
+			name: "PR licensed container rejects opaque runtime options",
+			files: map[string]string{
+				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    container:\n      image: unity:latest\n      options: --env NODE_OPTIONS=--require=./payload.js\n    steps:\n" + guard + guard + directAcquireStep(),
+			},
+			wantCode: "unsafe-job-container",
 		},
 		{
 			name: "pre acquire guard may run for a superset of entry conditions",
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: steps.ready == 'true'\n        uses:", 1) +
-					"      - if: steps.ready == 'true' && github.event_name == 'pull_request'\n        uses: " + acquire + "\n",
+					conditionalAcquireStep("      ", "steps.ready == 'true' && github.event_name == 'pull_request'"),
 			},
 		},
 		{
@@ -315,7 +381,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - env:\n          NODE_OPTIONS: --require ./fake-guard-hook.js\n        uses:", 1) +
-					acquireStep,
+					acquireDirect,
 			},
 			wantCode: "invalid-current-head-guard",
 		},
@@ -342,7 +408,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: always()\n        uses:", 1) +
-					"      - if: always() && success()\n        uses: " + acquire + "\n",
+					conditionalAcquireStep("      ", "always() && success()"),
 			},
 		},
 		{
@@ -350,7 +416,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
-					"      - if: steps.a == 'true' || steps.b == 'true'\n        uses: " + acquire + "\n",
+					conditionalAcquireStep("      ", "steps.a == 'true' || steps.b == 'true'"),
 			},
 		},
 		{
@@ -367,7 +433,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: (steps.a == 'true' || steps.b == 'true')\n        uses:", 1) +
-					"      - if: success() && (steps.a == 'true' || steps.b == 'true')\n        uses: " + acquire + "\n",
+					conditionalAcquireStep("      ", "success() && (steps.a == 'true' || steps.b == 'true')"),
 			},
 		},
 		{
@@ -427,20 +493,20 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "AND event exclusion is proven non PR",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' && success()\n    runs-on: ubuntu-latest\n    steps:\n" + acquireStep,
+				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' && success()\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 		},
 		{
 			name: "OR event expression remains PR capable",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' || github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    steps:\n" + acquireStep,
+				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' || github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 			wantCode: "missing-initial-current-head-guard",
 		},
 		{
 			name: "mixed AND OR event expression remains PR capable",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' && false || true\n    runs-on: ubuntu-latest\n    steps:\n" + acquireStep,
+				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' && false || true\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 			wantCode: "missing-initial-current-head-guard",
 		},
@@ -448,14 +514,14 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			name: "PR reachability propagates through called workflow",
 			files: map[string]string{
 				".github/workflows/main.yml":   "on: pull_request\njobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
-				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + acquireStep,
+				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + acquireDirect,
 			},
 		},
 		{
 			name: "nested composite requires its own pre acquire guard",
 			files: map[string]string{
 				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
-				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + "    - uses: " + acquire + "\n",
+				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + acquireStep("    "),
 			},
 		},
 		{
@@ -466,11 +532,30 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			},
 			wantCode: "missing-pre-lock-current-head-guard",
 		},
+		{
+			name: "guarded nested composite acquire still requires exact revalidation inputs",
+			files: map[string]string{
+				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + "    - uses: " + acquire + "\n",
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
+		{
+			name: "nested composite acquire rejects environment injection",
+			files: map[string]string{
+				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + strings.Replace(acquireStep("    "), "    - uses:", "    - env:\n        NODE_OPTIONS: --require ./payload.js\n      uses:", 1),
+			},
+			wantCode: "invalid-acquire-pr-head-revalidation",
+		},
 	}
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			findings, err := AnalyzePolicy(fixture(testCase.files), Policy{RequiredGuardSHA: testSHA})
+			findings, err := AnalyzePolicy(fixture(testCase.files), Policy{
+				RequiredGuardSHA:   testSHA,
+				RequiredAcquireSHA: testSHA,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -502,6 +587,38 @@ func TestCancellationPolicyValidatesSnapshotIdentity(t *testing.T) {
 	snapshot.SHA = "main"
 	if _, err := AnalyzeCancellationSafety(snapshot); err == nil {
 		t.Fatal("expected mutable snapshot ref to fail")
+	}
+
+	snapshot = fixture(map[string]string{".github/workflows/main.yml": "jobs: {}\n"})
+	if _, err := AnalyzePolicy(snapshot, Policy{RequiredAcquireSHA: "main"}); err == nil {
+		t.Fatal("expected mutable required acquire ref to fail")
+	}
+}
+
+func TestRequiredAcquirePolicyCanRollOutIndependently(t *testing.T) {
+	workflowText := "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep()
+	findings, err := AnalyzePolicy(
+		fixture(map[string]string{".github/workflows/main.yml": workflowText}),
+		Policy{RequiredAcquireSHA: testSHA},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codes := findingCodes(findings); codes != "" {
+		t.Fatalf("exact acquire policy should not require standalone guards, got %s", codes)
+	}
+
+	findings, err = AnalyzePolicy(
+		fixture(map[string]string{
+			".github/workflows/main.yml": strings.Replace(workflowText, testSHA, strings.Repeat("b", 40), 1),
+		}),
+		Policy{RequiredAcquireSHA: testSHA},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codes := findingCodes(findings); !strings.Contains(codes, "invalid-acquire-pr-head-revalidation") {
+		t.Fatalf("expected exact acquire pin finding, got %s", codes)
 	}
 }
 

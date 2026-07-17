@@ -60,6 +60,7 @@ func TestRunRequiredGuardPolicy(t *testing.T) {
 		"--repository", "Ambiguous-Interactive/fixture",
 		"--sha", sha,
 		"--required-guard-sha", integrationSHA,
+		"--required-acquire-sha", integrationSHA,
 	}, &stdout, &stderr)
 	if exitCode != 1 || !strings.Contains(stdout.String(), `"Code":"missing-initial-current-head-guard"`) {
 		t.Fatalf("expected missing guard finding; exit=%d stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
@@ -75,6 +76,18 @@ func TestRunRequiredGuardPolicy(t *testing.T) {
 	}, &stdout, &stderr)
 	if exitCode != 2 || !strings.Contains(stderr.String(), "required guard SHA") {
 		t.Fatalf("expected invalid guard SHA error; exit=%d stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run([]string{
+		"--git-dir", repositoryRoot,
+		"--repository", "Ambiguous-Interactive/fixture",
+		"--sha", sha,
+		"--required-acquire-sha", "main",
+	}, &stdout, &stderr)
+	if exitCode != 2 || !strings.Contains(stderr.String(), "required acquire SHA") {
+		t.Fatalf("expected invalid acquire SHA error; exit=%d stdout=%s stderr=%s", exitCode, stdout.String(), stderr.String())
 	}
 }
 
