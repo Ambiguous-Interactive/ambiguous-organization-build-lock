@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unitypackage-smoke:unitypackage-smoke-29600000212",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unitypackage-smoke",
+    "runId": "29600000212",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
+    "queuedAt": "2026-07-17T18:57:02.585Z",
+    "acquiredAt": "2026-07-17T19:02:01.019Z",
+    "expiresAt": "2026-07-17T23:02:01.019Z",
+    "runnerId": "GitHub Actions 1000111524"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unitypackage-smoke:unitypackage-smoke-29600000212",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
       "queuedAt": "2026-07-17T18:57:02.585Z",
+      "acquiredAt": "2026-07-17T19:02:01.019Z",
+      "expiresAt": "2026-07-17T23:02:01.019Z",
       "runnerId": "GitHub Actions 1000111524"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "2b1097f4-988a-4e51-9718-138ef70919da",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "29600000212",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29600000212",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-17T18:55:59.544Z",
-      "availableAt": "2026-07-17T19:01:59.544Z"
-    },
     {
       "reservationId": "d430d486-d47a-4655-9ec9-aa787ad1c496",
       "holderId": "Ambiguous-Interactive/unity-helpers:29600000212:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-17T18:57:04.008Z"
+  "updatedAt": "2026-07-17T19:02:01.019Z"
 }
