@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29631452538",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29631452538",
+    "queuedAt": "2026-07-18T05:00:43.680Z",
+    "acquiredAt": "2026-07-18T05:33:57.416Z",
+    "expiresAt": "2026-07-18T09:33:57.416Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29631452538",
       "queuedAt": "2026-07-18T05:00:43.680Z",
+      "acquiredAt": "2026-07-18T05:33:57.416Z",
+      "expiresAt": "2026-07-18T09:33:57.416Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29610400274:unitypackage-smoke:unitypackage-smoke-29610400274",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -66,5 +81,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T05:33:50.967Z"
+  "updatedAt": "2026-07-18T05:33:57.416Z"
 }
