@@ -2751,7 +2751,52 @@ async function reap(config) {
     }
     state.holders = keptHolders;
 
-    const changed = holderReaped || beforeQueue !== state.queue.length || expiredCooldowns.length > 0;
+    // Auto-recover stale quarantines (issue #61). A quarantine tied to an ephemeral
+    // (GitHub-hosted) runner can never be same-runner-reclaimed, and before consumer
+    // activation retry (#57) only an operator could clear it -- so it pinned capacity
+    // indefinitely. Now the reaper converts a quarantine to a cooldown once it confirms
+    // the owning run is terminal AND the reservation has aged past the lease (giving a
+    // same-runner reclaim, which is stronger, first chance). If the seat was actually
+    // returned (the common, over-conservative case) the slot frees correctly; a genuinely
+    // leaked seat now surfaces as a 20111 incident via consumer retry rather than being
+    // masked. Skipped while a schema-5 account incident is active (admission is blocked
+    // anyway) and when the owning run status is unknown (fail closed: keep the quarantine).
+    let quarantineRecovered = false;
+    if (state.schemaVersion >= 4 && !(state.schemaVersion >= 5 && state.activeIncident)) {
+      const graceMs = (Number.isInteger(config.leaseMinutes) ? config.leaseMinutes : 240) * 60 * 1000;
+      const now = Date.now();
+      let recoveryCooldownSeconds = null;
+      for (const reservation of state.reservations) {
+        if (reservation.state !== "quarantine") {
+          continue;
+        }
+        const createdMs = parseTime(reservation.createdAt);
+        if (!(createdMs > 0 && now - createdMs >= graceMs)) {
+          continue;
+        }
+        const finished = await queueEntryIsFinished(
+          { ...reservation, queuedAt: reservation.createdAt },
+          config.readerToken
+        );
+        if (!finished) {
+          continue;
+        }
+        if (recoveryCooldownSeconds === null) {
+          recoveryCooldownSeconds = (await readLockConfig(config)).releaseCooldownSeconds;
+        }
+        reservation.state = "cooldown";
+        reservation.reason = `auto-recovered stale quarantine (owning run terminal): ${reservation.reason}`;
+        reservation.availableAt = new Date(now + recoveryCooldownSeconds * 1000).toISOString();
+        quarantineRecovered = true;
+        console.log(
+          `Auto-recovered stale quarantine ${reservation.reservationId} for runner ${reservation.runnerId}; ` +
+            "owning run is terminal and aged past the lease, so it becomes a cooldown."
+        );
+      }
+    }
+
+    const changed =
+      holderReaped || beforeQueue !== state.queue.length || expiredCooldowns.length > 0 || quarantineRecovered;
     if (!changed) {
       writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
       appendSummary(

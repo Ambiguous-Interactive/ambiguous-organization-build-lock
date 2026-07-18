@@ -3282,6 +3282,113 @@ test("reap reports reaped after an accepted write returns retryable failure then
   assert.equal(state.holder, null);
 });
 
+test("scheduled reap auto-recovers a stale quarantine whose owning run is terminal", async () => {
+  // A quarantine tied to an ephemeral GitHub-hosted runner can never be
+  // same-runner-reclaimed (issue #61). Once its owning run is terminal and it has
+  // aged past the lease, the reaper converts it to a cooldown so capacity is not
+  // pinned indefinitely; a genuinely leaked seat now surfaces via consumer
+  // activation retry (#57) rather than being masked by the stuck reservation.
+  const owner = withRunner(
+    semaphoreHolder("owner/repo", "999", "unitypackage-smoke"),
+    "GitHub Actions 1000111524"
+  );
+  const quarantine = lifecycleReservation(owner, {
+    reservationId: "stuck-quarantine",
+    state: "quarantine",
+    reason: "return-missing-positive-evidence",
+    createdAt: "2026-06-06T00:01:00.000Z"
+  });
+  let state = lifecycleState([], [], [quarantine]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content(
+            { maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 },
+            "cfg"
+          );
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "reaped-sha" } });
+          }
+          return base64Content(state, "state-before-reap");
+        }
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/999") {
+          return jsonResponse(200, { status: "completed", conclusion: "success" });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig());
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, reapOutputNames);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "reaped-sha");
+  });
+
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "cooldown");
+  assert.ok(state.reservations[0].availableAt);
+  assert.match(state.reservations[0].reason, /auto-recovered stale quarantine/);
+});
+
+test("scheduled reap keeps a quarantine whose owning run is still active", async () => {
+  // Conservative gate: an active (unknown-terminal) owning run must NOT be
+  // auto-recovered -- the seat may still be legitimately in use.
+  const owner = withRunner(
+    semaphoreHolder("owner/repo", "777", "playmode"),
+    "GitHub Actions 2000222"
+  );
+  const quarantine = lifecycleReservation(owner, {
+    reservationId: "active-quarantine",
+    state: "quarantine",
+    reason: "return-missing-positive-evidence",
+    createdAt: "2026-06-06T00:01:00.000Z"
+  });
+  let state = lifecycleState([], [], [quarantine]);
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "reaped-sha" } });
+          }
+          return base64Content(state, "state-before-reap");
+        }
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/777") {
+          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig());
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "false");
+  });
+
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "quarantine");
+});
+
 test("reap writes full output contract when only completed queue entries are removed", async () => {
   let state = {
     ...emptyState("wallstop-organization-builds"),
