@@ -133,10 +133,18 @@ func TestFindingDiagnosticEscapesHostileComponents(t *testing.T) {
 	}
 }
 
-func TestRunEscapesHostileErrorDiagnostics(t *testing.T) {
+func TestRunEscapesParseErrorDiagnostics(t *testing.T) {
 	t.Parallel()
+	root := t.TempDir()
+	workflow := filepath.Join(root, ".github", "workflows", "invalid.yml")
+	if err := os.MkdirAll(filepath.Dir(workflow), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workflow, []byte("env: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr strings.Builder
-	code := run(filepath.Join(t.TempDir(), "missing\n::error::\u2028"), &stdout, &stderr)
+	code := run(root, &stdout, &stderr)
 	if code != 1 || stdout.Len() != 0 {
 		t.Fatalf("run returned code=%d stdout=%q", code, stdout.String())
 	}
