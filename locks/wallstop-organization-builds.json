@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29626150219:platform-build-linux:platform-build-linux-0",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-linux",
-    "runId": "29626150219",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29626150219",
-    "queuedAt": "2026-07-18T03:55:51.194Z",
-    "acquiredAt": "2026-07-18T04:23:16.200Z",
-    "expiresAt": "2026-07-18T08:23:16.200Z",
-    "runnerId": "tiny-box-linux"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29626150219:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "29626150219",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29626150219",
-      "queuedAt": "2026-07-18T03:55:51.194Z",
-      "acquiredAt": "2026-07-18T04:23:16.200Z",
-      "expiresAt": "2026-07-18T08:23:16.200Z",
-      "runnerId": "tiny-box-linux"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29577509238:platform-build-windows:platform-build-windows",
@@ -67,8 +41,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "e00938d5-b779-44ad-af25-dce1e3cf0507",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29626150219:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "29626150219",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29626150219",
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T04:30:27.368Z",
+      "availableAt": "2026-07-18T04:36:27.368Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T04:23:16.200Z"
+  "updatedAt": "2026-07-18T04:30:27.368Z"
 }
