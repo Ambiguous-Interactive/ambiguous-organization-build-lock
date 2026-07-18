@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:29627928964:unity-compile-check:unity-ci-compile-check",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-compile-check",
-    "runId": "29627928964",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29627928964",
-    "queuedAt": "2026-07-18T03:42:03.126Z",
-    "acquiredAt": "2026-07-18T04:14:34.654Z",
-    "expiresAt": "2026-07-18T08:14:34.654Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:29627928964:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "29627928964",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29627928964",
-      "queuedAt": "2026-07-18T03:42:03.126Z",
-      "acquiredAt": "2026-07-18T04:14:34.654Z",
-      "expiresAt": "2026-07-18T08:14:34.654Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29626150219:platform-build-linux:platform-build-linux-0",
@@ -67,8 +41,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "5bafec19-5754-455d-9468-e7d154031c2c",
+      "holderId": "Ambiguous-Interactive/IshoBoy:29627928964:unity-compile-check:unity-ci-compile-check",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-compile-check",
+      "runId": "29627928964",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29627928964",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T04:17:14.470Z",
+      "availableAt": "2026-07-18T04:23:14.470Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T04:14:34.654Z"
+  "updatedAt": "2026-07-18T04:17:14.471Z"
 }
