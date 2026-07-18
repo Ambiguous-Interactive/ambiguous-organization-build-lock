@@ -104,8 +104,13 @@ successful canary from each consumer.
 
 Only after the portal has zero unexplained activations, prove two distinct
 machines activate concurrently under two holders, both return with their
-activating identities, and a third machine succeeds after cooldown. Then merge
-a configuration-only PR changing `maxHolders` from 1 to 2.
+activating identities, and — once `releaseCooldownSeconds` is `0` and every
+consumer wraps activation in bounded retry — a third machine acquires immediately
+after a release and its activation retry absorbs any residual Unity handoff with
+zero `20111` incidents. Then merge a configuration-only PR changing `maxHolders`
+from 1 to 2. Lower `releaseCooldownSeconds` toward `0` only after all consumers
+have adopted activation retry and their `minimum-release-cooldown-seconds` no
+longer exceeds the new value.
 
 At capacity two, one runner quarantine leaves effective capacity one; two leave
 zero. A global incident immediately leaves zero. Do not add an automatic
