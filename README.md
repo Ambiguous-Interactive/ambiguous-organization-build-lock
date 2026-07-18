@@ -300,10 +300,24 @@ when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
 
-Under schema 4 and 5, stale holders are quarantined instead of freed. Operators may
-dispatch the reaper with `operation=recover`, the exact reservation ID, and
-`resource-safe=true` only after confirming Unity portal cleanup. Recovery starts
-a cooldown; it never frees capacity immediately.
+Under schema 4 and 5, stale holders are quarantined instead of freed. A queued job
+on the same physical runner reclaims a quarantine first (return-at-start), which is
+the strongest recovery because it actually returns the seat. Under **schema 5** (account health enabled) the scheduled reaper also
+**auto-recovers a quarantine** once it confirms the owning run is terminal and the
+reservation has aged past the lease: it converts the quarantine to a cooldown so
+capacity is not pinned indefinitely (notably for quarantines tied to ephemeral
+GitHub-hosted runners, which can never be same-runner-reclaimed). It is gated to
+schema 5 on purpose — that is where the backstop lives: consumers wrap activation in
+bounded retry, so a returned seat (the common, over-conservative case) frees the slot,
+while a genuinely leaked seat trips a confirmed `20111` **global account incident**
+that halts admission (operator-visible) instead of silently pinning capacity. That is
+a deliberate trade of graceful degradation for a loud, actionable signal. The reaper
+fails closed when the owning run status cannot be confirmed (the quarantine is kept)
+and skips recovery while a global incident is already active.
+
+Operators may still force recovery by dispatching the reaper with `operation=recover`,
+the exact reservation ID, and `resource-safe=true` after confirming Unity portal
+cleanup; like auto-recovery it starts a cooldown rather than freeing capacity outright.
 
 For schema 5, dispatch `operation=recover-incident` with the exact incident ID
 and `portal-cleanup-confirmed=true` only after the Unity portal inventory is
