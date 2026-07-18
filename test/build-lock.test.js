@@ -3282,12 +3282,11 @@ test("reap reports reaped after an accepted write returns retryable failure then
   assert.equal(state.holder, null);
 });
 
-test("scheduled reap auto-recovers a stale quarantine whose owning run is terminal", async () => {
+test("scheduled reap auto-recovers a stale quarantine (schema 5, terminal run) to a cooldown", async () => {
   // A quarantine tied to an ephemeral GitHub-hosted runner can never be
-  // same-runner-reclaimed (issue #61). Once its owning run is terminal and it has
-  // aged past the lease, the reaper converts it to a cooldown so capacity is not
-  // pinned indefinitely; a genuinely leaked seat now surfaces via consumer
-  // activation retry (#57) rather than being masked by the stuck reservation.
+  // same-runner-reclaimed (issue #61). At schema 5 -- where a leaked seat's 20111
+  // latches a global incident as the backstop -- the reaper converts a terminal-run,
+  // lease-aged quarantine to a cooldown so capacity is not pinned indefinitely.
   const owner = withRunner(
     semaphoreHolder("owner/repo", "999", "unitypackage-smoke"),
     "GitHub Actions 1000111524"
@@ -3298,7 +3297,7 @@ test("scheduled reap auto-recovers a stale quarantine whose owning run is termin
     reason: "return-missing-positive-evidence",
     createdAt: "2026-06-06T00:01:00.000Z"
   });
-  let state = lifecycleState([], [], [quarantine]);
+  let state = accountHealthState([], [], [quarantine]);
 
   await withTempFile(async (outputFile) => {
     await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
@@ -3309,7 +3308,7 @@ test("scheduled reap auto-recovers a stale quarantine whose owning run is termin
         }
         if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
           return base64Content(
-            { maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 },
+            { maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, accountHealth: true, releaseCooldownSeconds: 1 },
             "cfg"
           );
         }
@@ -3341,20 +3340,18 @@ test("scheduled reap auto-recovers a stale quarantine whose owning run is termin
   assert.match(state.reservations[0].reason, /auto-recovered stale quarantine/);
 });
 
-test("scheduled reap keeps a quarantine whose owning run is still active", async () => {
-  // Conservative gate: an active (unknown-terminal) owning run must NOT be
-  // auto-recovered -- the seat may still be legitimately in use.
+test("scheduled reap releases a stale quarantine immediately when the cooldown is 0", async () => {
   const owner = withRunner(
-    semaphoreHolder("owner/repo", "777", "playmode"),
-    "GitHub Actions 2000222"
+    semaphoreHolder("owner/repo", "999", "unitypackage-smoke"),
+    "GitHub Actions 1000111524"
   );
   const quarantine = lifecycleReservation(owner, {
-    reservationId: "active-quarantine",
+    reservationId: "stuck-quarantine",
     state: "quarantine",
     reason: "return-missing-positive-evidence",
     createdAt: "2026-06-06T00:01:00.000Z"
   });
-  let state = lifecycleState([], [], [quarantine]);
+  let state = accountHealthState([], [], [quarantine]);
 
   await withTempFile(async (outputFile) => {
     await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
@@ -3364,7 +3361,10 @@ test("scheduled reap keeps a quarantine whose owning run is still active", async
           return jsonResponse(200, { object: { sha: "branch-sha" } });
         }
         if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-          return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          return base64Content(
+            { maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, accountHealth: true, releaseCooldownSeconds: 0 },
+            "cfg"
+          );
         }
         if (parsed.pathname === SEMAPHORE_STATE_PATH) {
           if (options.method === "PUT") {
@@ -3373,21 +3373,85 @@ test("scheduled reap keeps a quarantine whose owning run is still active", async
           }
           return base64Content(state, "state-before-reap");
         }
-        if (parsed.pathname === "/repos/owner/repo/actions/runs/777") {
-          return jsonResponse(200, { status: "in_progress", conclusion: null });
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/999") {
+          return jsonResponse(200, { status: "completed", conclusion: "success" });
         }
         return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
       }, async () => {
         await reap(semaphoreConfig());
       });
     });
+
     const outputs = readEnvironmentFile(outputFile);
-    assert.equal(outputs.reaped, "false");
+    assert.equal(outputs.reaped, "true");
   });
 
-  assert.equal(state.reservations.length, 1);
-  assert.equal(state.reservations[0].state, "quarantine");
+  // A zero cooldown mirrors the release path: the reservation is dropped, not left as
+  // a zero-length cooldown -- the slot is free immediately.
+  assert.equal(state.reservations.length, 0);
 });
+
+// The reaper must NOT auto-recover a quarantine outside the narrow safe window.
+for (const testCase of [
+  { name: "the lock is only schema 4 (no 20111 incident backstop)", schema: 4, createdAt: "2026-06-06T00:01:00.000Z", run: { status: "completed", conclusion: "success" } },
+  { name: "the owning run is still active", schema: 5, createdAt: "2026-06-06T00:01:00.000Z", run: { status: "in_progress", conclusion: null } },
+  { name: "the reservation has not aged past the lease", schema: 5, createdAt: "recent", run: { status: "completed", conclusion: "success" } },
+  { name: "the owning run cannot be confirmed terminal (fail closed)", schema: 5, createdAt: "2026-06-06T00:01:00.000Z", run: null }
+]) {
+  test(`scheduled reap keeps a quarantine when ${testCase.name}`, async () => {
+    const owner = withRunner(semaphoreHolder("owner/repo", "999", "playmode"), "GitHub Actions 555");
+    const createdAt = testCase.createdAt === "recent" ? new Date(Date.now() - 60 * 1000).toISOString() : testCase.createdAt;
+    const quarantine = lifecycleReservation(owner, {
+      reservationId: "kept-quarantine",
+      state: "quarantine",
+      reason: "return-missing-positive-evidence",
+      createdAt
+    });
+    let state = testCase.schema === 5
+      ? accountHealthState([], [], [quarantine])
+      : lifecycleState([], [], [quarantine]);
+
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content(
+              { maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, accountHealth: testCase.schema === 5, releaseCooldownSeconds: 1 },
+              "cfg"
+            );
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "reaped-sha" } });
+            }
+            return base64Content(state, "state-before-reap");
+          }
+          if (parsed.pathname === "/repos/owner/repo/actions/runs/999") {
+            return testCase.run ? jsonResponse(200, testCase.run) : jsonResponse(404, { message: "no run" });
+          }
+          // Reached only in the "cannot be confirmed" case: a missing run with an
+          // accessible repo -> getRunStatus returns known:false (not a hard error).
+          if (parsed.pathname === "/repos/owner/repo") {
+            return jsonResponse(200, { full_name: "owner/repo" });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await reap(semaphoreConfig());
+        });
+      });
+      const outputs = readEnvironmentFile(outputFile);
+      assert.equal(outputs.reaped, "false");
+    });
+
+    assert.equal(state.reservations.length, 1);
+    assert.equal(state.reservations[0].state, "quarantine");
+  });
+}
 
 test("reap writes full output contract when only completed queue entries are removed", async () => {
   let state = {

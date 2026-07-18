@@ -2754,18 +2754,23 @@ async function reap(config) {
     // Auto-recover stale quarantines (issue #61). A quarantine tied to an ephemeral
     // (GitHub-hosted) runner can never be same-runner-reclaimed, and before consumer
     // activation retry (#57) only an operator could clear it -- so it pinned capacity
-    // indefinitely. Now the reaper converts a quarantine to a cooldown once it confirms
+    // indefinitely. The reaper converts such a quarantine to a cooldown once it confirms
     // the owning run is terminal AND the reservation has aged past the lease (giving a
-    // same-runner reclaim, which is stronger, first chance). If the seat was actually
-    // returned (the common, over-conservative case) the slot frees correctly; a genuinely
-    // leaked seat now surfaces as a 20111 incident via consumer retry rather than being
-    // masked. Skipped while a schema-5 account incident is active (admission is blocked
-    // anyway) and when the owning run status is unknown (fail closed: keep the quarantine).
+    // same-runner reclaim, which actually returns the seat, first chance).
+    //
+    // Gated to schema 5 (accountHealth) ON PURPOSE: the backstop for a genuinely leaked
+    // seat is the confirmed-`20111` GLOBAL INCIDENT, which only exists at schema 5. Freeing
+    // a slot lets a build attempt activation; a returned seat (the common, over-conservative
+    // case) succeeds, while a truly leaked seat trips 20111 and latches the incident
+    // (operator-visible) instead of pinning capacity silently. At schema 4 that backstop
+    // does not exist, so recovering there would be unsafe. Fails closed on unknown run
+    // status (keeps the quarantine) and skips while an incident is already active.
     let quarantineRecovered = false;
-    if (state.schemaVersion >= 4 && !(state.schemaVersion >= 5 && state.activeIncident)) {
+    if (state.schemaVersion >= 5 && !state.activeIncident) {
       const graceMs = (Number.isInteger(config.leaseMinutes) ? config.leaseMinutes : 240) * 60 * 1000;
       const now = Date.now();
       let recoveryCooldownSeconds = null;
+      const releasedImmediately = new Set();
       for (const reservation of state.reservations) {
         if (reservation.state !== "quarantine") {
           continue;
@@ -2784,13 +2789,29 @@ async function reap(config) {
         if (recoveryCooldownSeconds === null) {
           recoveryCooldownSeconds = (await readLockConfig(config)).releaseCooldownSeconds;
         }
-        reservation.state = "cooldown";
-        reservation.reason = `auto-recovered stale quarantine (owning run terminal): ${reservation.reason}`;
-        reservation.availableAt = new Date(now + recoveryCooldownSeconds * 1000).toISOString();
         quarantineRecovered = true;
-        console.log(
-          `Auto-recovered stale quarantine ${reservation.reservationId} for runner ${reservation.runnerId}; ` +
-            "owning run is terminal and aged past the lease, so it becomes a cooldown."
+        if (recoveryCooldownSeconds <= 0) {
+          // Mirror the release path (a confirmed resource-safe release with cooldown 0
+          // writes no reservation): a zero cooldown frees the slot immediately, so drop
+          // the reservation rather than leaving a zero-length cooldown to prune next cycle.
+          releasedImmediately.add(reservation.reservationId);
+          console.log(
+            `Auto-recovered stale quarantine ${reservation.reservationId} for runner ${reservation.runnerId}; ` +
+              "owning run is terminal and aged past the lease, so the slot is released immediately (cooldown 0)."
+          );
+        } else {
+          reservation.state = "cooldown";
+          reservation.reason = `auto-recovered stale quarantine (owning run terminal): ${reservation.reason}`;
+          reservation.availableAt = new Date(now + recoveryCooldownSeconds * 1000).toISOString();
+          console.log(
+            `Auto-recovered stale quarantine ${reservation.reservationId} for runner ${reservation.runnerId}; ` +
+              "owning run is terminal and aged past the lease, so it becomes a cooldown."
+          );
+        }
+      }
+      if (releasedImmediately.size) {
+        state.reservations = state.reservations.filter(
+          (reservation) => !releasedImmediately.has(reservation.reservationId)
         );
       }
     }
