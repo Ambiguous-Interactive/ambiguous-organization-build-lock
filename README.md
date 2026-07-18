@@ -300,10 +300,21 @@ when the holder workflow run has completed, or when the lease has expired and
 the run cannot be proven active. The same stale predicate is used by acquire and
 the reaper.
 
-Under schema 4 and 5, stale holders are quarantined instead of freed. Operators may
-dispatch the reaper with `operation=recover`, the exact reservation ID, and
-`resource-safe=true` only after confirming Unity portal cleanup. Recovery starts
-a cooldown; it never frees capacity immediately.
+Under schema 4 and 5, stale holders are quarantined instead of freed. A queued job
+on the same physical runner reclaims a quarantine first (return-at-start), which is
+the strongest recovery because it actually returns the seat. The scheduled reaper
+also **auto-recovers a quarantine** once it confirms the owning run is terminal and
+the reservation has aged past the lease: it converts the quarantine to a cooldown so
+capacity is not pinned indefinitely (notably for quarantines tied to ephemeral
+GitHub-hosted runners, which can never be same-runner-reclaimed). This is safe because
+consumers now wrap activation in bounded retry — a returned seat frees the slot, while
+a genuinely leaked seat surfaces as a confirmed `20111` account incident rather than
+silent capacity loss. The reaper fails closed when the owning run status is unknown
+(the quarantine is kept) and skips recovery while a global incident is active.
+
+Operators may still force recovery by dispatching the reaper with `operation=recover`,
+the exact reservation ID, and `resource-safe=true` after confirming Unity portal
+cleanup; like auto-recovery it starts a cooldown rather than freeing capacity outright.
 
 For schema 5, dispatch `operation=recover-incident` with the exact incident ID
 and `portal-cleanup-confirmed=true` only after the Unity portal inventory is
