@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "29631452538",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29631452538",
-    "queuedAt": "2026-07-18T06:40:52.476Z",
-    "acquiredAt": "2026-07-18T06:59:59.825Z",
-    "expiresAt": "2026-07-18T10:59:59.825Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29631452538",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29631452538",
-      "queuedAt": "2026-07-18T06:40:52.476Z",
-      "acquiredAt": "2026-07-18T06:59:59.825Z",
-      "expiresAt": "2026-07-18T10:59:59.825Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29631263576:unity-tests:2021.3.45f1-playmode",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "c55135af-83f8-4a6e-8b39-a0d03f3d876c",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29631452538",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29631452538",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T07:06:15.490Z",
+      "availableAt": "2026-07-18T07:12:15.490Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T06:59:59.826Z"
+  "updatedAt": "2026-07-18T07:06:15.491Z"
 }
