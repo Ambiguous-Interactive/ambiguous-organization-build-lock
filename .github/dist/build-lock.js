@@ -1239,10 +1239,10 @@ function normalizeReleaseCooldownSeconds(raw, sourcePath) {
   if (raw === undefined || raw === null) {
     return DEFAULT_RELEASE_COOLDOWN_SECONDS;
   }
-  if (!Number.isInteger(raw) || raw < 1 || raw > 86400) {
+  if (!Number.isInteger(raw) || raw < 0 || raw > 86400) {
     console.log(
       `::warning::Ignoring invalid releaseCooldownSeconds=${JSON.stringify(raw)} in ${sourcePath}; ` +
-        `expected an integer between 1 and 86400. Using ${DEFAULT_RELEASE_COOLDOWN_SECONDS}.`
+        `expected an integer between 0 and 86400. Using ${DEFAULT_RELEASE_COOLDOWN_SECONDS}.`
     );
     return DEFAULT_RELEASE_COOLDOWN_SECONDS;
   }
@@ -1849,15 +1849,28 @@ async function cleanupIdentity(config, identity, options = {}) {
       !(state.schemaVersion >= 5 && options.resourceHealth === "blocked")
     ) {
       const reservationState = options.resourceSafe === true ? "cooldown" : "quarantine";
-      const reason = options.reason ||
-        (reservationState === "cooldown" ? "release cleanup confirmed resource-safe" : "release cleanup was not proven resource-safe");
-      reservation = reservationFromHolder(
-        removedHolders[0],
-        reservationState,
-        reason,
-        options.releaseCooldownSeconds || DEFAULT_RELEASE_COOLDOWN_SECONDS
-      );
-      state.reservations.push(reservation);
+      // Resolve the cooldown explicitly (not `|| DEFAULT`) so a configured 0 is
+      // honored rather than treated as falsy and replaced by the default.
+      const effectiveCooldownSeconds = Number.isInteger(options.releaseCooldownSeconds)
+        ? options.releaseCooldownSeconds
+        : DEFAULT_RELEASE_COOLDOWN_SECONDS;
+      // A zero-length cooldown means "no cooldown": a confirmed resource-safe
+      // release frees its slot immediately. The Unity activation handoff is now
+      // absorbed by consumer-side bounded activation retry (issue #57), so the
+      // lock no longer needs to hold a slot warm after a proven-clean release.
+      // Quarantines are unaffected: they are non-expiring and model unproven
+      // cleanup, so a 0 cooldown never weakens the resource-leak protection.
+      if (!(reservationState === "cooldown" && effectiveCooldownSeconds <= 0)) {
+        const reason = options.reason ||
+          (reservationState === "cooldown" ? "release cleanup confirmed resource-safe" : "release cleanup was not proven resource-safe");
+        reservation = reservationFromHolder(
+          removedHolders[0],
+          reservationState,
+          reason,
+          effectiveCooldownSeconds
+        );
+        state.reservations.push(reservation);
+      }
     }
     // Public release outputs are singular; report the same first holder that legacy
     // clients see through the mirrored `holder` field.

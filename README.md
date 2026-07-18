@@ -70,7 +70,9 @@ section, guard every licensed step on the acquire output, and release with
     runner-id: ${{ runner.name }}
     timeout-minutes: "180"
     require-resource-lifecycle: "true"
-    minimum-release-cooldown-seconds: "360"
+    # Consumers that wrap serial activation in bounded retry no longer need the
+    # lock to hold a slot warm; keep this at or below the live releaseCooldownSeconds.
+    minimum-release-cooldown-seconds: "0"
   env:
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
@@ -218,10 +220,26 @@ fails closed. This assumes one registered runner agent per physical machine.
 
 Add `"resourceLifecycle": true` only after all consumers pass cleanup proof and
 schema-3 holders and queue entries have drained. Activation fails closed on
-non-empty state. `"releaseCooldownSeconds": 360` retains a one-minute safety
-margin over the observed five-minute Unity activation handoff. During rollout,
-keep `maxHolders` at 1; restore 2 only after cross-runner canaries show no Unity
+non-empty state. `releaseCooldownSeconds` is a config knob (integer 0-86400) for
+how long a confirmed resource-safe release keeps its slot reserved before the next
+job may take it. It historically absorbed the observed ~five-minute Unity
+activation handoff by holding the slot warm. That handoff is now absorbed instead
+by **consumer-side bounded activation retry** (see below), so the live value is
+`0`: a proven-clean release frees its slot immediately (no reservation is written)
+and the next job acquires at once, retrying activation only as long as Unity
+actually needs. A value of `0` never weakens leak protection — an *unproven*
+cleanup still becomes a non-expiring quarantine regardless of the cooldown, and a
+confirmed `20111` still raises the global account incident. During rollout, keep
+`maxHolders` at 1; restore 2 only after cross-runner canaries show no Unity
 activation-limit failures.
+
+**Consumer requirement:** because the lock no longer holds a slot warm, every
+consumer's licensed Unity step MUST wrap serial activation in a bounded
+retry-with-backoff that retries the transient `20111` "maximum number of
+activations" contention and fails closed to the existing incident evidence only
+when it persists past the budget. Do not lower `releaseCooldownSeconds` below a
+consumer's `minimum-release-cooldown-seconds` until that consumer has adopted the
+retry.
 
 ## Authentication
 
