@@ -1,9 +1,13 @@
-# Secure Two-Seat Unity Rollout
+# Historical Secure Two-Seat Unity Rollout
 
-This runbook is the deployment gate for the code in this repository. Keep
-`maxHolders: 1` and `accountHealth: false` until every prerequisite below is
-recorded in one restricted tracking issue. Never attach raw PEM files, serials,
-logs, ZIP files, or credential values to the issue or repository.
+> [!WARNING]
+> This is a historical record of the migration and incident response. It is not
+> an operator runbook. Current values and recovery procedures are in
+> [Unity Build Lock Operations](operations-runbook.md).
+
+This record preserves why the schema-5 two-seat design exists. Never attach raw
+PEM files, serials, logs, ZIP files, or credential values to an issue or this
+repository.
 
 ## Evidence and containment
 
@@ -26,7 +30,7 @@ watch did not return a randomized machine identity; and other jobs attempted
 return from a different stock image. Those activations exhausted two seats while
 the lock state remained internally consistent.
 
-## Authorization cutover
+## Historical authorization cutover
 
 The registered organization is `Ambiguous-Interactive`, owner ID `212056428`.
 The lock repository is fixed to `ambiguous-organization-build-lock`, repository
@@ -34,49 +38,31 @@ ID `1244796436`. Any canonical repository context owned by the registered
 organization may enroll; the protected writer credential is the actual
 authorization boundary.
 
-1. Release the schema-4-compatible authorization change at an immutable SHA.
-2. Create the reader App with Metadata read, Actions read, and organization
-   Self-hosted runners read, with no Contents access, and install it with
-   all-repository access in the registered organization. This read-only
-   installation makes future organization repositories reaper-visible and lets
-   hosted preflights fail closed on runner outages without changing App scope.
-3. Verify compatibility while the writer App still has its old installation.
-4. Restrict the writer App installation to only this lock repository, with
-   Contents write. Rotate its key and update the organization writer secret
-   exposed to enrolled repositories.
-5. Prove the reader token cannot read contents and the writer token cannot
-   access a consumer repository. The unit suite verifies requested token scope;
-   the tracking issue must record live negative API probes.
-
-If the compatibility release lands before reader credentials are provisioned,
-the reaper temporarily mints its consumer-only Actions/Metadata token from the
-existing broad writer App. This fallback is valid only while that App remains
-installed on the five original consumers. Provision and verify the dedicated reader App
-before narrowing the writer installation; operator quarantine/incident recovery
-does not require the reader because it never reads workflow-run status.
+The rollout first introduced a reader/writer split while the legacy App
+installation remained broad, then restricted the writer App to this lock
+repository. The initial reader design omitted Contents permission and used
+all-repository installation. Later policy-audit requirements added Contents
+read and changed the intended steady-state installation to the reviewed
+consumer set. The compatibility fallback from reader operations to the broad
+writer App remains code history, not the current credential boundary.
 
 Repository-ID validation is defense in depth. In this GitHub-only design, the
 shared writer App private key is the ultimate authorization boundary; a stolen
 key can call GitHub without executing this action. Cryptographic caller identity
 would require an OIDC broker.
 
-## Consumer sequence
+## Historical consumer sequence
 
-Migrate one repository at a time: unity-helpers,
-DepartmentOfArrangements, DxMessaging, DoxReloaded, then IshoBoy. Do not start
-the next PR until the prior PR is merged, reviewed at its exact SHA, green, and
-canaried.
+The first sequence migrated unity-helpers, DepartmentOfArrangements,
+DxMessaging, DoxReloaded, and IshoBoy one repository at a time. Subsequent
+incident work removed DepartmentOfArrangements from the active perimeter and
+enrolled qora-redux and the controlled unity-builder fork. The current six-item
+inventory is maintained in the operations runbook.
 
-Each repository must have a data-driven policy test enumerating every Unity
-secret, GameCI use, and activation reference. Licensed jobs must use the
-protected `unity-license` environment, immutable action SHAs, persistent
-licensing home and machine identity across activation/return. Licensed jobs may
-validate protected branches, controlled manual dispatches, and trusted
-same-repository pull requests. Fork and Dependabot pull requests must never
-receive the licensed environment or its credentials. Same-repository PR
-validation requires no manual environment approval, so repository write access
-is part of the credential trust boundary. Job-scoped Unity secrets and
-custom-image/stock-return mismatches are prohibited.
+The original protected-environment design was replaced by selected-repository
+organization secrets without manual PR approval. Persistent licensing home and
+machine identity, immutable action pins, exact return evidence, and fork-secret
+isolation remained safety requirements.
 
 The shared classifier contract is:
 
@@ -87,40 +73,33 @@ The shared classifier contract is:
 - `20113`: `unknown/healthy`, reason `unity-20113-unclassified`, until sanitized
   production evidence establishes a stronger meaning.
 
-## Schema 5 activation and rollback
+## Historical schema 5 activation
 
-Before activation, prove all enrolled consumers and the reaper are pinned to an
-immutable schema-5-capable SHA and organization-wide search finds no schema-4-
-only or mutable `@v1` consumer. Preserve that schema-5-capable release as the
-rollback artifact; never run a schema-4-only client against schema 5.
+Before activation, the rollout proved all enrolled consumers and the reaper
+were pinned to an immutable schema-5-capable SHA and found no active mutable
+consumer reference. The compatible release was preserved as a rollback
+artifact.
 
-Drain holders, queue entries, cooldowns, and quarantines. Merge a configuration-
-only PR changing `accountHealth` to `true` while leaving `maxHolders` at 1. Run
-normal return, cross-machine handoff, cancellation, hard-stop reaping, synthetic
-`20111`, wrong-ID recovery rejection, exact-ID confirmed recovery, and one
-successful canary from each consumer.
+Activation drained holders, queue entries, cooldowns, and quarantines before
+enabling account health at capacity one. The rollout exercised normal return,
+cross-machine handoff, cancellation containment, exact-ID recovery rejection,
+and exact-ID portal-confirmed recovery before raising capacity.
 
-## Two-seat enablement
+## Historical two-seat enablement
 
-Only after the portal has zero unexplained activations, prove two distinct
-machines activate concurrently under two holders, both return with their
-activating identities, and — once `releaseCooldownSeconds` is `0` and every
-consumer wraps activation in bounded retry — a third machine acquires immediately
-after a release and its activation retry absorbs any residual Unity handoff with
-zero `20111` incidents. Then merge a configuration-only PR changing `maxHolders`
-from 1 to 2. Lower `releaseCooldownSeconds` toward `0` only after all consumers
-have adopted activation retry and their `minimum-release-cooldown-seconds` no
-longer exceeds the new value.
+The portal baseline was reconciled before two distinct machines proved two
+concurrent holders. Capacity then moved from one to two. Later work deployed
+bounded activation retry and reduced confirmed-cleanup cooldown from 360
+seconds to the current transitional value; literal zero remains tracked
+separately.
 
-At capacity two, one runner quarantine leaves effective capacity one; two leave
-zero. A global incident immediately leaves zero. Do not add an automatic
-configuration rollback to one holder.
+The migration established the enduring capacity rule: one runner quarantine
+reduces effective capacity by one, two consume both seats, and a global
+incident blocks admission.
 
-Monitor for seven days. Close the incident issues only with zero `20111`
-events, zero unexplained activations, zero unsafe releases admitted as clean,
-and zero unauthorized caller attempts.
+The post-activation monitoring gate was recorded in issues #27 and #29.
 
-## Organization audit
+## Historical organization-audit scope
 
 Use a one-time owner-authenticated collection without a permanent `admin:org`
 PAT. Record sanitized principals, teams, outside/direct collaborators, service
@@ -128,14 +107,10 @@ and enterprise owners, 2FA and SAML/SCIM posture, dormant access, Apps, OAuth
 Apps, PAT approvals, deploy/SSH keys, runner groups, environments, ruleset
 bypasses, and secret names/scopes/update times (never values).
 
-Verify owner recovery, then enable organization 2FA. Move all seven all-
-repository Apps to selected repositories and least privilege or uninstall them,
-while preserving Cursor Bugbot and Copilot on the review-loop repositories.
-Stage rulesets in evaluate mode, validate required App bypasses, then enforce.
-Only the writer App may bypass `lock-state`; administrators may not. Enable and
-test secret scanning and push protection, including a Unity-serial pattern.
-Repeat the principal audit quarterly and after membership, App, or secret-scope
-changes.
+The rollout identified follow-up work for owner recovery, 2FA, App and secret
+scope, rulesets, bypass actors, secret scanning, and quarterly principal
+reviews. These are tracked work items rather than instructions to infer from
+this historical snapshot.
 
 ## Review evidence
 

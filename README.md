@@ -2,12 +2,16 @@
 
 This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
-that share one Unity Pro seat must use this lock before invoking Unity.
+that share a finite Unity Pro seat pool must use this lock before invoking
+Unity.
 > [!NOTE]
-> Consumer jobs use a state-writer GitHub App restricted to this repository with
-> `contents: write`. A separate all-repository reader App has `actions: read`,
-> `metadata: read`, and organization `self-hosted runners: read`; each operation
-> requests only the permission subset it needs.
+> Consumer jobs use a state-writer GitHub App whose tokens are restricted to
+> this repository with `contents: write`. A separate reader App has
+> `actions: read`, `contents: read`, `metadata: read`, and organization
+> `self-hosted runners: read`; each operation requests only the permission and
+> repository subset it needs. The required selected-repository installation
+> boundary and the currently open control-plane scope gap are documented in the
+> steady-state runbook.
 ## Automated Releases
 
 The `Auto release` workflow runs on a weekly schedule and via manual dispatch.
@@ -27,7 +31,9 @@ credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
 ## Consumer Workflow Pattern
 
 See [consumer enrollment](docs/consumer-enrollment.md) for the repeatable
-repository/App/environment checklist and canary requirements.
+repository/App/secret-scope checklist and canary requirements. Operators should
+use the [steady-state runbook](docs/operations-runbook.md); the secure rollout
+document is a historical migration record.
 
 Run a hosted preflight before every self-hosted Unity job. It mints a
 short-lived token from the reader App, asks GitHub for runner groups visible to
@@ -79,7 +85,7 @@ section, guard every licensed step on the acquire output, and release with
 
 - name: Run Unity Test Runner
   if: ${{ steps.acquire-build-lock.outputs.acquired == 'true' }}
-  uses: game-ci/unity-test-runner@v4
+  uses: game-ci/unity-test-runner@IMMUTABLE_GAMECI_COMMIT_SHA
 
 - name: Return Unity license
   id: return-unity-license
@@ -177,12 +183,13 @@ quarantines because those paths cannot prove the external activation was
 returned. Once schema 4 exists, configuration cannot downgrade lifecycle
 protection.
 
-Schema 5 adds at most one immutable global account incident. It is supported by
-this release but remains dormant while `accountHealth` is false. Enabling it is
-a one-way, drained migration: schema 4 holders, queue entries, cooldowns, and
-quarantines must all be empty. A confirmed `20111` report blocks admission
-immediately without growing the queue. Existing holders may finish and clean up.
-Incidents never expire and cannot be recovered by same-runner admission.
+Schema 5 adds at most one immutable global account incident. It is active for
+`wallstop-organization-builds` because the committed config enables
+`accountHealth`. The one-way migration required schema-4 holders, queue entries,
+cooldowns, and quarantines to be empty. A confirmed `20111` report blocks
+admission immediately without growing the queue. Existing holders may finish
+and clean up. Incidents never expire and cannot be recovered by same-runner
+admission.
 
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
@@ -223,15 +230,15 @@ schema-3 holders and queue entries have drained. Activation fails closed on
 non-empty state. `releaseCooldownSeconds` is a config knob (integer 0-86400) for
 how long a confirmed resource-safe release keeps its slot reserved before the next
 job may take it. It historically absorbed the observed ~five-minute Unity
-activation handoff by holding the slot warm. That handoff is now absorbed instead
-by **consumer-side bounded activation retry** (see below), so the live value is
-`0`: a proven-clean release frees its slot immediately (no reservation is written)
-and the next job acquires at once, retrying activation only as long as Unity
-actually needs. A value of `0` never weakens leak protection — an *unproven*
-cleanup still becomes a non-expiring quarantine regardless of the cooldown, and a
-confirmed `20111` still raises the global account incident. During rollout, keep
-`maxHolders` at 1; restore 2 only after cross-runner canaries show no Unity
-activation-limit failures.
+activation handoff by holding the slot warm. That handoff is now absorbed
+instead by **consumer-side bounded activation retry** (see below). The committed
+live value is read from
+`locks/wallstop-organization-builds.config.json` and is transitional while
+issue #60 tracks the immutable-release and consumer-repin sequence required for
+literal zero. At `0`, a proven-clean release frees its slot immediately and
+writes no reservation. Zero never weakens leak protection: unproven cleanup
+still creates a non-expiring quarantine, and confirmed `20111` still raises the
+global account incident.
 
 **Consumer requirement:** because the lock no longer holds a slot warm, every
 consumer's licensed Unity step MUST wrap serial activation in a bounded
@@ -243,42 +250,40 @@ retry.
 
 ## Authentication
 
-Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together as organization
-secrets available to enrolled organization repositories. The writer App is
-installed only on this lock repository. Tokens are minted for only
-`ambiguous-organization-build-lock` with `contents: write`; caller owner ID/name,
-canonical repository ID/name, lock repository, and lock name are validated
-before any credential parsing or network access. Any repository owned by the
-registered organization can enroll without a lock-action code change; App-key
-possession and organization-secret repository access remain the authorization
-boundary.
+Set `BUILD_LOCK_APP_ID` and `BUILD_LOCK_APP_PRIVATE_KEY` together as
+selected-repository organization secrets available to enrolled repositories.
+The required steady-state installation restricts the writer App to this lock
+repository. Tokens are minted for only `ambiguous-organization-build-lock` with
+`contents: write`; caller owner ID/name, canonical repository ID/name, lock
+repository, and lock name are validated before any credential parsing or
+network access. Enrollment does not require a lock-action code change, but
+App-key possession and organization-secret repository access remain the
+authorization boundary. See the runbook for the known live scope gap.
 
 The reaper additionally uses `BUILD_LOCK_READER_APP_ID` and
-`BUILD_LOCK_READER_APP_PRIVATE_KEY`. Install that reader App with all-repository
-access in the registered organization so newly created organization repositories
-are reaper-visible without an App installation change. The reader has Actions
-read, Metadata read, and organization Self-hosted runners read; it has no
-Contents permission. Each use mints a token restricted to the operation: the
-reaper requests only `actions: read` and `metadata: read`, while hosted runner
-preflights request only organization self-hosted-runner inventory. Acquire and
-release never read cross-repository Actions state; an unreaped holder remains
-authoritative and admission fails closed.
+`BUILD_LOCK_READER_APP_PRIVATE_KEY`. The required steady-state installation
+restricts that reader App to the reviewed consumer set. It has Actions read,
+Contents read, Metadata read, and organization Self-hosted runners read. Each
+use mints a token restricted to the operation and repositories: the reaper
+requests Actions/Metadata, hosted runner preflights request runner inventory,
+and the central policy audit requests Contents for exact registered commits.
+Acquire and release never read cross-repository Actions state; an unreaped
+holder remains authoritative and admission fails closed.
 
-During the compatibility cutover only, if the dedicated reader credentials are
-absent, the scheduled reaper may mint the same consumer-only Actions/Metadata
-token from the existing broad writer App. The token remains restricted to the
-five original consumers and has no Contents permission. Provision the reader
-App before narrowing the writer installation, then remove reliance on this
-fallback. Operator `recover` and `recover-incident` operations do not inspect
-workflow runs and therefore do not require reader credentials.
+The code retains a compatibility fallback that can mint an Actions/Metadata
+token from a legacy broad writer installation when reader credentials are
+absent. Steady-state deployment must not rely on it: the writer App remains
+lock-repository-only and missing reader credentials fail the scheduled reaper.
+Operator `recover` and `recover-incident` operations do not inspect workflow
+runs and therefore do not require reader credentials.
 
 Legacy `BUILD_LOCK_TOKEN` authentication is rejected. Old pinned runs must drain
 before the state-writer App key is rotated.
 
-Rollout note: upgrade every consumer to the latest `v1` before raising
-`maxHolders` above 1. Pre-semaphore clients see only the mirrored first holder
-(they wait conservatively and never over-admit), but a state write from such a
-client drops the extra `holders` entries.
+Consumers pin reviewed 40-character compatibility commits. Never run a
+pre-semaphore client against the active two-holder state: although it sees the
+mirrored first holder conservatively, its state write can drop additional
+`holders` entries.
 
 ## Transient Auth Failures
 
