@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:29648845180:unity-tests:2022.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29648845180",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29648845180",
+    "queuedAt": "2026-07-18T17:24:15.757Z",
+    "acquiredAt": "2026-07-18T18:04:25.328Z",
+    "expiresAt": "2026-07-18T22:04:25.328Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29648845180:unity-tests:2022.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29648845180",
       "queuedAt": "2026-07-18T17:24:15.757Z",
+      "acquiredAt": "2026-07-18T18:04:25.328Z",
+      "expiresAt": "2026-07-18T22:04:25.328Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29653333564:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -55,5 +70,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T18:04:24.463Z"
+  "updatedAt": "2026-07-18T18:04:25.329Z"
 }
