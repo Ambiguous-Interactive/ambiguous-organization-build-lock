@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29648845180:unity-tests:2022.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29648845180",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29648845180",
-    "queuedAt": "2026-07-18T16:50:47.841Z",
-    "acquiredAt": "2026-07-18T17:00:49.077Z",
-    "expiresAt": "2026-07-18T21:00:49.077Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29648845180:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29648845180",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29648845180",
-      "queuedAt": "2026-07-18T16:50:47.841Z",
-      "acquiredAt": "2026-07-18T17:00:49.077Z",
-      "expiresAt": "2026-07-18T21:00:49.077Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29643599493:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "9a8dd2b4-3a90-40ab-9aa0-74c5a60b4473",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29648845180:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29648845180",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29648845180",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T17:01:29.062Z",
+      "availableAt": "2026-07-18T17:07:29.062Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T17:00:49.077Z"
+  "updatedAt": "2026-07-18T17:01:29.062Z"
 }
