@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29643599493:unity-tests-standalone:6000.5.2f1-standalone",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests-standalone",
-    "runId": "29643599493",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29643599493",
-    "queuedAt": "2026-07-18T16:31:17.786Z",
-    "acquiredAt": "2026-07-18T16:39:38.037Z",
-    "expiresAt": "2026-07-18T20:39:38.037Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29643599493:unity-tests-standalone:6000.5.2f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "29643599493",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29643599493",
-      "queuedAt": "2026-07-18T16:31:17.786Z",
-      "acquiredAt": "2026-07-18T16:39:38.037Z",
-      "expiresAt": "2026-07-18T20:39:38.037Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29643904487:unity-tests:2022.3.45f1-standalone",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "75033f83-12d7-4320-b290-ca9779286d9f",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29643599493:unity-tests-standalone:6000.5.2f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "29643599493",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29643599493",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T16:47:12.001Z",
+      "availableAt": "2026-07-18T16:53:12.001Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T16:39:38.038Z"
+  "updatedAt": "2026-07-18T16:47:12.001Z"
 }
