@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29629898845:unity-tests:2022.3.45f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "29629898845",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29629898845",
+    "queuedAt": "2026-07-18T05:17:35.714Z",
+    "acquiredAt": "2026-07-18T06:04:55.029Z",
+    "expiresAt": "2026-07-18T10:04:55.029Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:29629898845:unity-tests:2022.3.45f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29629898845",
       "queuedAt": "2026-07-18T05:17:35.714Z",
+      "acquiredAt": "2026-07-18T06:04:55.029Z",
+      "expiresAt": "2026-07-18T10:04:55.029Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29631452538:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -55,5 +70,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T06:04:53.207Z"
+  "updatedAt": "2026-07-18T06:04:55.029Z"
 }
