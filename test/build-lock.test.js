@@ -4102,9 +4102,9 @@ test("committed lock config files are well-formed", () => {
     if (Object.hasOwn(parsed, "releaseCooldownSeconds")) {
       assert.ok(
         Number.isInteger(parsed.releaseCooldownSeconds) &&
-          parsed.releaseCooldownSeconds >= 1 &&
+          parsed.releaseCooldownSeconds >= 0 &&
           parsed.releaseCooldownSeconds <= 86400,
-        `${file} releaseCooldownSeconds must be an integer between 1 and 86400`
+        `${file} releaseCooldownSeconds must be an integer between 0 and 86400`
       );
     }
   }
@@ -5426,10 +5426,15 @@ test("schema 4 reservations round-trip and malformed lifecycle state fails close
 
 test("schema 4 release transitions ownership to cooldown or quarantine", async (t) => {
   for (const testCase of [
-    { resourceSafe: true, result: "cooldown-started", state: "cooldown", available: true },
-    { resourceSafe: false, result: "quarantined", state: "quarantine", available: false }
+    { resourceSafe: true, cooldownSeconds: 360, result: "cooldown-started", state: "cooldown", available: true, reservations: 1 },
+    { resourceSafe: false, cooldownSeconds: 360, result: "quarantined", state: "quarantine", available: false, reservations: 1 },
+    // A zero cooldown means "no cooldown" (issue #57): a confirmed resource-safe
+    // release frees its slot immediately with no reservation, so the next job can
+    // acquire at once and absorb any residual Unity handoff via activation retry.
+    // A quarantine is unaffected because unproven cleanup never entered this path.
+    { resourceSafe: true, cooldownSeconds: 0, result: "released", state: "", available: false, reservations: 0 }
   ]) {
-    await t.test(testCase.result, async () => {
+    await t.test(`${testCase.result} (cooldown=${testCase.cooldownSeconds})`, async () => {
       const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
       let state = lifecycleState([held]);
       await withTempFile(async (outputFile) => {
@@ -5440,7 +5445,7 @@ test("schema 4 release transitions ownership to cooldown or quarantine", async (
               return jsonResponse(200, { object: { sha: "branch-sha" } });
             }
             if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-              return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 360 }, "cfg");
+              return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: testCase.cooldownSeconds }, "cfg");
             }
             if (parsed.pathname === SEMAPHORE_STATE_PATH) {
               if (options.method === "PUT") {
@@ -5454,22 +5459,32 @@ test("schema 4 release transitions ownership to cooldown or quarantine", async (
             await release(semaphoreConfig({ runnerId: "runner-a", resourceSafe: testCase.resourceSafe }));
             const message = testCase.result === "cooldown-started"
               ? /Removed lock ownership.*resource capacity entered cooldown/
-              : /Removed lock ownership.*resource capacity is quarantined/;
+              : testCase.result === "quarantined"
+                ? /Removed lock ownership.*resource capacity is quarantined/
+                : /Released wallstop-organization-builds/;
             assert.match(logs.join("\n"), message);
-            assert.doesNotMatch(logs.join("\n"), /Released wallstop-organization-builds/);
+            if (testCase.result !== "released") {
+              assert.doesNotMatch(logs.join("\n"), /Released wallstop-organization-builds/);
+            }
           });
         });
         const outputs = readEnvironmentFile(outputFile);
         assert.equal(outputs.released, "true");
         assert.equal(outputs["cleanup-result"], testCase.result);
         assert.equal(outputs["reservation-state"], testCase.state);
-        assert.ok(outputs["reservation-id"]);
+        if (testCase.reservations > 0) {
+          assert.ok(outputs["reservation-id"]);
+        } else {
+          assert.equal(outputs["reservation-id"], "");
+        }
         assert.equal(Boolean(outputs["available-at"]), testCase.available);
       });
       assert.equal(state.holders.length, 0);
-      assert.equal(state.reservations.length, 1);
-      assert.equal(state.reservations[0].runnerId, "runner-a");
-      assert.equal(state.reservations[0].state, testCase.state);
+      assert.equal(state.reservations.length, testCase.reservations);
+      if (testCase.reservations > 0) {
+        assert.equal(state.reservations[0].runnerId, "runner-a");
+        assert.equal(state.reservations[0].state, testCase.state);
+      }
     });
   }
 });
