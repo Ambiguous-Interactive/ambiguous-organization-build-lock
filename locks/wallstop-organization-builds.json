@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:29629898845:unitypackage-smoke:unitypackage-smoke-29629898845",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "29629898845",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29629898845",
-    "queuedAt": "2026-07-18T11:46:45.165Z",
-    "acquiredAt": "2026-07-18T11:58:45.224Z",
-    "expiresAt": "2026-07-18T15:58:45.224Z",
-    "runnerId": "GitHub Actions 1000113419"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:29629898845:unitypackage-smoke:unitypackage-smoke-29629898845",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "29629898845",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29629898845",
-      "queuedAt": "2026-07-18T11:46:45.165Z",
-      "acquiredAt": "2026-07-18T11:58:45.224Z",
-      "expiresAt": "2026-07-18T15:58:45.224Z",
-      "runnerId": "GitHub Actions 1000113419"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:29631263576:unity-tests:6000.3.16f1-standalone",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "ce46e618-370a-428f-b460-92a8e2a24a10",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29629898845:unitypackage-smoke:unitypackage-smoke-29629898845",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "29629898845",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29629898845",
+      "runnerId": "GitHub Actions 1000113419",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T12:00:55.005Z",
+      "availableAt": "2026-07-18T12:06:55.005Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T11:58:45.224Z"
+  "updatedAt": "2026-07-18T12:00:55.005Z"
 }
