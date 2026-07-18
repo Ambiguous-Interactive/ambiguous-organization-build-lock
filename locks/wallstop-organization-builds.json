@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:29644197545:build-mac:steam-macos-build-6000.5.2f1",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Build and Deploy to Steam",
-    "job": "build-mac",
-    "runId": "29644197545",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29644197545",
-    "queuedAt": "2026-07-18T12:23:10.515Z",
-    "acquiredAt": "2026-07-18T12:45:38.388Z",
-    "expiresAt": "2026-07-18T16:45:38.388Z",
-    "runnerId": "mac-mini"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:29644197545:build-mac:steam-macos-build-6000.5.2f1",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Build and Deploy to Steam",
-      "job": "build-mac",
-      "runId": "29644197545",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29644197545",
-      "queuedAt": "2026-07-18T12:23:10.515Z",
-      "acquiredAt": "2026-07-18T12:45:38.388Z",
-      "expiresAt": "2026-07-18T16:45:38.388Z",
-      "runnerId": "mac-mini"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29644197545:build-linux:steam-linux-build-6000.5.2f1",
@@ -78,8 +52,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "46158f00-a8ff-443c-9537-8702c462e94e",
+      "holderId": "Ambiguous-Interactive/IshoBoy:29644197545:build-mac:steam-macos-build-6000.5.2f1",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Build and Deploy to Steam",
+      "job": "build-mac",
+      "runId": "29644197545",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29644197545",
+      "runnerId": "mac-mini",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T12:56:51.403Z",
+      "availableAt": "2026-07-18T13:02:51.403Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T12:45:38.388Z"
+  "updatedAt": "2026-07-18T12:56:51.404Z"
 }
