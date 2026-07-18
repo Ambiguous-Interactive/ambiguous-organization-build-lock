@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29643904487:unity-tests:2021.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29643904487",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29643904487",
-    "queuedAt": "2026-07-18T12:20:44.823Z",
-    "acquiredAt": "2026-07-18T12:38:44.049Z",
-    "expiresAt": "2026-07-18T16:38:44.049Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29643904487:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29643904487",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29643904487",
-      "queuedAt": "2026-07-18T12:20:44.823Z",
-      "acquiredAt": "2026-07-18T12:38:44.049Z",
-      "expiresAt": "2026-07-18T16:38:44.049Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29644197545:build-mac:steam-macos-build-6000.5.2f1",
@@ -78,8 +52,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-17T19:03:14.795Z"
+    },
+    {
+      "reservationId": "1b2cee01-353e-45a6-973b-dc154606a5a0",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29643904487:unity-tests:2021.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29643904487",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29643904487",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-18T12:39:20.983Z",
+      "availableAt": "2026-07-18T12:45:20.983Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-18T12:38:44.049Z"
+  "updatedAt": "2026-07-18T12:39:20.984Z"
 }
