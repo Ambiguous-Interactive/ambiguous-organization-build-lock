@@ -73,6 +73,40 @@ issue through exact-head review, green CI, merge, and post-merge verification.
 - Cursor Bugbot: passed, zero findings
 - GitHub Copilot: quota exhausted, no actionable feedback
 
+## Post-merge battle test
+
+- PR #67 merged as `568650b515ac3004b64d69d25d9035e78efb16a5`.
+- Main CI and both live Dependabot update jobs passed at that commit.
+- The broadened Go updater immediately created grouped PR #68, proving that
+  direct and indirect modules were discovered together.
+- PR #68 exposed an upstream compatibility boundary: YAML v4 rc.4-rc.6 removed
+  parser error fields/types still used by actionlint v1.7.12. Central CI failed
+  at actionlint compilation, and the exact-head auto-merge gate failed closed.
+- Root cause: the production command and the CI-only actionlint tool shared one
+  Go module graph. Minimal version selection therefore forced actionlint to
+  compile against the production parser version, even though actionlint pins an
+  older parser API.
+- Rejected stopgap: ignoring rc.4-rc.6 would leave production pinned to rc.3 and
+  repeat the failure for any future incompatible parser release.
+- Corrective design: `tools/actionlint` now owns the actionlint tool and its
+  transitive parser graph. A tools-build-tagged source import keeps actionlint
+  as that module's sole direct dependency. Production independently advances
+  its YAML parser. CI caches, verifies, and checks tidiness for both graphs.
+  Dependabot updates every root dependency without ignores; its default tools
+  behavior proposes direct actionlint releases while leaving transitive lock
+  dependencies eligible for security updates.
+- Red-green proof: the isolation policy initially failed because the tools
+  module did not exist, then passed after the split. Full validation passed with
+  374/374 Node tests, Go tests, both checksum and tidiness checks, actionlint,
+  the credential audit, syntax checks, and diff hygiene.
+- Two final independent adversarial reviews returned `ZERO ISSUES` after
+  verifying MVS isolation, version/security update eligibility, CI coverage,
+  upgrade-tolerant tests, minimality, and the complete RCA.
+- Published the isolation fix as PR #69 at
+  `2297ed6312abec4c3bd7eba06f89317dda770dec`. Exact-head central CI and
+  Cursor Bugbot passed, there were no review threads, and Copilot returned only
+  its quota-exhausted response. No dependent Unity workflow ran.
+
 ## Prioritized issue inventory
 
 The ordering favors low paid/licensed Unity usage, autonomous completion under
