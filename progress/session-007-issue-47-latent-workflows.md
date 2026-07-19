@@ -1,6 +1,6 @@
 # Session 007: Issue 47 latent-workflow removal
 
-Status: in progress
+Status: awaiting required Unity portal reconciliation
 
 ## Objective
 
@@ -127,7 +127,42 @@ completion, safety impact, and bounded scope. Counts are lower bounds.
   3-version by 3-mode Unity matrix in run `29695726376`.
 - PR #282 was squash-merged through the GitHub connector as
   `b859aaaf348ab0938312a0716642b5ab51c2c9b8` only after that exact-head proof.
-  Default-branch push verification is in progress.
+  Default-branch static CI, devcontainer validation, and release drafting passed.
+
+## Default-branch RCA and fail-closed follow-up
+
+- Default-branch Unity run `29696231385` exposed a pre-existing active schema-5
+  account incident, `incident-08d2ae36d87d05ac56c5b448`, reported by
+  qora-redux run `29694913080` on `DAD-MACHINE` for
+  `unity-account-limit-20111`.
+- The central acquire action correctly returned `acquired=false` and
+  `admission-result=account-blocked`, but its output-oriented interface keeps
+  the step successful so callers can inspect the result. All six Dx licensed
+  windows failed to inspect it and could therefore start Unity without owning
+  the lock. Unity 2021 PlayMode retried 20111 until its bounded budget expired;
+  this was a production workflow bug, not a test failure.
+- The remaining already-red Unity and performance jobs were canceled to avoid
+  further unsafe paid activations. Post-cancellation state has no holders or
+  queue entries and no new reservation. The existing DoxReloaded
+  `unity-return-400006` quarantine remains untouched.
+- DxMessaging PR #283 fixes the full class across six lock windows in five
+  workflows. Each acquire has a stable ID, blocked or missing admission causes
+  an immediate nonzero guard, licensed work independently requires exact
+  `acquired=true`, and return/release cleanup remains unconditional.
+- Red-first policy evidence failed because no window had the guard. The
+  data-driven green contract inventories all six windows, distinguishes five
+  expected-empty paths from the release export, and requires the exact empty
+  predicate on both the guard and licensed-work step. Local `validate:all`,
+  13/13 focused lifecycle tests, Prettier, pre-commit, and adversarial review
+  pass.
+- Cursor's first review found that the policy did not protect the expected-empty
+  conjunct. Exact head `84e80c2bac2f9b229691fefa6242b8325036dcc6`
+  addresses that feedback; the thread is resolved and exact-head re-review/CI
+  is running. Copilot was requested after both pushes and reported quota
+  exhaustion without actionable feedback.
+- The active incident cannot be cleared from GitHub evidence alone. The runbook
+  requires reconciliation of every Unity portal activation before dispatching
+  `recover-incident` with the exact ID and `portal-cleanup-confirmed=true`.
 
 ## Central enrollment audit extension
 
@@ -152,5 +187,10 @@ completion, safety impact, and bounded scope. Counts are lower bounds.
   missing central audit. A second pass found ambiguous CLI dispatch and a stale
   hard-coded default-branch ref. After fixes and regression tests, the final
   adversarial pass reported zero issues across both repositories.
-- Pending DxMessaging `master` verification, central PR/reviewer/CI loop,
-  central merge/default-branch audit dispatch, and issue closure.
+- Central PR #72 exact head `f53e4b9283fac9688644b84aecbac20187bbdfc4`
+  has zero-Unity CI green, Cursor zero-issue review, no review threads, and a
+  Copilot quota-exhausted response. Merge is held until the Dx recovery and
+  follow-up PR are fully green.
+- Pending externally confirmed Unity portal reconciliation, DxMessaging PR #283
+  green/merge/default-branch verification, central evidence refresh and merge,
+  live audit dispatch, and issue closure.
