@@ -102,6 +102,10 @@ issue through exact-head review, green CI, merge, and post-merge verification.
 - Two final independent adversarial reviews returned `ZERO ISSUES` after
   verifying MVS isolation, version/security update eligibility, CI coverage,
   upgrade-tolerant tests, minimality, and the complete RCA.
+- Published the isolation fix as PR #69 at
+  `2297ed6312abec4c3bd7eba06f89317dda770dec`. Exact-head central CI and
+  Cursor Bugbot passed, there were no review threads, and Copilot returned only
+  its quota-exhausted response. No dependent Unity workflow ran.
 
 ## Prioritized issue inventory
 
