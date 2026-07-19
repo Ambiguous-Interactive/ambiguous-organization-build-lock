@@ -566,6 +566,10 @@ function oneLine(value) {
   return String(value || "").replace(/[\r\n]+/g, " ").trim();
 }
 
+function workflowCommandData(value) {
+  return oneLine(value).replace(/%/g, "%25");
+}
+
 function retryAfterMs(response) {
   const value = header(response, "retry-after");
   if (!value) {
@@ -814,6 +818,46 @@ function emptyState(lockName, schemaVersion = DEFAULT_SCHEMA_VERSION) {
   };
 }
 
+function incidentEvidenceDigest(incident) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({
+      repository: incident.repository,
+      workflow: incident.workflow,
+      job: incident.job,
+      runId: incident.runId,
+      runAttempt: incident.runAttempt,
+      runnerId: incident.runnerId,
+      reason: incident.reason
+    }))
+    .digest("hex");
+}
+
+function githubServerOrigin() {
+  const configured = String(process.env.GITHUB_SERVER_URL || "https://github.com").trim();
+  let parsed;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error("GITHUB_SERVER_URL must be an absolute HTTP(S) origin.");
+  }
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    (parsed.pathname !== "/" && parsed.pathname !== "") ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("GITHUB_SERVER_URL must be an absolute HTTP(S) origin.");
+  }
+  return parsed.origin;
+}
+
+function canonicalRunUrl(repository, runId) {
+  return `${githubServerOrigin()}/${repository}/actions/runs/${runId}`;
+}
+
 function normalizeIncident(incident) {
   if (incident === null) {
     return null;
@@ -834,18 +878,25 @@ function normalizeIncident(incident) {
     reason: String(incident.reason || ""),
     evidenceDigest: String(incident.evidenceDigest || "").trim()
   };
+  const repositorySegments = normalized.repository.split("/");
+  const canonicalRepository =
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized.repository) &&
+    repositorySegments.every((segment) => segment !== "." && segment !== "..");
+  const expectedRunUrl = canonicalRunUrl(normalized.repository, normalized.runId);
+  const expectedEvidenceDigest = incidentEvidenceDigest(normalized);
   if (
     !/^incident-[a-f0-9]{24}$/.test(normalized.incidentId) ||
-    !normalized.repository ||
+    !canonicalRepository ||
     !normalized.workflow ||
     !normalized.job ||
     !/^[1-9][0-9]*$/.test(normalized.runId) ||
     !/^[1-9][0-9]*$/.test(normalized.runAttempt) ||
-    !normalized.runUrl ||
+    normalized.runUrl !== expectedRunUrl ||
     !normalized.runnerId ||
     !parseTime(normalized.reportedAt) ||
     normalized.reason !== "unity-account-limit-20111" ||
     !/^[a-f0-9]{64}$/.test(normalized.evidenceDigest) ||
+    normalized.evidenceDigest !== expectedEvidenceDigest ||
     normalized.incidentId !== `incident-${normalized.evidenceDigest.slice(0, 24)}`
   ) {
     throw new Error(
@@ -856,18 +907,7 @@ function normalizeIncident(incident) {
 }
 
 function incidentFromIdentity(identity, reason) {
-  const evidenceDigest = crypto
-    .createHash("sha256")
-    .update(JSON.stringify({
-      repository: identity.repository,
-      workflow: identity.workflow,
-      job: identity.job,
-      runId: identity.runId,
-      runAttempt: identity.runAttempt,
-      runnerId: identity.runnerId,
-      reason
-    }))
-    .digest("hex");
+  const evidenceDigest = incidentEvidenceDigest({ ...identity, reason });
   return {
     incidentId: `incident-${evidenceDigest.slice(0, 24)}`,
     repository: identity.repository,
@@ -1387,7 +1427,7 @@ function currentIdentity(config) {
     runId,
     runAttempt,
     runnerId: String(config.runnerId || "").trim(),
-    runUrl: `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${repository}/actions/runs/${runId}`,
+    runUrl: canonicalRunUrl(repository, runId),
     queuedAt: nowIso()
   };
 }
@@ -1838,14 +1878,17 @@ async function cleanupIdentity(config, identity, options = {}) {
     }
     const queueCleaned = state.queue.some(ownsEntry);
     state.queue = state.queue.filter((entry) => !ownsEntry(entry));
-    const removedHolders = state.holders.filter(ownsEntry);
-    const remainingHolders = state.holders.filter((holder) => !ownsEntry(holder));
+    const removedHolders = options.queueOnly === true ? [] : state.holders.filter(ownsEntry);
+    const remainingHolders = options.queueOnly === true
+      ? state.holders
+      : state.holders.filter((holder) => !ownsEntry(holder));
     const released = remainingHolders.length !== state.holders.length;
     state.holders = remainingHolders;
     let reservation = null;
     if (
       state.schemaVersion >= 4 &&
       removedHolders.length &&
+      options.preActivationCleanup !== true &&
       !(state.schemaVersion >= 5 && options.resourceHealth === "blocked")
     ) {
       const reservationState = options.resourceSafe === true ? "cooldown" : "quarantine";
@@ -1871,6 +1914,22 @@ async function cleanupIdentity(config, identity, options = {}) {
         );
         state.reservations.push(reservation);
       }
+    }
+    if (
+      state.schemaVersion >= 4 &&
+      removedHolders.length &&
+      options.preActivationCleanup === true &&
+      options.preActivationReservation
+    ) {
+      const restored = structuredClone(options.preActivationReservation);
+      if (restored.runnerId !== removedHolders[0].runnerId || restored.state !== "quarantine") {
+        throw new Error("Pre-activation cleanup reservation provenance does not match the admitted holder.");
+      }
+      if (state.reservations.some((candidate) => candidate.reservationId === restored.reservationId)) {
+        throw new Error(`Pre-activation cleanup reservation ${restored.reservationId} already exists.`);
+      }
+      state.reservations.push(restored);
+      reservation = restored;
     }
     // Public release outputs are singular; report the same first holder that legacy
     // clients see through the mirrored `holder` field.
@@ -2097,6 +2156,33 @@ function writeReapOutputs({ reaped, stateSha = "" }) {
   writeOutput("state-sha", stateSha);
 }
 
+function activeIncidentAdmissionMessage(lockName, incident, options = {}) {
+  const context =
+    `Global account incident ${oneLine(incident.incidentId)} blocks new ${oneLine(lockName)} admission. ` +
+      `Confirmed reason ${oneLine(incident.reason)} was reported by repository ${oneLine(incident.repository)}, ` +
+      `workflow ${oneLine(incident.workflow)}, job ${oneLine(incident.job)}, run attempt ${oneLine(incident.runAttempt)}, ` +
+      `runner ${oneLine(incident.runnerId)}, at ${oneLine(incident.reportedAt)}; source run ${oneLine(incident.runUrl)}. ` +
+      `This is a fail-closed denial: do not start licensed work or edit lock state manually. `;
+  if (options.cleanupFailed) {
+    return oneLine(
+      context +
+        `Exact build-lock cleanup could not be confirmed (${oneLine(options.cleanupError)}). ` +
+        `First, use supported release, post-action, or fallback cleanup to remove caller ` +
+        `${oneLine(options.holderId)} from both holders and queue, and confirm that removal with a fresh ` +
+        `lock-state read. After caller removal is confirmed, reconcile every Unity Portal activation. ` +
+        `Then dispatch Reap stale build locks with operation=recover-incident, ` +
+        `incident-id=${oneLine(incident.incidentId)}, and portal-cleanup-confirmed=true. ` +
+        `Only then rerun the consumer.`
+    );
+  }
+  return oneLine(
+    context +
+      `After reconciling every Unity Portal activation, dispatch Reap stale build locks with ` +
+      `operation=recover-incident, incident-id=${oneLine(incident.incidentId)}, and ` +
+      `portal-cleanup-confirmed=true; then rerun the consumer.`
+  );
+}
+
 async function acquire(config) {
   validateLockName(config.lockName);
   const identity = currentIdentity(config);
@@ -2123,6 +2209,69 @@ async function acquire(config) {
     let quarantineRecovered = false;
     let lastObservation = null;
     let authFailureSince = null;
+    let lockStateMayNeedCleanup = false;
+    let admissionMayHaveBeenWrittenByThisInvocation = false;
+    let preActivationReservation = null;
+
+    const cleanupBeforeActivation = async (reason, options = {}) => {
+      const result = await cleanupIdentity(config, identity, {
+        maxAttempts: 3,
+        conflictDelayMs: 500,
+        queueOnly: options.queueOnly === true,
+        preActivationCleanup: admissionMayHaveBeenWrittenByThisInvocation,
+        preActivationReservation,
+        resourceSafe: false,
+        releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
+        reason,
+        apiOptions: { signal: apiOptions.signal }
+      });
+      console.log(`::notice::Build-lock cleanup before activation: ${cleanupResultName(result)}.`);
+      return result;
+    };
+
+    const rejectForActiveIncident = async (incident, observedStateSha, options = {}) => {
+      const message = activeIncidentAdmissionMessage(config.lockName, incident);
+      let cleanupResult = null;
+      if (lockStateMayNeedCleanup) {
+        try {
+          cleanupResult = await cleanupBeforeActivation("global account incident blocked admission", {
+            queueOnly: options.queueOnly === true
+          });
+        } catch (cleanupError) {
+          const waitMs = Date.now() - started;
+          writeAcquireOutputs({
+            acquired: false,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            waitMs,
+            attempts,
+            admissionResult: "account-blocked-cleanup-failed",
+            incidentId: incident.incidentId,
+            resourceHealth: "blocked",
+            resourceReason: incident.reason
+          });
+          throw new Error(activeIncidentAdmissionMessage(config.lockName, incident, {
+            cleanupFailed: true,
+            cleanupError: cleanupError.message,
+            holderId: identity.holderId
+          }), { cause: cleanupError });
+        }
+      }
+      const waitMs = Date.now() - started;
+      writeAcquireOutputs({
+        acquired: false,
+        lockName: config.lockName,
+        holderId: identity.holderId,
+        stateSha: cleanupResult?.sha || observedStateSha || "",
+        waitMs,
+        attempts,
+        admissionResult: "account-blocked",
+        incidentId: incident.incidentId,
+        resourceHealth: "blocked",
+        resourceReason: incident.reason
+      });
+      throw new Error(message);
+    };
 
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
@@ -2200,27 +2349,12 @@ async function acquire(config) {
         }
         const resourceLifecycle = state.schemaVersion >= 4;
         if (state.schemaVersion >= 5 && state.activeIncident) {
-          const waitMs = Date.now() - started;
-          writeAcquireOutputs({
-            acquired: false,
-            lockName: config.lockName,
-            holderId: identity.holderId,
-            stateSha: sha || "",
-            waitMs,
-            attempts,
-            admissionResult: "account-blocked",
-            incidentId: state.activeIncident.incidentId,
-            resourceHealth: "blocked",
-            resourceReason: state.activeIncident.reason
+          if (state.queue.some((entry) => entry.holderId === identity.holderId)) {
+            lockStateMayNeedCleanup = true;
+          }
+          await rejectForActiveIncident(state.activeIncident, sha, {
+            queueOnly: !admissionMayHaveBeenWrittenByThisInvocation
           });
-          appendSummary(
-            `Admission blocked for ${config.lockName} by global incident ${state.activeIncident.incidentId}.`
-          );
-          console.log(
-            `::error::Global account incident ${state.activeIncident.incidentId} blocks new ${config.lockName} admission.`
-          );
-          console.log("::endgroup::");
-          return;
         }
         const expiredCooldowns = pruneExpiredCooldowns(state);
         if (expiredCooldowns.length) {
@@ -2298,6 +2432,7 @@ async function acquire(config) {
           state.queue.push(identity);
           changed = true;
         } else {
+          lockStateMayNeedCleanup = true;
           recordPostCleanupNeeded();
         }
 
@@ -2373,6 +2508,7 @@ async function acquire(config) {
           : state.queue.slice(0, Math.max(0, freeSlots));
         const eligible = canRecoverQuarantine || eligibleEntries.some((entry) => entry.holderId === identity.holderId);
         if ((freeSlots > 0 || canRecoverQuarantine) && eligible) {
+          const admissionReservation = canRecoverQuarantine ? structuredClone(matchingQuarantine) : null;
           if (canRecoverQuarantine) {
             console.log(
               `Recovering quarantine ${matchingQuarantine.reservationId} on original runner ${identity.runnerId}.`
@@ -2388,9 +2524,14 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Acquire ${config.lockName}`, { apiOptions });
           if (write.conflict) {
-            if (canRecoverQuarantine && write.ambiguous) {
-              quarantineRecovered = true;
+            if (write.ambiguous) {
+              admissionMayHaveBeenWrittenByThisInvocation = true;
+              lockStateMayNeedCleanup = true;
+              preActivationReservation = admissionReservation;
               recordPostCleanupNeeded();
+              if (canRecoverQuarantine) {
+                quarantineRecovered = true;
+              }
             }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
@@ -2398,9 +2539,15 @@ async function acquire(config) {
           if (canRecoverQuarantine) {
             quarantineRecovered = true;
           }
+          admissionMayHaveBeenWrittenByThisInvocation = true;
+          lockStateMayNeedCleanup = true;
+          preActivationReservation = admissionReservation;
           recordPostCleanupNeeded();
           throwIfCancellation(cancellation);
           const verified = await readState(config, { apiOptions });
+          if (verified.state.schemaVersion >= 5 && verified.state.activeIncident) {
+            await rejectForActiveIncident(verified.state.activeIncident, verified.sha);
+          }
           const verifiedHolder = verified.state.holders.find((holder) => holder.holderId === identity.holderId);
           if (
             !verifiedHolder ||
@@ -2433,9 +2580,14 @@ async function acquire(config) {
           throwIfCancellation(cancellation);
           const write = await writeState(config, sha, state, `Queue for ${config.lockName}`, { apiOptions });
           if (write.conflict) {
+            if (write.ambiguous) {
+              lockStateMayNeedCleanup = true;
+              recordPostCleanupNeeded();
+            }
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
+          lockStateMayNeedCleanup = true;
           recordPostCleanupNeeded();
         }
 
@@ -2913,9 +3065,10 @@ async function run() {
       throw new Error(`Unknown BUILD_LOCK_MODE: ${MODE}`);
     }
   } catch (error) {
+    const message = oneLine(error.message);
     console.log("::endgroup::");
-    console.error(`::error::${error.message}`);
-    appendSummary(`Build lock action failed: ${error.message}`);
+    console.error(`::error::${workflowCommandData(message)}`);
+    appendSummary(`Build lock action failed: ${message}`);
     process.exit(1);
   }
 }
@@ -2951,5 +3104,6 @@ module.exports = {
   runCancellationCleanup,
   runPostCleanup,
   selectEligibleQueueEntries,
+  workflowCommandData,
   writeState
 };

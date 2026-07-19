@@ -29,8 +29,16 @@ const {
   reap,
   runCancellationCleanup,
   selectEligibleQueueEntries,
+  workflowCommandData,
   writeState
 } = require("../.github/dist/build-lock.js");
+
+test("workflow error commands escape percent sequences and collapse line breaks", () => {
+  assert.equal(
+    workflowCommandData("source%0Ainjected\r\n::error::second"),
+    "source%250Ainjected ::error::second"
+  );
+});
 
 const testAppKeys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
 const testAppPrivateKey = testAppKeys.privateKey.export({ type: "pkcs8", format: "pem" });
@@ -69,6 +77,7 @@ const actionEnvNames = [
   "GITHUB_RUN_ATTEMPT",
   "GITHUB_WORKFLOW",
   "GITHUB_JOB",
+  "GITHUB_SERVER_URL",
   "GITHUB_OUTPUT",
   "GITHUB_STEP_SUMMARY",
   "GITHUB_STATE",
@@ -6099,8 +6108,7 @@ test("schema 4 post cleanup quarantines held ownership", async () => {
 });
 
 function accountIncident(overrides = {}) {
-  return {
-    incidentId: "incident-0123456789abcdef01234567",
+  const incident = {
     repository: "owner/repo",
     workflow: "Perf",
     job: "perf-benchmarks",
@@ -6110,13 +6118,66 @@ function accountIncident(overrides = {}) {
     runnerId: "runner-a",
     reportedAt: "2026-06-06T00:01:00.000Z",
     reason: "unity-account-limit-20111",
-    evidenceDigest: "0123456789abcdef01234567" + "a".repeat(40),
     ...overrides
+  };
+  const evidenceDigest = crypto.createHash("sha256").update(JSON.stringify({
+    repository: incident.repository,
+    workflow: incident.workflow,
+    job: incident.job,
+    runId: incident.runId,
+    runAttempt: incident.runAttempt,
+    runnerId: incident.runnerId,
+    reason: incident.reason
+  })).digest("hex");
+  return {
+    ...incident,
+    incidentId: `incident-${evidenceDigest.slice(0, 24)}`,
+    evidenceDigest
   };
 }
 
 function accountHealthState(holders = [], queue = [], reservations = [], activeIncident = null) {
   return { ...lifecycleState(holders, queue, reservations), schemaVersion: 5, activeIncident };
+}
+
+function accountHealthFetchStore(initialState, options = {}) {
+  let state = structuredClone(initialState);
+  let writes = 0;
+  const maxHolders = options.maxHolders || 1;
+
+  return {
+    fetch: async (url, request = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch" } });
+      }
+      if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+        return base64Content({
+          maxHolders,
+          runnerSerialization: true,
+          resourceLifecycle: true,
+          accountHealth: true
+        }, "cfg");
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        if (request.method === "PUT") {
+          writes++;
+          const proposed = JSON.parse(Buffer.from(JSON.parse(request.body).content, "base64").toString("utf8"));
+          if (typeof options.rejectWrites === "function"
+            ? options.rejectWrites(proposed, writes)
+            : options.rejectWrites) {
+            return jsonResponse(409, { message: "simulated cleanup conflict" });
+          }
+          state = options.afterWrite ? options.afterWrite(proposed, writes) : proposed;
+          return jsonResponse(200, { content: { sha: `write-${writes}` } });
+        }
+        return base64Content(state, `read-${writes}`);
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    },
+    state: () => state,
+    writes: () => writes
+  };
 }
 
 test("release report compatibility mapping rejects contradictory old and new inputs", () => {
@@ -6153,13 +6214,40 @@ test("schema 5 global incidents round-trip and require immutable evidence proven
     () => normalizeState(accountHealthState([], [], [], { ...incident, evidenceDigest: "not-a-digest" }), "wallstop-organization-builds"),
     /SHA-256 evidence digest/
   );
+  assert.throws(
+    () => normalizeState(
+      accountHealthState([], [], [], { ...incident, runUrl: "https://example.invalid/forged" }),
+      "wallstop-organization-builds"
+    ),
+    /immutable run\/runner provenance/
+  );
+  assert.throws(
+    () => normalizeState(
+      accountHealthState([], [], [], { ...incident, workflow: "Forged workflow" }),
+      "wallstop-organization-builds"
+    ),
+    /immutable run\/runner provenance/
+  );
+  for (const repository of ["../repo", "owner/..", "./repo", "owner/."]) {
+    assert.throws(
+      () => normalizeState(
+        accountHealthState([], [], [], accountIncident({ repository })),
+        "wallstop-organization-builds"
+      ),
+      /immutable run\/runner provenance/
+    );
+  }
 });
 
 test("schema 5 blocked release creates one immutable global incident", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
   let state = accountHealthState([held]);
   await withTempFile(async (outputFile) => {
-    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+    await withActionEnv({
+      ...semaphoreActionEnv,
+      GITHUB_OUTPUT: outputFile,
+      GITHUB_SERVER_URL: "https://github.enterprise.example/"
+    }, async () => {
       await withMockedFetch(async (url, options = {}) => {
         const parsed = new URL(url);
         if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
@@ -6176,6 +6264,15 @@ test("schema 5 blocked release creates one immutable global incident", async () 
         runnerId: "runner-a",
         resourceReport: { cleanupStatus: "unknown", health: "blocked", reason: "unity-account-limit-20111" }
       })));
+      assert.equal(
+        state.activeIncident.runUrl,
+        "https://github.enterprise.example/owner/repo/actions/runs/123"
+      );
+      assert.deepEqual(
+        normalizeState(state, "wallstop-organization-builds").activeIncident,
+        state.activeIncident,
+        "an enterprise incident must remain readable after its creation write"
+      );
     });
     const outputs = readEnvironmentFile(outputFile);
     assert.equal(outputs["cleanup-result"], "global-quarantined");
@@ -6227,28 +6324,221 @@ test("schema 5 uncertainty reasons remain runner-local and never create account 
 
 test("schema 5 global incident blocks acquire immediately without growing the queue", async () => {
   const incident = accountIncident();
-  const state = accountHealthState([], [], [], incident);
-  let writes = 0;
+  const store = accountHealthFetchStore(accountHealthState([], [], [], incident));
+  let rejection;
   await withTempFile(async (outputFile) => {
-    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
-      await withMockedFetch(async (url, options = {}) => {
-        const parsed = new URL(url);
-        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
-        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, accountHealth: true }, "cfg");
-        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
-          if (options.method === "PUT") writes++;
-          return base64Content(state, "blocked-state");
-        }
-        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-      }, () => acquire(semaphoreConfig({ runnerId: "runner-b" })));
-    });
+    await assert.rejects(
+      () => withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(store.fetch, () => acquire(semaphoreConfig({ runnerId: "runner-b" })));
+      }),
+      (error) => {
+        rejection = error;
+        return true;
+      }
+    );
     const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, acquireOutputNames);
     assert.equal(outputs.acquired, "false");
     assert.equal(outputs["admission-result"], "account-blocked");
     assert.equal(outputs["incident-id"], incident.incidentId);
   });
-  assert.equal(writes, 0);
-  assert.deepEqual(state.queue, []);
+  for (const value of [
+    incident.incidentId,
+    incident.repository,
+    incident.workflow,
+    incident.job,
+    incident.runUrl,
+    incident.runnerId,
+    incident.reportedAt,
+    incident.reason,
+    "operation=recover-incident",
+    `incident-id=${incident.incidentId}`,
+    "portal-cleanup-confirmed=true"
+  ]) {
+    assert.match(rejection.message, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(rejection.message, /[\r\n]/);
+  assert.doesNotMatch(rejection.message, new RegExp(incident.evidenceDigest));
+  assert.equal(store.writes(), 0);
+  assert.deepEqual(store.state().queue, []);
+});
+
+test("schema 5 immediate incident cleans only the caller's exact queued identity", async () => {
+  const incident = accountIncident({ runnerId: "runner-c" });
+  const unrelatedHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const unrelatedQueue = withRunner(semaphoreQueueEntry("other/repo", "998", "playmode"), "runner-d");
+  const callerQueue = withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-a");
+  const store = accountHealthFetchStore(
+    accountHealthState([unrelatedHolder], [unrelatedQueue, callerQueue], [], incident),
+    { maxHolders: 2 }
+  );
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(store.fetch, () => assert.rejects(
+        () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+        /Global account incident .* blocks new .* admission/
+      ));
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["admission-result"], "account-blocked");
+    assert.equal(outputs["state-sha"], "write-1");
+  });
+  assert.equal(store.writes(), 1);
+  assert.deepEqual(store.state().queue, [unrelatedQueue]);
+  assert.deepEqual(store.state().holders, [unrelatedHolder]);
+  assert.deepEqual(store.state().reservations, []);
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
+});
+
+test("schema 5 incident appearing during a wait removes the caller's exact queue identity", async () => {
+  const unrelatedHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const incident = accountIncident({ runnerId: unrelatedHolder.runnerId });
+  const store = accountHealthFetchStore(accountHealthState([unrelatedHolder]), {
+    afterWrite: (state, writes) => ({ ...state, activeIncident: writes === 1 ? incident : state.activeIncident })
+  });
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(store.fetch, () => assert.rejects(
+          () => acquire(semaphoreConfig({ runnerId: "runner-a", timeoutMinutes: 10 })),
+          /Global account incident .* blocks new .* admission/
+        ));
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["admission-result"], "account-blocked");
+    assert.equal(outputs["state-sha"], "write-2");
+  });
+  assert.equal(store.writes(), 2, "queue insertion and exact queue cleanup must each use one CAS write");
+  assert.deepEqual(store.state().queue, []);
+  assert.deepEqual(store.state().holders, [unrelatedHolder]);
+  assert.deepEqual(store.state().reservations, []);
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
+});
+
+test("schema 5 incident published after admission is retracted before activation", async () => {
+  const incident = accountIncident({ runnerId: "runner-b" });
+  const store = accountHealthFetchStore(accountHealthState(), {
+    afterWrite: (state, writes) => ({ ...state, activeIncident: writes === 1 ? incident : state.activeIncident })
+  });
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(store.fetch, () => assert.rejects(
+        () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+        /Global account incident .* blocks new .* admission/
+      ));
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "account-blocked");
+    assert.equal(outputs["state-sha"], "write-2");
+  });
+  assert.equal(store.writes(), 2, "admission and pre-activation retraction must each use one CAS write");
+  assert.deepEqual(store.state().holders, []);
+  assert.deepEqual(store.state().queue, []);
+  assert.deepEqual(store.state().reservations, []);
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
+});
+
+test("schema 5 incident after quarantine admission restores the exact quarantine", async () => {
+  const incident = accountIncident({ runnerId: "runner-b" });
+  const caller = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  const quarantine = lifecycleReservation(caller, { reservationId: "caller-quarantine" });
+  const store = accountHealthFetchStore(accountHealthState([], [], [quarantine]), {
+    afterWrite: (state, writes) => ({ ...state, activeIncident: writes === 1 ? incident : state.activeIncident })
+  });
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(store.fetch, () => assert.rejects(
+      () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+      /Global account incident .* blocks new .* admission/
+    ));
+  });
+  assert.equal(store.writes(), 2);
+  assert.deepEqual(store.state().holders, []);
+  assert.deepEqual(store.state().queue, []);
+  assert.deepEqual(store.state().reservations, [quarantine]);
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
+});
+
+test("schema 5 incident cleanup failure reports a typed fail-closed result", async () => {
+  const incident = accountIncident({ runnerId: "runner-c" });
+  const callerQueue = withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-a");
+  const store = accountHealthFetchStore(accountHealthState([], [callerQueue], [], incident), {
+    rejectWrites: true
+  });
+  let rejection;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(store.fetch, () => assert.rejects(
+          () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+          (error) => {
+            rejection = error;
+            return true;
+          }
+        ));
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "account-blocked-cleanup-failed");
+    assert.equal(outputs["incident-id"], incident.incidentId);
+    assert.equal(outputs["resource-health"], "blocked");
+    assert.equal(outputs["resource-reason"], incident.reason);
+  });
+  assert.match(rejection.message, /Exact build-lock cleanup could not be confirmed/);
+  assert.match(rejection.message, /First, use supported release, post-action, or fallback cleanup/);
+  assert.match(rejection.message, /confirm that removal with a fresh lock-state read/);
+  assert.match(rejection.message, /reconcile every Unity Portal activation/);
+  assert.match(rejection.message, /operation=recover-incident/);
+  assert.match(rejection.message, new RegExp(`incident-id=${incident.incidentId}`));
+  assert.match(rejection.message, /portal-cleanup-confirmed=true/);
+  assert.match(rejection.message, /Only then rerun the consumer/);
+  assert.equal(store.writes(), 3);
+  assert.deepEqual(store.state().queue, [callerQueue]);
+  assert.deepEqual(store.state().holders, []);
+  assert.deepEqual(store.state().reservations, []);
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
+});
+
+test("schema 5 post-admission cleanup failure forbids incident recovery until caller removal", async () => {
+  const incident = accountIncident({ runnerId: "runner-b" });
+  const store = accountHealthFetchStore(accountHealthState(), {
+    afterWrite: (state, writes) => ({ ...state, activeIncident: writes === 1 ? incident : state.activeIncident }),
+    rejectWrites: (_state, writes) => writes > 1
+  });
+  let rejection;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(store.fetch, () => assert.rejects(
+          () => acquire(semaphoreConfig({ runnerId: "runner-a" })),
+          (error) => {
+            rejection = error;
+            return true;
+          }
+        ));
+      });
+    });
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["admission-result"], "account-blocked-cleanup-failed");
+    assert.equal(outputs["incident-id"], incident.incidentId);
+  });
+  const cleanupPosition = rejection.message.indexOf("First, use supported release");
+  const portalPosition = rejection.message.indexOf("reconcile every Unity Portal activation");
+  const recoveryPosition = rejection.message.indexOf("operation=recover-incident");
+  const rerunPosition = rejection.message.indexOf("Only then rerun the consumer");
+  assert.ok(cleanupPosition >= 0 && cleanupPosition < portalPosition);
+  assert.ok(portalPosition < recoveryPosition);
+  assert.ok(recoveryPosition < rerunPosition);
+  assert.match(rejection.message, /remove caller owner\/repo:123:perf-benchmarks:playmode from both holders and queue/);
+  assert.match(rejection.message, /confirm that removal with a fresh lock-state read/);
+  assert.match(rejection.message, new RegExp(`incident-id=${incident.incidentId}`));
+  assert.match(rejection.message, /portal-cleanup-confirmed=true/);
+  assert.equal(store.writes(), 4, "one admission and three bounded cleanup attempts are expected");
+  assert.equal(store.state().holders.length, 1, "failed cleanup must remain visible and fail closed");
+  assert.equal(store.state().holders[0].holderId, "owner/repo:123:perf-benchmarks:playmode");
+  assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
 test("schema 5 incident recovery requires exact ID and portal proof then enters cooldown", async () => {
