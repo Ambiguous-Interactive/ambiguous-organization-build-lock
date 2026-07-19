@@ -27,19 +27,6 @@
       "acquiredAt": "2026-07-19T18:53:35.666Z",
       "expiresAt": "2026-07-19T22:53:35.666Z",
       "runnerId": "box-linux"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29699024925:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "29699024925",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29699024925",
-      "queuedAt": "2026-07-19T18:53:46.343Z",
-      "acquiredAt": "2026-07-19T18:54:44.315Z",
-      "expiresAt": "2026-07-19T22:54:44.315Z",
-      "runnerId": "tiny-box-linux"
     }
   ],
   "queue": [
@@ -66,7 +53,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "dadf253f-6796-4fbe-9dd1-ac056787d2e8",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29699024925:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "29699024925",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29699024925",
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-19T18:58:40.136Z",
+      "availableAt": "2026-07-19T18:58:41.136Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T18:55:51.424Z"
+  "updatedAt": "2026-07-19T18:58:40.136Z"
 }
