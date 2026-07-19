@@ -1,40 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29697839937:build-webgl:build-webgl",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "build-webgl",
+    "runId": "29697839937",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29697839937",
+    "queuedAt": "2026-07-19T18:08:05.394Z",
+    "acquiredAt": "2026-07-19T18:08:06.627Z",
+    "expiresAt": "2026-07-19T22:08:06.627Z",
+    "runnerId": "tiny-box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "c6426ef4-36cc-42f4-ba00-d440cee9f1d2",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29697839937:unity-tests:unity-tests-1",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29697839937:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
-      "job": "unity-tests",
+      "job": "build-webgl",
       "runId": "29697839937",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29697839937",
-      "runnerId": "tiny-box-linux",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-07-19T18:06:51.479Z"
-    },
-    {
-      "reservationId": "091b2f4a-d9ab-46a2-8dac-71d59dee74f3",
-      "holderId": "Ambiguous-Interactive/DxMessaging:29697187657:unity-tests:2022.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29697187657",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29697187657",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-19T18:07:32.425Z",
-      "availableAt": "2026-07-19T18:07:33.425Z"
+      "queuedAt": "2026-07-19T18:08:05.394Z",
+      "acquiredAt": "2026-07-19T18:08:06.627Z",
+      "expiresAt": "2026-07-19T22:08:06.627Z",
+      "runnerId": "tiny-box-linux"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T18:07:32.425Z"
+  "updatedAt": "2026-07-19T18:08:06.627Z"
 }
