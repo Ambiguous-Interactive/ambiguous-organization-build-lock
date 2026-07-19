@@ -147,6 +147,22 @@ a rerun can clean older ownership. Explicit targets are restricted to the
 current repository and workflow run. The fallback passes its own non-empty
 `runner-id` after runner serialization is activated.
 
+A schema-5 `account-blocked` admission is an intentional nonzero, fail-closed
+result. The acquire action writes `acquired=false`, the exact `incident-id`, and
+the typed health/reason outputs before failing, so `if: always()` diagnostics and
+cleanup can inspect them; ordinary licensed steps must not run. If the caller
+was queued or had just been admitted, acquire attempts to remove only that
+caller's exact pre-activation state before it fails. A confirmed cleanup reports
+`account-blocked`; an unconfirmed cleanup reports
+`account-blocked-cleanup-failed`. In the latter case, do not recover the incident
+or rerun until supported release, post-action, or fallback cleanup has removed
+the caller from both holders and queue and a fresh lock-state read confirms it.
+The error identifies the sanitized source run and recovery inputs. Operators
+must reconcile every Unity Portal activation, then dispatch `Reap stale build
+locks` with `operation=recover-incident`, the exact incident ID, and
+`portal-cleanup-confirmed=true`. Never edit `lock-state` or recover an incident
+without that external proof.
+
 `holder-id-suffix` may contain internal spaces or colons, but must not contain
 line breaks or leading/trailing whitespace; the actions reject those values so
 every acquired holder ID remains exactly reproducible by fallback cleanup.

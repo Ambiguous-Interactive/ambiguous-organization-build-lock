@@ -114,7 +114,7 @@ runner quarantine.
 | Normal holder | One slot consumed | Let the owning run finish. Do not cancel it merely because a newer commit exists. |
 | Confirmed-cleanup cooldown | One slot consumed until `availableAt` | Wait for expiry. At the live one-second setting this is normally transient. |
 | Runner quarantine | One slot consumed without expiry | Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
-| Global account incident | All admission blocked | Stop canaries, reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. |
+| Global account incident | All admission blocked; acquire attempts exact pre-activation queue/holder cleanup | Stop canaries and follow the sanitized source-run provenance in the acquire error. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. Never edit lock state directly. |
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |
 | Runner unavailable | Licensed work must remain pending or red | Restore eligible runner capacity. Never turn an unavailable required job into skip/green. |
 

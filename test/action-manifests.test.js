@@ -244,6 +244,12 @@ test("legacy and opt-in acquire actions expose the same interface", () => {
   assert.deepEqual(optInOutputs, legacyOutputs);
 });
 
+test("top-level action errors sanitize workflow-command data", () => {
+  const source = fs.readFileSync(path.join(distRoot, "build-lock.js"), "utf8");
+
+  assert.match(source, /console\.error\(`::error::\$\{workflowCommandData\(message\)\}`\)/);
+});
+
 test("release accepts the physical runner identity required by schema 3", () => {
   const release = readActionManifest("release-build-lock");
   const inputs = yamlRequiredTopLevelMappingKeys(release, "inputs", "release-build-lock/action.yml");
@@ -300,6 +306,8 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /Keep the explicit\s+release step/);
   assert.match(readme, /stable `v1` contract/);
   assert.match(readme, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
+  assert.match(readme, /`account-blocked` admission is an intentional nonzero, fail-closed/);
+  assert.match(readme, /portal-cleanup-confirmed=true/);
 });
 
 test("README documents configurable parallelism and transient-auth handling", () => {
