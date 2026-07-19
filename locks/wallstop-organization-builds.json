@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-19T04:47:46.994Z",
       "expiresAt": "2026-07-19T08:47:46.994Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "1ce26c6b-a366-4c70-9477-e0cc22722f4d",
       "holderId": "Ambiguous-Interactive/unity-builder:29673952887:buildForAllPlatformsWindows:buildForAllPlatformsWindows-0",
       "repository": "Ambiguous-Interactive/unity-builder",
       "workflow": "Builds - Windows",
@@ -36,14 +40,12 @@
       "runId": "29673952887",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-builder/actions/runs/29673952887",
-      "queuedAt": "2026-07-19T04:52:03.652Z",
-      "acquiredAt": "2026-07-19T04:52:04.786Z",
-      "expiresAt": "2026-07-19T08:52:04.786Z",
-      "runnerId": "ELI-MACHINE:29673952887:1:0"
+      "runnerId": "ELI-MACHINE:29673952887:1:0",
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-07-19T04:52:25.267Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T04:52:04.787Z"
+  "updatedAt": "2026-07-19T04:52:25.267Z"
 }
