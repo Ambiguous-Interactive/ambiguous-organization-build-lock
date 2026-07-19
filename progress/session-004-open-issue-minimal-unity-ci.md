@@ -55,6 +55,23 @@ issue through exact-head review, green CI, merge, and post-merge verification.
 10. Two fresh adversarial reviews independently returned `ZERO ISSUES` and
     confirmed the corrected Dependabot semantics, Node LTS/runtime pin, test
     coverage, auto-merge trust boundary, minimality, and PR readiness.
+11. Published commit `d2407c98e7b7769dd5edf62f5265ea803d56c1e4` and
+    opened PR #67. Exact-head central CI and Cursor Bugbot passed. There were no
+    review threads or Bugbot findings; Copilot responded that its review quota
+    was exhausted. The reviewer API also rejected the Copilot service account
+    as a non-collaborator, while the tagged-comment mechanism returned the
+    quota response successfully.
+12. The pushed head triggered only the central validation workflow and the
+    expected skipped Dependabot auto-merge job. It triggered zero dependent
+    Unity workflows and zero paid/licensed Unity jobs.
+
+## Published change
+
+- PR: #67 `ci: update all Go dependencies with Dependabot`
+- First reviewed head: `d2407c98e7b7769dd5edf62f5265ea803d56c1e4`
+- Central CI: passed
+- Cursor Bugbot: passed, zero findings
+- GitHub Copilot: quota exhausted, no actionable feedback
 
 ## Prioritized issue inventory
 
