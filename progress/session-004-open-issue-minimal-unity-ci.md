@@ -1,6 +1,6 @@
 # Session 004: Open issue minimal-Unity-CI delivery
 
-Status: in progress
+Status: complete
 
 ## Objective
 
@@ -106,6 +106,18 @@ issue through exact-head review, green CI, merge, and post-merge verification.
   `2297ed6312abec4c3bd7eba06f89317dda770dec`. Exact-head central CI and
   Cursor Bugbot passed, there were no review threads, and Copilot returned only
   its quota-exhausted response. No dependent Unity workflow ran.
+- Pushed the final session-evidence head
+  `1558f8737bad0ca9348df6410bee47bf249d6f5c`; central CI and Cursor Bugbot
+  passed again with no review threads. Copilot's API request and tagged-comment
+  request were both attempted; the service returned its quota-exhausted result.
+- PR #69 merged as `18c971c1207d9fb0d742c20c6ea408e67105a171`.
+  Main CI passed, as did all four live Dependabot updater jobs: GitHub Actions,
+  root Go modules, isolated actionlint Go modules, and the pre-existing grouped
+  update refresh. Generated PR #68 auto-closed because its former shared module
+  graph no longer existed, and no replacement dependency PR was created.
+- The final merged tree matches the fully validated branch tree. Across both
+  delivery PRs, zero dependent-project Unity workflows or paid/licensed Unity
+  jobs ran, and no organization policy changed.
 
 ## Prioritized issue inventory
 
