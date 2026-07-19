@@ -36,9 +36,10 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     allow:
-      - dependency-name: "github.com/rhysd/actionlint"
+      - dependency-type: "all"
     groups:
-      actionlint:
+      go-modules:
+        applies-to: "version-updates"
         patterns:
-          - "github.com/rhysd/actionlint"
+          - "*"
     open-pull-requests-limit: 5
