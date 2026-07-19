@@ -24,7 +24,10 @@ const expectedWorkflowRunScriptSignatures = new Map([
     [
       'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
       "set -euo pipefail\ngo run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
-      "node --test test/*.test.js"
+      "node --test test/*.test.js",
+      "go test ./...",
+      "go mod tidy -diff",
+      "go run ./cmd/workflow-credential-audit ."
     ]
   ],
   [

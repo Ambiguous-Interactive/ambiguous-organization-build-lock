@@ -46,3 +46,12 @@ jobs:
 
       - name: Run fast action tests
         run: node --test test/*.test.js
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Verify Go modules are tidy
+        run: go mod tidy -diff
+
+      - name: Reject credential-shaped workflow env literals
+        run: go run ./cmd/workflow-credential-audit .
