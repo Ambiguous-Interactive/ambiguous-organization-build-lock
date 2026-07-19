@@ -1,6 +1,6 @@
 # Session 007: Issue 47 latent-workflow removal
 
-Status: awaiting required Unity portal reconciliation
+Status: dependent delivery verified; central merge queued
 
 ## Objective
 
@@ -157,12 +157,64 @@ completion, safety impact, and bounded scope. Counts are lower bounds.
   pass.
 - Cursor's first review found that the policy did not protect the expected-empty
   conjunct. Exact head `84e80c2bac2f9b229691fefa6242b8325036dcc6`
-  addresses that feedback; the thread is resolved and exact-head re-review/CI
-  is running. Copilot was requested after both pushes and reported quota
-  exhaustion without actionable feedback.
-- The active incident cannot be cleared from GitHub evidence alone. The runbook
-  requires reconciliation of every Unity portal activation before dispatching
-  `recover-incident` with the exact ID and `portal-cleanup-confirmed=true`.
+  addresses that feedback; the thread was resolved and the exact-head Cursor
+  rereview reported zero issues. Copilot was requested after both pushes and
+  reported quota exhaustion without actionable feedback.
+- Portal reconciliation confirmed the exact incident was externally clean.
+  Guarded recovery run `29696967498` used `operation=recover-incident`, the
+  exact incident ID, and `portal-cleanup-confirmed=true`; central history commit
+  `c6b5911c` records the recovery. The pre-existing Dox quarantine was separately
+  recovered only after equivalent portal proof.
+- PR #283's exact-head full 3-version by 3-mode run `29697187657` passed, along
+  with static CI, both automated reviewers' available results, thread-aware
+  review inventory, and adversarial review. It was squash-merged as
+  `35fc35f721dc682a1f5ab105d61f8db1b3754a4b`.
+
+## Cancellation-cleanup RCA and full-class fix
+
+- A superseded default-branch matrix was canceled only after its remaining work
+  became redundant. Unity itself returned the entitlement successfully, but the
+  cleanup classifier rejected Unity's canonical prefixed ULF diagnostic,
+  `[Licensing::Module] Error: Serial number unavailable for ULF return; skipping operation`,
+  and created reservation `926c489d-2984-46de-8b72-456422911bd7` with
+  `return-missing-positive-evidence`. Exact job logs supplied the required
+  same-runner positive proof, and guarded recovery run `29699406532` removed
+  only that reservation.
+- DxMessaging PR #284 fixes the entire cleanup-evidence path. It accepts the
+  observed canonical ULF line without weakening the required two-signal proof
+  or known-termination exclusions, ports account-health classification from
+  Python to PowerShell for every enrolled Windows runner, preserves bounded and
+  sanitized evidence discovery, and makes composite outputs fail closed unless
+  account health and return safety are both exact successes.
+- Data-driven tests cover canonical, legacy, explicit ULF, near-miss, and all
+  known termination results; recursive evidence discovery also covers trimmed
+  input, case-distinct Linux paths, exact `20111` boundaries, deterministic
+  digests, and sanitized diagnostics. Local policy validation, formatting,
+  actionlint, and the supported Linux CI suite passed.
+- The first adversarial pass found the production classifier gap and a latent
+  fail-open composite output. The second found case-insensitive path collapse
+  and input-whitespace parity. After correction, final adversarial review found
+  zero issues. Exact PR head
+  `7794e54f238d3ad14578144b64e0cd1ab6d178b4` passed static CI and the full 3x3
+  Unity run `29700041599`; Cursor reported zero issues, Copilot reported quota
+  exhaustion, and no review threads remained. PR #284 was squash-merged as
+  `0fdc3de6e8d2eec92a5fafaf15af3c374aa9b0d5`.
+
+## Final Dx default-branch verification
+
+- Performance run `29701726990` passed both Unity 6 benchmark modes and safely
+  auto-committed only generated throughput documentation, advancing `master` to
+  `c257e4ff37e5c53359e50245c8b01349de6d5dc5`.
+- The prior code-head run completed six green paid legs. After the generated-doc
+  commit created the authoritative latest-head matrix, the superseded run was
+  canceled during an observed zero-active handoff, saving its remaining three
+  paid Unity legs without interrupting cleanup.
+- At exact current `master` commit `c257e4ff37e5c53359e50245c8b01349de6d5dc5`,
+  static CI run `29703432444`, documentation deployment run `29703432437`, and
+  Unity run `29703432451` all passed. The Unity run completed all nine version
+  by mode legs and all 12 jobs green. No duplicate manual run was dispatched.
+- A later unrelated DoxReloaded `unity-return-400006` quarantine remains
+  untouched because this session has no matching Dox portal proof.
 
 ## Central enrollment audit extension
 
@@ -187,10 +239,11 @@ completion, safety impact, and bounded scope. Counts are lower bounds.
   missing central audit. A second pass found ambiguous CLI dispatch and a stale
   hard-coded default-branch ref. After fixes and regression tests, the final
   adversarial pass reported zero issues across both repositories.
-- Central PR #72 exact head `f53e4b9283fac9688644b84aecbac20187bbdfc4`
-  has zero-Unity CI green, Cursor zero-issue review, no review threads, and a
-  Copilot quota-exhausted response. Merge is held until the Dx recovery and
-  follow-up PR are fully green.
-- Pending externally confirmed Unity portal reconciliation, DxMessaging PR #283
-  green/merge/default-branch verification, central evidence refresh and merge,
-  live audit dispatch, and issue closure.
+- Central PR #72 exact head `0754dee6a1a723820832b4ce7f9c6b02ceb72290`
+  had zero-Unity CI green, Cursor zero-issue review, no review threads, and a
+  Copilot quota-exhausted response before this final evidence refresh. Dx
+  recovery, both fail-closed follow-ups, and current-default-branch verification
+  are now complete.
+- Remaining central-only steps are the final evidence push and reviewer/check
+  cycle, merge, `main` verification, live zero-Unity audit of Dx's exact current
+  default commit, and issue closure confirmation.
