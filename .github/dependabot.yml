@@ -43,3 +43,15 @@ updates:
         patterns:
           - "*"
     open-pull-requests-limit: 5
+
+  - package-ecosystem: "gomod"
+    directory: "/tools/actionlint"
+    schedule:
+      interval: "weekly"
+    assignees:
+      - "wallstop"
+    reviewers:
+      - "wallstop"
+    commit-message:
+      prefix: "chore(ci)"
+    open-pull-requests-limit: 5

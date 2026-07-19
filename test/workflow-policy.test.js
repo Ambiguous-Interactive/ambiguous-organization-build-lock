@@ -23,10 +23,11 @@ const expectedWorkflowRunScriptSignatures = new Map([
     "ci.yml",
     [
       'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
-      "set -euo pipefail\ngo run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
+      "set -euo pipefail\ngo -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
       "node --test test/*.test.js",
       "go test ./...",
-      "go mod tidy -diff",
+      "go mod verify\ngo -C tools/actionlint mod verify",
+      "go mod tidy -diff\ngo -C tools/actionlint mod tidy -diff",
       "go run ./cmd/workflow-credential-audit ."
     ]
   ],
@@ -1195,22 +1196,34 @@ test("workflow run script scanner covers every expected workflow run step", () =
   }
 });
 
-test("CI uses Node LTS and keeps every Go dependency Dependabot-upgradable", () => {
+test("CI isolates actionlint while keeping production Go dependencies upgradable", () => {
   const text = readWorkflow("ci.yml");
-  const goMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
+  const rootGoMod = fs.readFileSync(path.join(repoRoot, "go.mod"), "utf8");
+  const actionlintGoMod = fs.readFileSync(path.join(repoRoot, "tools", "actionlint", "go.mod"), "utf8");
+  const actionlintToolsGo = fs.readFileSync(path.join(repoRoot, "tools", "actionlint", "tools.go"), "utf8");
   const dependabot = fs.readFileSync(path.join(repoRoot, ".github", "dependabot.yml"), "utf8");
   const steps = workflowJobStepMaps(text, "validate");
   const lintStep = steps.find((step) => step.name === "Lint GitHub Actions workflows");
   const setupNodeStep = steps.find((step) => /^actions\/setup-node@[a-f0-9]{40}$/.test(step.uses || ""));
   const setupGoStep = steps.find((step) => /^actions\/setup-go@[a-f0-9]{40}$/.test(step.uses || ""));
-  const lintScript = runScriptSections(text).find((section) => section.text.includes(`go run -mod=readonly ${expectedActionlintCommand}`));
+  const lintScript = runScriptSections(text).find((section) => section.text.includes(`go -C tools/actionlint run -mod=readonly ${expectedActionlintCommand}`));
+  const semanticModuleVersion = "v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?";
   const actionlintRequire = new RegExp(
-    `^require ${escapeRegExp(expectedActionlintModule)} (v\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)(?:\\s+// indirect)?$`,
+    `^require ${escapeRegExp(expectedActionlintModule)} (${semanticModuleVersion})$`,
     "m"
-  ).exec(goMod);
-  const goModuleUpdates = dependabot
-    .split(/\n(?=  - package-ecosystem:)/)
-    .find((section) => /^  - package-ecosystem:\s*"gomod"\s*$/m.test(section));
+  ).exec(actionlintGoMod);
+  const yamlRequire = new RegExp(
+    `^require go\\.yaml\\.in/yaml/v4 (${semanticModuleVersion})$`,
+    "m"
+  ).exec(rootGoMod);
+  const directToolRequires = [...actionlintGoMod.matchAll(/^require (\S+) v\S+$/gm)].map((match) => match[1]);
+  const goModuleUpdates = dependabot.split(/\n(?=  - package-ecosystem:)/).filter((section) =>
+    /^  - package-ecosystem:\s*"gomod"\s*$/m.test(section)
+  );
+  const rootModuleUpdates = goModuleUpdates.find((section) => /^\s+directory:\s*"\/"\s*$/m.test(section));
+  const actionlintModuleUpdates = goModuleUpdates.find((section) =>
+    /^\s+directory:\s*"\/tools\/actionlint"\s*$/m.test(section)
+  );
 
   assert.ok(lintStep, "CI must keep a named actionlint workflow lint step");
   assert.equal(lintStep.uses, undefined, "CI actionlint must not use a Docker-based action");
@@ -1218,7 +1231,10 @@ test("CI uses Node LTS and keeps every Go dependency Dependabot-upgradable", () 
   assert.ok(setupNodeStep, "CI must install Node explicitly");
   assert.deepEqual(setupNodeStep.with, { "node-version": "24" });
   assert.ok(setupGoStep, "CI must install Go explicitly before running module-pinned actionlint");
-  assert.deepEqual(setupGoStep.with, { "go-version-file": "go.mod", cache: "true" });
+  assert.equal(setupGoStep.with["go-version-file"], "go.mod");
+  assert.equal(setupGoStep.with.cache, "true");
+  assert.equal(setupGoStep.with["cache-dependency-path"], "|");
+  assert.match(text, /cache-dependency-path:\s*\|\s*\n\s+go\.sum\s*\n\s+tools\/actionlint\/go\.sum/);
   assert.ok(lintScript, "CI actionlint run script must stay visible to policy scanning");
 
   assert.doesNotMatch(text, /docker:\/\/rhysd\/actionlint/i, "CI actionlint must not depend on Docker pulls");
@@ -1226,22 +1242,34 @@ test("CI uses Node LTS and keeps every Go dependency Dependabot-upgradable", () 
   assert.doesNotMatch(text, /actionlint_\$\{version\}_checksums\.txt/, "CI actionlint must not require manual checksum updates");
   assert.doesNotMatch(text, new RegExp(`${escapeRegExp(expectedActionlintCommand)}@`), "CI must take actionlint's version from go.mod");
   assert.match(lintScript.text, /set -euo pipefail/, "CI actionlint must fail on unset variables and pipeline errors");
-  assert.match(lintScript.text, new RegExp(`^\\s*go run -mod=readonly ${escapeRegExp(expectedActionlintCommand)} -color\\s*$`, "m"));
-  assert.ok(actionlintRequire, "go.mod must pin actionlint with a semantic module version");
-  assert.match(goMod, new RegExp(`^tool ${escapeRegExp(expectedActionlintCommand)}$`, "m"), "go.mod must keep the actionlint command dependency live as a Go tool");
-  assert.ok(goModuleUpdates, "Dependabot must watch the root Go module");
-  assert.match(goModuleUpdates, /directory:\s*"\/"/, "Dependabot gomod updates must target the root go.mod");
+  assert.match(lintScript.text, new RegExp(`^\\s*go -C tools/actionlint run -mod=readonly ${escapeRegExp(expectedActionlintCommand)} -color\\s*$`, "m"));
+  assert.ok(actionlintRequire, "tools/actionlint/go.mod must pin actionlint with a semantic module version");
+  assert.deepEqual(directToolRequires, [expectedActionlintModule], "actionlint must be the tools module's only direct dependency");
+  assert.match(actionlintToolsGo, /^\/\/go:build tools$/m, "the actionlint dependency keeper must be excluded from normal builds");
   assert.match(
-    goModuleUpdates,
+    actionlintToolsGo,
+    new RegExp(`^import _ "${escapeRegExp(expectedActionlintCommand)}"$`, "m"),
+    "the tools-only source must keep the actionlint command as a direct dependency"
+  );
+  assert.doesNotMatch(rootGoMod, /github\.com\/rhysd\/actionlint/, "the production module must not resolve actionlint dependencies");
+  assert.ok(yamlRequire, "the production YAML parser must have an independently upgradable semantic module version");
+  assert.equal(goModuleUpdates.length, 2, "Dependabot must watch exactly the production and actionlint Go modules");
+  assert.ok(rootModuleUpdates, "Dependabot must watch the root Go module");
+  assert.match(
+    rootModuleUpdates,
     /allow:\s*\n\s+- dependency-type: "all"/,
     "Dependabot gomod updates must explicitly allow every declared Go dependency"
   );
-  assert.doesNotMatch(goModuleUpdates, /^\s+ignore:/m, "Dependabot must not ignore declared Go dependencies");
+  assert.doesNotMatch(rootModuleUpdates, /^\s+ignore:/m, "Dependabot must not ignore production Go dependencies");
   assert.match(
-    goModuleUpdates,
+    rootModuleUpdates,
     /groups:\s*\n\s+go-modules:\s*\n\s+applies-to: "version-updates"\s*\n\s+patterns:\s*\n\s+- "\*"/,
     "Dependabot must group every declared Go dependency version update"
   );
+  assert.ok(actionlintModuleUpdates, "Dependabot must watch the isolated actionlint module");
+  assert.doesNotMatch(actionlintModuleUpdates, /^\s+allow:/m, "the tools updater must use Dependabot's direct-dependency default");
+  assert.doesNotMatch(actionlintModuleUpdates, /^\s+ignore:/m, "the tools updater must keep transitive security updates eligible");
+  assert.doesNotMatch(actionlintModuleUpdates, /go\.yaml\.in\/yaml\/v4/, "the tools updater must not special-case actionlint's parser dependency");
 });
 
 test("workflow step parser handles compact with and env maps", () => {

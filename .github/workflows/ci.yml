@@ -28,6 +28,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/actionlint/go.sum
 
       - name: Check JavaScript syntax
         run: |
@@ -42,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
+          go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
       - name: Run fast action tests
         run: node --test test/*.test.js
@@ -50,8 +53,15 @@ jobs:
       - name: Run Go tests
         run: go test ./...
 
+      - name: Verify Go module checksums
+        run: |
+          go mod verify
+          go -C tools/actionlint mod verify
+
       - name: Verify Go modules are tidy
-        run: go mod tidy -diff
+        run: |
+          go mod tidy -diff
+          go -C tools/actionlint mod tidy -diff
 
       - name: Reject credential-shaped workflow env literals
         run: go run ./cmd/workflow-credential-audit .
