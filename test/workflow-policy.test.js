@@ -12,6 +12,7 @@ const expectedWorkflowJobs = new Map([
   ["auto-release.yml", ["release"]],
   ["ci.yml", ["validate"]],
   ["dependabot-auto-merge.yml", ["dependabot"]],
+  ["dx-unity-automation-audit.yml", ["audit"]],
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedWorkflowRunScriptSignatures = new Map([
@@ -37,6 +38,13 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "set -euo pipefail\nskip() {",
       "set -euo pipefail\n# Poll for up to ~13.3 minutes, leaving headroom under the 15 minute job timeout.",
       'set -euo pipefail\npr_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"'
+    ]
+  ],
+  [
+    "dx-unity-automation-audit.yml",
+    [
+      'echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"',
+      "go run ./cmd/workflow-credential-audit\nunity-automation"
     ]
   ],
   ["reap-stale-locks.yml", []]
@@ -1194,6 +1202,17 @@ test("workflow run script scanner covers every expected workflow run step", () =
       `${workflow} run-script policy coverage must stay aligned with checked workflow run steps`
     );
   }
+});
+
+test("Dx Unity audit checks the consumer's current default branch", () => {
+  const steps = workflowJobStepMaps(readWorkflow("dx-unity-automation-audit.yml"), "audit");
+  const checkout = steps.find((step) => step.name === "Checkout current DxMessaging default branch");
+
+  assert.ok(checkout, "Dx audit must keep an explicit consumer checkout step");
+  assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+  assert.equal(checkout.with.repository, "Ambiguous-Interactive/DxMessaging");
+  assert.equal(checkout.with.path, ".policy-consumers/DxMessaging");
+  assert.equal(Object.hasOwn(checkout.with, "ref"), false, "checkout must follow the repository's current default branch");
 });
 
 test("CI isolates actionlint while keeping production Go dependencies upgradable", () => {
@@ -2465,7 +2484,7 @@ test("scheduled manual workflows declare stable concurrency", () => {
     );
   }
 
-  assert.deepEqual(checkedWorkflows.sort(), ["auto-release.yml", "reap-stale-locks.yml"]);
+  assert.deepEqual(checkedWorkflows.sort(), ["auto-release.yml", "dx-unity-automation-audit.yml", "reap-stale-locks.yml"]);
 });
 
 test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
