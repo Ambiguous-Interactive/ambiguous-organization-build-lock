@@ -1,0 +1,54 @@
+name: Dx Unity automation audit
+
+on:
+  schedule:
+    - cron: "31 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dx-unity-automation-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Reject unregistered Dx Unity automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout policy repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Checkout current DxMessaging default branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Ambiguous-Interactive/DxMessaging
+          path: .policy-consumers/DxMessaging
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Record sanitized audited commit
+        shell: bash
+        run: echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reject unregistered Unity automation
+        run: >-
+          go run ./cmd/workflow-credential-audit
+          unity-automation
+          .policy-consumers/DxMessaging
+          .github/actions/return-unity-license/action.yml
+          .github/actions/validate-unity-license/action.yml
+          .github/workflows/perf-numbers.yml
+          .github/workflows/release.yml
+          .github/workflows/unity-benchmarks.yml
+          .github/workflows/unity-gameci-experiment.yml
+          .github/workflows/unity-tests.yml

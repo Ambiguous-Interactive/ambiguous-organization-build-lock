@@ -17,6 +17,7 @@ import (
 var (
 	credentialNamePattern   = regexp.MustCompile(`(?i)(^|_)(API_KEY|ACCESS_KEY|CREDENTIAL|PASSWORD|PASSWD|PRIVATE_KEY|SECRET|TOKEN)(_|$)`)
 	allowedReferencePattern = regexp.MustCompile(`^\$\{\{\s*(secrets\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\}$`)
+	unityAutomationPattern  = regexp.MustCompile(`(?i)\bUNITY_(SERIAL|EMAIL|PASSWORD|LICENSE|LICENSING_SERVER)\b|game-ci/unity-(test-runner|builder|activate)@`)
 	credentialValuePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`),
 		regexp.MustCompile(`^(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})$`),
@@ -39,6 +40,9 @@ type finding struct {
 func (f finding) String() string {
 	if f.Kind == "unsupported" {
 		return fmt.Sprintf("%s:%d: unsupported env mapping syntax; use a direct mapping with scalar values", safeDiagnosticComponent(f.File), f.Line)
+	}
+	if f.Kind == "unity-automation" {
+		return fmt.Sprintf("%s: unregistered Unity credential or activation automation; register the exact reviewed path", safeDiagnosticComponent(f.File))
 	}
 	return fmt.Sprintf("%s:%d: credential-shaped literal in env[%s]; use OIDC or an exact secrets.NAME or github.token expression", safeDiagnosticComponent(f.File), f.Line, safeDiagnosticComponent(f.Name))
 }
@@ -207,6 +211,51 @@ func auditRepository(root string) ([]finding, error) {
 	return findings, nil
 }
 
+func isUnregisteredUnityAutomation(file, source string, allowed map[string]bool) bool {
+	return unityAutomationPattern.MatchString(source) && !allowed[filepath.ToSlash(file)]
+}
+
+func auditUnityAutomationRepository(root string, allowed map[string]bool) ([]finding, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("inspect target root: %w", err)
+	}
+	if !rootInfo.IsDir() {
+		return nil, fmt.Errorf("target root is not a directory")
+	}
+	githubInfo, err := os.Stat(filepath.Join(root, ".github"))
+	if err != nil {
+		return nil, fmt.Errorf("inspect target .github directory: %w", err)
+	}
+	if !githubInfo.IsDir() {
+		return nil, fmt.Errorf("target .github path is not a directory")
+	}
+	files, err := listWorkflowYAML(root)
+	if err != nil {
+		return nil, err
+	}
+	var findings []finding
+	for _, path := range files {
+		contents, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, readErr
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil, relErr
+		}
+		relative = filepath.ToSlash(relative)
+		if isUnregisteredUnityAutomation(relative, string(contents), allowed) {
+			findings = append(findings, finding{File: relative, Kind: "unity-automation"})
+		}
+	}
+	return findings, nil
+}
+
 func run(root string, stdout, stderr io.Writer) int {
 	findings, err := auditRepository(root)
 	if err != nil {
@@ -223,10 +272,44 @@ func run(root string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func main() {
-	root := "."
-	if len(os.Args) > 1 {
-		root = os.Args[1]
+func runUnityAutomation(root string, allowed map[string]bool, stdout, stderr io.Writer) int {
+	findings, err := auditUnityAutomationRepository(root, allowed)
+	if err != nil {
+		fmt.Fprintf(stderr, "Unity automation audit failed: %s\n", safeDiagnosticComponent(err.Error()))
+		return 1
 	}
-	os.Exit(run(root, os.Stdout, os.Stderr))
+	if len(findings) > 0 {
+		for _, finding := range findings {
+			fmt.Fprintln(stderr, finding.String())
+		}
+		return 1
+	}
+	fmt.Fprintln(stdout, "Registered Unity automation policy passed.")
+	return 0
+}
+
+func dispatch(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return run(".", stdout, stderr)
+	}
+	if args[0] == "unity-automation" {
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "usage: workflow-credential-audit unity-automation ROOT [ALLOWED_PATH ...]")
+			return 2
+		}
+		allowed := make(map[string]bool, len(args)-2)
+		for _, path := range args[2:] {
+			allowed[filepath.ToSlash(filepath.Clean(path))] = true
+		}
+		return runUnityAutomation(args[1], allowed, stdout, stderr)
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: workflow-credential-audit [ROOT] | unity-automation ROOT [ALLOWED_PATH ...]")
+		return 2
+	}
+	return run(args[0], stdout, stderr)
+}
+
+func main() {
+	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
 }

@@ -198,3 +198,106 @@ func TestRepositoryPassesAudit(t *testing.T) {
 		t.Fatalf("repository has workflow credential findings: %v", findings)
 	}
 }
+
+func TestUnityAutomationPolicy(t *testing.T) {
+	t.Parallel()
+	allowed := map[string]bool{".github/workflows/unity-tests.yml": true}
+	cases := []struct {
+		name   string
+		file   string
+		source string
+		want   bool
+	}{
+		{"registered secret reference", ".github/workflows/unity-tests.yml", "env: {UNITY_SERIAL: '${{ secrets.UNITY_SERIAL }}'}\n", false},
+		{"disabled secret reference", ".github/workflows-disabled/unity-tests.yml", "env: {UNITY_PASSWORD: '${{ secrets.UNITY_PASSWORD }}'}\n", true},
+		{"copied GameCI runner", ".github/workflows/copied.yml", "uses: game-ci/unity-test-runner@v4\n", true},
+		{"GameCI builder", ".github/workflows/build.yml", "uses: game-ci/unity-builder@v4\n", true},
+		{"GameCI activation", ".github/workflows/activate.yml", "uses: game-ci/unity-activate@v2\n", true},
+		{"retired license", ".github/workflows/legacy.yml", "env: {UNITY_LICENSE: value}\n", true},
+		{"retired server", ".github/workflows/legacy.yml", "env: {UNITY_LICENSING_SERVER: value}\n", true},
+		{"unrelated YAML", ".github/workflows/docs.yml", "run: npm run docs\n", false},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isUnregisteredUnityAutomation(test.file, test.source, allowed); got != test.want {
+				t.Fatalf("isUnregisteredUnityAutomation(%q) = %v, want %v", test.file, got, test.want)
+			}
+		})
+	}
+}
+
+func TestUnityAutomationRepositoryAuditRecurses(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	paths := map[string]string{
+		".github/workflows/registered.yml": "env: {UNITY_EMAIL: '${{ secrets.UNITY_EMAIL }}'}\n",
+		".github/nested/unsafe.YAML":       "uses: game-ci/unity-builder@v4\n",
+		"outside/ignored.yml":              "uses: game-ci/unity-builder@v4\n",
+	}
+	for relative, contents := range paths {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findings, err := auditUnityAutomationRepository(root, map[string]bool{".github/workflows/registered.yml": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].File != ".github/nested/unsafe.YAML" || findings[0].Kind != "unity-automation" {
+		t.Fatalf("unexpected Unity automation findings: %#v", findings)
+	}
+}
+
+func TestUnityAutomationAuditFailsClosedForInvalidTargets(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "missing")
+	withoutGitHub := t.TempDir()
+	fileRoot := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(fileRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{missing, withoutGitHub, fileRoot} {
+		if _, err := auditUnityAutomationRepository(root, nil); err == nil {
+			t.Fatalf("auditUnityAutomationRepository(%q) succeeded for an invalid target", root)
+		}
+	}
+}
+
+func TestDispatchUsesExplicitUnityAutomationMode(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	workflow := filepath.Join(root, ".github", "workflows", "unsafe.yml")
+	if err := os.MkdirAll(filepath.Dir(workflow), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workflow, []byte("uses: game-ci/unity-builder@v4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"zero-entry registry still runs Unity audit", []string{"unity-automation", root}, 1},
+		{"registered path passes Unity audit", []string{"unity-automation", root, ".github/workflows/unsafe.yml"}, 0},
+		{"missing Unity root", []string{"unity-automation"}, 2},
+		{"extra credential-audit argument", []string{root, "unexpected"}, 2},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr strings.Builder
+			if got := dispatch(test.args, &stdout, &stderr); got != test.want {
+				t.Fatalf("dispatch(%q) = %d, want %d; stdout=%q stderr=%q", test.args, got, test.want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
