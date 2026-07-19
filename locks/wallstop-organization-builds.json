@@ -1,8 +1,34 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29696837367:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "29696837367",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29696837367",
+    "queuedAt": "2026-07-19T17:31:02.993Z",
+    "acquiredAt": "2026-07-19T17:31:04.083Z",
+    "expiresAt": "2026-07-19T21:31:04.083Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29696837367:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "29696837367",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29696837367",
+      "queuedAt": "2026-07-19T17:31:02.993Z",
+      "acquiredAt": "2026-07-19T17:31:04.083Z",
+      "expiresAt": "2026-07-19T21:31:04.083Z",
+      "runnerId": "ELI-MACHINE"
+    }
+  ],
   "queue": [],
   "reservations": [
     {
@@ -18,23 +44,8 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-19T16:41:20.877Z"
-    },
-    {
-      "reservationId": "49121350-1ce9-4b12-9db9-747dc3c35e3c",
-      "holderId": "Ambiguous-Interactive/qora-redux:29694913080:unity:incident-recovery",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "29694913080",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29694913080",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "portal cleanup confirmed for incident-08d2ae36d87d05ac56c5b448",
-      "createdAt": "2026-07-19T17:30:44.626Z",
-      "availableAt": "2026-07-19T17:30:45.626Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T17:30:44.627Z"
+  "updatedAt": "2026-07-19T17:31:04.083Z"
 }
