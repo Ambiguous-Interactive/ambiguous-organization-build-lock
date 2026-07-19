@@ -1,21 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29680338269:unity-tests:unity-tests-1",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "29680338269",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29680338269",
-    "queuedAt": "2026-07-19T08:46:25.049Z",
-    "acquiredAt": "2026-07-19T08:46:26.376Z",
-    "expiresAt": "2026-07-19T12:46:26.376Z",
-    "runnerId": "box-linux"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "9c80e94a-3673-4c9f-8d57-3d70ad4dc4c2",
       "holderId": "Ambiguous-Interactive/DoxReloaded:29680338269:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -23,30 +14,12 @@
       "runId": "29680338269",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29680338269",
-      "queuedAt": "2026-07-19T08:46:25.049Z",
-      "acquiredAt": "2026-07-19T08:46:26.376Z",
-      "expiresAt": "2026-07-19T12:46:26.376Z",
-      "runnerId": "box-linux"
-    }
-  ],
-  "queue": [],
-  "reservations": [
-    {
-      "reservationId": "aea2a3e5-a7d4-42f8-8d66-a99ecff4cd74",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29680338269:unity-tests:unity-tests-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "29680338269",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29680338269",
-      "runnerId": "tiny-box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-19T08:51:26.506Z",
-      "availableAt": "2026-07-19T08:51:27.506Z"
+      "runnerId": "box-linux",
+      "state": "quarantine",
+      "reason": "unity-return-400006",
+      "createdAt": "2026-07-19T08:52:40.156Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T08:51:26.507Z"
+  "updatedAt": "2026-07-19T08:52:40.157Z"
 }
