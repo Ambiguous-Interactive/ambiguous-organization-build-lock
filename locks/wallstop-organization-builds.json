@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:29671162611:unity:qora-PlayMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "29671162611",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29671162611",
+    "queuedAt": "2026-07-19T03:06:36.780Z",
+    "acquiredAt": "2026-07-19T03:12:12.649Z",
+    "expiresAt": "2026-07-19T07:12:12.649Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29671162611:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29671162611",
       "queuedAt": "2026-07-19T03:06:36.780Z",
+      "acquiredAt": "2026-07-19T03:12:12.649Z",
+      "expiresAt": "2026-07-19T07:12:12.649Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:29671044893:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -27,23 +42,7 @@
       "runnerId": "tiny-box-linux"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "6cb3ae35-f610-400f-be87-ff1e83989cbc",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29671044893:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "29671044893",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29671044893",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-19T03:12:06.777Z",
-      "availableAt": "2026-07-19T03:12:07.777Z"
-    }
-  ],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-19T03:12:06.778Z"
+  "updatedAt": "2026-07-19T03:12:12.649Z"
 }
