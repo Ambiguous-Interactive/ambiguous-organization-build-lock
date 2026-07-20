@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:29782127599:unity-tests:2022.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "29782127599",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29782127599",
-    "queuedAt": "2026-07-20T22:44:16.455Z",
-    "acquiredAt": "2026-07-20T22:49:19.086Z",
-    "expiresAt": "2026-07-21T02:49:19.086Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:29782127599:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "29782127599",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29782127599",
-      "queuedAt": "2026-07-20T22:44:16.455Z",
-      "acquiredAt": "2026-07-20T22:49:19.086Z",
-      "expiresAt": "2026-07-21T02:49:19.086Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29784279849:unity:qora-PlayMode",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-20T22:49:32.600Z"
+    },
+    {
+      "reservationId": "9d96c6fe-db9d-4713-8472-07cb8a557a8d",
+      "holderId": "Ambiguous-Interactive/DxMessaging:29782127599:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "29782127599",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/29782127599",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-20T22:49:48.877Z",
+      "availableAt": "2026-07-20T22:49:49.877Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-20T22:49:32.601Z"
+  "updatedAt": "2026-07-20T22:49:48.878Z"
 }
