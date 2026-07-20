@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const crypto = require("crypto");
+const { requireCurrentPrHead } = require("./require-current-pr-head.js");
 
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
 const MODE = process.env.BUILD_LOCK_MODE || process.argv[2] || "acquire";
@@ -20,6 +21,7 @@ const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
+const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
@@ -2168,7 +2170,7 @@ function cancellationApiOptions(cancellation) {
 }
 
 function isCancellationError(error, cancellation) {
-  return cancellation.requested || isAbortError(error, cancellation.abortController.signal);
+  return cancellation.requested || cancellation.abortController.signal.aborted;
 }
 
 function throwIfCancellation(cancellation) {
@@ -2285,17 +2287,15 @@ async function acquire(config) {
   const recordPostCleanupNeeded = createPostCleanupRecorder(config);
 
   try {
-    let lockConfig = await readLockConfig(config, { apiOptions });
-    assertAcquireConfigRequirements(config, lockConfig);
-    await ensureStateBranch(config, { apiOptions });
-    let lockConfigReadAt = Date.now();
-    const started = Date.now();
-    const deadline = started + config.timeoutMinutes * 60 * 1000;
+    let lockConfig = null;
+    let started = Date.now();
+    let deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
     const staleRecovered = false;
     let quarantineRecovered = false;
     let lastObservation = null;
     let authFailureSince = null;
+    let lastPrHeadCheckAt = 0;
     let lockStateMayNeedCleanup = false;
     let admissionMayHaveBeenWrittenByThisInvocation = false;
     let preActivationReservation = null;
@@ -2308,7 +2308,7 @@ async function acquire(config) {
         preActivationCleanup: admissionMayHaveBeenWrittenByThisInvocation,
         preActivationReservation,
         resourceSafe: false,
-        releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
+        releaseCooldownSeconds: lockConfig?.releaseCooldownSeconds ?? DEFAULT_RELEASE_COOLDOWN_SECONDS,
         reason,
         apiOptions: { signal: apiOptions.signal }
       });
@@ -2360,6 +2360,132 @@ async function acquire(config) {
       throw new Error(message);
     };
 
+    const hasPrScope = ["pull_request", "pull_request_target"].includes(
+      String(process.env.GITHUB_EVENT_NAME || "").trim()
+    ) || Boolean(config.pullRequestNumber || config.expectedHeadSha);
+    const revalidatePrHead = async ({ force = false, cleanup = false } = {}) => {
+      if (!hasPrScope) {
+        return;
+      }
+      const now = Date.now();
+      if (!force && lastPrHeadCheckAt && now - lastPrHeadCheckAt < DEFAULT_PR_HEAD_TTL_MS) {
+        return;
+      }
+
+      let result;
+      try {
+        result = await requireCurrentPrHead({
+          env: {
+            ...process.env,
+            "INPUT_GITHUB-TOKEN": config.githubToken || "",
+            "INPUT_PULL-REQUEST-NUMBER": config.pullRequestNumber || "",
+            "INPUT_EXPECTED-HEAD-SHA": config.expectedHeadSha || ""
+          },
+          signal: apiOptions.signal,
+          writeOutputs: false,
+          throwOnStale: false,
+          log: () => {}
+        });
+        lastPrHeadCheckAt = Date.now();
+      } catch (error) {
+        let cleanupResult = null;
+        if (cleanup && lockStateMayNeedCleanup) {
+          try {
+            cleanupResult = await cleanupBeforeActivation(
+              "pull request identity became unverifiable before activation"
+            );
+          } catch (cleanupError) {
+            const waitMs = Date.now() - started;
+            writeAcquireOutputs({
+              acquired: false,
+              lockName: config.lockName,
+              holderId: identity.holderId,
+              waitMs,
+              attempts,
+              staleRecovered,
+              quarantineRecovered,
+              admissionResult: "pr-head-cleanup-failed"
+            });
+            const message =
+              `Pull request head validation failed (${oneLine(error.message)}), and exact pre-activation ` +
+              `build-lock cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
+            appendSummary(message);
+            throw new Error(message, { cause: cleanupError });
+          }
+        }
+        const waitMs = Date.now() - started;
+        writeAcquireOutputs({
+          acquired: false,
+          lockName: config.lockName,
+          holderId: identity.holderId,
+          waitMs,
+          attempts,
+          staleRecovered,
+          quarantineRecovered,
+          stateSha: cleanupResult?.sha || "",
+          admissionResult: "pr-head-check-failed"
+        });
+        const message = `Pull request head validation failed before ${config.lockName} admission: ${oneLine(error.message)}.`;
+        appendSummary(message);
+        const terminalError = new Error(message, { cause: error });
+        terminalError.prHeadValidationFailed = true;
+        throw terminalError;
+      }
+
+      if (result.isCurrent) {
+        return;
+      }
+
+      let cleanupResult = null;
+      if (cleanup && lockStateMayNeedCleanup) {
+        try {
+          cleanupResult = await cleanupBeforeActivation("pull request superseded before activation");
+        } catch (cleanupError) {
+          const waitMs = Date.now() - started;
+          writeAcquireOutputs({
+            acquired: false,
+            lockName: config.lockName,
+            holderId: identity.holderId,
+            waitMs,
+            attempts,
+            staleRecovered,
+            quarantineRecovered,
+            admissionResult: "pr-head-cleanup-failed"
+          });
+          const message =
+            `Pull request ${config.pullRequestNumber} was superseded, and exact pre-activation build-lock ` +
+            `cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
+          appendSummary(message);
+          throw new Error(message, { cause: cleanupError });
+        }
+      }
+      const waitMs = Date.now() - started;
+      writeAcquireOutputs({
+        acquired: false,
+        lockName: config.lockName,
+        holderId: identity.holderId,
+        waitMs,
+        attempts,
+        staleRecovered,
+        quarantineRecovered,
+        stateSha: cleanupResult?.sha || "",
+        admissionResult: "superseded"
+      });
+      const message =
+        `Stale pull request run for ${config.expectedHeadSha}; pull request #${config.pullRequestNumber} ` +
+        `now points to ${result.currentHeadSha}`;
+      appendSummary(`${message}. No licensed work was admitted.`);
+      throw new Error(message);
+    };
+
+    await revalidatePrHead({ force: true });
+    lockConfig = await readLockConfig(config, { apiOptions });
+    assertAcquireConfigRequirements(config, lockConfig);
+    await ensureStateBranch(config, { apiOptions });
+    let lockConfigReadAt = Date.now();
+    started = Date.now();
+    deadline = started + config.timeoutMinutes * 60 * 1000;
+
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
     console.log(`Holder: ${identity.holderId}`);
@@ -2369,6 +2495,7 @@ async function acquire(config) {
       throwIfCancellation(cancellation);
       attempts++;
       try {
+        await revalidatePrHead({ cleanup: true });
         // Re-read the parallelism config on a TTL so long waits pick up limit changes
         // without adding a contents read to every poll.
         const configTtlMs = integerEnvironment("BUILD_LOCK_CONFIG_TTL_MS", DEFAULT_CONFIG_TTL_MS);
@@ -2470,6 +2597,8 @@ async function acquire(config) {
           }
         }
         if (myHolder) {
+          lockStateMayNeedCleanup = true;
+          await revalidatePrHead({ force: true, cleanup: true });
           recordPostCleanupNeeded();
           const waitMs = Date.now() - started;
           const position = queuePosition(state, identity.holderId);
@@ -2595,6 +2724,7 @@ async function acquire(config) {
           : state.queue.slice(0, Math.max(0, freeSlots));
         const eligible = canRecoverQuarantine || eligibleEntries.some((entry) => entry.holderId === identity.holderId);
         if ((freeSlots > 0 || canRecoverQuarantine) && eligible) {
+          await revalidatePrHead({ force: true, cleanup: true });
           const admissionReservation = canRecoverQuarantine ? structuredClone(matchingQuarantine) : null;
           if (canRecoverQuarantine) {
             console.log(
@@ -2646,6 +2776,7 @@ async function acquire(config) {
             await sleep(jitter(1000), { signal: apiOptions.signal });
             continue;
           }
+          await revalidatePrHead({ force: true, cleanup: true });
           const waitMs = Date.now() - started;
           writeAcquireOutputs({
             acquired: true,
@@ -3110,6 +3241,9 @@ function config() {
     holderIdSuffix,
     targetHolderId: MODE === "release" ? input("holder-id") : "",
     runnerId: input("runner-id"),
+    githubToken: input("github-token"),
+    pullRequestNumber: input("pull-request-number"),
+    expectedHeadSha: input("expected-head-sha"),
     resourceSafe: resourceReport.cleanupStatus === "confirmed",
     resourceReport,
     operation,

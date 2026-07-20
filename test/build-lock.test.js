@@ -221,6 +221,241 @@ test("environment file parser fails closed on malformed output lines", async () 
   });
 });
 
+test("acquire removes its queued request when the PR is superseded during the FIFO wait", async () => {
+  const expectedHead = "a".repeat(40);
+  const newerHead = "b".repeat(40);
+  const waitingHolder = semaphoreHolder("other/repo", "999", "editmode");
+  let state = semaphoreState([waitingHolder]);
+  let stateReads = 0;
+  let prReads = 0;
+  let stateWrites = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      { ...semaphoreActionEnv, GITHUB_EVENT_NAME: "pull_request", GITHUB_OUTPUT: outputFile },
+      async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/owner/repo/pulls/77") {
+              prReads++;
+              return jsonResponse(200, {
+                state: "open",
+                head: { sha: prReads === 1 ? expectedHead : newerHead }
+              });
+            }
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch" } });
+            }
+            if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+              return base64Content({ maxHolders: 1 }, "cfg");
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              if (options.method === "PUT") {
+                state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                stateWrites++;
+                return jsonResponse(200, { content: { sha: `state-${stateWrites}` } });
+              }
+              stateReads++;
+              if (stateReads === 2) {
+                state = semaphoreState([], state.queue);
+              }
+              return base64Content(state, `state-read-${stateReads}`);
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async () => {
+            await assert.rejects(
+              () => acquire(semaphoreConfig({
+                githubToken: "github-token",
+                pullRequestNumber: "77",
+                expectedHeadSha: expectedHead
+              })),
+              new RegExp(`Stale pull request run for ${expectedHead}.*${newerHead}`)
+            );
+          });
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "superseded");
+  });
+
+  assert.equal(prReads, 2, "PR identity must be checked at entry and again before admission");
+  assert.ok(stateWrites >= 2, "the queued request and its cleanup must both be persisted");
+  assert.deepEqual(state.holders, []);
+  assert.deepEqual(state.queue, []);
+});
+
+test("acquire periodically removes a superseded PR while capacity remains occupied", async () => {
+  const originalNow = Date.now;
+  const expectedHead = "1".repeat(40);
+  const newerHead = "2".repeat(40);
+  const waitingHolder = semaphoreHolder("other/repo", "999", "editmode");
+  let state = semaphoreState([waitingHolder]);
+  let fakeNow = 1_000;
+  let prReads = 0;
+  let stateWrites = 0;
+  Date.now = () => fakeNow;
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        { ...semaphoreActionEnv, GITHUB_EVENT_NAME: "pull_request", GITHUB_OUTPUT: outputFile },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/owner/repo/pulls/78") {
+                prReads++;
+                return jsonResponse(200, {
+                  state: "open",
+                  head: { sha: prReads === 1 ? expectedHead : newerHead }
+                });
+              }
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch" } });
+              }
+              if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                return base64Content({ maxHolders: 1 }, "cfg");
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                  stateWrites++;
+                  if (stateWrites === 1) fakeNow += 61_000;
+                  return jsonResponse(200, { content: { sha: `state-${stateWrites}` } });
+                }
+                return base64Content(state, `state-read-${stateWrites}`);
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await assert.rejects(
+                () => acquire(semaphoreConfig({
+                  githubToken: "github-token",
+                  pullRequestNumber: "78",
+                  expectedHeadSha: expectedHead,
+                  timeoutMinutes: 10
+                })),
+                new RegExp(`Stale pull request run for ${expectedHead}.*${newerHead}`)
+              );
+            });
+          });
+        }
+      );
+      assert.equal(readEnvironmentFile(outputFile)["admission-result"], "superseded");
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.equal(prReads, 2);
+  assert.equal(stateWrites, 2);
+  assert.equal(state.holders[0].holderId, waitingHolder.holderId);
+  assert.deepEqual(state.queue, []);
+});
+
+test("acquire retracts a just-admitted stale PR without creating a lifecycle reservation", async () => {
+  const expectedHead = "c".repeat(40);
+  const newerHead = "d".repeat(40);
+  let state = lifecycleState();
+  let prReads = 0;
+  let stateWrites = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      { ...semaphoreActionEnv, GITHUB_EVENT_NAME: "pull_request", GITHUB_OUTPUT: outputFile },
+      async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/owner/repo/pulls/88") {
+            prReads++;
+            return jsonResponse(200, {
+              state: "open",
+              head: { sha: prReads < 3 ? expectedHead : newerHead }
+            });
+          }
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({
+              maxHolders: 1,
+              runnerSerialization: true,
+              resourceLifecycle: true,
+              releaseCooldownSeconds: 360
+            }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              stateWrites++;
+              return jsonResponse(200, { content: { sha: `state-${stateWrites}` } });
+            }
+            return base64Content(state, `state-read-${stateWrites}`);
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({
+              runnerId: "runner-a",
+              githubToken: "github-token",
+              pullRequestNumber: "88",
+              expectedHeadSha: expectedHead
+            })),
+            new RegExp(`Stale pull request run for ${expectedHead}.*${newerHead}`)
+          );
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "superseded");
+    assert.equal(outputs["state-sha"], "state-2");
+  });
+
+  assert.equal(prReads, 3, "entry, pre-CAS, and post-verification checks must all run");
+  assert.equal(stateWrites, 2, "admission and exact retraction must each use one CAS write");
+  assert.deepEqual(state.holders, []);
+  assert.deepEqual(state.queue, []);
+  assert.deepEqual(state.reservations, [], "known pre-activation retraction must not reduce capacity");
+});
+
+test("PR identity lookup failure happens before lock-state access", async () => {
+  let lockStateAccesses = 0;
+  await withTempFile(async (outputFile) => {
+    await withActionEnv(
+      { ...semaphoreActionEnv, GITHUB_EVENT_NAME: "pull_request", GITHUB_OUTPUT: outputFile },
+      async () => {
+        await withMockedFetch(async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/owner/repo/pulls/99") {
+            return jsonResponse(403, { message: "Resource not accessible by integration" });
+          }
+          if (parsed.pathname.includes("/repos/o/r/")) lockStateAccesses++;
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({
+              githubToken: "github-token",
+              pullRequestNumber: "99",
+              expectedHeadSha: "e".repeat(40)
+            })),
+            /pull request lookup failed with HTTP 403/i
+          );
+        });
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.acquired, "false");
+    assert.equal(outputs["admission-result"], "pr-head-check-failed");
+  });
+  assert.equal(lockStateAccesses, 0);
+});
+
 test("environment file parser rejects empty names", async () => {
   await withTempFile(async (file) => {
     fs.writeFileSync(file, "=value\n", "utf8");

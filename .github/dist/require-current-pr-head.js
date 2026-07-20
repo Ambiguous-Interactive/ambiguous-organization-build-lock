@@ -72,10 +72,14 @@ async function requireCurrentPrHead(options = {}) {
   const pullRequestNumber = input(env, "PULL-REQUEST-NUMBER");
   const hasPullRequestInputs = Boolean(pullRequestNumber || expectedHeadSha);
   const isPullRequestEvent = eventName === "pull_request" || eventName === "pull_request_target";
+  const shouldWriteOutputs = options.writeOutputs !== false;
+  const shouldThrowOnStale = options.throwOnStale !== false;
 
   if (!isPullRequestEvent && !hasPullRequestInputs) {
-    writeOutput(env, "is-current", "true", appendFile);
-    writeOutput(env, "current-head-sha", expectedHeadSha, appendFile);
+    if (shouldWriteOutputs) {
+      writeOutput(env, "is-current", "true", appendFile);
+      writeOutput(env, "current-head-sha", expectedHeadSha, appendFile);
+    }
     log(`::notice::Current-head guard skipped for ${oneLine(eventName || "unknown")} event.`);
     return { isCurrent: true, currentHeadSha: expectedHeadSha };
   }
@@ -83,7 +87,8 @@ async function requireCurrentPrHead(options = {}) {
   const token = input(env, "GITHUB-TOKEN");
   const repository = String(env.GITHUB_REPOSITORY || "").trim();
   const apiUrl = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
-  const signal = options.signal || AbortSignal.timeout(30_000);
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs === undefined ? 30_000 : options.timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
   const sleep = options.sleep || ((milliseconds) => wait(milliseconds, undefined, { signal }));
 
   if (!token) {
@@ -138,12 +143,18 @@ async function requireCurrentPrHead(options = {}) {
   }
 
   const isCurrent = currentHeadSha.toLowerCase() === expectedHeadSha.toLowerCase();
-  writeOutput(env, "is-current", String(isCurrent), appendFile);
-  writeOutput(env, "current-head-sha", currentHeadSha, appendFile);
-  if (!isCurrent) {
+  if (shouldWriteOutputs) {
+    writeOutput(env, "is-current", String(isCurrent), appendFile);
+    writeOutput(env, "current-head-sha", currentHeadSha, appendFile);
+  }
+  if (!isCurrent && shouldThrowOnStale) {
     throw new Error(
       `Stale pull request run for ${expectedHeadSha}; pull request #${pullRequestNumber} now points to ${currentHeadSha}`
     );
+  }
+
+  if (!isCurrent) {
+    return { isCurrent: false, currentHeadSha };
   }
 
   log(`::notice::Pull request #${pullRequestNumber} still points to this run's head SHA.`);

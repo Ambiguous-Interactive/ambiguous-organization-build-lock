@@ -84,6 +84,40 @@ test("current PR head guard rejects a superseded run and reports the new SHA", a
   assert.deepEqual(writes, [`is-current=false\n`, `current-head-sha=${newerSha}\n`]);
 });
 
+test("embedded current-head checks can return stale without writing another action's outputs", async () => {
+  const writes = [];
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: (_path, value) => writes.push(value),
+    fetchImpl: async () => response(200, { state: "open", head: { sha: newerSha } }),
+    writeOutputs: false,
+    throwOnStale: false,
+    log: () => {}
+  });
+
+  assert.deepEqual(result, { isCurrent: false, currentHeadSha: newerSha });
+  assert.deepEqual(writes, []);
+});
+
+test("a caller cancellation signal does not disable the bounded request timeout", async () => {
+  const caller = new AbortController();
+  await assert.rejects(
+    requireCurrentPrHead({
+      env: guardEnvironment(),
+      fetchImpl: async (_url, options) => {
+        await new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+        });
+      },
+      signal: caller.signal,
+      timeoutMs: 1,
+      log: () => {}
+    }),
+    /timeout|aborted/i
+  );
+  assert.equal(caller.signal.aborted, false);
+});
+
 test("current PR head guard retries a transient lookup without a fixed long sleep", async () => {
   const sleeps = [];
   let discarded = 0;

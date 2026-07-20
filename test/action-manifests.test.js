@@ -15,6 +15,9 @@ const acquireInputKeys = [
   "lock-name",
   "holder-id-suffix",
   "runner-id",
+  "github-token",
+  "pull-request-number",
+  "expected-head-sha",
   "lock-repository",
   "state-branch",
   "timeout-minutes",
@@ -308,6 +311,11 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
   assert.match(readme, /`account-blocked` admission is an intentional nonzero, fail-closed/);
   assert.match(readme, /portal-cleanup-confirmed=true/);
+  assert.match(readme, /require-current-pr-head@IMMUTABLE_COMMIT_SHA/);
+  assert.match(readme, /strategy\.fail-fast: false/);
+  assert.match(readme, /github-token: \$\{\{ github\.token \}\}/);
+  assert.match(readme, /pull-request-number: \$\{\{ github\.event\.pull_request\.number \}\}/);
+  assert.match(readme, /expected-head-sha: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
 });
 
 test("README documents configurable parallelism and transient-auth handling", () => {
