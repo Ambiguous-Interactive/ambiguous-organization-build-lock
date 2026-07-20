@@ -9,6 +9,10 @@ function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, " ").trim();
 }
 
+function workflowCommandData(value) {
+  return oneLine(value).replace(/%/g, "%25");
+}
+
 function input(env, name) {
   return String(env[`INPUT_${name.toUpperCase()}`] || "").trim();
 }
@@ -165,7 +169,7 @@ async function run() {
   try {
     await requireCurrentPrHead();
   } catch (error) {
-    console.error(`::error::${oneLine(error instanceof Error ? error.message : error)}`);
+    console.error(`::error::${workflowCommandData(error instanceof Error ? error.message : error)}`);
     process.exitCode = 1;
   }
 }
@@ -174,4 +178,4 @@ if (require.main === module) {
   run();
 }
 
-module.exports = { oneLine, requireCurrentPrHead, retryDelay };
+module.exports = { oneLine, requireCurrentPrHead, retryDelay, workflowCommandData };

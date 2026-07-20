@@ -1,10 +1,21 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { requireCurrentPrHead, retryDelay } = require("../.github/dist/require-current-pr-head.js");
+const {
+  requireCurrentPrHead,
+  retryDelay,
+  workflowCommandData
+} = require("../.github/dist/require-current-pr-head.js");
 
 const expectedSha = "a".repeat(40);
 const newerSha = "b".repeat(40);
+
+test("current PR head errors escape percent sequences and collapse line breaks", () => {
+  assert.equal(
+    workflowCommandData("source%0Ainjected\r\n::error::second"),
+    "source%250Ainjected ::error::second"
+  );
+});
 
 function guardEnvironment(overrides = {}) {
   return {

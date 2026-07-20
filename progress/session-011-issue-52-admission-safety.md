@@ -64,7 +64,7 @@ this zero-Unity-churn central slice.
 
 - JavaScript syntax: all action distributions and tests passed.
 - actionlint v1.7.12: passed through the isolated tool module.
-- Node test suite after adversarial remediation: 436 passed, 0 failed.
+- Node test suite after adversarial remediation: 437 passed, 0 failed.
 - Go tests: passed.
 - Root and actionlint module verification/tidy checks: passed.
 - Workflow credential-literal audit: passed.
@@ -74,6 +74,9 @@ this zero-Unity-churn central slice.
 - Adversarial follow-up also covers terminal PR authorization failure, cleanup
   CAS exhaustion, timeout classification, holder/quarantine provenance, ambiguous
   recovery conflicts, and runtime parsing of all three PR identity inputs.
+- The standalone guard's terminal error command escapes percent sequences before
+  writing to the GitHub Actions command channel; injection-shaped regression
+  coverage verifies percent and newline handling.
 
 Root dependencies and pinned GitHub Actions are current. The actionlint tool
 module's YAML rc.3 has a newer rc.6 available, but a clean compatibility probe
