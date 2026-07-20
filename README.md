@@ -69,6 +69,24 @@ aggregate job must fail if the preflight or licensed job fails, is cancelled,
 or is unexpectedly skipped. Only explicitly modeled cases such as fork-secret
 safety or a documented no-change path may accept a skipped licensed job.
 
+Every workflow-level, job-level, and called-workflow concurrency scope capable
+of reaching licensed acquire must literally set `cancel-in-progress: false`.
+Do not use an expression that can evaluate to `true` on any licensed path. For
+pull requests, reject a superseded run before expensive setup and pass the same
+immutable event identity to acquire for periodic FIFO revalidation:
+
+```yaml
+- name: Require current PR head
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/require-current-pr-head@IMMUTABLE_COMMIT_SHA
+  with:
+    github-token: ${{ github.token }}
+    pull-request-number: ${{ github.event.pull_request.number }}
+    expected-head-sha: ${{ github.event.pull_request.head.sha }}
+```
+
+Licensed matrix jobs must also set `strategy.fail-fast: false`; GitHub's default
+matrix fail-fast behavior can cancel a sibling while it holds a Unity license.
+
 Validate local secret shape first, acquire immediately before the licensed Unity
 section, guard every licensed step on the acquire output, and release with
 `if: always()`:
@@ -84,6 +102,9 @@ section, guard every licensed step on the acquire output, and release with
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
+    github-token: ${{ github.token }}
+    pull-request-number: ${{ github.event.pull_request.number }}
+    expected-head-sha: ${{ github.event.pull_request.head.sha }}
     timeout-minutes: "180"
     require-resource-lifecycle: "true"
     # Consumers that wrap serial activation in bounded retry no longer need the
@@ -123,6 +144,17 @@ snapshot it actually uses, including periodic refreshes while queued, and fails
 before reading or mutating lock state if the initial snapshot cannot satisfy them.
 This also makes a missing, malformed, or temporarily unreadable config fail closed
 for consumers that require lifecycle protection.
+
+The PR identity inputs close the race after the standalone current-head guard:
+acquire revalidates periodically while queued, immediately before its admission
+write, and again after verified admission but before returning control to Unity.
+A superseded or unverifiable PR attempts to remove its own queued or
+just-admitted identity and fails without running licensed work. If exact cleanup
+cannot be confirmed, `admission-result=pr-head-cleanup-failed` explicitly means
+the lock state is not known clean. Keep licensed work blocked and use the
+explicit release, post-action, or scheduled-reaper fallback, then confirm the
+caller is absent before rerunning. Empty PR inputs on push and dispatch do not
+perform PR API calls.
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The Unity return
