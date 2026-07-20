@@ -770,6 +770,149 @@ test("clean recovery CAS conflict cannot leak quarantine provenance into a later
   assert.deepEqual(state.reservations, [], "the unrelated conflicted quarantine must not be resurrected");
 });
 
+test("PR lookup cancellation uses normal acquire cleanup without PR-failure outputs", async () => {
+  const originalExit = process.exit;
+  let exitCode = null;
+  let state = semaphoreState([]);
+  let stateReads = 0;
+  process.exit = (code) => {
+    exitCode = code;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        { ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile },
+        async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/owner/repo/pulls/104") {
+              process.emit("SIGINT", "SIGINT");
+              throw options.signal.reason;
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              stateReads++;
+              if (options.method === "PUT") {
+                state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "cleanup" } });
+              }
+              return base64Content(state, `cleanup-read-${stateReads}`);
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async (logs) => {
+            await assert.rejects(
+              () => acquire(semaphoreConfig({
+                githubToken: "github-token",
+                pullRequestNumber: "104",
+                expectedHeadSha: "a".repeat(40)
+              })),
+              /Build lock acquire cancelled by SIGINT/
+            );
+            assert.doesNotMatch(logs.join("\n"), /Pull request head validation failed|pr-head-(?:check|cleanup)-failed/i);
+          });
+        }
+      );
+
+      assert.deepEqual(readEnvironmentFile(outputFile), {});
+    });
+  } finally {
+    process.exit = originalExit;
+  }
+
+  assert.equal(exitCode, 130);
+  assert.ok(stateReads >= 2, "normal cancellation cleanup must use its fresh cleanup signal");
+  assert.deepEqual(state.queue, []);
+});
+
+test("PR cleanup cancellation uses normal acquire cleanup without PR-failure outputs", async (t) => {
+  for (const testCase of [
+    { name: "validation failure cleanup", response: () => jsonResponse(403, { message: "Forbidden" }) },
+    { name: "stale-head cleanup", response: () => jsonResponse(200, { state: "open", head: { sha: "b".repeat(40) } }) }
+  ]) {
+    await t.test(testCase.name, async () => {
+      const originalExit = process.exit;
+      const originalNow = Date.now;
+      const waitingHolder = semaphoreHolder("other/repo", "999", "editmode");
+      let exitCode = null;
+      let fakeNow = 1_000;
+      let prReads = 0;
+      let stateWrites = 0;
+      let cancellationInjected = false;
+      let state = semaphoreState([waitingHolder]);
+      process.exit = (code) => {
+        exitCode = code;
+      };
+      Date.now = () => fakeNow;
+
+      try {
+        await withTempFile(async (outputFile) => {
+          await withActionEnv(
+            { ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile },
+            async () => {
+              await withMockedFetch(async (url, options = {}) => {
+                const parsed = new URL(url);
+                if (parsed.pathname === "/repos/owner/repo/pulls/105") {
+                  prReads++;
+                  return prReads === 1
+                    ? jsonResponse(200, { state: "open", head: { sha: "a".repeat(40) } })
+                    : testCase.response();
+                }
+                if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                  return jsonResponse(200, { object: { sha: "branch" } });
+                }
+                if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                  return base64Content({ maxHolders: 1 }, "cfg");
+                }
+                if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                  if (options.method === "PUT") {
+                    state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                    stateWrites++;
+                    if (stateWrites === 1) fakeNow += 61_000;
+                    return jsonResponse(200, { content: { sha: `write-${stateWrites}` } });
+                  }
+                  if (prReads >= 2 && !cancellationInjected) {
+                    cancellationInjected = true;
+                    process.emit("SIGINT", "SIGINT");
+                    throw options.signal.reason;
+                  }
+                  return base64Content(state, `read-${stateWrites}`);
+                }
+                return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+              }, async (logs) => {
+                await assert.rejects(
+                  () => acquire(semaphoreConfig({
+                    githubToken: "github-token",
+                    pullRequestNumber: "105",
+                    expectedHeadSha: "a".repeat(40),
+                    pollSeconds: 0,
+                    timeoutMinutes: 10
+                  })),
+                  /Build lock acquire cancelled by SIGINT/
+                );
+                assert.doesNotMatch(
+                  logs.join("\n"),
+                  /Pull request head validation failed|superseded.*cleanup could not be confirmed|pr-head-(?:check|cleanup)-failed/i
+                );
+              });
+            }
+          );
+
+          assert.deepEqual(readEnvironmentFile(outputFile), {});
+        });
+      } finally {
+        Date.now = originalNow;
+        process.exit = originalExit;
+      }
+
+      assert.equal(exitCode, 130);
+      assert.equal(cancellationInjected, true);
+      assert.equal(stateWrites, 2, "queue insertion and normal signal cleanup must be the only persisted writes");
+      assert.equal(state.holders[0].holderId, waitingHolder.holderId);
+      assert.deepEqual(state.queue, []);
+    });
+  }
+});
+
 test("environment file parser rejects empty names", async () => {
   await withTempFile(async (file) => {
     fs.writeFileSync(file, "=value\n", "utf8");

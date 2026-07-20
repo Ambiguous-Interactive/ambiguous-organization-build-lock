@@ -64,7 +64,7 @@ this zero-Unity-churn central slice.
 
 - JavaScript syntax: all action distributions and tests passed.
 - actionlint v1.7.12: passed through the isolated tool module.
-- Node test suite after adversarial remediation: 437 passed, 0 failed.
+- Node test suite after CI and reviewer remediation: 441 passed, 0 failed.
 - Go tests: passed.
 - Root and actionlint module verification/tidy checks: passed.
 - Workflow credential-literal audit: passed.
@@ -94,3 +94,10 @@ legacy non-PR acquire tests could therefore enter the new fail-closed PR path on
 on hosted CI. Production behavior was correct. The harness now scrubs/restores
 `GITHUB_EVENT_NAME` like every other Actions variable, while PR-specific tests
 continue to set it explicitly.
+
+Bugbot then identified that a signal abort during embedded PR validation could
+write a typed PR failure before normal cancellation cleanup. Acquire now checks
+cancellation at every PR lookup/cleanup boundary and rethrows directly to the
+existing signal handler. SIGINT lookup cancellation and both validation-error and
+stale-head cleanup cancellation paths prove exit 130, exact queue cleanup, no
+unrelated state removal, and no `pr-head-*` output misclassification.

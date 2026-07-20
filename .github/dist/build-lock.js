@@ -2386,15 +2386,23 @@ async function acquire(config) {
           throwOnStale: false,
           log: () => {}
         });
+        throwIfCancellation(cancellation);
         lastPrHeadCheckAt = Date.now();
       } catch (error) {
+        if (isCancellationError(error, cancellation)) {
+          throw error;
+        }
         let cleanupResult = null;
         if (cleanup && lockStateMayNeedCleanup) {
           try {
             cleanupResult = await cleanupBeforeActivation(
               "pull request identity became unverifiable before activation"
             );
+            throwIfCancellation(cancellation);
           } catch (cleanupError) {
+            if (isCancellationError(cleanupError, cancellation)) {
+              throw cleanupError;
+            }
             const waitMs = Date.now() - started;
             writeAcquireOutputs({
               acquired: false,
@@ -2440,7 +2448,11 @@ async function acquire(config) {
       if (cleanup && lockStateMayNeedCleanup) {
         try {
           cleanupResult = await cleanupBeforeActivation("pull request superseded before activation");
+          throwIfCancellation(cancellation);
         } catch (cleanupError) {
+          if (isCancellationError(cleanupError, cancellation)) {
+            throw cleanupError;
+          }
           const waitMs = Date.now() - started;
           writeAcquireOutputs({
             acquired: false,
