@@ -27,19 +27,6 @@
       "acquiredAt": "2026-07-20T23:31:21.888Z",
       "expiresAt": "2026-07-21T03:31:21.888Z",
       "runnerId": "tiny-box-linux"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:29784923406:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "29784923406",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29784923406",
-      "queuedAt": "2026-07-20T23:29:37.332Z",
-      "acquiredAt": "2026-07-20T23:32:48.271Z",
-      "expiresAt": "2026-07-21T03:32:48.271Z",
-      "runnerId": "DAD-MACHINE"
     }
   ],
   "queue": [
@@ -55,7 +42,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "2e2065aa-adf2-47c3-937a-afa43677dd44",
+      "holderId": "Ambiguous-Interactive/IshoBoy:29784923406:unity-compile-check:unity-ci-compile-check",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-compile-check",
+      "runId": "29784923406",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29784923406",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-20T23:35:22.764Z",
+      "availableAt": "2026-07-20T23:35:23.764Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-20T23:33:46.806Z"
+  "updatedAt": "2026-07-20T23:35:22.764Z"
 }
