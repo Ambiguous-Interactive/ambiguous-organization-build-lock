@@ -6,22 +6,26 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  RUNNER_INVENTORY_TIMEOUT_MS,
+  classifyRunnerInventoryError,
   execute,
   matchingOnlineRunners,
   parseRequiredLabelSets,
   parseRepository,
   readAccessibleOrganizationRunners,
-  readAllRunnerGroups
+  readAllRunnerGroups,
+  runnerInventoryApiOptions,
+  run
 } = require("../.github/dist/check-unity-runners.js");
 
 const testKey = crypto
   .generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs8", format: "pem" });
 
-function jsonResponse(value, status = 200) {
+function jsonResponse(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json", ...headers }
   });
 }
 
@@ -90,6 +94,60 @@ test("calling repository identity is canonical and organization-owned", () => {
     "Ambiguous-Interactive/unity-helpers\n::error::injected"
   ]) {
     assert.throws(() => parseRepository(invalid, "Ambiguous-Interactive"), /repository/i);
+  }
+});
+
+test("runner inventory uses a shared 150-second deadline and full-jitter retry policy", () => {
+  const signal = new AbortController().signal;
+  const options = runnerInventoryApiOptions(signal);
+
+  assert.equal(RUNNER_INVENTORY_TIMEOUT_MS, 150_000);
+  assert.deepEqual(
+    {
+      maxAttempts: options.maxAttempts,
+      baseDelayMs: options.baseDelayMs,
+      maxDelayMs: options.maxDelayMs,
+      fullJitter: options.fullJitter,
+      signal: options.signal
+    },
+    {
+      maxAttempts: 13,
+      baseDelayMs: 5000,
+      maxDelayMs: 60000,
+      fullJitter: true,
+      signal
+    }
+  );
+});
+
+test("runner inventory failures distinguish API unavailability from runner unavailability", () => {
+  const retryableCases = [
+    { status: 500, requestId: "request-500" },
+    { status: 502, requestId: "request-502" },
+    { status: 429, requestId: "request-429" },
+    { status: 401, requestId: "request-401" },
+    { message: "fetch failed" }
+  ];
+
+  for (const details of retryableCases) {
+    const error = Object.assign(new Error(details.message || `HTTP ${details.status}`), details, {
+      retryable: true,
+      attempts: 13,
+      path: "/orgs/Ambiguous-Interactive/actions/runner-groups"
+    });
+    const classified = classifyRunnerInventoryError(error);
+
+    assert.equal(classified.code, "RUNNER_INVENTORY_API_UNAVAILABLE");
+    assert.match(classified.message, /not evidence that a required runner is offline/i);
+    assert.match(classified.message, /failed closed/i);
+    if (details.requestId) {
+      assert.match(classified.message, new RegExp(details.requestId));
+    }
+  }
+
+  for (const status of [403, 404]) {
+    const error = Object.assign(new Error(`HTTP ${status}`), { status, retryable: false });
+    assert.equal(classifyRunnerInventoryError(error), error, `ordinary HTTP ${status} must remain fail-fast`);
   }
 });
 
@@ -252,6 +310,137 @@ test("runtime requests only organization runner read permission and rejects an e
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
   await assert.rejects(() => execute(), /No accessible online organization runner matches/);
+});
+
+test("runner retry policy also covers GitHub App installation discovery", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+  });
+
+  console.log = () => {};
+  process.env["INPUT_READER-APP-ID"] = "12345";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows","unity"]]';
+
+  let installationCalls = 0;
+  global.fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      installationCalls++;
+      if (installationCalls < 4) {
+        return jsonResponse(
+          { message: "upstream unavailable" },
+          502,
+          { "x-github-request-id": `auth-${installationCalls}` }
+        );
+      }
+      return jsonResponse({ id: 99 });
+    }
+    if (parsed.pathname === "/app/installations/99/access_tokens") {
+      return jsonResponse({ token: "short-lived-reader-token", expires_at: "2099-01-01T00:00:00Z" });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
+      return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {
+      return jsonResponse({
+        total_count: 1,
+        runners: [{
+          id: 1,
+          name: "windows-unity",
+          status: "online",
+          labels: [{ name: "self-hosted" }, { name: "Windows" }, { name: "unity" }]
+        }]
+      });
+    }
+    return jsonResponse({ message: "unexpected test request" }, 404);
+  };
+
+  const result = await execute({
+    signal: new AbortController().signal,
+    apiOptions: {
+      maxAttempts: 4,
+      baseDelayMs: 0,
+      maxDelayMs: 0,
+      random: () => 0,
+      sleep: async () => {}
+    }
+  });
+
+  assert.equal(installationCalls, 4);
+  assert.equal(result.onlineRunnerCount, 1);
+});
+
+test("terminal runner preflight preserves classified API diagnostics safely", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalExitCode = process.exitCode;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runner-preflight-terminal-"));
+  const controller = new AbortController();
+  const errors = [];
+
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    console.error = originalError;
+    process.exitCode = originalExitCode;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  console.log = () => {};
+  console.error = (message) => errors.push(String(message));
+  process.exitCode = 0;
+  process.env["INPUT_READER-APP-ID"] = "12345";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows","unity"]]';
+  process.env.GITHUB_STEP_SUMMARY = path.join(tempRoot, "summary.md");
+
+  global.fetch = async (url) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, "/orgs/Ambiguous-Interactive/installation");
+    return jsonResponse(
+      { message: "upstream auth\nunavailable%temporarily" },
+      502,
+      { "x-github-request-id": "terminal-auth-request" }
+    );
+  };
+
+  await run({
+    signal: controller.signal,
+    apiOptions: {
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      maxDelayMs: 1000,
+      sleep: async (_delay, { signal }) => {
+        controller.abort(new DOMException("runner inventory deadline elapsed", "TimeoutError"));
+        throw signal.reason;
+      }
+    }
+  });
+
+  assert.equal(process.exitCode, 1);
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /^::warning::/);
+  assert.match(errors[0], /API\/auth availability failure/);
+  assert.match(errors[1], /^::error::Unity runner preflight failed closed:/);
+  for (const command of errors) {
+    assert.equal(/[\r\n]/.test(command), false, "workflow commands must stay on one line");
+    assert.match(command, /upstream auth unavailable%25temporarily/);
+    assert.equal(command.split("terminal-auth-request").length - 1, 1, "request ID must not be duplicated");
+  }
 });
 
 test("runtime validates repository identity before parsing credentials or making requests", async (t) => {
