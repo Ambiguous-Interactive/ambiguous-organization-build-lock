@@ -615,6 +615,56 @@ test("GitHub App installation lookup honors cancellation", async () => {
   });
 });
 
+test("sole timed-out GitHub App waiter preserves structured auth retry diagnostics", async () => {
+  const controller = new AbortController();
+  let installationCalls = 0;
+  const auth = createGitHubAppAuth({
+    appId: "12345",
+    privateKey: testAppPrivateKey,
+    owner: "Ambiguous-Interactive",
+    apiOptions: {
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      maxDelayMs: 1000,
+      sleep: async (_delay, { signal }) => {
+        controller.abort(new DOMException("runner inventory deadline elapsed", "TimeoutError"));
+        throw signal.reason;
+      }
+    }
+  });
+
+  await withMockedFetch(
+    async (url) => {
+      const parsed = new URL(url);
+      assert.equal(parsed.pathname, "/orgs/Ambiguous-Interactive/installation");
+      installationCalls++;
+      return jsonResponse(
+        502,
+        { message: "upstream auth unavailable" },
+        { "x-github-request-id": "auth-deadline-request" }
+      );
+    },
+    async () => {
+      await assert.rejects(
+        () => auth.getToken({ signal: controller.signal }),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.equal(error.retryable, true);
+          assert.equal(error.status, 502);
+          assert.equal(error.requestId, "auth-deadline-request");
+          assert.equal(error.path, "/orgs/Ambiguous-Interactive/installation");
+          assert.equal(error.attempts, 1);
+          assert.match(error.message, /runner inventory deadline elapsed/i);
+          assert.match(error.message, /HTTP 502/i);
+          return true;
+        }
+      );
+    }
+  );
+
+  assert.equal(installationCalls, 1);
+});
+
 test("concurrent GitHub App token waiters cancel independently", async () => {
   const firstController = new AbortController();
   const secondController = new AbortController();
@@ -643,10 +693,10 @@ test("concurrent GitHub App token waiters cancel independently", async () => {
     const first = auth.getToken({ signal: firstController.signal });
     const second = auth.getToken({ signal: secondController.signal });
     await new Promise((resolve) => setImmediate(resolve));
-    firstController.abort(new Error("first waiter cancelled"));
+    firstController.abort(new DOMException("first waiter deadline elapsed", "TimeoutError"));
     finishInstallationLookup();
 
-    await assert.rejects(first, /first waiter cancelled/);
+    await assert.rejects(first, /first waiter deadline elapsed/);
     assert.equal(await second, "shared-token");
   });
 });
@@ -1068,29 +1118,130 @@ test("writeState does not mark a 401-then-conflict sequence as an ambiguous writ
   });
 });
 
-test("api honors Retry-After for retryable responses", async () => {
-  let calls = 0;
-  const delays = [];
-  await withMockedFetch(
-    async () => {
-      calls++;
-      if (calls === 1) {
-        return jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "2" });
-      }
-      return jsonResponse(200, { ok: true });
+test("api computes bounded retry delays from Retry-After or full jitter", async (t) => {
+  const now = Date.parse("2026-07-20T00:00:00Z");
+  const cases = [
+    {
+      name: "delta-seconds",
+      status: 429,
+      retryAfter: "2",
+      maxDelayMs: 5000,
+      expectedDelay: 2000
     },
-    async () => {
-      const result = await api("GET", "/repos/o/r", undefined, "token", {
-        maxAttempts: 2,
-        baseDelayMs: 0,
-        maxDelayMs: 5000,
-        sleep: async (delay) => {
-          delays.push(delay);
-        }
-      });
+    {
+      name: "HTTP-date with injected clock",
+      status: 503,
+      retryAfter: "Mon, 20 Jul 2026 00:00:30 GMT",
+      maxDelayMs: 60000,
+      expectedDelay: 30000
+    },
+    {
+      name: "Retry-After capped at the policy maximum",
+      status: 503,
+      retryAfter: "120",
+      maxDelayMs: 60000,
+      expectedDelay: 60000
+    },
+    {
+      name: "suffixed delta-seconds falls back to deterministic full jitter",
+      status: 503,
+      retryAfter: "2seconds",
+      maxDelayMs: 10000,
+      expectedDelay: 500
+    },
+    {
+      name: "negative delta-seconds falls back to deterministic full jitter",
+      status: 503,
+      retryAfter: "-1",
+      maxDelayMs: 10000,
+      expectedDelay: 500
+    },
+    {
+      name: "fractional delta-seconds falls back to deterministic full jitter",
+      status: 503,
+      retryAfter: "1.5",
+      maxDelayMs: 10000,
+      expectedDelay: 500
+    },
+    {
+      name: "non-IMF HTTP date falls back to deterministic full jitter",
+      status: 503,
+      retryAfter: "07/20/2026 00:00:30 GMT",
+      maxDelayMs: 10000,
+      expectedDelay: 500
+    },
+    {
+      name: "IMF-fixdate with an incorrect weekday falls back to deterministic full jitter",
+      status: 503,
+      retryAfter: "Sun, 20 Jul 2026 00:00:30 GMT",
+      maxDelayMs: 10000,
+      expectedDelay: 500
+    }
+  ];
 
-      assert.deepEqual(result, { ok: true });
-      assert.deepEqual(delays, [2000]);
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const delays = [];
+      let calls = 0;
+      await withMockedFetch(
+        async () => {
+          calls++;
+          return calls === 1
+            ? jsonResponse(
+              testCase.status,
+              { message: "retryable response" },
+              { "retry-after": testCase.retryAfter }
+            )
+            : jsonResponse(200, { ok: true });
+        },
+        async () => {
+          assert.deepEqual(
+            await api("GET", "/repos/o/r", undefined, "token", {
+              maxAttempts: 2,
+              baseDelayMs: 1000,
+              maxDelayMs: testCase.maxDelayMs,
+              fullJitter: true,
+              now: () => now,
+              random: () => 0.5,
+              sleep: async (delay) => delays.push(delay)
+            }),
+            { ok: true }
+          );
+        }
+      );
+
+      assert.deepEqual(delays, [testCase.expectedDelay]);
+    });
+  }
+});
+
+test("api preserves the last retryable response when its deadline expires", async () => {
+  const controller = new AbortController();
+  await withMockedFetch(
+    async () => jsonResponse(502, { message: "bad gateway" }, { "x-github-request-id": "deadline-request" }),
+    async () => {
+      await assert.rejects(
+        () => api("GET", "/repos/o/r", undefined, "token", {
+          maxAttempts: 5,
+          baseDelayMs: 1000,
+          maxDelayMs: 1000,
+          signal: controller.signal,
+          sleep: async () => {
+            controller.abort(new DOMException("bounded deadline elapsed", "TimeoutError"));
+            throw controller.signal.reason;
+          }
+        }),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.equal(error.retryable, true);
+          assert.equal(error.status, 502);
+          assert.equal(error.requestId, "deadline-request");
+          assert.equal(error.attempts, 1);
+          assert.match(error.message, /bounded deadline elapsed/i);
+          assert.match(error.message, /HTTP 502/i);
+          return true;
+        }
+      );
     }
   );
 });

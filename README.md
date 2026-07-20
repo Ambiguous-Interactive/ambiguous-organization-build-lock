@@ -42,6 +42,16 @@ closed when that inventory cannot be read, the repository has no visible runner
 group, or any required label set has no accessible online runner. A busy online
 runner is considered available infrastructure and may queue the licensed job.
 
+GitHub App authentication and every paginated runner-inventory read share one
+150-second deadline, leaving diagnostic and step-teardown headroom inside the
+consumers' three-minute preflight job limit. Retryable API responses use bounded
+exponential backoff with full jitter; a valid `Retry-After` delta-seconds or
+HTTP-date value takes precedence, capped at 60 seconds. Ordinary
+permission/configuration responses such as non-rate-limited 403 and 404 fail
+immediately. If the bounded retries are exhausted, the action remains nonzero
+but reports an API/auth availability failure explicitly; that result is not
+presented as evidence that a required runner is offline.
+
 ```yaml
 runner-preflight:
   name: Unity runner preflight

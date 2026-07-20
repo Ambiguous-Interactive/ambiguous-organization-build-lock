@@ -2,10 +2,40 @@
 "use strict";
 
 const fs = require("fs");
-const { api, createGitHubAppAuth } = require("./build-lock.js");
+const { api, createGitHubAppAuth, workflowCommandData } = require("./build-lock.js");
 
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
 const MAX_RUNNER_INVENTORY_PAGES = 10;
+const RUNNER_INVENTORY_TIMEOUT_MS = 150 * 1000;
+
+function runnerInventoryApiOptions(signal, overrides = {}) {
+  return {
+    maxAttempts: 13,
+    baseDelayMs: 5000,
+    maxDelayMs: 60000,
+    fullJitter: true,
+    signal,
+    ...overrides
+  };
+}
+
+function classifyRunnerInventoryError(error) {
+  if (!error || error.retryable !== true) {
+    return error;
+  }
+  const errorMessage = String(error.message || "");
+  const requestId = error.requestId && !errorMessage.includes(error.requestId)
+    ? ` GitHub request ID: ${error.requestId}.`
+    : "";
+  const classified = new Error(
+    "GitHub runner inventory could not be read after bounded retries; this is an API/auth availability " +
+      `failure, not evidence that a required runner is offline. The preflight failed closed.${requestId} ` +
+      `Last error: ${errorMessage}`
+  );
+  classified.code = "RUNNER_INVENTORY_API_UNAVAILABLE";
+  classified.cause = error;
+  return classified;
+}
 
 function input(name) {
   return String(process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "").trim();
@@ -204,7 +234,7 @@ function matchingOnlineRunners(runners, requiredLabels) {
   });
 }
 
-async function execute() {
+async function execute(options = {}) {
   const owner = input("owner") || AUTHORIZED_OWNER;
   if (owner !== AUTHORIZED_OWNER) {
     throw new Error(`owner is not authorized; expected ${AUTHORIZED_OWNER}.`);
@@ -218,15 +248,23 @@ async function execute() {
   }
   const privateKey = requiredInput("reader-app-private-key");
   maskSecret(privateKey);
+  const signal = options.signal || AbortSignal.timeout(RUNNER_INVENTORY_TIMEOUT_MS);
+  const apiOptions = runnerInventoryApiOptions(signal, options.apiOptions);
   const auth = createGitHubAppAuth({
     appId,
     privateKey,
     owner,
-    permissions: { organization_self_hosted_runners: "read" }
+    permissions: { organization_self_hosted_runners: "read" },
+    apiOptions
   });
-  const runners = await readAccessibleOrganizationRunners(owner, repositoryName, (path) =>
-    api("GET", path, undefined, auth)
-  );
+  let runners;
+  try {
+    runners = await readAccessibleOrganizationRunners(owner, repositoryName, (path) =>
+      api("GET", path, undefined, auth, apiOptions)
+    );
+  } catch (error) {
+    throw classifyRunnerInventoryError(error);
+  }
   const onlineRunnerCount = runners.filter((runner) => runner && runner.status === "online").length;
   const matches = requiredLabelSets.map((labels) => ({
     labels,
@@ -250,13 +288,16 @@ async function execute() {
   return { onlineRunnerCount, matches };
 }
 
-async function run() {
+async function run(options = {}) {
   try {
-    await execute();
+    await execute(options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     appendSummary(`Unity runner preflight failed closed: ${message}`);
-    console.error(`::error::Unity runner preflight failed closed: ${message}`);
+    if (error && error.code === "RUNNER_INVENTORY_API_UNAVAILABLE") {
+      console.error(`::warning::${workflowCommandData(message)}`);
+    }
+    console.error(`::error::${workflowCommandData(`Unity runner preflight failed closed: ${message}`)}`);
     process.exitCode = 1;
   }
 }
@@ -266,6 +307,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  RUNNER_INVENTORY_TIMEOUT_MS,
+  classifyRunnerInventoryError,
   execute,
   matchingOnlineRunners,
   parseRequiredLabelSets,
@@ -273,5 +316,6 @@ module.exports = {
   readAccessibleOrganizationRunners,
   readAllGroupRunners,
   readAllRunnerGroups,
+  runnerInventoryApiOptions,
   run
 };

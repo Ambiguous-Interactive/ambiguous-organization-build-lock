@@ -200,7 +200,8 @@ function createGitHubAppAuth({
   repository = "",
   repositories = null,
   permissions = null,
-  now = () => Date.now()
+  now = () => Date.now(),
+  apiOptions = {}
 }) {
   const normalizedPrivateKey = String(privateKey).includes("\n")
     ? String(privateKey).trim()
@@ -216,7 +217,11 @@ function createGitHubAppAuth({
   let sharedRefresh = null;
 
   async function jwtApi(method, path, body, signal) {
-    return api(method, path, body, createAppJwt(appId, keyObject, now()), { maxAttempts: 3, signal });
+    return api(method, path, body, createAppJwt(appId, keyObject, now()), {
+      ...apiOptions,
+      maxAttempts: apiOptions.maxAttempts === undefined ? 3 : apiOptions.maxAttempts,
+      signal: signal || apiOptions.signal
+    });
   }
 
   async function lookupInstallation(signal) {
@@ -271,6 +276,7 @@ function createGitHubAppAuth({
     refresh.waiters++;
     return new Promise((resolve, reject) => {
       let settled = false;
+      let soleWaiterTimeout = null;
       const finish = (callback, value, aborted = false) => {
         if (settled) {
           return;
@@ -285,12 +291,29 @@ function createGitHubAppAuth({
         }
         callback(value);
       };
-      const onAbort = () => finish(reject, abortReason(signal), true);
+      const onAbort = () => {
+        const reason = abortReason(signal);
+        if (
+          reason.name === "TimeoutError" &&
+          refresh.waiters === 1 &&
+          !refresh.controller.signal.aborted
+        ) {
+          // The inner API layer can attach the auth endpoint, last status, and
+          // request ID after observing this abort. Keep the sole waiter attached
+          // long enough to receive that structured error instead of a bare timeout.
+          soleWaiterTimeout = reason;
+          refresh.controller.abort(reason);
+          return;
+        }
+        finish(reject, reason, true);
+      };
       if (signal) {
         signal.addEventListener("abort", onAbort, { once: true });
       }
       refresh.promise.then(
-        (value) => finish(resolve, value),
+        (value) => soleWaiterTimeout
+          ? finish(reject, soleWaiterTimeout)
+          : finish(resolve, value),
         (error) => finish(reject, error)
       );
     });
@@ -515,6 +538,9 @@ function apiRetryOptions(overrides = {}) {
     maxAttempts: integerEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS", DEFAULT_API_MAX_ATTEMPTS, 1),
     baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
     maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    fullJitter: false,
+    now: Date.now,
+    random: Math.random,
     ...overrides,
     sleep: (ms) => retrySleep(ms, { signal })
   };
@@ -570,17 +596,25 @@ function workflowCommandData(value) {
   return oneLine(value).replace(/%/g, "%25");
 }
 
-function retryAfterMs(response) {
+function retryAfterMs(response, now = Date.now) {
   const value = header(response, "retry-after");
   if (!value) {
     return null;
   }
-  const seconds = Number.parseFloat(value);
-  if (Number.isFinite(seconds)) {
-    return Math.max(0, Math.ceil(seconds * 1000));
+  const normalized = String(value).trim();
+  if (/^[0-9]+$/.test(normalized)) {
+    const seconds = Number(normalized);
+    return Number.isFinite(seconds) ? seconds * 1000 : null;
   }
-  const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  if (
+    !/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$/.test(normalized)
+  ) {
+    return null;
+  }
+  const date = Date.parse(normalized);
+  return Number.isFinite(date) && new Date(date).toUTCString() === normalized
+    ? Math.max(0, date - now())
+    : null;
 }
 
 function isRateLimitResponse(response, data) {
@@ -633,11 +667,19 @@ function isUnknownOutcomeMutationResponse(response) {
 }
 
 function retryDelayMs(response, attempt, options) {
-  const retryAfter = retryAfterMs(response);
+  const retryAfter = retryAfterMs(response, options.now);
   if (retryAfter !== null) {
     return Math.min(retryAfter, options.maxDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
+  if (options.fullJitter) {
+    const cap = Math.min(exponential, options.maxDelayMs);
+    const random = Number(options.random());
+    const sample = Number.isFinite(random)
+      ? Math.min(Math.max(random, 0), 0.9999999999999999)
+      : 0;
+    return Math.floor(sample * (cap + 1));
+  }
   return Math.min(jitter(exponential), options.maxDelayMs);
 }
 
@@ -665,6 +707,26 @@ function httpError(method, path, response, data, text) {
   error.status = response.status;
   error.data = data;
   error.requestId = header(response, "x-github-request-id") || "";
+  return error;
+}
+
+function apiRetryExhaustedError(method, path, attempts, lastFailure, deadlineReason = null) {
+  const deadline = deadlineReason
+    ? ` because the bounded deadline elapsed (${oneLine(deadlineReason.message || deadlineReason)})`
+    : "";
+  const description = lastFailure
+    ? lastFailure.description
+    : "no response was received before the deadline";
+  const error = new Error(
+    `${method} ${path} exhausted its bounded GitHub API retry budget after ${attempts} attempt(s)${deadline}; ` +
+      `last failure: ${description}.`
+  );
+  error.code = "GITHUB_API_RETRY_EXHAUSTED";
+  error.retryable = true;
+  error.attempts = attempts;
+  error.path = path;
+  error.status = lastFailure && lastFailure.status;
+  error.requestId = (lastFailure && lastFailure.requestId) || "";
   return error;
 }
 
@@ -699,6 +761,7 @@ async function api(method, path, body, authToken, options = {}) {
   const mutationMethod = method === "PUT";
   let unknownOutcomeMutationFailure = false;
   let renewableRefreshUsed = false;
+  let lastRetryableFailure = null;
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
     try {
       throwIfAborted(retry.signal);
@@ -724,9 +787,18 @@ async function api(method, path, body, authToken, options = {}) {
         return data;
       }
 
-      if (attempt < retry.maxAttempts && isRetryableResponse(response, data)) {
+      const retryableResponse = isRetryableResponse(response, data);
+      if (retryableResponse) {
+        lastRetryableFailure = {
+          status: response.status,
+          requestId: header(response, "x-github-request-id") || "",
+          description: `HTTP ${response.status}: ${responseDetails(response, data, text)}`
+        };
         if (mutationMethod && isUnknownOutcomeMutationResponse(response)) {
           unknownOutcomeMutationFailure = true;
+        }
+        if (attempt >= retry.maxAttempts) {
+          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
         }
         const delay = retryDelayMs(response, attempt, retry);
         throwIfAborted(retry.signal);
@@ -744,11 +816,26 @@ async function api(method, path, body, authToken, options = {}) {
       }
       throw error;
     } catch (error) {
+      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
+        throw error;
+      }
       if (isAbortError(error, retry.signal)) {
+        const reason = retry.signal && retry.signal.aborted ? abortReason(retry.signal) : error;
+        if (reason && reason.name === "TimeoutError") {
+          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, reason);
+        }
         throw retry.signal && retry.signal.aborted ? abortReason(retry.signal) : error;
       }
-      if (error.status || attempt >= retry.maxAttempts) {
+      if (error.status) {
         throw error;
+      }
+      lastRetryableFailure = {
+        status: undefined,
+        requestId: "",
+        description: `transport error: ${oneLine(error.message)}`
+      };
+      if (attempt >= retry.maxAttempts) {
+        throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
       }
       if (mutationMethod) {
         unknownOutcomeMutationFailure = true;
