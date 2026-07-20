@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-20T03:08:56.818Z",
       "expiresAt": "2026-07-20T07:08:56.818Z",
       "runnerId": "tiny-box-linux"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "942f469d-ce3d-43f2-a14e-22f89fe70f5a",
       "holderId": "Ambiguous-Interactive/IshoBoy:29714067157:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
       "workflow": "Unity CI Validation",
@@ -36,14 +40,13 @@
       "runId": "29714067157",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29714067157",
-      "queuedAt": "2026-07-20T03:13:16.779Z",
-      "acquiredAt": "2026-07-20T03:13:19.210Z",
-      "expiresAt": "2026-07-20T07:13:19.210Z",
-      "runnerId": "DAD-MACHINE"
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-20T03:16:02.284Z",
+      "availableAt": "2026-07-20T03:16:03.284Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-20T03:13:19.211Z"
+  "updatedAt": "2026-07-20T03:16:02.284Z"
 }
