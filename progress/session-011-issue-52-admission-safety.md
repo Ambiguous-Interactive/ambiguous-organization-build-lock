@@ -64,13 +64,16 @@ this zero-Unity-churn central slice.
 
 - JavaScript syntax: all action distributions and tests passed.
 - actionlint v1.7.12: passed through the isolated tool module.
-- Node test suite: 428 passed, 0 failed.
+- Node test suite after adversarial remediation: 436 passed, 0 failed.
 - Go tests: passed.
 - Root and actionlint module verification/tidy checks: passed.
 - Workflow credential-literal audit: passed.
 - Focused PR-head coverage proves entry rejection, periodic queue revalidation,
   pre-admission checking, and post-verification exact retraction without a new
   reservation.
+- Adversarial follow-up also covers terminal PR authorization failure, cleanup
+  CAS exhaustion, timeout classification, holder/quarantine provenance, ambiguous
+  recovery conflicts, and runtime parsing of all three PR identity inputs.
 
 Root dependencies and pinned GitHub Actions are current. The actionlint tool
 module's YAML rc.3 has a newer rc.6 available, but a clean compatibility probe
