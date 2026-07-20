@@ -84,3 +84,13 @@ failed compilation against actionlint v1.7.12, so that isolated pin is retained.
 
 Five unrelated untracked progress artifacts were present when the clean branch was
 created. They were not modified or staged.
+
+## Hosted CI RCA
+
+PR #80 run `29778788595` exposed a test-environment leak: GitHub-hosted pull
+request jobs set `GITHUB_EVENT_NAME=pull_request`, but the build-lock test helper
+did not include that variable in its controlled Actions environment. Fifty-one
+legacy non-PR acquire tests could therefore enter the new fail-closed PR path only
+on hosted CI. Production behavior was correct. The harness now scrubs/restores
+`GITHUB_EVENT_NAME` like every other Actions variable, while PR-specific tests
+continue to set it explicitly.
