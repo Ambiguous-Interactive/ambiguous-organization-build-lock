@@ -101,3 +101,59 @@ cancellation at every PR lookup/cleanup boundary and rethrows directly to the
 existing signal handler. SIGINT lookup cancellation and both validation-error and
 stale-head cleanup cancellation paths prove exit 130, exact queue cleanup, no
 unrelated state removal, and no `pr-head-*` output misclassification.
+
+## Consumer rollout and live canaries
+
+The immutable v1.9.1 release commit
+`a00614ace745152a659c5c2654f7cefb68a5a628` is pinned by the reviewed rollout
+heads in DoxReloaded #179, IshoBoy #195, qora-redux #72, unity-helpers #305,
+and DxMessaging #280. IshoBoy #195 merged as
+`ea67abd8ba959125628564a91a21300936c2fbe7`. Qora-redux #72 completed its
+truthful aggregate and squash-merged as
+`cc05787ff05264f8bdbf76e39d6440b174893c62`; the remaining exact heads are
+still gated on their licensed matrices before merge.
+
+- Superseded before acquire: qora run `29782325333` queued exact identity
+  `Ambiguous-Interactive/qora-redux:29782325333:unity:qora-EditMode`, then a
+  newer PR head was pushed. Acquire removed only that FIFO entry, reported the
+  exact stale-head transition, never activated or held a seat, and the required
+  `Unity CI` aggregate failed. Its sibling setup guard also failed stale and both
+  fallback-cleanup jobs passed.
+- Superseded after acquire: unity-helpers run `29782129274` retained holder
+  `6000.3.16f1-editmode` after a newer PR head was pushed, completed successfully
+  at `2026-07-20T22:23:34Z`, and released without quarantine.
+- Manual cancellation: ordinary cancel plus force-cancel attempts 2 and 3 of
+  Dox run `29783811664` all produced a cancelled workflow and red aggregate.
+  Even a second force request at the return boundary preserved exact positive
+  Unity return evidence, so release correctly used `cleanup-confirmed` cooldown
+  instead of claiming uncertainty.
+- Fail-closed recovery: real Unity return `400006` events on `tiny-box-linux`
+  created quarantine rather than freeing capacity. Subsequent work on that exact
+  physical runner atomically reclaimed reservations, including
+  `7e421015-3a74-4f27-a324-a1af4730594c` in Dox run `29783811664` attempt 2;
+  its later positive return released normally. No portal-safe recovery was
+  asserted without exact evidence.
+
+## Transitive cancellation policy follow-up
+
+Draft PR #56 remains unsuitable wholesale. Its privileged cross-repository
+workflow, stale consumer manifest, and organization-scope assumptions are not
+part of this no-policy-change rollout. The reviewed snapshot analyzer alone was
+transplanted onto current main, where it rejects unsafe workflow, job, local
+reusable-workflow, and nested composite inheritance around immutable acquire
+actions.
+
+Additional adversarial fixtures cover two reusable-workflow levels, reusable to
+nested-composite chains at both caller scopes, literal-false safety across every
+transitive boundary, all findings from multiple licensed leaves, and fail-closed
+remote reusable workflows. Focused and complete Go suites pass.
+
+The exact acquire pin is now enforced independently of event type for direct
+workflow steps and every recursively reached reusable workflow or composite
+leaf. Push, manual, and nested-composite stale-SHA regressions prevent a licensed
+non-PR path from retaining an older immutable acquire implementation. Git-backed
+snapshots also run every object lookup with `--no-replace-objects`; a hostile
+local replacement mapping an unsafe commit to a safe tree still audits the
+original unsafe commit. A second no-edit adversarial review found no residual
+bypass. `go test ./...`, `go vet ./...`, all 441 JavaScript tests, and
+`git diff --check` pass on the final bytes.
