@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:29857903168:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "29857903168",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29857903168",
+    "queuedAt": "2026-07-21T18:38:02.228Z",
+    "acquiredAt": "2026-07-21T18:38:04.876Z",
+    "expiresAt": "2026-07-21T22:38:04.876Z",
+    "runnerId": "tiny-box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "bdfd8415-f058-42c6-9ed4-84534ed9d83a",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29857278042:unity-tests:unity-tests-1",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29857903168:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
       "job": "unity-tests",
-      "runId": "29857278042",
+      "runId": "29857903168",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29857278042",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-21T18:31:52.698Z",
-      "availableAt": "2026-07-21T18:31:53.698Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29857903168",
+      "queuedAt": "2026-07-21T18:38:02.228Z",
+      "acquiredAt": "2026-07-21T18:38:04.876Z",
+      "expiresAt": "2026-07-21T22:38:04.876Z",
+      "runnerId": "tiny-box-linux"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-21T18:31:52.699Z"
+  "updatedAt": "2026-07-21T18:38:04.877Z"
 }
