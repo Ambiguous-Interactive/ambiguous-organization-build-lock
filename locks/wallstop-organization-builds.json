@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:29865411886:build-webgl:build-webgl",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "build-webgl",
-    "runId": "29865411886",
+    "holderId": "Ambiguous-Interactive/IshoBoy:29866484463:unity-compile-check:unity-ci-compile-check",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-compile-check",
+    "runId": "29866484463",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29865411886",
-    "queuedAt": "2026-07-21T20:30:31.737Z",
-    "acquiredAt": "2026-07-21T20:30:34.243Z",
-    "expiresAt": "2026-07-22T00:30:34.243Z",
-    "runnerId": "tiny-box-linux"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29866484463",
+    "queuedAt": "2026-07-21T20:40:41.898Z",
+    "acquiredAt": "2026-07-21T20:40:44.194Z",
+    "expiresAt": "2026-07-22T00:40:44.194Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29865411886:build-webgl:build-webgl",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "build-webgl",
-      "runId": "29865411886",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29865411886",
-      "queuedAt": "2026-07-21T20:30:31.737Z",
-      "acquiredAt": "2026-07-21T20:30:34.243Z",
-      "expiresAt": "2026-07-22T00:30:34.243Z",
-      "runnerId": "tiny-box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:29866484463:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "b24021a6-3ec3-4cac-a48a-eeee6f2ed0d7",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:29865411886:build-webgl:build-webgl",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "build-webgl",
+      "runId": "29865411886",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29865411886",
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-21T20:40:47.879Z",
+      "availableAt": "2026-07-21T20:40:48.879Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-21T20:40:44.194Z"
+  "updatedAt": "2026-07-21T20:40:47.879Z"
 }
