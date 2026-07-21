@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:29872528744:unity-compile-check:unity-ci-compile-check",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-compile-check",
-    "runId": "29872528744",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29872528744",
-    "queuedAt": "2026-07-21T22:11:37.669Z",
-    "acquiredAt": "2026-07-21T22:14:44.024Z",
-    "expiresAt": "2026-07-22T02:14:44.024Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:29872528744:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "29872528744",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29872528744",
-      "queuedAt": "2026-07-21T22:11:37.669Z",
-      "acquiredAt": "2026-07-21T22:14:44.024Z",
-      "expiresAt": "2026-07-22T02:14:44.024Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29872967971:unity:qora-EditMode",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-07-21T21:53:08.941Z"
+    },
+    {
+      "reservationId": "868a31b9-0bd5-42f5-84bb-c3ae713ab97c",
+      "holderId": "Ambiguous-Interactive/IshoBoy:29872528744:unity-compile-check:unity-ci-compile-check",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-compile-check",
+      "runId": "29872528744",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29872528744",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-21T22:17:21.728Z",
+      "availableAt": "2026-07-21T22:17:22.728Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-21T22:15:24.853Z"
+  "updatedAt": "2026-07-21T22:17:21.728Z"
 }
