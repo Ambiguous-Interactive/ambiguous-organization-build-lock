@@ -1,41 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:29783991976:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-single-threaded",
+    "runId": "29783991976",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29783991976",
+    "queuedAt": "2026-07-21T02:28:42.628Z",
+    "acquiredAt": "2026-07-21T02:28:44.922Z",
+    "expiresAt": "2026-07-21T06:28:44.922Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "087c2ad1-d4c3-476f-95ec-1594985eb286",
-      "holderId": "Ambiguous-Interactive/unity-helpers:29783991976:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
+      "holderId": "Ambiguous-Interactive/unity-helpers:29783991976:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests-single-threaded",
       "runId": "29783991976",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/29783991976",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-21T02:27:59.557Z",
-      "availableAt": "2026-07-21T02:28:00.557Z"
-    },
-    {
-      "reservationId": "5f41de23-f031-4a8c-8b7e-c4dec43783cb",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:29794356435:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "29794356435",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/29794356435",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-21T02:27:43.815Z",
-      "availableAt": "2026-07-21T02:27:44.815Z"
+      "queuedAt": "2026-07-21T02:28:42.628Z",
+      "acquiredAt": "2026-07-21T02:28:44.922Z",
+      "expiresAt": "2026-07-21T06:28:44.922Z",
+      "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-21T02:27:43.816Z"
+  "updatedAt": "2026-07-21T02:28:44.922Z"
 }
