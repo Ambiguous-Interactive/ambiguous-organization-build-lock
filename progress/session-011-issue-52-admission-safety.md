@@ -157,3 +157,26 @@ local replacement mapping an unsafe commit to a safe tree still audits the
 original unsafe commit. A second no-edit adversarial review found no residual
 bypass. `go test ./...`, `go vet ./...`, all 441 JavaScript tests, and
 `git diff --check` pass on the final bytes.
+
+## Rollout closeout
+
+The consumer rollout is complete. The exact reviewed heads squash-merged and
+their default-branch workflows completed successfully:
+
+- DoxReloaded #179 -> `b3bfa73049e55e52923e613f9718787590c1c0e8`;
+  Build and Deploy `29791762829` and Devcontainer Health `29791762830` passed.
+- IshoBoy #195 -> `ea67abd8ba959125628564a91a21300936c2fbe7`;
+  Unity CI Validation `29784923406` and every companion workflow passed.
+- qora-redux #72 -> `cc05787ff05264f8bdbf76e39d6440b174893c62`;
+  Unity Tests `29785838308` and LLM Harness `29785838233` passed.
+- unity-helpers #305 -> `76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d`;
+  the complete Unity Tests matrix and export smoke in `29796316020` passed.
+- DxMessaging #280 -> `d91a952d694930710c390c9860c0b4e67acf1a97`;
+  Unity Tests `29792780206` and every companion workflow passed.
+
+An exact default-branch inventory found every actual organization build-lock
+`uses:` reference at v1.9.1 commit
+`a00614ace745152a659c5c2654f7cefb68a5a628`; no v1.8.3 or draft-lineage pin
+remains. Dox Dependabot PRs #172 and #173 and central draft #56 were closed as
+superseded, with their branches/history preserved. No organization policy or
+credential scope was changed.
