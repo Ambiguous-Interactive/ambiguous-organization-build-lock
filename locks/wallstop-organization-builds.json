@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:29934474851:unity:qora-EditMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "29934474851",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29934474851",
+    "queuedAt": "2026-07-22T15:41:17.652Z",
+    "acquiredAt": "2026-07-22T15:48:13.598Z",
+    "expiresAt": "2026-07-22T19:48:13.598Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29934474851:unity:qora-EditMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,9 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29934474851",
       "queuedAt": "2026-07-22T15:41:17.652Z",
+      "acquiredAt": "2026-07-22T15:48:13.598Z",
+      "expiresAt": "2026-07-22T19:48:13.598Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "b4581ba9-69b8-4023-b903-7f0c0acba2d3",
@@ -30,23 +44,8 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-22T15:47:44.059Z"
-    },
-    {
-      "reservationId": "89003851-f633-4dbf-b7e7-aae7c79eeca0",
-      "holderId": "Ambiguous-Interactive/qora-redux:29934474851:unity:qora-PlayMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "29934474851",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29934474851",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-22T15:47:53.540Z",
-      "availableAt": "2026-07-22T15:47:54.540Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-22T15:47:53.541Z"
+  "updatedAt": "2026-07-22T15:48:13.599Z"
 }
