@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:29892959540:unity-tests:unity-ci-tests-EditMode",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-tests",
-    "runId": "29892959540",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29892959540",
-    "queuedAt": "2026-07-22T05:18:46.886Z",
-    "acquiredAt": "2026-07-22T05:21:15.354Z",
-    "expiresAt": "2026-07-22T09:21:15.354Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:29892959540:unity-tests:unity-ci-tests-EditMode",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-tests",
-      "runId": "29892959540",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29892959540",
-      "queuedAt": "2026-07-22T05:18:46.886Z",
-      "acquiredAt": "2026-07-22T05:21:15.354Z",
-      "expiresAt": "2026-07-22T09:21:15.354Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-22T05:14:15.539Z"
+    },
+    {
+      "reservationId": "32368615-43e8-49ad-a4cd-9fb4dc9242ec",
+      "holderId": "Ambiguous-Interactive/IshoBoy:29892959540:unity-tests:unity-ci-tests-EditMode",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "29892959540",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/29892959540",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-22T05:26:46.598Z",
+      "availableAt": "2026-07-22T05:26:47.598Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-22T05:21:15.354Z"
+  "updatedAt": "2026-07-22T05:26:46.598Z"
 }
