@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/qora-redux:29983659384:unity:qora-PlayMode",
+    "holderId": "Ambiguous-Interactive/qora-redux:29983659384:unity:qora-EditMode",
     "repository": "Ambiguous-Interactive/qora-redux",
     "workflow": "Unity Tests",
     "job": "unity",
     "runId": "29983659384",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29983659384",
-    "queuedAt": "2026-07-23T06:00:06.857Z",
-    "acquiredAt": "2026-07-23T06:00:08.155Z",
-    "expiresAt": "2026-07-23T10:00:08.155Z",
-    "runnerId": "ELI-MACHINE"
+    "queuedAt": "2026-07-23T06:00:07.284Z",
+    "acquiredAt": "2026-07-23T06:00:08.945Z",
+    "expiresAt": "2026-07-23T10:00:08.945Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/qora-redux:29983659384:unity:qora-PlayMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "29983659384",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29983659384",
-      "queuedAt": "2026-07-23T06:00:06.857Z",
-      "acquiredAt": "2026-07-23T06:00:08.155Z",
-      "expiresAt": "2026-07-23T10:00:08.155Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/qora-redux:29983659384:unity:qora-EditMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -55,7 +42,23 @@
       "runnerId": "tiny-box-linux"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "43bf1c80-2ed8-46e0-90c3-4403a8d403a9",
+      "holderId": "Ambiguous-Interactive/qora-redux:29983659384:unity:qora-PlayMode",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "29983659384",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/29983659384",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-23T06:03:03.559Z",
+      "availableAt": "2026-07-23T06:03:04.559Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-23T06:03:01.475Z"
+  "updatedAt": "2026-07-23T06:03:03.559Z"
 }
