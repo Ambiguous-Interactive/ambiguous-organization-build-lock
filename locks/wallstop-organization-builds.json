@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-23T17:22:08.104Z",
       "expiresAt": "2026-07-23T21:22:08.104Z",
       "runnerId": "box-linux"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "5ef2dc57-3e4b-46af-8c0c-b6c5a0488169",
       "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -36,14 +40,13 @@
       "runId": "30027567746",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30027567746",
-      "queuedAt": "2026-07-23T17:27:28.248Z",
-      "acquiredAt": "2026-07-23T17:27:29.476Z",
-      "expiresAt": "2026-07-23T21:27:29.476Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-23T17:33:32.059Z",
+      "availableAt": "2026-07-23T17:33:33.059Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-23T17:27:29.476Z"
+  "updatedAt": "2026-07-23T17:33:32.059Z"
 }
