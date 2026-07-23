@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:platform-build-linux:platform-build-linux-0",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:build-webgl:build-webgl",
     "repository": "Ambiguous-Interactive/DoxReloaded",
     "workflow": "Build and Deploy",
-    "job": "platform-build-linux",
+    "job": "build-webgl",
     "runId": "30027567746",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30027567746",
-    "queuedAt": "2026-07-23T17:14:48.398Z",
-    "acquiredAt": "2026-07-23T17:14:49.832Z",
-    "expiresAt": "2026-07-23T21:14:49.832Z",
-    "runnerId": "box-linux"
+    "queuedAt": "2026-07-23T17:16:42.472Z",
+    "acquiredAt": "2026-07-23T17:16:43.739Z",
+    "expiresAt": "2026-07-23T21:16:43.739Z",
+    "runnerId": "tiny-box-linux"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "30027567746",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30027567746",
-      "queuedAt": "2026-07-23T17:14:48.398Z",
-      "acquiredAt": "2026-07-23T17:14:49.832Z",
-      "expiresAt": "2026-07-23T21:14:49.832Z",
-      "runnerId": "box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:build-webgl:build-webgl",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "efdd99ec-e641-4f14-bc75-4303f77dbca0",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30027567746:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "30027567746",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30027567746",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-23T17:19:55.098Z",
+      "availableAt": "2026-07-23T17:19:56.098Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-23T17:16:43.739Z"
+  "updatedAt": "2026-07-23T17:19:55.099Z"
 }
