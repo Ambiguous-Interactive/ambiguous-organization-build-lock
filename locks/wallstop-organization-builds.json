@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30050325994:build-webgl:build-webgl",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "build-webgl",
-    "runId": "30050325994",
+    "holderId": "Ambiguous-Interactive/qora-redux:30051144794:unity:qora-PlayMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "30051144794",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30050325994",
-    "queuedAt": "2026-07-23T22:43:58.359Z",
-    "acquiredAt": "2026-07-23T22:44:00.774Z",
-    "expiresAt": "2026-07-24T02:44:00.774Z",
-    "runnerId": "box-linux"
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30051144794",
+    "queuedAt": "2026-07-23T22:49:04.660Z",
+    "acquiredAt": "2026-07-23T22:52:43.019Z",
+    "expiresAt": "2026-07-24T02:52:43.019Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30050325994:build-webgl:build-webgl",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "build-webgl",
-      "runId": "30050325994",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30050325994",
-      "queuedAt": "2026-07-23T22:43:58.359Z",
-      "acquiredAt": "2026-07-23T22:44:00.774Z",
-      "expiresAt": "2026-07-24T02:44:00.774Z",
-      "runnerId": "box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/qora-redux:30051144794:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "ad248e1b-5d68-4144-83cd-1e43a8ae6c3c",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30050325994:build-webgl:build-webgl",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "build-webgl",
+      "runId": "30050325994",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30050325994",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-23T22:54:31.078Z",
+      "availableAt": "2026-07-23T22:54:32.078Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-23T22:52:43.019Z"
+  "updatedAt": "2026-07-23T22:54:31.080Z"
 }
