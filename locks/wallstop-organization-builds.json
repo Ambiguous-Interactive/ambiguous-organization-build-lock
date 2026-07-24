@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30134726040:unity-tests:unity-ci-tests-EditMode",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "30134726040",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30134726040",
+    "queuedAt": "2026-07-24T23:57:54.792Z",
+    "acquiredAt": "2026-07-24T23:57:57.599Z",
+    "expiresAt": "2026-07-25T03:57:57.599Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "6e4e7af3-a4bc-4a76-b591-b879988aa9e1",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30133643329:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30133643329",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30133643329",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-24T23:55:59.868Z",
-      "availableAt": "2026-07-24T23:56:00.868Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:30134726040:unity-tests:unity-ci-tests-EditMode",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "30134726040",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30134726040",
+      "queuedAt": "2026-07-24T23:57:54.792Z",
+      "acquiredAt": "2026-07-24T23:57:57.599Z",
+      "expiresAt": "2026-07-25T03:57:57.599Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-24T23:55:59.869Z"
+  "updatedAt": "2026-07-24T23:57:57.600Z"
 }
