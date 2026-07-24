@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30124864592:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "30124864592",
+    "holderId": "Ambiguous-Interactive/qora-redux:30126159202:unity:qora-PlayMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "30126159202",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30124864592",
-    "queuedAt": "2026-07-24T20:58:20.282Z",
-    "acquiredAt": "2026-07-24T20:58:21.661Z",
-    "expiresAt": "2026-07-25T00:58:21.661Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30126159202",
+    "queuedAt": "2026-07-24T21:04:54.014Z",
+    "acquiredAt": "2026-07-24T21:04:56.498Z",
+    "expiresAt": "2026-07-25T01:04:56.498Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30124864592:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30124864592",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30124864592",
-      "queuedAt": "2026-07-24T20:58:20.282Z",
-      "acquiredAt": "2026-07-24T20:58:21.661Z",
-      "expiresAt": "2026-07-25T00:58:21.661Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/qora-redux:30126159202:unity:qora-PlayMode",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "b2abf649-e5be-4a10-bb27-716076de9835",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30124864592:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "30124864592",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30124864592",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-24T21:06:27.323Z",
+      "availableAt": "2026-07-24T21:06:28.323Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-24T21:04:56.499Z"
+  "updatedAt": "2026-07-24T21:06:27.324Z"
 }
