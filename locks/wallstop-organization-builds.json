@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30167022931:platform-build-linux:platform-build-linux-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-linux",
+    "runId": "30167022931",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30167022931",
+    "queuedAt": "2026-07-25T17:21:31.371Z",
+    "acquiredAt": "2026-07-25T17:21:32.570Z",
+    "expiresAt": "2026-07-25T21:21:32.570Z",
+    "runnerId": "tiny-box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "71397d22-a044-4a61-ae4e-99224a99cdbe",
-      "holderId": "Ambiguous-Interactive/IshoBoy:30167221673:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "30167221673",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30167022931:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "30167022931",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30167221673",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-25T17:21:27.409Z",
-      "availableAt": "2026-07-25T17:21:28.409Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30167022931",
+      "queuedAt": "2026-07-25T17:21:31.371Z",
+      "acquiredAt": "2026-07-25T17:21:32.570Z",
+      "expiresAt": "2026-07-25T21:21:32.570Z",
+      "runnerId": "tiny-box-linux"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-25T17:21:27.409Z"
+  "updatedAt": "2026-07-25T17:21:32.571Z"
 }
