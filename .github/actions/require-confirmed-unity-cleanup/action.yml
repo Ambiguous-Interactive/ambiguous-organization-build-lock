@@ -1,0 +1,48 @@
+name: Require confirmed Unity cleanup
+description: Fail an acquired licensed job unless cleanup and central release are coherently safe.
+inputs:
+  acquired:
+    description: Exact acquired output from acquire-build-lock.
+    required: true
+  classification-complete:
+    description: Exact classification-complete output from the central classifier.
+    required: true
+  cleanup-status:
+    description: Classified Unity cleanup status.
+    required: true
+  cleanup-health:
+    description: Classified Unity account health.
+    required: true
+  cleanup-reason:
+    description: Classified stable reason code.
+    required: true
+  release-outcome:
+    description: GitHub outcome of the release-build-lock step.
+    required: true
+  cleanup-result:
+    description: Typed cleanup result from release-build-lock.
+    required: true
+  released:
+    description: Whether release-build-lock removed holder ownership.
+    required: true
+  release-health:
+    description: Effective resource health from release-build-lock.
+    required: true
+  release-reason:
+    description: Effective resource reason from release-build-lock.
+    required: true
+  reservation-state:
+    description: Lifecycle reservation state when one was created.
+    required: false
+  reservation-id:
+    description: Opaque lifecycle reservation identifier when one was created.
+    required: false
+  incident-id:
+    description: Opaque account incident identifier when one is active.
+    required: false
+outputs:
+  cleanup-safe:
+    description: True only when all cleanup and release evidence is coherent and safe.
+runs:
+  using: node24
+  main: ../../dist/require-confirmed-unity-cleanup.js

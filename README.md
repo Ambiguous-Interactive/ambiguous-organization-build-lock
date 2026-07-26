@@ -137,19 +137,48 @@ section, guard every licensed step on the acquire output, and release with
   if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
   uses: ./.github/actions/return-unity-license
 
+- name: Classify Unity cleanup evidence
+  id: classify-unity-cleanup
+  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-cleanup-evidence@COMPATIBILITY_COMMIT_SHA
+  with:
+    return-log-path: ${{ steps.return-unity-license.outputs.return-log-path }}
+    return-command-completed: ${{ steps.return-unity-license.outputs.return-command-completed }}
+    return-exit-code: ${{ steps.return-unity-license.outputs.return-exit-code }}
+    evidence-capture-complete: ${{ steps.return-unity-license.outputs.evidence-capture-complete }}
+
 - name: Release organization Unity lock
+  id: release-build-lock
   if: always()
   uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@COMPATIBILITY_COMMIT_SHA
   with:
     lock-name: wallstop-organization-builds
     holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}
     runner-id: ${{ runner.name }}
-    resource-cleanup-status: ${{ steps.return-unity-license.outputs.resource-cleanup-status }}
-    resource-health: ${{ steps.return-unity-license.outputs.resource-health }}
-    resource-reason: ${{ steps.return-unity-license.outputs.resource-reason }}
+    resource-cleanup-status: ${{ steps.classify-unity-cleanup.outputs.resource-cleanup-status }}
+    resource-health: ${{ steps.classify-unity-cleanup.outputs.resource-health }}
+    resource-reason: ${{ steps.classify-unity-cleanup.outputs.resource-reason }}
   env:
     BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
     BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+
+- name: Require confirmed Unity cleanup
+  if: always()
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/require-confirmed-unity-cleanup@COMPATIBILITY_COMMIT_SHA
+  with:
+    acquired: ${{ steps.acquire-build-lock.outputs.acquired }}
+    classification-complete: ${{ steps.classify-unity-cleanup.outputs.classification-complete }}
+    cleanup-status: ${{ steps.classify-unity-cleanup.outputs.resource-cleanup-status }}
+    cleanup-health: ${{ steps.classify-unity-cleanup.outputs.resource-health }}
+    cleanup-reason: ${{ steps.classify-unity-cleanup.outputs.resource-reason }}
+    release-outcome: ${{ steps.release-build-lock.outcome }}
+    cleanup-result: ${{ steps.release-build-lock.outputs.cleanup-result }}
+    released: ${{ steps.release-build-lock.outputs.released }}
+    release-health: ${{ steps.release-build-lock.outputs.resource-health }}
+    release-reason: ${{ steps.release-build-lock.outputs.resource-reason }}
+    reservation-state: ${{ steps.release-build-lock.outputs.reservation-state }}
+    reservation-id: ${{ steps.release-build-lock.outputs.reservation-id }}
+    incident-id: ${{ steps.release-build-lock.outputs.incident-id }}
 ```
 
 The two acquire requirements are opt-in for backward compatibility. Lifecycle-aware
@@ -171,12 +200,22 @@ caller is absent before rerunning. Empty PR inputs on push and dispatch do not
 perform PR API calls.
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
-mutable major tags are not permitted in protected consumers. The Unity return
-helper must emit `resource-cleanup-status=confirmed` only for exact positive
-return evidence. Exit zero or `Serial number unavailable` alone is insufficient.
-Timeouts, truncated logs, termination, `400006`, `20113`, and missing positive
-evidence report `unknown/healthy` with an allowlisted reason. Confirmed `20111`
-reports `unknown/blocked` with `unity-account-limit-20111`.
+mutable major tags are not permitted in protected consumers. The return wrapper
+owns command invocation and bounded raw-log capture; it must not classify its own
+evidence. The central classifier accepts cleanup proof only from the dedicated
+current return log. Exact entitlement-return and client-ULF-return lines are both
+required. Exit zero, supplemental proof, or `Serial number unavailable` is
+insufficient. Skipped ULF, timeouts, truncated logs, termination, `400006`,
+`20113`, and missing positive evidence report `unknown/healthy` with an
+allowlisted reason. Confirmed `20111` reports `unknown/blocked` with
+`unity-account-limit-20111`.
+
+The final cleanup gate is intentionally separate from release. Holder removal can
+be followed by a cooldown, quarantine, or account incident, so `released=true`
+alone is not capacity-safety proof. Keep the gate under `if: always()` without
+`continue-on-error`; it accepts only a coherent confirmed classification and
+safe central release. Delete raw return and activation logs afterward under a
+separate `if: always()` step, and never upload those logs as artifacts.
 
 The release action is intentionally safe to run even when acquire never reached
 the front of the queue. It reports `cleanup-result=cooldown-started`,

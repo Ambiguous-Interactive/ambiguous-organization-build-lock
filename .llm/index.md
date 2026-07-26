@@ -48,3 +48,4 @@ Read only the files relevant to the current task.
 | File | When to read |
 | --- | --- |
 | [.llm/tasks/README.md](./tasks/README.md) | Template for recording bounded tasks, hypotheses, experiments, and validation evidence. |
+| [.llm/tasks/issue-85-central-unity-cleanup-policy.md](./tasks/issue-85-central-unity-cleanup-policy.md) | Task record for central bounded Unity cleanup classification and post-release safety gating. |

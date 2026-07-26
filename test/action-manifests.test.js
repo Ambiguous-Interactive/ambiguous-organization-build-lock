@@ -298,6 +298,67 @@ test("runner availability action requires reader App auth and fail-closed label 
   assert.match(manifest, /main:\s+\.\.\/\.\.\/dist\/check-unity-runners\.js/);
 });
 
+test("central Unity cleanup actions expose exact Node 24 policy contracts", () => {
+  const classifier = readActionManifest("classify-unity-cleanup-evidence");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      classifier,
+      "inputs",
+      "classify-unity-cleanup-evidence/action.yml"
+    ),
+    [
+      "return-log-path",
+      "return-command-completed",
+      "return-exit-code",
+      "evidence-capture-complete",
+      "supplemental-evidence-paths"
+    ]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      classifier,
+      "outputs",
+      "classify-unity-cleanup-evidence/action.yml"
+    ),
+    [
+      "resource-safe",
+      "resource-cleanup-status",
+      "resource-health",
+      "resource-reason",
+      "classification-complete",
+      "evidence-digest"
+    ]
+  );
+  assert.match(classifier, /using:\s*node24/);
+  assert.match(classifier, /main:\s+\.\.\/\.\.\/dist\/classify-unity-cleanup-evidence\.js/);
+
+  const gate = readActionManifest("require-confirmed-unity-cleanup");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(gate, "inputs", "require-confirmed-unity-cleanup/action.yml"),
+    [
+      "acquired",
+      "classification-complete",
+      "cleanup-status",
+      "cleanup-health",
+      "cleanup-reason",
+      "release-outcome",
+      "cleanup-result",
+      "released",
+      "release-health",
+      "release-reason",
+      "reservation-state",
+      "reservation-id",
+      "incident-id"
+    ]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(gate, "outputs", "require-confirmed-unity-cleanup/action.yml"),
+    ["cleanup-safe"]
+  );
+  assert.match(gate, /using:\s*node24/);
+  assert.match(gate, /main:\s+\.\.\/\.\.\/dist\/require-confirmed-unity-cleanup\.js/);
+});
+
 test("README documents guarded acquire usage and unconditional release cleanup", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 

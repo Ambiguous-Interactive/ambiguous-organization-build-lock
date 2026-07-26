@@ -50,6 +50,7 @@ const RESOURCE_REASON_CODES = new Set([
   "return-log-truncated",
   "return-terminated",
   "return-missing-positive-evidence",
+  "return-ulf-skipped",
   "activation-timeout",
   "activation-terminated"
 ]);
