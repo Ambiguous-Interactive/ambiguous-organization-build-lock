@@ -1,0 +1,95 @@
+{
+  "name": "Ambiguous Organization Build Lock",
+  "image": "mcr.microsoft.com/devcontainers/go@sha256:090a56c6c9c4e80a1573c18c1225eb851b8c86c199fc929b07ea2a67f7b4850f",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2.5.9": {
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "upgradePackages": false,
+      "username": "vscode"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1.1.0": {
+      "version": "2.96.0"
+    },
+    "ghcr.io/devcontainers/features/go:1.3.4": {
+      "golangciLintVersion": "2.12.2",
+      "version": "1.26.5"
+    },
+    "ghcr.io/devcontainers/features/node:2.1.0": {
+      "nodeGypDependencies": false,
+      "npmVersion": "none",
+      "pnpmVersion": "none",
+      "version": "24.18.0"
+    }
+  },
+  "containerEnv": {
+    "COLORTERM": "truecolor",
+    "FORCE_COLOR": "1",
+    "GOTOOLCHAIN": "local",
+    "PAGER": "less -FRX"
+  },
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "shutdownAction": "stopContainer",
+  "init": true,
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb",
+    "storage": "8gb"
+  },
+  "mounts": [
+    "source=ambiguous-build-lock-${devcontainerId}-go-mod-cache,target=/go/pkg/mod,type=volume",
+    "source=ambiguous-build-lock-${devcontainerId}-go-build-cache,target=/home/vscode/.cache/go-build,type=volume",
+    "source=ambiguous-build-lock-${devcontainerId}-node-cache,target=/home/vscode/.npm,type=volume",
+    "source=ambiguous-build-lock-${devcontainerId}-shell-history,target=/commandhistory,type=volume"
+  ],
+  "postCreateCommand": "if [ -f .devcontainer/scripts/post-create.sh ]; then bash .devcontainer/scripts/post-create.sh; else set -eu; export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get install -y --no-install-recommends bat direnv fd-find hyperfine jq make man-db procps ripgrep shellcheck tree xz-utils; machine=\"$(dpkg --print-architecture)\"; case \"${machine}\" in amd64) go_arch=amd64; go_sha=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053; node_arch=x64; node_sha=55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450fa76742; gh_arch=amd64; gh_sha=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60 ;; arm64) go_arch=arm64; go_sha=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49; node_arch=arm64; node_sha=58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6; gh_arch=arm64; gh_sha=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909 ;; *) echo \"Unsupported architecture: ${machine}\" >&2; exit 1 ;; esac; curl -fsSL \"https://go.dev/dl/go1.26.5.linux-${go_arch}.tar.gz\" -o /tmp/go.tar.gz; echo \"${go_sha}  /tmp/go.tar.gz\" | sha256sum -c -; rm -rf /usr/local/go; tar -xzf /tmp/go.tar.gz -C /usr/local; rm -f /tmp/go.tar.gz; curl -fsSL \"https://nodejs.org/dist/v24.18.0/node-v24.18.0-linux-${node_arch}.tar.xz\" -o /tmp/node.tar.xz; echo \"${node_sha}  /tmp/node.tar.xz\" | sha256sum -c -; tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; rm -f /tmp/node.tar.xz; curl -fsSL \"https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_${gh_arch}.tar.gz\" -o /tmp/gh.tar.gz; echo \"${gh_sha}  /tmp/gh.tar.gz\" | sha256sum -c -; tar -xzf /tmp/gh.tar.gz -C /tmp; install -m 0755 \"/tmp/gh_2.96.0_linux_${gh_arch}/bin/gh\" /usr/local/bin/gh; rm -rf /tmp/gh.tar.gz \"/tmp/gh_2.96.0_linux_${gh_arch}\"; ln -sf /usr/bin/batcat /usr/local/bin/bat; ln -sf /usr/bin/fdfind /usr/local/bin/fd; for tool in /usr/local/go/bin/go /go/bin/*; do if [ -x \"${tool}\" ]; then ln -sf \"${tool}\" \"/usr/local/bin/$(basename \"${tool}\")\"; fi; done; rm -rf /var/lib/apt/lists/*; fi",
+  "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
+  "waitFor": "postCreateCommand",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Catppuccin.catppuccin-vsc",
+        "DavidAnson.vscode-markdownlint",
+        "EditorConfig.EditorConfig",
+        "GitHub.vscode-github-actions",
+        "PKief.material-icon-theme",
+        "golang.go",
+        "redhat.vscode-yaml",
+        "streetsidesoftware.code-spell-checker",
+        "timonwong.shellcheck",
+        "usernamehw.errorlens"
+      ],
+      "settings": {
+        "editor.bracketPairColorization.enabled": true,
+        "editor.codeActionsOnSave": {
+          "source.organizeImports": "explicit"
+        },
+        "editor.formatOnSave": true,
+        "editor.guides.bracketPairs": "active",
+        "editor.inlineSuggest.enabled": true,
+        "editor.minimap.enabled": false,
+        "editor.renderWhitespace": "boundary",
+        "editor.rulers": [
+          100
+        ],
+        "editor.stickyScroll.enabled": true,
+        "files.eol": "\n",
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "go.testFlags": [
+          "-count=1"
+        ],
+        "go.toolsManagement.autoUpdate": false,
+        "redhat.telemetry.enabled": false,
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.enablePersistentSessions": true,
+        "terminal.integrated.shellIntegration.enabled": true,
+        "terminal.integrated.smoothScrolling": true,
+        "workbench.colorTheme": "Catppuccin Mocha",
+        "workbench.iconTheme": "material-icon-theme"
+      }
+    }
+  }
+}
