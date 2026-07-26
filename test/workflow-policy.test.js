@@ -12,6 +12,7 @@ const expectedWorkflowJobs = new Map([
   ["auto-release.yml", ["release"]],
   ["ci.yml", ["validate"]],
   ["dependabot-auto-merge.yml", ["dependabot"]],
+  ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
   ["reap-stale-locks.yml", ["reap"]]
 ]);
@@ -23,7 +24,8 @@ const expectedWorkflowRunScriptSignatures = new Map([
   [
     "ci.yml",
     [
-      'for action_file in .github/dist/*.js; do\nnode --check "${action_file}"',
+      "node --check tools/llm-harness.mjs\nfor action_file in .github/dist/*.js; do",
+      "node tools/llm-harness.mjs check",
       "set -euo pipefail\ngo -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
       "node --test test/*.test.js",
       "go test ./...",
@@ -40,6 +42,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       'set -euo pipefail\npr_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"'
     ]
   ],
+  ["devcontainer.yml", []],
   [
     "dx-unity-automation-audit.yml",
     [
@@ -2576,6 +2579,19 @@ test("semantic-release workflows serialize releases without canceling active pub
   }
 
   assert.deepEqual(checkedWorkflows, ["auto-release.yml"]);
+});
+
+test("semantic-release runtime and configured plugins are exact", () => {
+  const text = readWorkflow("auto-release.yml");
+
+  assert.match(text, /^\s*semantic_version:\s*25\.0\.8\s*$/m);
+  for (const plugin of [
+    "@semantic-release/commit-analyzer@13.0.1",
+    "@semantic-release/release-notes-generator@14.1.1",
+    "@semantic-release/github@12.0.9"
+  ]) {
+    assert.match(text, new RegExp(`^\\s*${plugin.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*$`, "m"));
+  }
 });
 
 test("Dependabot auto-merge handles successful CI reruns", () => {

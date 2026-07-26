@@ -4,6 +4,20 @@ This repository provides a central organization-level lock for licensed Unity
 build sections. GitHub Actions `concurrency` is repository-scoped, so repos
 that share a finite Unity Pro seat pool must use this lock before invoking
 Unity.
+
+## Development Environment
+
+The repository has a pinned, multi-architecture [development container](.devcontainer/README.md)
+for VS Code and VSCodium on Linux, macOS, and Windows. It includes Go 1.26,
+Node.js 24, GitHub Actions tooling, persistent build caches, zsh, and matching
+editor extensions. After reopening the repository in the container, run
+`.devcontainer/scripts/verify.sh` for the complete CI-equivalent local check.
+
+Agent front ends share the canonical [`.llm/context.md`](.llm/context.md) and
+its generated knowledge index. See [`.llm/README.md`](.llm/README.md) for the
+skill metadata contract, exact 300-line policy scope, generation commands, and
+local hook setup.
+
 > [!NOTE]
 > Consumer jobs use a state-writer GitHub App whose tokens are restricted to
 > this repository with `contents: write`. A separate reader App has

@@ -34,12 +34,16 @@ jobs:
 
       - name: Check JavaScript syntax
         run: |
+          node --check tools/llm-harness.mjs
           for action_file in .github/dist/*.js; do
             node --check "${action_file}"
           done
           for test_file in test/*.test.js; do
             node --check "${test_file}"
           done
+
+      - name: Validate agent context harness
+        run: node tools/llm-harness.mjs check
 
       - name: Lint GitHub Actions workflows
         shell: bash

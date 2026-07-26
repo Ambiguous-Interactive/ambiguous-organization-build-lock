@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+staged_tree="$(mktemp -d "${TMPDIR:-/tmp}/llm-harness-staged.XXXXXX")"
+trap 'rm -rf "${staged_tree}"' EXIT
+git checkout-index --all --prefix="${staged_tree}/"
+
+if ! node "${staged_tree}/tools/llm-harness.mjs" check --root "${staged_tree}"; then
+  echo "The staged LLM harness is inconsistent." >&2
+  echo "Run 'node tools/llm-harness.mjs generate', stage the result and source changes, then retry." >&2
+  exit 1
+fi
