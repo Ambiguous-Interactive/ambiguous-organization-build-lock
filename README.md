@@ -53,8 +53,12 @@ Run a hosted preflight before every self-hosted Unity job. It mints a
 short-lived token from the reader App, asks GitHub for runner groups visible to
 the calling repository, and considers only runners in those groups. It fails
 closed when that inventory cannot be read, the repository has no visible runner
-group, or any required label set has no accessible online runner. A busy online
-runner is considered available infrastructure and may queue the licensed job.
+group, or any required label set has no accessible REGISTERED runner -- the state
+in which a queued job can never be picked up. A busy runner and a temporarily
+offline runner are both available infrastructure: GitHub holds the licensed job
+in the queue until one of them takes it. An all-offline label set passes with a
+warning naming the runners it is waiting on, so a reboot or a runner-service
+restart does not turn a required check red.
 
 GitHub App authentication and every paginated runner-inventory read share one
 150-second deadline, leaving diagnostic and step-teardown headroom inside the

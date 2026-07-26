@@ -87,8 +87,9 @@ reader access. Treat either condition as scope drift.
 
 ## Normal job lifecycle
 
-1. A hosted preflight proves that the repository can see an online runner with
-   the required labels. Busy runners count as available infrastructure.
+1. A hosted preflight proves that the repository can see a registered runner
+   with the required labels. Busy and temporarily offline runners both count as
+   available infrastructure; the job queues until one accepts it.
 2. The licensed job validates local credential shape and verifies that it is
    still the current trusted PR head before entering the organization FIFO.
 3. Acquire records the exact repository, run, job, holder suffix, and physical

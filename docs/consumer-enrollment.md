@@ -68,7 +68,7 @@ Before enforcing the aggregate as required:
 
 1. Open a same-repository PR and confirm the licensed job starts without an
    approval prompt.
-2. Confirm preflight can see the intended online runner labels.
+2. Confirm preflight can see the intended registered runner labels.
 3. Confirm acquire records the expected repository, run, job, attempt, and
    physical runner.
 4. Confirm Unity produces the intended test or build result.
