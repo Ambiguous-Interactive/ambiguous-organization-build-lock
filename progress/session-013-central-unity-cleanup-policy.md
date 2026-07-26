@@ -2,7 +2,7 @@
 
 Date: 2026-07-26
 
-Status: local implementation, full validation, and independent review complete
+Status: complete; central policy merged and verified green
 
 ## Objective and boundary
 
@@ -96,9 +96,41 @@ explicit open questions rather than promoted inference.
 No Unity, Docker, credential, network, or paid CI operation is required for this
 implementation or its fixture suites.
 
-## Pending
+## Delivery and main verification
 
-- Open the central PR, request exact-head Cursor Bugbot and Copilot reviews, and
-  merge only after all required CI and review evidence is green.
-- Publish an immutable release before any consumer adoption; migrate
-  unity-helpers, qora-redux, and DoxReloaded separately.
+- PR #90 contained one exact reviewed commit,
+  `513e2dedfdaf60a5a33f1d40de1611b1cf8fac6b`. Build lock CI passed, Cursor
+  Bugbot recorded that exact SHA with no finding, and Copilot's quota response
+  was explicitly awaited.
+- PR #90 was squash-merged as
+  `673eb65e7d863a1a8a8a70882bd980e189d41754`.
+- The push-triggered Build lock CI run `30187918965` passed on that exact merge
+  commit. Its validation job passed JavaScript syntax, the agent harness,
+  actionlint, 533 fast action tests, both Go modules, checksum/tidy checks, and
+  the credential-literal audit.
+- The merged SHA is the immutable initial consumer pin. Issue #85 remains open
+  until consumers adopt the policy; issue #83 remains open until external
+  two-identity return evidence supports any capacity change.
+
+## Follow-up ownership
+
+The consumer migrations are intentionally separate to minimize licensed Unity
+churn and preserve consumer-specific return commands:
+
+- `Ambiguous-Interactive/unity-helpers#312` preserves its four public cleanup
+  outputs through a compatibility shim while adopting the central classifier
+  and final gate.
+- `Ambiguous-Interactive/qora-redux#137` adds explicit capture metadata, fixes
+  quarantined-but-green behavior, adopts the central release gate, and removes
+  run-scoped evidence afterward.
+- `Ambiguous-Interactive/DoxReloaded#246` proves parity with the local Python
+  policy across Linux, macOS, and Windows before replacing it.
+
+The skipped-ULF prerequisite was completed by
+`Ambiguous-Interactive/unity-helpers#311`, merged as
+`296c4433f6faaa126a26d911396fc69c4bd4c00c`. It corrects the same fail-open
+interpretation in both shared classifiers and direct helpers, adds mixed-order
+regressions, and upgrades `markdownlint-cli` to remove its high-severity audit
+findings. Its full PR matrix passed, including eight edit/play jobs and four
+standalone Unity versions. Every push workflow on the exact merge commit,
+including Unity Tests, passed, and issue `unity-helpers#310` closed.
