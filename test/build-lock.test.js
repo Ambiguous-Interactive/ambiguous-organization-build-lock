@@ -7159,6 +7159,7 @@ test("schema 5 uncertainty reasons remain runner-local and never create account 
     "return-log-truncated",
     "return-terminated",
     "return-missing-positive-evidence",
+    "return-ulf-skipped",
     "unity-20113-unclassified"
   ]) {
     await t.test(reason, async () => {

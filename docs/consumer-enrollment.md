@@ -39,18 +39,27 @@ or writer App. The current inventory is recorded in
 4. Acquire immediately before the activation-capable section. Pass a stable,
    non-empty `runner.name` and set lifecycle downgrade guards compatible with
    the committed live configuration.
-5. Keep activation, tests/build, positive return-evidence classification, and
-   release in one job on one physical runner identity. Use bounded activation
-   retry for transient seat handoff.
-6. Run return and typed release under `always()`. Only exact positive return
-   evidence is `confirmed/healthy`; exit zero or a missing serial is not proof.
+5. Keep activation, tests/build, return, central evidence classification, release,
+   and the final cleanup gate in one job on one physical runner identity. Use
+   bounded activation retry for transient seat handoff.
+6. Run return, `classify-unity-cleanup-evidence`, and typed release under
+   `always()`. The return wrapper reports its dedicated run-scoped log path,
+   command-completed state, signed exit code, and capture-complete attestation.
+   Only exact entitlement and ULF success lines in that dedicated log are
+   `confirmed/healthy`; exit zero, supplemental proof, or a missing serial is not
+   proof.
 7. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
    proven.
-8. Emit one stable, always-reporting aggregate. It fails on preflight failure,
+8. Run `require-confirmed-unity-cleanup` after release with `if: always()` and no
+   `continue-on-error`. A quarantine, incident, missing classification, holder
+   removal without a safe release result, or contradictory reservation must fail
+   the licensed job. Delete raw evidence afterward under `if: always()` and never
+   upload it.
+9. Emit one stable, always-reporting aggregate. It fails on preflight failure,
    cancellation, unexpected skip, missing matrix output, partial execution,
-   missing cleanup evidence, or release failure.
-9. Disable automatic cancellation for every scope that can terminate a job
+   missing cleanup evidence, release failure, or final-gate failure.
+10. Disable automatic cancellation for every scope that can terminate a job
    after acquire. Superseded runs exit before acquire; holders finish cleanup.
 
 ## Canary
@@ -63,8 +72,9 @@ Before enforcing the aggregate as required:
 3. Confirm acquire records the expected repository, run, job, attempt, and
    physical runner.
 4. Confirm Unity produces the intended test or build result.
-5. Confirm return is `confirmed/healthy` and release removes ownership. At the
-   current nonzero setting a short confirmed-cleanup cooldown is expected.
+5. Confirm the central classifier reports `confirmed/healthy`, release removes
+   ownership, and the final cleanup gate passes. At the current nonzero setting a
+   short confirmed-cleanup cooldown is expected.
 6. Confirm no holder, quarantine, or global incident remains after normal
    cleanup and cooldown expiry.
 7. Confirm a fork PR receives no organization credentials and follows the

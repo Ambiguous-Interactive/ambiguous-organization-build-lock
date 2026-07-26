@@ -1,0 +1,34 @@
+name: Classify Unity cleanup evidence
+description: Classify bounded Unity return evidence without exposing raw licensing logs.
+inputs:
+  return-log-path:
+    description: Dedicated run-scoped log for the current Unity return command.
+    required: true
+  return-command-completed:
+    description: Literal true only when the return command reached a recorded exit.
+    required: true
+  return-exit-code:
+    description: Signed decimal return-command exit code; required when the command completed.
+    required: false
+  evidence-capture-complete:
+    description: Literal true only when the return wrapper completed bounded evidence capture.
+    required: true
+  supplemental-evidence-paths:
+    description: Newline-separated run-scoped log files or directories used only for account-health evidence.
+    required: false
+outputs:
+  resource-safe:
+    description: Compatibility boolean; true only for confirmed healthy cleanup.
+  resource-cleanup-status:
+    description: Confirmed or unknown cleanup status.
+  resource-health:
+    description: Healthy or blocked account health.
+  resource-reason:
+    description: Stable allowlisted evidence reason.
+  classification-complete:
+    description: True when bounded classification completed deterministically.
+  evidence-digest:
+    description: SHA-256 digest of bounded evidence identity and bytes.
+runs:
+  using: node24
+  main: ../../dist/classify-unity-cleanup-evidence.js

@@ -1,0 +1,169 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+
+const {
+  environmentValues,
+  evaluateCleanupGate,
+  formatDiagnostic
+} = require("../.github/dist/require-confirmed-unity-cleanup.js");
+
+const gateRuntimePath = path.join(
+  __dirname,
+  "..",
+  ".github",
+  "dist",
+  "require-confirmed-unity-cleanup.js"
+);
+
+const safeCooldown = {
+  acquired: "true",
+  classificationComplete: "true",
+  cleanupStatus: "confirmed",
+  cleanupHealth: "healthy",
+  cleanupReason: "cleanup-confirmed",
+  releaseOutcome: "success",
+  cleanupResult: "cooldown-started",
+  released: "true",
+  releaseHealth: "healthy",
+  releaseReason: "cleanup-confirmed",
+  reservationState: "cooldown",
+  reservationId: "reservation-abc",
+  incidentId: ""
+};
+
+test("gate accepts only coherent confirmed cleanup releases", async (t) => {
+  await t.test("safe cooldown", () => {
+    assert.deepEqual(evaluateCleanupGate(safeCooldown), { safe: true, failures: [] });
+  });
+  await t.test("safe direct release", () => {
+    assert.deepEqual(evaluateCleanupGate({
+      ...safeCooldown,
+      cleanupResult: "released",
+      reservationState: "",
+      reservationId: ""
+    }), { safe: true, failures: [] });
+  });
+
+  const failures = [
+    ["not acquired", { acquired: "false" }],
+    ["classification incomplete", { classificationComplete: "false" }],
+    ["unknown cleanup", { cleanupStatus: "unknown", cleanupReason: "return-timeout" }],
+    ["blocked account", { cleanupStatus: "unknown", cleanupHealth: "blocked", cleanupReason: "unity-account-limit-20111" }],
+    ["release failed", { releaseOutcome: "failure" }],
+    ["quarantine", { cleanupResult: "quarantined", released: "true", reservationState: "quarantine" }],
+    ["global quarantine", { cleanupResult: "global-quarantined", incidentId: "incident-abc" }],
+    ["queue clean only", { cleanupResult: "queue-cleaned", released: "false" }],
+    ["noop", { cleanupResult: "noop", released: "false" }],
+    ["holder not removed", { released: "false" }],
+    ["release health mismatch", { releaseHealth: "blocked" }],
+    ["release reason mismatch", { releaseReason: "return-log-truncated" }],
+    ["incident present", { incidentId: "incident-abc" }],
+    ["cooldown state missing", { reservationState: "", reservationId: "" }],
+    ["cooldown id missing", { reservationId: "" }],
+    ["direct release has reservation", { cleanupResult: "released" }],
+    ["missing outputs", Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, ""]))]
+  ];
+
+  for (const [name, patch] of failures) {
+    await t.test(name, () => {
+      const result = evaluateCleanupGate({ ...safeCooldown, ...patch });
+      assert.equal(result.safe, false);
+      assert.ok(result.failures.length > 0);
+    });
+  }
+});
+
+test("gate diagnostic contains only allowlisted typed values and escapes commands", () => {
+  const malicious = {
+    ...safeCooldown,
+    cleanupStatus: "unknown\n::warning::spoofed",
+    cleanupReason: "return-timeout\r\n%spoof"
+  };
+  const result = evaluateCleanupGate(malicious);
+  assert.equal(result.safe, false);
+  const diagnostic = formatDiagnostic(malicious, result.failures);
+  assert.doesNotMatch(diagnostic, /spoofed/);
+  assert.doesNotMatch(diagnostic, /\r|\n/);
+  assert.match(diagnostic, /invalid/);
+});
+
+test("GitHub action input environment preserves hyphenated input names", () => {
+  assert.deepEqual(environmentValues({
+    "INPUT_ACQUIRED": "true",
+    "INPUT_CLASSIFICATION-COMPLETE": "true",
+    "INPUT_CLEANUP-STATUS": "confirmed",
+    "INPUT_CLEANUP-HEALTH": "healthy",
+    "INPUT_CLEANUP-REASON": "cleanup-confirmed",
+    "INPUT_RELEASE-OUTCOME": "success",
+    "INPUT_CLEANUP-RESULT": "released",
+    "INPUT_RELEASED": "true",
+    "INPUT_RELEASE-HEALTH": "healthy",
+    "INPUT_RELEASE-REASON": "cleanup-confirmed",
+    "INPUT_RESERVATION-STATE": "",
+    "INPUT_RESERVATION-ID": "",
+    "INPUT_INCIDENT-ID": ""
+  }), {
+    acquired: "true",
+    classificationComplete: "true",
+    cleanupStatus: "confirmed",
+    cleanupHealth: "healthy",
+    cleanupReason: "cleanup-confirmed",
+    releaseOutcome: "success",
+    cleanupResult: "released",
+    released: "true",
+    releaseHealth: "healthy",
+    releaseReason: "cleanup-confirmed",
+    reservationState: "",
+    reservationId: "",
+    incidentId: ""
+  });
+});
+
+test("committed gate runtime exits nonzero for unsafe cleanup and zero only for safe cleanup", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-gate-runtime-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  function execute(values, outputName) {
+    const outputPath = path.join(root, outputName);
+    const environment = { ...process.env, GITHUB_OUTPUT: outputPath };
+    for (const [name, value] of Object.entries(values)) {
+      const inputName = name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+      environment[`INPUT_${inputName.toUpperCase()}`] = value;
+    }
+    const processResult = childProcess.spawnSync(process.execPath, [gateRuntimePath], {
+      encoding: "utf8",
+      env: environment
+    });
+    return {
+      ...processResult,
+      outputs: fs.readFileSync(outputPath, "utf8").trim().split(/\r?\n/)
+    };
+  }
+
+  const unsafeMarker = "DO-NOT-ECHO";
+  const unsafe = execute({
+    ...safeCooldown,
+    cleanupStatus: `unknown\n::warning::${unsafeMarker}`,
+    cleanupReason: "return-timeout",
+    cleanupResult: "quarantined",
+    reservationState: "quarantine"
+  }, "unsafe.txt");
+  assert.equal(unsafe.status, 1);
+  assert.equal(unsafe.outputs.at(-1), "cleanup-safe=false");
+  assert.doesNotMatch(`${unsafe.stdout}\n${unsafe.stderr}`, new RegExp(unsafeMarker));
+
+  const safe = execute({
+    ...safeCooldown,
+    cleanupResult: "released",
+    reservationState: "",
+    reservationId: ""
+  }, "safe.txt");
+  assert.equal(safe.status, 0);
+  assert.equal(safe.outputs.at(-1), "cleanup-safe=true");
+});
