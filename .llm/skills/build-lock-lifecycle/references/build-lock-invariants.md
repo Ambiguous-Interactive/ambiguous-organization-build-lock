@@ -9,6 +9,9 @@
 - Schema versions newer than the client fail closed.
 - Stale ownership is handled by the scheduled reaper, not opportunistic
   admission.
+- Invalid or contradictory cleanup diagnostics never veto exact ownership
+  cleanup; degrade their evidence conservatively, preserve capacity as unsafe,
+  and fail only after the cleanup attempt.
 - Unconfirmed resource cleanup creates quarantine or an account-level block; it
   does not silently return capacity.
 - Recovery requires the exact reservation or incident identity plus external

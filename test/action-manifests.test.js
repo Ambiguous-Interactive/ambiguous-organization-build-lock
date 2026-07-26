@@ -264,7 +264,16 @@ test("release accepts the physical runner identity required by schema 3", () => 
     assert.ok(inputs.includes(input));
   }
   assert.match(release, /<repository>:<run-id>:<source-job-id>:<holder-id-suffix>/);
-  for (const output of ["reservation-id", "reservation-state", "available-at", "incident-id", "resource-health", "resource-reason"]) {
+  for (const output of [
+    "reservation-id",
+    "reservation-state",
+    "available-at",
+    "incident-id",
+    "resource-health",
+    "resource-reason",
+    "report-degraded",
+    "report-validation-error"
+  ]) {
     assert.match(release, new RegExp(`^  ${output}:`, "m"));
   }
 });

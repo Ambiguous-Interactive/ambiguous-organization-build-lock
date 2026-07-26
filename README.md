@@ -211,7 +211,7 @@ current return log. Exact entitlement-return and client-ULF-return lines are bot
 required. Exit zero, supplemental proof, or `Serial number unavailable` is
 insufficient. Skipped ULF, timeouts, truncated logs, termination, `400006`,
 `20113`, and missing positive evidence report `unknown/healthy` with an
-allowlisted reason. Confirmed `20111` reports `unknown/blocked` with
+allowlisted reason. Detected `20111` reports `unknown/blocked` with
 `unity-account-limit-20111`.
 
 The final cleanup gate is intentionally separate from release. Holder removal can
@@ -232,6 +232,22 @@ indication that holder ownership was removed. `queue-cleaned` means
 the current run was waiting but never held the lock, so no licensed work should
 have run. Do not gate the release step on `acquired == 'true'`; release also
 cleans queue entries for runs that were interrupted while waiting.
+
+Invalid or contradictory cleanup-report inputs never veto exact ownership
+cleanup. Release degrades them to
+`unknown/healthy/cleanup-evidence-unknown`, quarantines any held capacity under
+schema 4 or newer, writes `report-degraded=true` plus a stable
+`report-validation-error`, and only then fails the action. Queue-only and no-op
+cleanup have no capacity to quarantine. The rejected caller-controlled value is
+not persisted or logged. Keep the final cleanup gate in place: the failed
+release outcome and unknown evidence must remain red while the lock itself stays
+recoverable.
+Validation codes are `invalid-resource-safe`,
+`invalid-resource-cleanup-status`, `invalid-resource-health`,
+`invalid-resource-reason`, `blocked-health-reason-mismatch`,
+`account-limit-health-mismatch`, `account-limit-cleanup-status-mismatch`,
+`confirmed-cleanup-reason-mismatch`, `cleanup-confirmed-status-mismatch`, and
+`resource-safe-contradiction`.
 
 Cleanup ownership is keyed to the exact logical `holderId`. In schema 3, a
 monotonic run-attempt fence prevents a late older attempt from deleting a newer
@@ -301,10 +317,10 @@ protection.
 Schema 5 adds at most one immutable global account incident. It is active for
 `wallstop-organization-builds` because the committed config enables
 `accountHealth`. The one-way migration required schema-4 holders, queue entries,
-cooldowns, and quarantines to be empty. A confirmed `20111` report blocks
-admission immediately without growing the queue. Existing holders may finish
-and clean up. Incidents never expire and cannot be recovered by same-runner
-admission.
+cooldowns, and quarantines to be empty. An
+`unknown/blocked/unity-account-limit-20111` report blocks admission immediately
+without growing the queue. Existing holders may finish and clean up. Incidents
+never expire and cannot be recovered by same-runner admission.
 
 State never stores tokens or environment dumps. It stores only run identity,
 holder timing, queue entries, and public run URLs.
@@ -352,8 +368,8 @@ live value is read from
 issue #60 tracks the immutable-release and consumer-repin sequence required for
 literal zero. At `0`, a proven-clean release frees its slot immediately and
 writes no reservation. Zero never weakens leak protection: unproven cleanup
-still creates a non-expiring quarantine, and confirmed `20111` still raises the
-global account incident.
+still creates a non-expiring quarantine, and a classified `20111` report still
+raises the global account incident.
 
 **Consumer requirement:** because the lock no longer holds a slot warm, every
 consumer's licensed Unity step MUST wrap serial activation in a bounded
@@ -429,11 +445,13 @@ capacity is not pinned indefinitely (notably for quarantines tied to ephemeral
 GitHub-hosted runners, which can never be same-runner-reclaimed). It is gated to
 schema 5 on purpose — that is where the backstop lives: consumers wrap activation in
 bounded retry, so a returned seat (the common, over-conservative case) frees the slot,
-while a genuinely leaked seat trips a confirmed `20111` **global account incident**
-that halts admission (operator-visible) instead of silently pinning capacity. That is
-a deliberate trade of graceful degradation for a loud, actionable signal. The reaper
-fails closed when the owning run status cannot be confirmed (the quarantine is kept)
-and skips recovery while a global incident is already active.
+while a genuinely leaked seat trips an
+`unknown/blocked/unity-account-limit-20111` **global account incident** that
+halts admission (operator-visible) instead of silently pinning capacity. That
+is a deliberate trade of graceful degradation for a loud, actionable signal.
+The reaper fails closed when the owning run status cannot be confirmed (the
+quarantine is kept) and skips recovery while a global incident is already
+active.
 
 Operators may still force recovery by dispatching the reaper with `operation=recover`,
 the exact reservation ID, and `resource-safe=true` after confirming Unity portal

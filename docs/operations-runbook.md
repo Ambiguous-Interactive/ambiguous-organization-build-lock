@@ -100,6 +100,9 @@ reader access. Treat either condition as scope drift.
    evidence is `confirmed/healthy`.
 6. Release always runs with the acquire identity and typed cleanup evidence.
    Waiting jobs are removed from the queue even when they never acquired.
+   Invalid or contradictory evidence is degraded to unknown; under schema 4 or
+   newer, any removed held capacity is quarantined. The release step fails only
+   after exact ownership cleanup.
 7. The stable aggregate fails on preflight failure, cancellation, unexpected
    skip, partial matrix execution, missing return evidence, or failed release.
 
@@ -116,6 +119,7 @@ runner quarantine.
 | Confirmed-cleanup cooldown | One slot consumed until `availableAt` | Wait for expiry. At the live one-second setting this is normally transient. |
 | Runner quarantine | One slot consumed without expiry | Reasons include `return-ulf-skipped`, `unity-return-400006`, timeout, termination, incomplete logs, and missing positive evidence. Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
 | Global account incident | All admission blocked; acquire attempts exact pre-activation queue/holder cleanup | Stop canaries and follow the sanitized source-run provenance in the acquire error. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. Never edit lock state directly. |
+| Degraded cleanup report | Exact holder/queue cleanup is attempted; under schema 4 or newer, a removed holder becomes a quarantine | Use `report-validation-error` to correct the typed inputs. The rejected value is intentionally not logged. Treat the failed step and unknown cleanup as red, reconcile the resource, and recover only by exact reservation ID when one was created. |
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |
 | Runner unavailable | Licensed work must remain pending or red | Restore eligible runner capacity. Never turn an unavailable required job into skip/green. |
 

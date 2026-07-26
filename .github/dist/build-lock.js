@@ -95,13 +95,22 @@ function rawInput(name) {
   return value === undefined || value === "" ? undefined : value;
 }
 
+function releaseReportValidationError(validationCode, message) {
+  const error = new Error(message);
+  error.validationCode = validationCode;
+  return error;
+}
+
 function parseReleaseReport(values = {}) {
   const oldRaw = values.resourceSafe;
   let oldMapping = null;
   if (oldRaw !== undefined && oldRaw !== "") {
     const normalized = String(oldRaw).trim().toLowerCase();
     if (normalized !== "true" && normalized !== "false") {
-      throw new Error("Input resource-safe must be true or false when supplied.");
+      throw releaseReportValidationError(
+        "invalid-resource-safe",
+        "Input resource-safe must be true or false when supplied."
+      );
     }
     oldMapping = normalized === "true"
       ? { cleanupStatus: "confirmed", health: "healthy" }
@@ -123,30 +132,87 @@ function parseReleaseReport(values = {}) {
   const health = String(values.health || "").trim();
   const reason = String(values.reason || "").trim();
   if (cleanupStatus !== "confirmed" && cleanupStatus !== "unknown") {
-    throw new Error("resource-cleanup-status must be confirmed or unknown.");
+    throw releaseReportValidationError(
+      "invalid-resource-cleanup-status",
+      "resource-cleanup-status must be confirmed or unknown."
+    );
   }
   if (health !== "healthy" && health !== "blocked") {
-    throw new Error("resource-health must be healthy or blocked.");
+    throw releaseReportValidationError(
+      "invalid-resource-health",
+      "resource-health must be healthy or blocked."
+    );
   }
   if (!RESOURCE_REASON_CODES.has(reason)) {
-    throw new Error(`resource-reason is not an allowlisted stable reason code: ${JSON.stringify(reason)}.`);
+    throw releaseReportValidationError(
+      "invalid-resource-reason",
+      "resource-reason is not an allowlisted stable reason code."
+    );
   }
   if (health === "blocked" && reason !== "unity-account-limit-20111") {
-    throw new Error("resource-health=blocked is reserved for confirmed unity-account-limit-20111 evidence.");
+    throw releaseReportValidationError(
+      "blocked-health-reason-mismatch",
+      "resource-health=blocked is reserved for confirmed unity-account-limit-20111 evidence."
+    );
   }
   if (health === "healthy" && reason === "unity-account-limit-20111") {
-    throw new Error("unity-account-limit-20111 requires resource-health=blocked.");
+    throw releaseReportValidationError(
+      "account-limit-health-mismatch",
+      "unity-account-limit-20111 requires resource-health=blocked."
+    );
+  }
+  if (
+    health === "blocked" &&
+    reason === "unity-account-limit-20111" &&
+    cleanupStatus !== "unknown"
+  ) {
+    throw releaseReportValidationError(
+      "account-limit-cleanup-status-mismatch",
+      "unity-account-limit-20111 requires resource-cleanup-status=unknown."
+    );
   }
   if (health === "healthy" && cleanupStatus === "confirmed" && reason !== "cleanup-confirmed") {
-    throw new Error("confirmed healthy cleanup requires resource-reason=cleanup-confirmed.");
+    throw releaseReportValidationError(
+      "confirmed-cleanup-reason-mismatch",
+      "confirmed healthy cleanup requires resource-reason=cleanup-confirmed."
+    );
   }
   if (cleanupStatus === "unknown" && reason === "cleanup-confirmed") {
-    throw new Error("resource-reason=cleanup-confirmed requires confirmed cleanup status.");
+    throw releaseReportValidationError(
+      "cleanup-confirmed-status-mismatch",
+      "resource-reason=cleanup-confirmed requires confirmed cleanup status."
+    );
   }
   if (oldMapping && (oldMapping.cleanupStatus !== cleanupStatus || oldMapping.health !== health)) {
-    throw new Error("resource-safe contradicts the supplied resource cleanup status or health.");
+    throw releaseReportValidationError(
+      "resource-safe-contradiction",
+      "resource-safe contradicts the supplied resource cleanup status or health."
+    );
   }
   return { cleanupStatus, health, reason };
+}
+
+function resolveReleaseReport(values = {}) {
+  try {
+    return {
+      report: parseReleaseReport(values),
+      degraded: false,
+      validationError: ""
+    };
+  } catch (error) {
+    if (!error.validationCode) {
+      throw error;
+    }
+    return {
+      report: {
+        cleanupStatus: "unknown",
+        health: "healthy",
+        reason: "cleanup-evidence-unknown"
+      },
+      degraded: true,
+      validationError: error.validationCode
+    };
+  }
 }
 
 function nonNegativeIntegerInput(name, fallback, maximum) {
@@ -1869,6 +1935,8 @@ function writeReleaseOutputs(config, identity, result) {
   writeOutput("incident-id", result.incidentId || "");
   writeOutput("resource-health", result.resourceHealth || config.resourceReport?.health || "healthy");
   writeOutput("resource-reason", result.resourceReason || config.resourceReport?.reason || "");
+  writeOutput("report-degraded", String(config.resourceReportDegraded === true));
+  writeOutput("report-validation-error", config.resourceReportValidationError || "");
 }
 
 function firstHolderContext(holders) {
@@ -2905,6 +2973,13 @@ async function release(config) {
     identity.holderId = targetHolderId;
   }
   console.log(`::group::Release build lock ${config.lockName}`);
+  if (config.resourceReportDegraded) {
+    console.log(
+      `::warning::Cleanup report validation failed (${workflowCommandData(config.resourceReportValidationError)}); ` +
+        "exact holder and queue cleanup will be attempted with evidence degraded to unknown; " +
+        "removed held capacity will be quarantined when lifecycle state supports it."
+    );
+  }
 
   const lockConfig = await readLockConfig(config);
   const resourceReport = config.resourceReport || {
@@ -2938,6 +3013,12 @@ async function release(config) {
   appendSummary(releaseMessage);
   console.log(releaseMessage);
   console.log("::endgroup::");
+  if (config.resourceReportDegraded) {
+    throw new Error(
+      `Build lock exact cleanup completed with cleanup-result=${cleanupResult} after report validation failed: ` +
+        `${config.resourceReportValidationError}.`
+    );
+  }
 }
 
 async function postCleanup(config) {
@@ -3241,12 +3322,24 @@ function config() {
   const holderIdSuffix = holderIdSuffixInput();
   const token = credential(lockRepo);
   const operation = input("operation", "reap");
-  const resourceReport = parseReleaseReport({
-    resourceSafe: rawInput("resource-safe"),
-    cleanupStatus: rawInput("resource-cleanup-status"),
-    health: rawInput("resource-health"),
-    reason: rawInput("resource-reason")
-  });
+  const resourceReportResolution = MODE === "release"
+    ? resolveReleaseReport({
+      resourceSafe: rawInput("resource-safe"),
+      cleanupStatus: rawInput("resource-cleanup-status"),
+      health: rawInput("resource-health"),
+      reason: rawInput("resource-reason")
+    })
+    : {
+      report: parseReleaseReport({
+        resourceSafe: rawInput("resource-safe"),
+        cleanupStatus: rawInput("resource-cleanup-status"),
+        health: rawInput("resource-health"),
+        reason: rawInput("resource-reason")
+      }),
+      degraded: false,
+      validationError: ""
+    };
+  const resourceReport = resourceReportResolution.report;
   return {
     token,
     readerToken: readerCredentialRequired(MODE, operation) ? readerCredential(lockRepo.owner) : null,
@@ -3259,6 +3352,8 @@ function config() {
     expectedHeadSha: input("expected-head-sha"),
     resourceSafe: resourceReport.cleanupStatus === "confirmed",
     resourceReport,
+    resourceReportDegraded: resourceReportResolution.degraded,
+    resourceReportValidationError: resourceReportResolution.validationError,
     operation,
     reservationId: input("reservation-id"),
     incidentId: input("incident-id"),
@@ -3334,6 +3429,7 @@ module.exports = {
   readState,
   release,
   reap,
+  resolveReleaseReport,
   run,
   runCancellationCleanup,
   runPostCleanup,

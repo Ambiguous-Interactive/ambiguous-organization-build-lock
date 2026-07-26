@@ -27,6 +27,7 @@ const {
   readerCredentialRequired,
   release,
   reap,
+  resolveReleaseReport,
   runCancellationCleanup,
   selectEligibleQueueEntries,
   workflowCommandData,
@@ -120,7 +121,9 @@ const releaseOutputNames = [
   "available-at",
   "incident-id",
   "resource-health",
-  "resource-reason"
+  "resource-reason",
+  "report-degraded",
+  "report-validation-error"
 ];
 
 const reapOutputNames = ["reaped", "state-sha"];
@@ -7072,6 +7075,263 @@ test("release report compatibility mapping rejects contradictory old and new inp
     () => parseReleaseReport({ cleanupStatus: "unknown", health: "blocked", reason: "unity-20113-unclassified" }),
     /reserved for confirmed.*20111/
   );
+});
+
+test("invalid release reports degrade to one safe quarantine report with stable error codes", async (t) => {
+  const cases = [
+    {
+      name: "invalid compatibility boolean",
+      values: { resourceSafe: "maybe" },
+      error: "invalid-resource-safe"
+    },
+    {
+      name: "invalid cleanup status",
+      values: { cleanupStatus: "clean", health: "healthy", reason: "cleanup-confirmed" },
+      error: "invalid-resource-cleanup-status"
+    },
+    {
+      name: "invalid health",
+      values: { cleanupStatus: "unknown", health: "uncertain", reason: "cleanup-evidence-unknown" },
+      error: "invalid-resource-health"
+    },
+    {
+      name: "unrecognized reason",
+      values: { cleanupStatus: "unknown", health: "healthy", reason: "sentinel-invalid-reason" },
+      error: "invalid-resource-reason"
+    },
+    {
+      name: "blocked without account-limit evidence",
+      values: { cleanupStatus: "unknown", health: "blocked", reason: "return-missing-positive-evidence" },
+      error: "blocked-health-reason-mismatch"
+    },
+    {
+      name: "account-limit evidence marked healthy",
+      values: { cleanupStatus: "unknown", health: "healthy", reason: "unity-account-limit-20111" },
+      error: "account-limit-health-mismatch"
+    },
+    {
+      name: "account-limit evidence marked cleanup confirmed",
+      values: { cleanupStatus: "confirmed", health: "blocked", reason: "unity-account-limit-20111" },
+      error: "account-limit-cleanup-status-mismatch"
+    },
+    {
+      name: "confirmed healthy cleanup without confirmed reason",
+      values: { cleanupStatus: "confirmed", health: "healthy", reason: "return-timeout" },
+      error: "confirmed-cleanup-reason-mismatch"
+    },
+    {
+      name: "confirmed reason with unknown cleanup",
+      values: { cleanupStatus: "unknown", health: "healthy", reason: "cleanup-confirmed" },
+      error: "cleanup-confirmed-status-mismatch"
+    },
+    {
+      name: "legacy and typed evidence contradict",
+      values: {
+        resourceSafe: "true",
+        cleanupStatus: "unknown",
+        health: "healthy",
+        reason: "return-timeout"
+      },
+      error: "resource-safe-contradiction"
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, () => {
+      assert.deepEqual(resolveReleaseReport(testCase.values), {
+        report: {
+          cleanupStatus: "unknown",
+          health: "healthy",
+          reason: "cleanup-evidence-unknown"
+        },
+        degraded: true,
+        validationError: testCase.error
+      });
+    });
+  }
+});
+
+test("the committed release entrypoint resolves an invalid report before state cleanup", () => {
+  const runtimePath = path.join(__dirname, "..", ".github", "dist", "build-lock.js");
+  const script = `
+    const { config } = require(${JSON.stringify(runtimePath)});
+    const parsed = config();
+    process.stdout.write(JSON.stringify({
+      report: parsed.resourceReport,
+      degraded: parsed.resourceReportDegraded,
+      validationError: parsed.resourceReportValidationError
+    }));
+  `;
+  const result = childProcess.spawnSync(process.execPath, ["-e", script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BUILD_LOCK_MODE: "release",
+      "INPUT_LOCK-NAME": "wallstop-organization-builds",
+      "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+      "INPUT_RESOURCE-CLEANUP-STATUS": "unknown",
+      "INPUT_RESOURCE-HEALTH": "healthy",
+      "INPUT_RESOURCE-REASON": "sentinel-invalid-reason",
+      GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+      GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+      GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
+      BUILD_LOCK_APP_ID: "12345",
+      BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    report: {
+      cleanupStatus: "unknown",
+      health: "healthy",
+      reason: "cleanup-evidence-unknown"
+    },
+    degraded: true,
+    validationError: "invalid-resource-reason"
+  });
+  assert.equal(result.stderr.includes("sentinel-invalid-reason"), false);
+});
+
+test("a contradictory confirmed 20111 report quarantines only exact schema 5 ownership before release fails", async () => {
+  const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  const other = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  let state = accountHealthState([held, other]);
+  const resolution = resolveReleaseReport({
+    cleanupStatus: "confirmed",
+    health: "blocked",
+    reason: "unity-account-limit-20111"
+  });
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await assert.rejects(
+        () => withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({
+              maxHolders: 1,
+              runnerSerialization: true,
+              resourceLifecycle: true,
+              accountHealth: true
+            }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "degraded-release" } });
+            }
+            return base64Content(state, "before");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, (logs) => release(semaphoreConfig({
+          runnerId: "runner-a",
+          resourceReport: resolution.report,
+          resourceReportDegraded: resolution.degraded,
+          resourceReportValidationError: resolution.validationError
+        })).then(
+          () => logs,
+          (error) => {
+            const warning = logs.find((line) => line.includes("Cleanup report validation failed"));
+            assert.match(warning, /exact holder and queue cleanup will be attempted/);
+            assert.match(warning, /when lifecycle state supports it/);
+            throw error;
+          }
+        )),
+        /cleanup-result=quarantined.*account-limit-cleanup-status-mismatch/
+      );
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["cleanup-result"], "quarantined");
+    assert.equal(outputs["reservation-state"], "quarantine");
+    assert.equal(outputs["resource-health"], "healthy");
+    assert.equal(outputs["resource-reason"], "cleanup-evidence-unknown");
+    assert.equal(outputs["report-degraded"], "true");
+    assert.equal(outputs["report-validation-error"], "account-limit-cleanup-status-mismatch");
+    assert.equal(outputs["incident-id"], "");
+  });
+
+  assert.deepEqual(state.holders.map((holder) => holder.holderId), [other.holderId]);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.equal(state.reservations[0].runnerId, "runner-a");
+  assert.equal(state.reservations[0].holderId, held.holderId);
+  assert.equal(state.reservations[0].reason, "cleanup-evidence-unknown");
+  assert.equal(state.activeIncident, null);
+});
+
+test("degraded queue-only and noop releases report exact outcomes without claiming quarantine", async (t) => {
+  const resolution = resolveReleaseReport({
+    cleanupStatus: "unknown",
+    health: "healthy",
+    reason: "sentinel-invalid-reason"
+  });
+  const ownQueue = withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-a");
+  const other = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
+  const cases = [
+    {
+      name: "queue-only",
+      initialState: accountHealthState([], [ownQueue]),
+      cleanupResult: "queue-cleaned",
+      queueCleaned: "true"
+    },
+    {
+      name: "noop",
+      initialState: accountHealthState([other]),
+      cleanupResult: "noop",
+      queueCleaned: "false"
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const store = accountHealthFetchStore(testCase.initialState);
+      await withTempFile(async (outputFile) => {
+        await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+          await withMockedFetch(store.fetch, async (logs) => {
+            await assert.rejects(
+              () => release(semaphoreConfig({
+                runnerId: "runner-a",
+                resourceReport: resolution.report,
+                resourceReportDegraded: resolution.degraded,
+                resourceReportValidationError: resolution.validationError
+              })),
+              new RegExp(`cleanup-result=${testCase.cleanupResult}.*invalid-resource-reason`)
+            );
+            assert.equal(
+              logs.some((line) => line.includes("capacity is quarantined")),
+              false,
+              "degraded diagnostics must not claim a quarantine that was not created"
+            );
+            assert.equal(
+              logs.some((line) => line.includes("sentinel-invalid-reason")),
+              false,
+              "the rejected caller-controlled value must not be logged"
+            );
+          });
+        });
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "false");
+        assert.equal(outputs["queue-cleaned"], testCase.queueCleaned);
+        assert.equal(outputs["cleanup-result"], testCase.cleanupResult);
+        assert.equal(outputs["reservation-id"], "");
+        assert.equal(outputs["reservation-state"], "");
+        assert.equal(outputs["incident-id"], "");
+        assert.equal(outputs["resource-health"], "healthy");
+        assert.equal(outputs["resource-reason"], "cleanup-evidence-unknown");
+        assert.equal(outputs["report-degraded"], "true");
+        assert.equal(outputs["report-validation-error"], "invalid-resource-reason");
+      });
+    });
+  }
 });
 
 test("schema 5 global incidents round-trip and require immutable evidence provenance", () => {
