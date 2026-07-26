@@ -102,6 +102,10 @@ The interrupted work adds:
 6. A pinned `devcontainers/ci` workflow now performs native amd64 and arm64 builds
    and runs the complete verifier inside each container. This is zero licensed
    Unity churn.
+7. Cursor's exact-SHA PR review found that `safe.directory` was configured after
+   the DDorch post-start fallback invoked repository-dependent setup. Both
+   lifecycle paths now configure it before any repository command, with an
+   ordering regression test.
 
 ## Verification evidence
 
@@ -130,6 +134,9 @@ Observed green after focused remediation:
   pinned image manifest contains native `linux/amd64` and `linux/arm64`, confirmed
   the pinned `devcontainers/ci` inputs, and resolved every documented Open VSX
   extension.
+- after Cursor remediation, the focused lifecycle suite passed 3/3 and the
+  complete verifier again passed 459 Node tests plus every Go, module,
+  actionlint, harness, and credential gate.
 
 The local host has no Docker executable, so native container builds remain
 unverified locally. The new hosted matrix is the authoritative pending evidence.
@@ -173,3 +180,8 @@ bounded by the external proof described above.
   remediator added the missing full-verifier, external-manifest/input, extension,
   and continuous-improvement evidence. Latest-round re-review reported no
   actionable findings.
+- Cursor Bugbot exact-SHA review: one medium portability finding accepted;
+  `safe.directory` now precedes repository-dependent setup in both lifecycle
+  paths. Independent re-review found and the main-thread remediator fixed one
+  false-pass in the ordering regression; a deletion mutation now proves absence
+  fails. The latest independent review reported no actionable findings.

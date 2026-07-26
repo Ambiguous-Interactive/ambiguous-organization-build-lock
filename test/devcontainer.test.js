@@ -4,6 +4,14 @@ import { test } from "node:test";
 
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 
+const assertAppearsBefore = (text, first, second, message) => {
+  const firstIndex = text.indexOf(first);
+  const secondIndex = text.indexOf(second);
+  assert.notEqual(firstIndex, -1, `${message}: missing prerequisite`);
+  assert.notEqual(secondIndex, -1, `${message}: missing dependent command`);
+  assert.ok(firstIndex < secondIndex, message);
+};
+
 test("dev container is portable, pinned, and editor-neutral", async () => {
   const config = await readJson(".devcontainer/devcontainer.json");
   const lock = await readJson(".devcontainer/devcontainer-lock.json");
@@ -106,6 +114,32 @@ test("dev container lifecycle scripts are committed", async () => {
   await access(".devcontainer/scripts/post-create.sh");
   await access(".devcontainer/scripts/post-start.sh");
   await access(".devcontainer/scripts/verify.sh");
+
+  const postCreate = await readFile(".devcontainer/scripts/post-create.sh", "utf8");
+  const postStart = await readFile(".devcontainer/scripts/post-start.sh", "utf8");
+  const safeDirectory = 'git config --global --replace-all safe.directory "${PWD}"';
+  assertAppearsBefore(
+    postCreate,
+    safeDirectory,
+    "go mod download",
+    "post-create must trust the bind mount before any repository command"
+  );
+  assertAppearsBefore(
+    postStart,
+    safeDirectory,
+    "bash .devcontainer/scripts/post-create.sh",
+    "post-start must trust the bind mount before invoking the fallback bootstrap"
+  );
+  assert.throws(
+    () =>
+      assertAppearsBefore(
+        postCreate.replace(safeDirectory, ""),
+        safeDirectory,
+        "go mod download",
+        "mutated post-create"
+      ),
+    /missing prerequisite/
+  );
 });
 
 test("hosted CI builds and verifies both native architectures", async () => {

@@ -36,6 +36,7 @@ if ! grep -Fqx "${history_line}" /home/vscode/.zshrc; then
   printf '\n%s\n' "${history_line}" >> /home/vscode/.zshrc
 fi
 
+git config --global --replace-all safe.directory "${PWD}"
 go mod download
 go -C tools/actionlint mod download
 bash tools/install-git-hooks.sh
