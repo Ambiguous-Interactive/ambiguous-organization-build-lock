@@ -273,8 +273,8 @@ caller's exact pre-activation state before it fails. A confirmed cleanup reports
 or rerun until supported release, post-action, or fallback cleanup has removed
 the caller from both holders and queue and a fresh lock-state read confirms it.
 The error identifies the sanitized source run and recovery inputs. Operators
-must reconcile every Unity Portal activation, then dispatch `Reap stale build
-locks` with `operation=recover-incident`, the exact incident ID, and
+must reconcile every Unity Portal activation, then dispatch `Recover build
+lock` with `operation=recover-incident`, the exact incident ID, and
 `portal-cleanup-confirmed=true`. Never edit `lock-state` or recover an incident
 without that external proof.
 
@@ -431,10 +431,19 @@ governed by the holder lease.
 
 ## Stale Recovery
 
-The `Reap stale build locks` workflow runs every 5 minutes. Before schema 4 it clears a holder
-when the holder workflow run has completed, or when the lease has expired and
-the run cannot be proven active. The same stale predicate is used by acquire and
-the reaper.
+The `Reap stale build locks` workflow requests reaping every five minutes with
+cron `*/5 * * * *`; GitHub schedule delivery is best effort, not a guaranteed
+five-minute recovery cadence. The independent `Reaper delivery audit` requests
+checks every ten minutes and synchronizes one deduplicated operational issue
+when the latest scheduled reaper delivery is older than 30 minutes, or when a
+run is unsuccessful or remains active beyond 15 minutes. Scheduled/manual
+reaping uses a stable group with `cancel-in-progress: false`; proof-bearing
+recovery uses a separate workflow with no automatic concurrency cancellation.
+A new schedule cannot cancel running or pending recovery; concurrent state
+attempts remain inside the existing compare-and-swap retry contract. Before
+schema 4 the reaper clears a holder when the holder workflow run has completed,
+or when the lease has expired and the run cannot be proven active. The same
+stale predicate is used by acquire and the reaper.
 
 Under schema 4 and 5, stale holders are quarantined instead of freed. A queued job
 on the same physical runner reclaims a quarantine first (return-at-start), which is
@@ -453,14 +462,16 @@ The reaper fails closed when the owning run status cannot be confirmed (the
 quarantine is kept) and skips recovery while a global incident is already
 active.
 
-Operators may still force recovery by dispatching the reaper with `operation=recover`,
-the exact reservation ID, and `resource-safe=true` after confirming Unity portal
-cleanup; like auto-recovery it starts a cooldown rather than freeing capacity outright.
+Operators may still force recovery by dispatching `Recover build lock` with
+`operation=recover`, the exact reservation ID, and `resource-safe=true` after
+confirming Unity portal cleanup; like auto-recovery it starts a cooldown rather
+than freeing capacity outright.
 
-For schema 5, dispatch `operation=recover-incident` with the exact incident ID
-and `portal-cleanup-confirmed=true` only after the Unity portal inventory is
-reconciled. Recovery clears the global incident into a normal cooldown; a wrong
-ID or missing proof fails closed.
+For schema 5, dispatch `Recover build lock` with
+`operation=recover-incident`, the exact incident ID, and
+`portal-cleanup-confirmed=true` only after the Unity portal inventory is
+reconciled. Recovery clears the global incident into a normal cooldown; a
+wrong ID or missing proof fails closed.
 
 `stale-recovered` remains in the versioned output contract but is always false:
 consumer acquire no longer replaces stale holders. The scheduled reaper is the

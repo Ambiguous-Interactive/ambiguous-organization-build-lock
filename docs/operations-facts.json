@@ -1,8 +1,14 @@
 {
   "stateSchema": 5,
   "publishedRelease": {
-    "tag": "v1.8.3",
-    "commit": "59a2fa98224569e5a697f271a3ac4b866c53ac2c"
+    "tag": "v1.9.1",
+    "commit": "a00614ace745152a659c5c2654f7cefb68a5a628"
+  },
+  "reaperDelivery": {
+    "requestedSchedule": "*/5 * * * *",
+    "monitorSchedule": "7,17,27,37,47,57 * * * *",
+    "maximumDeliveryDelaySeconds": 1800,
+    "maximumRunDurationSeconds": 900
   },
   "enrolledConsumers": [
     "Ambiguous-Interactive/DoxReloaded",

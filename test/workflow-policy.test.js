@@ -14,6 +14,8 @@ const expectedWorkflowJobs = new Map([
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
+  ["recover-build-lock.yml", ["recover"]],
+  ["reaper-delivery-audit.yml", ["audit"]],
   ["reap-stale-locks.yml", ["reap"]]
 ]);
 const expectedWorkflowRunScriptSignatures = new Map([
@@ -49,6 +51,11 @@ const expectedWorkflowRunScriptSignatures = new Map([
       'echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"',
       "go run ./cmd/workflow-credential-audit\nunity-automation"
     ]
+  ],
+  ["recover-build-lock.yml", []],
+  [
+    "reaper-delivery-audit.yml",
+    ["go run ./cmd/reaper-delivery-audit --workflow=reap-stale-locks.yml --max-delivery-delay=30m --max-run-duration=15m"]
   ],
   ["reap-stale-locks.yml", []]
 ]);
@@ -2487,10 +2494,15 @@ test("scheduled manual workflows declare stable concurrency", () => {
     );
   }
 
-  assert.deepEqual(checkedWorkflows.sort(), ["auto-release.yml", "dx-unity-automation-audit.yml", "reap-stale-locks.yml"]);
+  assert.deepEqual(checkedWorkflows.sort(), [
+    "auto-release.yml",
+    "dx-unity-automation-audit.yml",
+    "reap-stale-locks.yml",
+    "reaper-delivery-audit.yml"
+  ]);
 });
 
-test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
+test("reap stale locks workflow is reaping-only and cannot cancel recovery", () => {
   const text = readWorkflow("reap-stale-locks.yml");
   const concurrency = workflowConcurrency(text);
   const reapSteps = workflowJobStepMaps(text, "reap");
@@ -2503,13 +2515,14 @@ test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
     ["reap"]
   );
   assert.equal(concurrency.group, "build-lock-reaper");
-  assert.equal(concurrency["cancel-in-progress"], "true");
+  assert.equal(concurrency["cancel-in-progress"], "false");
   assert.ok(reapActionStep, "reap job must call the local reap-stale-locks action");
   assert.equal(reapActionStep.with["lock-name"], "wallstop-organization-builds");
-  assert.match(reapActionStep.with.operation, /github\.event\.inputs\.operation/);
-  assert.match(reapActionStep.with["reservation-id"], /github\.event\.inputs\['reservation-id'\]/);
-  assert.match(reapActionStep.with["resource-safe"], /github\.event\.inputs\['resource-safe'\]/);
-  assert.doesNotMatch(text, /\$\{\{\s*inputs(?:\.|\[)/);
+  assert.equal(reapActionStep.with.operation, "reap");
+  assert.equal(reapActionStep.with["reservation-id"], undefined);
+  assert.equal(reapActionStep.with["resource-safe"], undefined);
+  assert.equal(reapActionStep.with["incident-id"], undefined);
+  assert.equal(reapActionStep.with["portal-cleanup-confirmed"], undefined);
   assert.equal(reapActionStep.env.BUILD_LOCK_APP_ID, "${{ secrets.BUILD_LOCK_APP_ID }}");
   assert.equal(
     reapActionStep.env.BUILD_LOCK_APP_PRIVATE_KEY,
@@ -2517,6 +2530,58 @@ test("reap stale locks workflow keeps scheduled manual cleanup wiring", () => {
   );
   assert.equal(reapActionStep.env.BUILD_LOCK_TOKEN, undefined);
   assert.doesNotMatch(text, /ORG_BUILD_LOCK_TOKEN/);
+});
+
+test("proof-bearing recovery uses an uncancellable workflow separate from scheduled reaping", () => {
+  const text = readWorkflow("recover-build-lock.yml");
+  const concurrency = workflowConcurrency(text);
+  const recoverSteps = workflowJobStepMaps(text, "recover");
+  const recoverActionStep = recoverSteps.find((step) => step.uses === "./.github/actions/reap-stale-locks");
+
+  assert.equal(workflowHasTrigger(text, "schedule"), false);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.deepEqual(jobSections(text).map((job) => job.name), ["recover"]);
+  assert.equal(concurrency, null, "proof-bearing recovery must not use automatic cancellation");
+  assert.ok(recoverActionStep, "recovery job must call the local reap-stale-locks action");
+  assert.equal(recoverActionStep.with["lock-name"], "wallstop-organization-builds");
+  assert.equal(recoverActionStep.with.operation, "${{ inputs.operation }}");
+  assert.match(recoverActionStep.with["reservation-id"], /inputs\['reservation-id'\]/);
+  assert.match(recoverActionStep.with["resource-safe"], /inputs\['resource-safe'\]/);
+  assert.match(recoverActionStep.with["incident-id"], /inputs\['incident-id'\]/);
+  assert.match(recoverActionStep.with["portal-cleanup-confirmed"], /inputs\['portal-cleanup-confirmed'\]/);
+  assert.equal(recoverActionStep.env.BUILD_LOCK_APP_ID, "${{ secrets.BUILD_LOCK_APP_ID }}");
+  assert.equal(
+    recoverActionStep.env.BUILD_LOCK_APP_PRIVATE_KEY,
+    "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}"
+  );
+  assert.equal(recoverActionStep.env.BUILD_LOCK_READER_APP_ID, undefined);
+  assert.equal(recoverActionStep.env.BUILD_LOCK_READER_APP_PRIVATE_KEY, undefined);
+});
+
+test("reaper delivery audit is independent, least privilege, and fail-closed", () => {
+  const text = readWorkflow("reaper-delivery-audit.yml");
+  const concurrency = workflowConcurrency(text);
+  const jobs = jobSections(text);
+  const steps = workflowJobStepMaps(text, "audit");
+  const auditStep = steps.find((step) => step.name === "Audit scheduled reaper delivery");
+
+  assert.equal(workflowHasTrigger(text, "schedule"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.deepEqual(jobs.map((job) => job.name), ["audit"]);
+  assert.equal(concurrency.group, "reaper-delivery-audit");
+  assert.equal(concurrency["cancel-in-progress"], "false");
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "actions", "read"), true);
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "issues", "write"), true);
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "contents", "read"), true);
+  assert.ok(auditStep, "monitor workflow must run the committed audit command");
+  assert.equal(auditStep.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.equal(auditStep.env.GITHUB_REPOSITORY, "${{ github.repository }}");
+  assert.equal(auditStep.env.GITHUB_API_URL, "${{ github.api_url }}");
+  assert.match(auditStep.run, /--workflow=reap-stale-locks\.yml/);
+  assert.match(auditStep.run, /--max-delivery-delay=30m/);
+  assert.match(auditStep.run, /--max-run-duration=15m/);
+  assert.doesNotMatch(auditStep.run, /\$\{\{\s*(?:secrets\.|github\.token)/);
+  assert.doesNotMatch(text, /BUILD_LOCK_(?:APP|READER|TOKEN)/);
 });
 
 test("semantic-release GitHub workflows declare required token permissions", () => {

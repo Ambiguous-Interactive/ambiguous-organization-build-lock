@@ -21,8 +21,8 @@ The committed sources of truth are
 - Runner serialization: `enabled`
 - Resource lifecycle: `enabled`
 - Confirmed-cleanup cooldown: `1` second
-- Published compatibility release: `v1.8.3` at
-  `59a2fa98224569e5a697f271a3ac4b866c53ac2c`
+- Published compatibility release: `v1.9.1` at
+  `a00614ace745152a659c5c2654f7cefb68a5a628`
 
 The one-second cooldown is transitional. Issue #60 tracks publishing and
 deploying allow-zero action code before changing the committed value to zero.
@@ -147,6 +147,40 @@ After any cancellation:
 
 The scheduled reaper confirms terminal workflow runs and applies schema-5
 recovery semantics. It keeps state unchanged when run status cannot be proven.
+The requested five-minute cron is not a guaranteed delivery cadence. GitHub
+schedule delivery is best effort; the current observed delivery can be tens of
+minutes late.
+
+The independent `Reaper delivery audit` workflow requests checks at minutes
+7, 17, 27, 37, 47, and 57. It queries scheduled reaper run history rather than
+depending on the reaper itself having run. It opens, updates, reopens, or closes
+one marker-identified incident issue. The issue contains run IDs, timestamps,
+reason codes, and commit SHAs only. It synchronizes an alert when:
+
+- no scheduled run history can be proven;
+- the latest delivery exceeds the 30-minute delivery threshold;
+- a delivered run remains active beyond the 15-minute run-duration threshold;
+- the latest run is unsuccessful.
+
+A known condition is a successful monitor outcome once the issue is
+synchronized; the open issue carries the operational red state without making
+every scheduled monitor run itself fail. The workflow fails red when run
+history is unavailable, malformed, oversized, cross-origin, or otherwise
+ambiguous, or when incident synchronization cannot be confirmed.
+
+The monitor is itself GitHub-scheduled, so it improves detection but does not
+create a bounded recovery SLO. If recovery must be guaranteed within 30
+minutes, provision an independent least-privilege trigger that can dispatch
+only the existing reaper workflow; it must not receive writer or Unity
+credentials and cannot bypass exact reservation/incident proof.
+
+`Reap stale build locks` owns scheduled and manual `reap` operations.
+Proof-bearing `recover` / `recover-incident` operations run only through the
+separate `Recover build lock` workflow, which has no automatic concurrency
+cancellation. The scheduled/manual reaper has a stable group with cancellation
+disabled, so a schedule cannot replace or cancel running or pending recovery.
+Concurrent reaping and recovery still use the lock action's compare-and-swap
+retry and exact-ID fencing.
 Monitor and alert on:
 
 - `20111` or any account-blocked classification;

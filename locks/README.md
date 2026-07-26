@@ -2,10 +2,11 @@
 
 The lock actions create JSON state files on the `lock-state` branch.
 
-Never edit or delete lock files by hand. Use the `Reap stale build locks`
-workflow for reaping and exact-ID recovery. A runner quarantine requires Unity
-portal cleanup proof plus its exact reservation ID; a global incident requires
-portal reconciliation plus its exact incident ID.
+Never edit or delete lock files by hand. `Reap stale build locks` owns
+scheduled/manual stale-state reaping. Use the separate `Recover build lock`
+workflow for exact-ID recovery. A runner quarantine requires Unity portal
+cleanup proof plus its exact reservation ID; a global incident requires portal
+reconciliation plus its exact incident ID.
 
 ## Lock Config
 

@@ -4,38 +4,10 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
-    inputs:
-      operation:
-        description: Reap stale state or recover a confirmed quarantine
-        required: true
-        type: choice
-        options:
-          - reap
-          - recover
-          - recover-incident
-        default: reap
-      reservation-id:
-        description: Exact quarantine reservation ID (recover only)
-        required: false
-        type: string
-      resource-safe:
-        description: Confirm the external Unity activation was returned (recover only)
-        required: false
-        type: boolean
-        default: false
-      incident-id:
-        description: Exact global incident ID (recover-incident only)
-        required: false
-        type: string
-      portal-cleanup-confirmed:
-        description: Confirm Unity portal cleanup (recover-incident only)
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: build-lock-reaper
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -53,11 +25,7 @@ jobs:
         uses: ./.github/actions/reap-stale-locks
         with:
           lock-name: wallstop-organization-builds
-          operation: ${{ github.event.inputs.operation || 'reap' }}
-          reservation-id: ${{ github.event.inputs['reservation-id'] || '' }}
-          resource-safe: ${{ github.event.inputs['resource-safe'] || false }}
-          incident-id: ${{ github.event.inputs['incident-id'] || '' }}
-          portal-cleanup-confirmed: ${{ github.event.inputs['portal-cleanup-confirmed'] || false }}
+          operation: reap
         env:
           BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}

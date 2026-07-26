@@ -7480,6 +7480,7 @@ test("schema 5 global incident blocks acquire immediately without growing the qu
     incident.runnerId,
     incident.reportedAt,
     incident.reason,
+    "Recover build lock",
     "operation=recover-incident",
     `incident-id=${incident.incidentId}`,
     "portal-cleanup-confirmed=true"
@@ -7619,6 +7620,7 @@ test("schema 5 incident cleanup failure reports a typed fail-closed result", asy
   assert.match(rejection.message, /First, use supported release, post-action, or fallback cleanup/);
   assert.match(rejection.message, /confirm that removal with a fresh lock-state read/);
   assert.match(rejection.message, /reconcile every Unity Portal activation/);
+  assert.match(rejection.message, /Recover build lock/);
   assert.match(rejection.message, /operation=recover-incident/);
   assert.match(rejection.message, new RegExp(`incident-id=${incident.incidentId}`));
   assert.match(rejection.message, /portal-cleanup-confirmed=true/);

@@ -2328,14 +2328,14 @@ function activeIncidentAdmissionMessage(lockName, incident, options = {}) {
         `First, use supported release, post-action, or fallback cleanup to remove caller ` +
         `${oneLine(options.holderId)} from both holders and queue, and confirm that removal with a fresh ` +
         `lock-state read. After caller removal is confirmed, reconcile every Unity Portal activation. ` +
-        `Then dispatch Reap stale build locks with operation=recover-incident, ` +
+        `Then dispatch Recover build lock with operation=recover-incident, ` +
         `incident-id=${oneLine(incident.incidentId)}, and portal-cleanup-confirmed=true. ` +
         `Only then rerun the consumer.`
     );
   }
   return oneLine(
     context +
-      `After reconciling every Unity Portal activation, dispatch Reap stale build locks with ` +
+      `After reconciling every Unity Portal activation, dispatch Recover build lock with ` +
       `operation=recover-incident, incident-id=${oneLine(incident.incidentId)}, and ` +
       `portal-cleanup-confirmed=true; then rerun the consumer.`
   );
