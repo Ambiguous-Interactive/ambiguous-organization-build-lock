@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:30186577551:unitypackage-smoke:unitypackage-smoke-30186577551",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "30186577551",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/30186577551",
-    "queuedAt": "2026-07-26T05:06:31.966Z",
-    "acquiredAt": "2026-07-26T05:06:34.146Z",
-    "expiresAt": "2026-07-26T09:06:34.146Z",
-    "runnerId": "GitHub Actions 1000128457"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:30186577551:unitypackage-smoke:unitypackage-smoke-30186577551",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "30186577551",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/30186577551",
-      "queuedAt": "2026-07-26T05:06:31.966Z",
-      "acquiredAt": "2026-07-26T05:06:34.146Z",
-      "expiresAt": "2026-07-26T09:06:34.146Z",
-      "runnerId": "GitHub Actions 1000128457"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-26T04:20:21.612Z"
+    },
+    {
+      "reservationId": "60ac3133-b571-4aab-86a9-e3031a5ff860",
+      "holderId": "Ambiguous-Interactive/unity-helpers:30186577551:unitypackage-smoke:unitypackage-smoke-30186577551",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "30186577551",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/30186577551",
+      "runnerId": "GitHub Actions 1000128457",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-26T05:08:39.041Z",
+      "availableAt": "2026-07-26T05:08:40.041Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-26T05:06:34.146Z"
+  "updatedAt": "2026-07-26T05:08:39.042Z"
 }
