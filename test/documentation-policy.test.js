@@ -40,6 +40,29 @@ test("steady-state runbook reports live schema-5 configuration", () => {
   assert.match(operations, /- Resource lifecycle: `enabled`/);
 });
 
+test("reaper delivery SLO facts and guidance stay synchronized", () => {
+  const facts = JSON.parse(read(factsPath));
+  const operations = read(operationsPath);
+  const readme = read(path.join(repoRoot, "README.md"));
+
+  assert.deepEqual(facts.reaperDelivery, {
+    requestedSchedule: "*/5 * * * *",
+    monitorSchedule: "7,17,27,37,47,57 * * * *",
+    maximumDeliveryDelaySeconds: 1800,
+    maximumRunDurationSeconds: 900
+  });
+  assert.match(operations, /requested five-minute cron is not a guaranteed delivery cadence/i);
+  assert.match(operations, /30-minute delivery threshold/);
+  assert.match(operations, /15-minute run-duration threshold/);
+  assert.match(operations, /independent `Reaper delivery audit` workflow/);
+  assert.match(operations, /run IDs, timestamps,\s+reason codes, and commit SHAs only/);
+  assert.match(operations, /separate `Recover build lock` workflow/);
+  assert.match(operations, /no automatic concurrency\s+cancellation/);
+  assert.match(operations, /cannot replace or cancel running or\s+pending recovery/);
+  assert.match(readme, /requests reaping every five minutes/i);
+  assert.doesNotMatch(readme, /reaper(?: workflow)? runs every 5 minutes/i);
+});
+
 test("steady-state runbook reports the registered release and consumer inventory", () => {
   const facts = JSON.parse(read(factsPath));
   const operations = read(operationsPath);

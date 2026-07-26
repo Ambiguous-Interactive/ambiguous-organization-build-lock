@@ -10,6 +10,11 @@ description: Apply repository GitHub Actions safety policy. Use when editing wor
 - Grant the smallest job/workflow permissions required.
 - Every concurrency scope capable of reaching licensed acquire must literally
   set `cancel-in-progress: false`.
+- `cancel-in-progress: false` protects the running member but GitHub can still
+  replace an older pending member of the same group. Periodic work must not
+  share a concurrency group with proof-bearing recovery. Keep recovery outside
+  automatic concurrency cancellation or isolate it from periodic groups, and
+  preserve CAS/exact-ID fencing for any resulting concurrent state attempts.
 - Licensed matrices set `strategy.fail-fast: false`.
 - Keep credentials out of command text, URLs, diagnostics, and direct secret
   interpolation in shell.

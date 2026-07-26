@@ -1,0 +1,55 @@
+name: Recover build lock
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Recover a confirmed quarantine or global incident
+        required: true
+        type: choice
+        options:
+          - recover
+          - recover-incident
+      reservation-id:
+        description: Exact quarantine reservation ID (recover only)
+        required: false
+        type: string
+      resource-safe:
+        description: Confirm the external Unity activation was returned (recover only)
+        required: false
+        type: boolean
+        default: false
+      incident-id:
+        description: Exact global incident ID (recover-incident only)
+        required: false
+        type: string
+      portal-cleanup-confirmed:
+        description: Confirm Unity portal cleanup (recover-incident only)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    name: Recover confirmed Unity lock state
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Recover confirmed wallstop organization build lock state
+        uses: ./.github/actions/reap-stale-locks
+        with:
+          lock-name: wallstop-organization-builds
+          operation: ${{ inputs.operation }}
+          reservation-id: ${{ inputs['reservation-id'] || '' }}
+          resource-safe: ${{ inputs['resource-safe'] || false }}
+          incident-id: ${{ inputs['incident-id'] || '' }}
+          portal-cleanup-confirmed: ${{ inputs['portal-cleanup-confirmed'] || false }}
+        env:
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
