@@ -1,5 +1,5 @@
 name: Check Unity runner availability
-description: Fail closed unless every required label set has an online runner accessible to the calling repository.
+description: Fail closed unless every required label set has a registered runner accessible to the calling repository.
 inputs:
   reader-app-id:
     description: GitHub App ID with organization self-hosted runners read permission.
@@ -12,13 +12,13 @@ inputs:
     required: false
     default: Ambiguous-Interactive
   required-label-sets:
-    description: JSON array of label arrays; every label array must match at least one online runner.
+    description: JSON array of label arrays; every label array must match at least one registered accessible runner.
     required: true
 outputs:
   online-runner-count:
     description: Number of online runners in groups visible to the calling repository.
   matched-runners:
-    description: JSON array containing accessible matching online runner names for each required label set.
+    description: JSON array of per-label-set entries carrying the matching online runner names and the matching registered runner names.
 runs:
   using: node24
   main: ../../dist/check-unity-runners.js

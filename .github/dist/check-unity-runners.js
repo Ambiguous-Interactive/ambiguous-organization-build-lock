@@ -220,9 +220,9 @@ async function readAccessibleOrganizationRunners(owner, repository, getPage) {
   return [...runnersById.values()];
 }
 
-function matchingOnlineRunners(runners, requiredLabels) {
+function matchingRegisteredRunners(runners, requiredLabels) {
   return runners.filter((runner) => {
-    if (!runner || runner.status !== "online" || !Array.isArray(runner.labels)) {
+    if (!runner || !Array.isArray(runner.labels)) {
       return false;
     }
     const labels = new Set(
@@ -232,6 +232,12 @@ function matchingOnlineRunners(runners, requiredLabels) {
     );
     return requiredLabels.every((label) => labels.has(label));
   });
+}
+
+function matchingOnlineRunners(runners, requiredLabels) {
+  return matchingRegisteredRunners(runners, requiredLabels).filter(
+    (runner) => runner.status === "online"
+  );
 }
 
 async function execute(options = {}) {
@@ -268,15 +274,36 @@ async function execute(options = {}) {
   const onlineRunnerCount = runners.filter((runner) => runner && runner.status === "online").length;
   const matches = requiredLabelSets.map((labels) => ({
     labels,
-    runners: matchingOnlineRunners(runners, labels).map((runner) => runner.name)
+    runners: matchingOnlineRunners(runners, labels).map((runner) => runner.name),
+    registered: matchingRegisteredRunners(runners, labels).map((runner) => runner.name)
   }));
-  const missing = matches.filter((match) => match.runners.length === 0);
-  if (missing.length > 0) {
+
+  // The preflight exists to catch a job that NOTHING will ever pick up, so the
+  // question it must answer is whether a matching runner is REGISTERED in a group
+  // this repository can see -- not whether one happens to be connected during the
+  // few seconds this action runs. A busy runner has always counted as available
+  // infrastructure because the job simply queues behind it; a runner that is
+  // registered but momentarily disconnected queues in exactly the same way, and
+  // GitHub holds the job until it reconnects. Failing on that state converts a
+  // machine reboot, a sleep window, or a runner-service restart into a red
+  // required check on work the fleet would have run minutes later.
+  const unregistered = matches.filter((match) => match.registered.length === 0);
+  if (unregistered.length > 0) {
     throw new Error(
-      `No accessible online organization runner matches required label set(s): ${missing
+      `No accessible organization runner is registered for required label set(s): ${unregistered
         .map((match) => `[${match.labels.join(", ")}]`)
-        .join("; ")}.`
+        .join("; ")}. A job requiring those labels can never be picked up.`
     );
+  }
+
+  const offline = matches.filter((match) => match.runners.length === 0);
+  for (const match of offline) {
+    const notice =
+      `Every runner registered for [${match.labels.join(", ")}] is currently offline ` +
+      `(${match.registered.join(", ")}). The licensed job will stay queued until one ` +
+      "reconnects; this is queueing, not a preflight failure.";
+    console.log(`::warning::${workflowCommandData(notice)}`);
+    appendSummary(`Unity runner preflight: ${notice}`);
   }
 
   writeOutput("online-runner-count", onlineRunnerCount);
@@ -311,6 +338,7 @@ module.exports = {
   classifyRunnerInventoryError,
   execute,
   matchingOnlineRunners,
+  matchingRegisteredRunners,
   parseRequiredLabelSets,
   parseRepository,
   readAccessibleOrganizationRunners,

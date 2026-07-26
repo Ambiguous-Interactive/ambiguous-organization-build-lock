@@ -10,6 +10,7 @@ const {
   classifyRunnerInventoryError,
   execute,
   matchingOnlineRunners,
+  matchingRegisteredRunners,
   parseRequiredLabelSets,
   parseRepository,
   readAccessibleOrganizationRunners,
@@ -78,6 +79,17 @@ test("runner matching requires every label and an online status", () => {
     "an online busy runner is available infrastructure and may queue work"
   );
   assert.deepEqual(matchingOnlineRunners(runners, ["self-hosted", "linux", "unity"]), []);
+
+  assert.deepEqual(
+    matchingRegisteredRunners(runners, ["self-hosted", "linux", "unity"]).map((runner) => runner.id),
+    [2],
+    "an offline runner is still registered infrastructure that can pick the job up later"
+  );
+  assert.deepEqual(
+    matchingRegisteredRunners(runners, ["self-hosted", "linux"]).map((runner) => runner.id),
+    [2, 3]
+  );
+  assert.deepEqual(matchingRegisteredRunners(runners, ["self-hosted", "macos"]), []);
 });
 
 test("calling repository identity is canonical and organization-owned", () => {
@@ -309,7 +321,10 @@ test("runtime requests only organization runner read permission and rejects an e
   assert.match(fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"), /^online-runner-count=1$/m);
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
-  await assert.rejects(() => execute(), /No accessible online organization runner matches/);
+  await assert.rejects(
+    () => execute(),
+    /No accessible organization runner is registered for required label set\(s\): \[self-hosted, linux, unity\]/
+  );
 });
 
 test("runner retry policy also covers GitHub App installation discovery", async (t) => {
@@ -459,4 +474,75 @@ test("runtime validates repository identity before parsing credentials or making
   global.fetch = async () => assert.fail("repository validation must precede network access");
 
   await assert.rejects(() => execute(), /repository owner is not authorized/i);
+});
+
+test("a registered label set whose runners are all offline queues instead of failing", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runner-preflight-offline-"));
+
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const logged = [];
+  console.log = (line) => logged.push(String(line));
+
+  process.env["INPUT_READER-APP-ID"] = "12345";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux"]]';
+  process.env.GITHUB_OUTPUT = path.join(tempRoot, "output.txt");
+  process.env.GITHUB_STEP_SUMMARY = path.join(tempRoot, "summary.md");
+
+  global.fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      return jsonResponse({ id: 99 });
+    }
+    if (parsed.pathname === "/app/installations/99/access_tokens") {
+      return jsonResponse({ token: "short-lived-reader-token", expires_at: "2099-01-01T00:00:00Z" });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
+      return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {
+      return jsonResponse({
+        total_count: 1,
+        runners: [
+          {
+            id: 1,
+            name: "box-linux",
+            status: "offline",
+            busy: false,
+            labels: [{ name: "self-hosted" }, { name: "Linux" }]
+          }
+        ]
+      });
+    }
+    return jsonResponse({ message: "unexpected test request" }, 404);
+  };
+
+  const result = await execute();
+
+  assert.equal(result.onlineRunnerCount, 0);
+  assert.deepEqual(result.matches, [
+    { labels: ["self-hosted", "linux"], runners: [], registered: ["box-linux"] }
+  ]);
+
+  const warnings = logged.filter((line) => line.startsWith("::warning::"));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /box-linux/);
+  assert.match(warnings[0], /queueing, not a preflight failure/);
+  assert.doesNotMatch(warnings[0], /\n/);
+
+  const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
+  assert.match(summary, /currently offline/);
+  assert.match(summary, /^Unity runner preflight passed for Ambiguous-Interactive\/unity-helpers/m);
+  assert.match(fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"), /^online-runner-count=0$/m);
 });
