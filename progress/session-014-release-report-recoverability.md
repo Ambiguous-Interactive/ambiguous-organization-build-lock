@@ -2,7 +2,7 @@
 
 Date: 2026-07-26
 
-Status: implementation and remediation green locally; final review and delivery pending
+Status: complete; implementation merged and verified green on main
 
 ## Objective and boundary
 
@@ -159,5 +159,23 @@ conservatively and fail only after exact ownership cleanup is attempted.
   intentionally outside this zero-Unity change; degraded-report cleanup reuses
   the existing independently tested ambiguous-CAS reconciliation path.
 
-PR review, merge, and post-merge `main` verification remain pending and will be
-recorded here before completion.
+## Delivery and main verification
+
+- PR #95 contained one implementation commit,
+  `99b5495ee7d05eab2b998e146bf8d39a4f1b27a1`, whose tree
+  `e3e2915e1fb163aa57505d56f0733924db4ff8d3` exactly matched the locally
+  verified tree.
+- Build lock CI run `30211924882` passed every validation step on that exact PR
+  head.
+- Cursor Bugbot reviewed that exact head and found no new issues. Copilot was
+  explicitly requested and returned its terminal quota-limit response without
+  code feedback. No review thread remained.
+- PR #95 was squash-merged as
+  `ce45a46a1bbd740b1a078be68809b3e06ac6e045`.
+- Push-triggered Build lock CI run `30212609375` passed on that exact merge
+  commit. Issues #88 and #89 closed as completed.
+- Dependency compatibility follow-up #94 remains open with a reproducible,
+  zero-Unity acceptance contract.
+
+No Unity workflow, licensed seat, portal mutation, organization policy change,
+or credential value was used for this delivery.
