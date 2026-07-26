@@ -2,7 +2,7 @@
 
 Date: 2026-07-26
 
-Status: locally verified and review-clean; delivery pending
+Status: complete; merged, runtime-proven, and main-green
 
 ## Objective and boundary
 
@@ -88,5 +88,23 @@ The fresh complete verifier passed 553 Node tests, all Go packages, actionlint,
 both module checksum/tidy gates, the harness, syntax checks, and the credential
 audit. The monitor also passed `go test -race`.
 
-Exact-head review/CI, merge, post-merge monitor execution, issue closure, and
-main verification are pending.
+PR #97 published exact head
+`3f2fe9102969810dfbf38869b1828dc3c2584228`, whose remote tree
+`3b2c09c33b2cb88bcbb288a4fe6b7f55570b3510` matched the locally verified
+tree. Build lock CI run 30219668279 passed on that head.
+
+Cursor Bugbot reviewed that exact head with no findings or review threads.
+Copilot was triggered both through GitHub's reviewer API and an exact-head
+tagged comment, but reported that the requester's review quota was exhausted.
+The main-thread adversarial review therefore remains the independent
+correctness evidence for the unavailable reviewer path.
+
+PR #97 was squash-merged with an expected-head fence as
+`9f44e4a253108cdd884145d4eb95e2d0ad50b857`. Issue #77 closed as completed,
+and post-merge Build lock CI run 30219771920 passed on that exact main commit.
+
+The active default-branch Reaper delivery audit then ran from that same exact
+main commit. Scheduled run 30220739735 and job 89842628232 completed
+successfully; the audit log reported `healthy`, the token permissions were
+limited to Actions read, Contents read, and Issues write, and no open delivery
+incident was created.

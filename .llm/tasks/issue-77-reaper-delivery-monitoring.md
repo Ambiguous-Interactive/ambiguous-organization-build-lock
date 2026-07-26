@@ -85,7 +85,12 @@
   credential audit passed after final remediation.
 - `go test -race ./cmd/reaper-delivery-audit`: passed.
 - `git diff --check` and `node tools/llm-harness.mjs check`: passed.
-- Remote exact-head CI remains pending delivery.
+- PR-head Build lock CI run 30219668279 passed on exact head
+  `3f2fe9102969810dfbf38869b1828dc3c2584228`.
+- Post-merge Build lock CI run 30219771920 passed on exact main commit
+  `9f44e4a253108cdd884145d4eb95e2d0ad50b857`.
+- Default-branch scheduled delivery audit run 30220739735 and job 89842628232
+  passed on that same main commit with a `healthy` result and no open incident.
 
 ## Adversarial review
 
@@ -94,12 +99,12 @@
   cross-origin token forwarding, oversized bodies, pagination escape,
   malformed timestamps/SHA/status, issue duplication, API-write churn, stale
   recovery workflow names, and concurrent recovery/reaping.
-- Intent-to-diff status: locally complete; remote workflow execution and issue
-  lifecycle remain to be proven.
+- Intent-to-diff status: PR #97 merged, issue #77 closed, exact-head plus
+  post-merge main CI passed, and the first scheduled audit completed healthy.
 - Unverifiable items and open questions: GitHub schedule delivery remains
   best-effort; a bounded recovery SLO needs an independent external trigger.
-- Remaining uncertainty: actual post-merge monitor metadata and GitHub issue
-  permissions require a default-branch/manual run.
+- Remaining uncertainty: GitHub schedule delivery remains best-effort and a
+  bounded recovery SLO still requires an external trigger.
 - Implementer: primary agent.
 - Reviewer and evidence: main-thread fresh diff-first review because the active
   agent mode prohibits spawning unless explicitly requested.
@@ -113,7 +118,10 @@
   no-op closed health, redirect fencing, bot-author ownership and duplicate
   rejection, and v1.9.1 fact synchronization.
 - Latest review round outcome: no actionable findings after fresh diff review,
-  553-test full verification, and the race-enabled monitor suite.
+  553-test full verification, the race-enabled monitor suite, and Cursor
+  Bugbot review of the exact PR head. Copilot was requested through both the
+  reviewer API and an exact-head tagged comment but reported exhausted
+  requester quota.
 - Main-thread fallback reason: sub-agents were not explicitly requested and
   current multi-agent instructions prohibit proactive delegation.
 
