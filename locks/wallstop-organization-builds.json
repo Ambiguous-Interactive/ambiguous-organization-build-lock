@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:30242098126:unity-tests:2021.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "30242098126",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30242098126",
-    "queuedAt": "2026-07-27T06:39:20.009Z",
-    "acquiredAt": "2026-07-27T06:43:04.086Z",
-    "expiresAt": "2026-07-27T10:43:04.086Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30242098126:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30242098126",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30242098126",
-      "queuedAt": "2026-07-27T06:39:20.009Z",
-      "acquiredAt": "2026-07-27T06:43:04.086Z",
-      "expiresAt": "2026-07-27T10:43:04.086Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-27T06:12:11.310Z"
+    },
+    {
+      "reservationId": "d814eb77-d662-4588-9f26-329843d44681",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30242098126:unity-tests:2021.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "30242098126",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30242098126",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-27T06:43:45.834Z",
+      "availableAt": "2026-07-27T06:43:46.834Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T06:43:04.086Z"
+  "updatedAt": "2026-07-27T06:43:45.835Z"
 }
