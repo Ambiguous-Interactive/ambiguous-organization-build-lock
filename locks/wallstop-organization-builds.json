@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:30226886384:unity:qora-EditMode",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "30226886384",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30226886384",
+    "queuedAt": "2026-07-27T00:21:08.299Z",
+    "acquiredAt": "2026-07-27T00:21:10.673Z",
+    "expiresAt": "2026-07-27T04:21:10.673Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/qora-redux:30226886384:unity:qora-EditMode",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "30226886384",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30226886384",
+      "queuedAt": "2026-07-27T00:21:08.299Z",
+      "acquiredAt": "2026-07-27T00:21:10.673Z",
+      "expiresAt": "2026-07-27T04:21:10.673Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "d80d036f-12ab-4db7-985d-f3d3934f22cb",
-      "holderId": "Ambiguous-Interactive/IshoBoy:30225896427:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "30225896427",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30225896427",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-missing-positive-evidence",
-      "createdAt": "2026-07-27T00:20:09.303Z"
-    },
     {
       "reservationId": "48f359cc-a5c7-4cc9-96b0-01a25e74b591",
       "holderId": "Ambiguous-Interactive/unity-helpers:30224097322:unity-tests-standalone:6000.5.2f1-standalone",
@@ -36,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T00:21:34.125Z"
+  "updatedAt": "2026-07-27T00:21:10.674Z"
 }
