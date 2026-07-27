@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30235214975:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "30235214975",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30235214975",
+    "queuedAt": "2026-07-27T03:45:10.314Z",
+    "acquiredAt": "2026-07-27T03:49:49.908Z",
+    "expiresAt": "2026-07-27T07:49:49.908Z",
+    "runnerId": "tiny-box-linux"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30235214975:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,8 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30235214975",
       "queuedAt": "2026-07-27T03:45:10.314Z",
+      "acquiredAt": "2026-07-27T03:49:49.908Z",
+      "expiresAt": "2026-07-27T07:49:49.908Z",
       "runnerId": "tiny-box-linux"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:30235305364:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -27,38 +42,7 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "41203ec7-eefa-43b8-b14c-0d2acf8a50ab",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30235214975:unity-tests:unity-tests-1",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "30235214975",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30235214975",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-27T03:49:39.598Z",
-      "availableAt": "2026-07-27T03:49:40.598Z"
-    },
-    {
-      "reservationId": "3febf943-f784-4044-9ddd-961ca12de5ea",
-      "holderId": "Ambiguous-Interactive/qora-redux:30235147175:unity:qora-EditMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "30235147175",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30235147175",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-27T03:49:09.627Z",
-      "availableAt": "2026-07-27T03:49:10.627Z"
-    }
-  ],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T03:49:09.628Z"
+  "updatedAt": "2026-07-27T03:49:49.909Z"
 }
