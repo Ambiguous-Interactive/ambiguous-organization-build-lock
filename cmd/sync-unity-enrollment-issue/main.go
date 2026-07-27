@@ -1,0 +1,370 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+)
+
+const (
+	alertMarker       = "<!-- unity-enrollment-audit:v1 -->"
+	alertTitle        = "policy: organization Unity enrollment drift detected"
+	maxAuditBytes     = 1024 * 1024
+	maxResponseBytes  = 1024 * 1024
+	maxIssuePages     = 10
+	maxAuditRows      = 256
+	maxIssueBodyBytes = 60 * 1024
+	maxRepositories   = 64
+)
+
+type issue struct {
+	Number      int             `json:"number"`
+	State       string          `json:"state"`
+	Title       string          `json:"title"`
+	Body        string          `json:"body"`
+	PullRequest json.RawMessage `json:"pull_request"`
+}
+
+type githubClient struct {
+	base       *url.URL
+	repository string
+	token      string
+	http       *http.Client
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv, http.DefaultClient))
+}
+
+func run(
+	arguments []string,
+	stdout, stderr io.Writer,
+	getenv func(string) string,
+	httpClient *http.Client,
+) int {
+	flags := flag.NewFlagSet("sync-unity-enrollment-issue", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	auditPath := flags.String("audit", "", "bounded organization audit JSON")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || *auditPath == "" {
+		return 2
+	}
+	audit, err := readAudit(*auditPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "Unity enrollment audit artifact is unavailable or invalid")
+		return 2
+	}
+	client, err := newGitHubClient(
+		getenv("GITHUB_API_URL"),
+		getenv("GITHUB_REPOSITORY"),
+		getenv("GITHUB_TOKEN"),
+		httpClient,
+	)
+	if err != nil {
+		fmt.Fprintln(stderr, "Unity enrollment issue synchronization is not configured")
+		return 2
+	}
+	if err := client.sync(context.Background(), audit); err != nil {
+		fmt.Fprintln(stderr, "Unity enrollment issue synchronization failed")
+		return 1
+	}
+	if audit.Complete && len(audit.Findings) == 0 {
+		fmt.Fprintln(stdout, "Unity enrollment audit is complete and clean; drift alert is closed.")
+	} else {
+		fmt.Fprintln(stdout, "Unity enrollment drift alert is open with sanitized evidence.")
+	}
+	return 0
+}
+
+func readAudit(path string) (enrollment.UnityOrganizationAudit, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return enrollment.UnityOrganizationAudit{}, err
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, maxAuditBytes+1))
+	if err != nil || len(content) > maxAuditBytes {
+		return enrollment.UnityOrganizationAudit{}, fmt.Errorf("audit exceeds size limit")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var audit enrollment.UnityOrganizationAudit
+	if err := decoder.Decode(&audit); err != nil {
+		return enrollment.UnityOrganizationAudit{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return enrollment.UnityOrganizationAudit{}, fmt.Errorf("audit must contain one JSON value")
+	}
+	if err := validateAudit(audit); err != nil {
+		return enrollment.UnityOrganizationAudit{}, err
+	}
+	return audit, nil
+}
+
+func validateAudit(audit enrollment.UnityOrganizationAudit) error {
+	if len(audit.Repositories) > maxRepositories || len(audit.Inventory) > maxAuditRows ||
+		len(audit.Findings) > maxAuditRows {
+		return fmt.Errorf("audit collection exceeds bound")
+	}
+	repositoryPattern := regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]+$`)
+	codePattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
+	pathPattern := regexp.MustCompile(`^\.github/(?:workflows/)?[A-Za-z0-9_./-]+\.ya?ml$`)
+	jobPattern := regexp.MustCompile(`^[A-Za-z0-9_. -]{0,128}$`)
+	validateIdentity := func(repository, sha string, shaOptional bool) error {
+		if !repositoryPattern.MatchString(repository) {
+			return fmt.Errorf("invalid repository")
+		}
+		if sha == "" && shaOptional {
+			return nil
+		}
+		if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) {
+			return fmt.Errorf("invalid commit")
+		}
+		return nil
+	}
+	for _, repository := range audit.Repositories {
+		if err := validateIdentity(repository.Repository, repository.SHA, false); err != nil {
+			return err
+		}
+	}
+	for _, entry := range audit.Inventory {
+		if err := validateIdentity(entry.Repository, entry.SHA, false); err != nil {
+			return err
+		}
+		if !pathPattern.MatchString(entry.Path) || !jobPattern.MatchString(entry.Job) {
+			return fmt.Errorf("invalid inventory location")
+		}
+		switch entry.Classification {
+		case "paid-serial", "controlled-canary", "synthetic", "disabled", "non-licensing-static":
+		default:
+			return fmt.Errorf("invalid inventory classification")
+		}
+	}
+	for _, finding := range audit.Findings {
+		if err := validateIdentity(finding.Repository, finding.SHA, true); err != nil {
+			return err
+		}
+		if !codePattern.MatchString(finding.Code) ||
+			(finding.Path != "" && !pathPattern.MatchString(finding.Path)) ||
+			!jobPattern.MatchString(finding.Job) {
+			return fmt.Errorf("invalid finding")
+		}
+	}
+	return nil
+}
+
+func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) (*githubClient, error) {
+	base, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || base.Scheme != "https" || base.Host == "" ||
+		base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, fmt.Errorf("invalid GitHub API URL")
+	}
+	if !regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]+$`).MatchString(repository) ||
+		strings.TrimSpace(token) == "" || httpClient == nil {
+		return nil, fmt.Errorf("invalid GitHub issue client configuration")
+	}
+	copyClient := *httpClient
+	copyClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		return errors.New("redirects are not allowed")
+	}
+	return &githubClient{
+		base:       base,
+		repository: repository,
+		token:      token,
+		http:       &copyClient,
+	}, nil
+}
+
+func (client *githubClient) sync(ctx context.Context, audit enrollment.UnityOrganizationAudit) error {
+	existing, err := client.findAlert(ctx)
+	if err != nil {
+		return err
+	}
+	clean := audit.Complete && len(audit.Findings) == 0
+	if clean && existing == nil {
+		return nil
+	}
+	body := renderIssueBody(audit)
+	if len(body) > maxIssueBodyBytes {
+		return fmt.Errorf("sanitized issue body exceeds bound")
+	}
+	if existing == nil {
+		_, err = client.request(ctx, http.MethodPost, client.repositoryPath("/issues"), map[string]any{
+			"title": alertTitle,
+			"body":  body,
+		})
+		return err
+	}
+	state := "open"
+	if clean {
+		state = "closed"
+	}
+	_, err = client.request(
+		ctx,
+		http.MethodPatch,
+		client.repositoryPath("/issues/"+strconv.Itoa(existing.Number)),
+		map[string]any{"title": alertTitle, "body": body, "state": state},
+	)
+	return err
+}
+
+func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
+	var found *issue
+	for page := 1; page <= maxIssuePages; page++ {
+		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=100&page=%d", page))
+		content, err := client.request(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var issues []issue
+		if err := json.Unmarshal(content, &issues); err != nil {
+			return nil, fmt.Errorf("decode issue list")
+		}
+		for index := range issues {
+			candidate := &issues[index]
+			pullRequest := strings.TrimSpace(string(candidate.PullRequest))
+			if (pullRequest != "" && pullRequest != "null") || !strings.Contains(candidate.Body, alertMarker) {
+				continue
+			}
+			if found != nil {
+				return nil, fmt.Errorf("duplicate Unity enrollment audit issues")
+			}
+			copy := *candidate
+			found = &copy
+		}
+		if len(issues) < 100 {
+			return found, nil
+		}
+	}
+	return nil, fmt.Errorf("issue pagination exceeds bound")
+}
+
+func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
+	var body strings.Builder
+	body.WriteString(alertMarker)
+	body.WriteString("\n\n# Organization Unity enrollment audit\n\n")
+	if audit.Complete {
+		body.WriteString("Retrieval: **complete**\n\n")
+	} else {
+		body.WriteString("Retrieval: **incomplete (fail closed)**\n\n")
+	}
+	body.WriteString("This issue contains sanitized repository, commit, workflow, job, classification, and reason-code evidence only. It never contains matched source lines or credential values.\n\n")
+
+	repositories := append([]enrollment.UnityAuditedRepository(nil), audit.Repositories...)
+	sort.Slice(repositories, func(i, j int) bool { return repositories[i].Repository < repositories[j].Repository })
+	body.WriteString("## Audited commits\n\n")
+	if len(repositories) == 0 {
+		body.WriteString("- None; retrieval did not establish an immutable repository snapshot.\n")
+	} else {
+		for _, repository := range repositories {
+			fmt.Fprintf(&body, "- `%s` at `%s`\n", repository.Repository, repository.SHA)
+		}
+	}
+
+	body.WriteString("\n## Findings\n\n")
+	if len(audit.Findings) == 0 {
+		body.WriteString("- None.\n")
+	} else {
+		body.WriteString("| Repository | Commit | Workflow | Job | Reason |\n")
+		body.WriteString("| --- | --- | --- | --- | --- |\n")
+		for _, finding := range audit.Findings {
+			fmt.Fprintf(
+				&body,
+				"| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
+				finding.Repository,
+				valueOrDash(finding.SHA),
+				valueOrDash(finding.Path),
+				valueOrDash(finding.Job),
+				finding.Code,
+			)
+		}
+	}
+
+	body.WriteString("\n## Active inventory\n\n")
+	if len(audit.Inventory) == 0 {
+		body.WriteString("- No Unity-related jobs were established by this audit.\n")
+	} else {
+		body.WriteString("| Repository | Workflow | Job | Classification |\n")
+		body.WriteString("| --- | --- | --- | --- |\n")
+		for _, entry := range audit.Inventory {
+			fmt.Fprintf(
+				&body,
+				"| `%s` | `%s` | `%s` | `%s` |\n",
+				entry.Repository,
+				entry.Path,
+				entry.Job,
+				entry.Classification,
+			)
+		}
+	}
+	body.WriteString("\nTracked by #42 and rollout tracker #30. A complete clean audit closes this alert automatically.\n")
+	return body.String()
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func (client *githubClient) repositoryPath(suffix string) string {
+	parts := strings.Split(client.repository, "/")
+	return "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + suffix
+}
+
+func (client *githubClient) request(
+	ctx context.Context,
+	method, path string,
+	payload map[string]any,
+) ([]byte, error) {
+	reference, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := client.base.ResolveReference(reference)
+	var body io.Reader
+	if payload != nil {
+		content, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(content)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("Authorization", "Bearer "+client.token)
+	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := client.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	content, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil || len(content) > maxResponseBytes {
+		return nil, fmt.Errorf("GitHub response exceeds bound")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("GitHub API request failed with status %d", response.StatusCode)
+	}
+	return content, nil
+}

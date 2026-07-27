@@ -6,6 +6,7 @@ const test = require("node:test");
 const repoRoot = path.join(__dirname, "..");
 const configPath = path.join(repoRoot, "locks", "wallstop-organization-builds.config.json");
 const factsPath = path.join(repoRoot, "docs", "operations-facts.json");
+const enrollmentPolicyPath = path.join(repoRoot, "unity-enrollment-policy.json");
 const operationsPath = path.join(repoRoot, "docs", "operations-runbook.md");
 const historyPath = path.join(repoRoot, "docs", "secure-two-seat-rollout.md");
 const activeDocumentation = [
@@ -65,6 +66,7 @@ test("reaper delivery SLO facts and guidance stay synchronized", () => {
 
 test("steady-state runbook reports the registered release and consumer inventory", () => {
   const facts = JSON.parse(read(factsPath));
+  const enrollmentPolicy = JSON.parse(read(enrollmentPolicyPath));
   const operations = read(operationsPath);
   const listedConsumers = [...operations.matchAll(/^- `([^`]+)` <!-- enrolled-consumer -->$/gm)].map(
     (match) => match[1]
@@ -79,6 +81,33 @@ test("steady-state runbook reports the registered release and consumer inventory
     )
   );
   assert.deepEqual(listedConsumers.sort(), [...facts.enrolledConsumers].sort());
+  assert.deepEqual(
+    enrollmentPolicy.repositories.map((entry) => entry.repository).sort(),
+    [...facts.enrolledConsumers].sort()
+  );
+  assert.equal(enrollmentPolicy.repositories.find((entry) => entry.repository.endsWith("/unity-builder")).fork, true);
+  assert.ok(enrollmentPolicy.approvedLockShas.includes(facts.publishedRelease.commit));
+});
+
+test("continuous enrollment audit facts and guidance stay synchronized", () => {
+  const facts = JSON.parse(read(factsPath));
+  const operations = read(operationsPath);
+  const readme = read(path.join(repoRoot, "README.md"));
+
+  assert.deepEqual(facts.unityEnrollmentAudit, {
+    policyPath: "unity-enrollment-policy.json",
+    schedule: "23 8 * * *",
+    repositoryCount: 6,
+    alertMarker: "unity-enrollment-audit:v1"
+  });
+  assert.match(operations, /`Organization Unity enrollment audit`/);
+  assert.match(operations, /runs daily at `23 8 \* \* \*`/);
+  assert.match(operations, /analyzes exact Git\s+objects without executing consumer code/);
+  assert.match(operations, /repository, commit, workflow path, job, classification, and stable reason\s+code/);
+  assert.match(operations, /complete clean audit/);
+  assert.match(operations, /registry exception with repository, path, classification, owner, and RFC3339\s+expiry/);
+  assert.match(readme, /`unity-enrollment-policy\.json`/);
+  assert.match(readme, /one\s+deduplicated issue/);
 });
 
 test("steady-state runbook distinguishes required credential scope from the live gap", () => {

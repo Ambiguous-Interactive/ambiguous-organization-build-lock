@@ -21,13 +21,13 @@ The committed sources of truth are
 - Runner serialization: `enabled`
 - Resource lifecycle: `enabled`
 - Confirmed-cleanup cooldown: `1` second
-- Published compatibility release: `v1.9.1` at
-  `a00614ace745152a659c5c2654f7cefb68a5a628`
+- Published compatibility release: `v1.10.0` at
+  `3741b56ceab4a68ba4c09fe7e91e804b53ff2412`
 
-The one-second cooldown is transitional. Issue #60 tracks publishing and
-deploying allow-zero action code before changing the committed value to zero.
-Until that sequence is complete, do not describe zero as live and do not change
-the config independently of consumer compatibility.
+The one-second cooldown remains the live value. Issue #60 tracks literal zero,
+but the concurrent shared-entitlement return collision in issue #83 must be
+resolved with independently returnable identities and live reconciliation
+before a zero-cooldown claim is safe. Do not describe zero as live.
 
 Effective capacity is `maxHolders` minus active holders and
 capacity-consuming reservations. A normal confirmed-cleanup cooldown consumes
@@ -50,6 +50,49 @@ six repositories:
 Enrollment changes are reviewed policy changes, not automatic consequences of
 organization ownership. Follow [Consumer Enrollment](consumer-enrollment.md)
 and update the continuous audit tracked by issue #42.
+
+## Continuous enrollment audit
+
+`unity-enrollment-policy.json` is the reviewed six-repository registry and
+immutable lock-action allowlist. The `Organization Unity enrollment audit`
+workflow runs daily at `23 8 * * *`, can be dispatched manually, and also runs
+after relevant policy changes reach `main`. It uses the reader App to check out
+each current default branch without persisting credentials, analyzes exact Git
+objects without executing consumer code, and revalidates every default-branch
+head before reporting.
+
+The repository set is an exact generated-coordination boundary, not an
+open-ended registry. Additions require the registry, reader-App token
+repository list, checkout steps, and exact-head revalidation list to change
+together; registry-only expansion is rejected.
+
+Manual operation starts the secretless `Request organization Unity enrollment
+audit` workflow. Its completed run triggers the secret-bearing audit through
+`workflow_run`, whose definition and executable policy are loaded from trusted
+`main`. The secret-bearing workflow deliberately has no direct
+`workflow_dispatch` trigger, so selecting a feature-branch ref cannot expose the
+reader App credential to branch-controlled workflow code.
+
+The audit fails closed if a repository, workflow, commit, reader credential,
+exception, or revalidation result is missing or ambiguous. Findings contain
+only repository, commit, workflow path, job, classification, and stable reason
+code. The workflow opens or updates one marker-fenced drift issue and closes it
+only after a complete clean audit. Never copy matched workflow source, secret
+values, or raw API responses into that issue. The sanitized active inventory
+and exact commit list in the issue are the retained evidence linked to issue
+#42 and rollout tracker #30.
+
+A complete scan that finds policy drift keeps the workflow run green only after
+the marker-fenced issue has been synchronized; that open issue is the
+operational-red state. Retrieval, analysis, head-revalidation, or issue-sync
+ambiguity keeps the workflow run red because no trustworthy policy result was
+established. The standalone audit command returns nonzero for both drift and
+incomplete evidence.
+
+Synthetic or deliberately disabled Unity-shaped workflows require an explicit
+registry exception with repository, path, classification, owner, and RFC3339
+expiry. An expired, unused, duplicate, or unregistered exception is drift. A
+paid-serial job cannot be excepted from lifecycle enforcement.
 
 ## Credential and App boundary
 

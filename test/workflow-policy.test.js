@@ -14,6 +14,8 @@ const expectedWorkflowJobs = new Map([
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
+  ["request-unity-enrollment-audit.yml", ["request"]],
+  ["unity-enrollment-audit.yml", ["audit"]],
   ["recover-build-lock.yml", ["recover"]],
   ["reaper-delivery-audit.yml", ["audit"]],
   ["reap-stale-locks.yml", ["reap"]]
@@ -50,6 +52,19 @@ const expectedWorkflowRunScriptSignatures = new Map([
     [
       'echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"',
       "go run ./cmd/workflow-credential-audit\nunity-automation"
+    ]
+  ],
+  [
+    "request-unity-enrollment-audit.yml",
+    ['echo "The completed request triggers the secret-bearing audit from\nthe trusted default-branch workflow."']
+  ],
+  [
+    "unity-enrollment-audit.yml",
+    [
+      "go run ./cmd/audit-unity-enrollment\n--policy unity-enrollment-policy.json",
+      "set -euo pipefail\nfailed=false",
+      'go run ./cmd/sync-unity-enrollment-issue\n--audit "${RUNNER_TEMP}/unity-enrollment-audit.json"',
+      "set -euo pipefail\nif [ ! -f \"${AUDIT_PATH}\" ]; then"
     ]
   ],
   ["recover-build-lock.yml", []],
@@ -1223,6 +1238,78 @@ test("Dx Unity audit checks the consumer's current default branch", () => {
   assert.equal(checkout.with.repository, "Ambiguous-Interactive/DxMessaging");
   assert.equal(checkout.with.path, ".policy-consumers/DxMessaging");
   assert.equal(Object.hasOwn(checkout.with, "ref"), false, "checkout must follow the repository's current default branch");
+});
+
+test("organization Unity enrollment audit is exact, read-only, and fail closed", () => {
+  const text = readWorkflow("unity-enrollment-audit.yml");
+  const requestText = readWorkflow("request-unity-enrollment-audit.yml");
+  const job = jobSections(text).find((candidate) => candidate.name === "audit");
+  const steps = workflowJobStepMaps(text, "audit");
+  const token = steps.find((step) => step.name === "Mint exact repository-scoped reader token");
+  const checkouts = steps.filter((step) => /^Checkout .* default branch$/.test(step.name || ""));
+  const audit = steps.find((step) => step.name === "Audit exact consumer snapshots");
+  const revalidate = steps.find((step) => step.name === "Revalidate default-branch heads");
+  const sync = steps.find((step) => step.name === "Synchronize deduplicated drift issue");
+  const summary = steps.find((step) => step.name === "Record sanitized audit counts");
+
+  assert.ok(job);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), false);
+  assert.equal(hasEffectivePermission(text, job.text, "issues", "write"), true);
+  assert.equal(workflowHasTrigger(text, "schedule"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), false);
+  assert.equal(workflowHasTrigger(text, "workflow_run"), true);
+  assert.equal(workflowHasTrigger(text, "pull_request"), false);
+  assert.equal(workflowHasTrigger(requestText, "workflow_dispatch"), true);
+  assert.doesNotMatch(requestText, /secrets\.|create-github-app-token|actions\/checkout/);
+  assert.match(text, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  for (const requiredPath of [
+    ".github/workflows/request-unity-enrollment-audit.yml",
+    ".github/actions/**",
+    ".github/dist/**",
+    "internal/enrollment/**",
+    "locks/**",
+    "unity-enrollment-policy.json"
+  ]) {
+    assert.match(text, new RegExp(`- "${escapeRegExp(requiredPath)}"`));
+  }
+
+  assert.match(token.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_READER_APP_ID }}");
+  assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}");
+  assert.equal(token.with["permission-contents"], "read");
+  assert.equal(
+    token.with.repositories,
+    "DoxReloaded,DxMessaging,IshoBoy,qora-redux,unity-builder,unity-helpers"
+  );
+
+  assert.deepEqual(
+    checkouts.map((step) => step.with.repository).sort(),
+    [
+      "Ambiguous-Interactive/DoxReloaded",
+      "Ambiguous-Interactive/DxMessaging",
+      "Ambiguous-Interactive/IshoBoy",
+      "Ambiguous-Interactive/qora-redux",
+      "Ambiguous-Interactive/unity-builder",
+      "Ambiguous-Interactive/unity-helpers"
+    ]
+  );
+  for (const checkout of checkouts) {
+    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+    assert.equal(checkout.with.token, "${{ steps.reader-token.outputs.token }}");
+    assert.equal(checkout.with["persist-credentials"], "false");
+    assert.equal(Object.hasOwn(checkout.with, "ref"), false);
+  }
+
+  assert.equal(audit.if, "${{ always() }}");
+  assert.equal(audit["continue-on-error"], "true");
+  assert.equal(revalidate.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
+  assert.equal(sync.if, "${{ always() }}");
+  assert.equal(sync.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.ok(summary);
+  assert.match(text, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH\}"\)" != "true" \]; then/);
+  const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");
+  assert.equal(trustedCheckout.with.ref, "main");
 });
 
 test("CI isolates actionlint while keeping production Go dependencies upgradable", () => {

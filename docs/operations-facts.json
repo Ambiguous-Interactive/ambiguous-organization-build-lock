@@ -1,14 +1,20 @@
 {
   "stateSchema": 5,
   "publishedRelease": {
-    "tag": "v1.9.1",
-    "commit": "a00614ace745152a659c5c2654f7cefb68a5a628"
+    "tag": "v1.10.0",
+    "commit": "3741b56ceab4a68ba4c09fe7e91e804b53ff2412"
   },
   "reaperDelivery": {
     "requestedSchedule": "*/5 * * * *",
     "monitorSchedule": "7,17,27,37,47,57 * * * *",
     "maximumDeliveryDelaySeconds": 1800,
     "maximumRunDurationSeconds": 900
+  },
+  "unityEnrollmentAudit": {
+    "policyPath": "unity-enrollment-policy.json",
+    "schedule": "23 8 * * *",
+    "repositoryCount": 6,
+    "alertMarker": "unity-enrollment-audit:v1"
   },
   "enrolledConsumers": [
     "Ambiguous-Interactive/DoxReloaded",
