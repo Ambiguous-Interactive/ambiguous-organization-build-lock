@@ -115,6 +115,21 @@ remain valid on workflow reruns.
 `node tools/llm-harness.mjs generate` refreshed the knowledge index.
 `.devcontainer/scripts/verify.sh` then passed 556 Node tests, every Go package,
 actionlint, module verification, tidy-diff, workflow credential policy, and the
-knowledge harness. Publishing the delivery remediation, its post-fix
-main-branch verification and issue synchronization, and issue #42 closure
-remain pending.
+knowledge harness.
+
+PR #112 delivered that remediation and merged as
+`d64c3a88a06e4b1f67950de22317d60593c75437` after exact-head Build lock CI,
+Cursor review, and an independent no-findings review. Copilot was requested but
+could not run because the requesting account had exhausted its review quota.
+Final-main Build lock CI run `30313533700` passed.
+
+Organization audit run `30313533707` then passed end to end. It retrieved all
+6/6 registered repositories, audited 113 active jobs with 286 findings,
+revalidated every default-branch head, uploaded the complete sanitized artifact
+`unity-enrollment-audit-30313533707-1` with a 30-day retention period, and
+created the single marker-fenced alert #113. The alert reports the exact totals,
+shows deterministic 40-finding and 16-inventory previews with omission counts,
+and links the retained artifact. Issue #42 and rollout tracker #30 received the
+live evidence; #42 was closed as completed. Alert #113 remains open for the
+measured consumer drift and will close automatically after a complete clean
+audit.
