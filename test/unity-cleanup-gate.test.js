@@ -38,6 +38,12 @@ const safeCooldown = {
 };
 
 test("gate accepts only coherent confirmed cleanup releases", async (t) => {
+  await t.test("explicitly not acquired", () => {
+    assert.deepEqual(evaluateCleanupGate({
+      ...Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, "missing"])),
+      acquired: "false"
+    }), { safe: true, failures: [] });
+  });
   await t.test("safe cooldown", () => {
     assert.deepEqual(evaluateCleanupGate(safeCooldown), { safe: true, failures: [] });
   });
@@ -51,7 +57,6 @@ test("gate accepts only coherent confirmed cleanup releases", async (t) => {
   });
 
   const failures = [
-    ["not acquired", { acquired: "false" }],
     ["classification incomplete", { classificationComplete: "false" }],
     ["unknown cleanup", { cleanupStatus: "unknown", cleanupReason: "return-timeout" }],
     ["blocked account", { cleanupStatus: "unknown", cleanupHealth: "blocked", cleanupReason: "unity-account-limit-20111" }],
@@ -76,6 +81,23 @@ test("gate accepts only coherent confirmed cleanup releases", async (t) => {
       assert.equal(result.safe, false);
       assert.ok(result.failures.length > 0);
     });
+  }
+});
+
+test("gate fails ambiguous acquisition state without misdiagnosing cleanup", () => {
+  for (const acquired of ["", "missing", "unexpected"]) {
+    const values = {
+      ...Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, "missing"])),
+      acquired
+    };
+    const result = evaluateCleanupGate(values);
+    assert.deepEqual(result, {
+      safe: false,
+      failures: ["the organization Unity lock acquisition state is missing or invalid"]
+    });
+    const diagnostic = formatDiagnostic(values, result.failures);
+    assert.match(diagnostic, /lock acquisition state is missing or invalid/);
+    assert.doesNotMatch(diagnostic, /cleanup was not confirmed/);
   }
 });
 
@@ -166,4 +188,12 @@ test("committed gate runtime exits nonzero for unsafe cleanup and zero only for 
   }, "safe.txt");
   assert.equal(safe.status, 0);
   assert.equal(safe.outputs.at(-1), "cleanup-safe=true");
+
+  const notAcquired = execute({
+    ...Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, "missing"])),
+    acquired: "false"
+  }, "not-acquired.txt");
+  assert.equal(notAcquired.status, 0);
+  assert.equal(notAcquired.outputs.at(-1), "cleanup-safe=true");
+  assert.match(notAcquired.stdout, /not required because the organization Unity lock was not acquired/);
 });

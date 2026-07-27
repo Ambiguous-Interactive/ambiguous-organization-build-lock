@@ -14,6 +14,10 @@
   and fail only after the cleanup attempt.
 - Unconfirmed resource cleanup creates quarantine or an account-level block; it
   does not silently return capacity.
+- A final licensed-cleanup gate may be non-applicable only for exact
+  `acquired=false`, with licensed work guarded by exact `acquired == 'true'`
+  and acquisition failures allowed to propagate. Missing or invalid acquisition
+  state remains fail-closed.
 - Recovery requires the exact reservation or incident identity plus external
   evidence required by the public contract.
 - Pull-request admission remains bound to the event head while queued and
