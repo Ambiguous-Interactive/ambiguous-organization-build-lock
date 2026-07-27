@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/qora-redux:30227996910:unity:qora-PlayMode",
-    "repository": "Ambiguous-Interactive/qora-redux",
-    "workflow": "Unity Tests",
-    "job": "unity",
-    "runId": "30227996910",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30228160865:unity-tests:unity-tests-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "30228160865",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30227996910",
-    "queuedAt": "2026-07-27T00:45:16.891Z",
-    "acquiredAt": "2026-07-27T00:45:19.242Z",
-    "expiresAt": "2026-07-27T04:45:19.242Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30228160865",
+    "queuedAt": "2026-07-27T00:46:45.558Z",
+    "acquiredAt": "2026-07-27T00:47:43.517Z",
+    "expiresAt": "2026-07-27T04:47:43.517Z",
+    "runnerId": "tiny-box-linux"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/qora-redux:30227996910:unity:qora-PlayMode",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "30227996910",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30227996910",
-      "queuedAt": "2026-07-27T00:45:16.891Z",
-      "acquiredAt": "2026-07-27T00:45:19.242Z",
-      "expiresAt": "2026-07-27T04:45:19.242Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30228160865:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -55,7 +42,23 @@
       "runnerId": "box-linux"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "d4fe3200-ab66-49e5-b105-1c7b1be2cab3",
+      "holderId": "Ambiguous-Interactive/qora-redux:30227996910:unity:qora-PlayMode",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "30227996910",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30227996910",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-27T00:48:49.915Z",
+      "availableAt": "2026-07-27T00:48:50.915Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T00:47:43.517Z"
+  "updatedAt": "2026-07-27T00:48:49.915Z"
 }
