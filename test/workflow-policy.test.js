@@ -1271,6 +1271,7 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   const checkout = steps.find((step) => step.name === "Checkout reviewed repository default branches");
   const audit = steps.find((step) => step.name === "Audit exact consumer snapshots");
   const revalidate = steps.find((step) => step.name === "Revalidate default-branch heads");
+  const evidence = steps.find((step) => step.name === "Upload full sanitized audit evidence");
   const sync = steps.find((step) => step.name === "Synchronize deduplicated drift issue");
   const summary = steps.find((step) => step.name === "Record sanitized audit counts");
 
@@ -1319,8 +1320,18 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.equal(audit.if, "${{ always() }}");
   assert.equal(audit["continue-on-error"], "true");
   assert.equal(revalidate.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
+  assert.equal(evidence.if, "${{ always() }}");
+  assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+  assert.equal(evidence.with.name, "unity-enrollment-audit-${{ github.run_id }}-${{ github.run_attempt }}");
+  assert.equal(evidence.with.path, "${{ runner.temp }}/unity-enrollment-audit.json");
+  assert.equal(evidence.with["if-no-files-found"], "error");
+  assert.equal(evidence.with["retention-days"], "30");
   assert.equal(sync.if, "${{ always() }}");
   assert.equal(sync.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.equal(sync.env.GITHUB_SERVER_URL, "${{ github.server_url }}");
+  assert.equal(sync.env.GITHUB_REPOSITORY, "${{ github.repository }}");
+  assert.equal(sync.env.GITHUB_RUN_ID, "${{ github.run_id }}");
+  assert.equal(sync.env.UNITY_AUDIT_ARTIFACT_URL, "${{ steps.audit-evidence.outputs.artifact-url }}");
   assert.ok(summary);
   assert.match(text, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH\}"\)" != "true" \]; then/);
   const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");

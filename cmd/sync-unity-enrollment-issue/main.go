@@ -20,14 +20,17 @@ import (
 )
 
 const (
-	alertMarker       = "<!-- unity-enrollment-audit:v1 -->"
-	alertTitle        = "policy: organization Unity enrollment drift detected"
-	maxAuditBytes     = 1024 * 1024
-	maxResponseBytes  = 1024 * 1024
-	maxIssuePages     = 10
-	maxAuditRows      = 256
-	maxIssueBodyBytes = 60 * 1024
-	maxRepositories   = 64
+	alertMarker          = "<!-- unity-enrollment-audit:v1 -->"
+	alertTitle           = "policy: organization Unity enrollment drift detected"
+	maxAuditBytes        = 4 * 1024 * 1024
+	maxResponseBytes     = 1024 * 1024
+	maxIssuePages        = 10
+	maxAuditRows         = 4096
+	maxIssueBodyBytes    = 60 * 1024
+	maxEvidenceURLBytes  = 2048
+	maxRepositories      = 64
+	maxRenderedFindings  = 40
+	maxRenderedInventory = 16
 )
 
 type issue struct {
@@ -76,7 +79,17 @@ func run(
 		fmt.Fprintln(stderr, "Unity enrollment issue synchronization is not configured")
 		return 2
 	}
-	if err := client.sync(context.Background(), audit); err != nil {
+	evidenceURL, err := validatedArtifactURL(
+		getenv("GITHUB_SERVER_URL"),
+		getenv("GITHUB_REPOSITORY"),
+		getenv("GITHUB_RUN_ID"),
+		getenv("UNITY_AUDIT_ARTIFACT_URL"),
+	)
+	if err != nil {
+		fmt.Fprintln(stderr, "Unity enrollment evidence link is unavailable or invalid")
+		return 2
+	}
+	if err := client.sync(context.Background(), audit, evidenceURL); err != nil {
 		fmt.Fprintln(stderr, "Unity enrollment issue synchronization failed")
 		return 1
 	}
@@ -119,7 +132,7 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 		len(audit.Findings) > maxAuditRows {
 		return fmt.Errorf("audit collection exceeds bound")
 	}
-	repositoryPattern := regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]+$`)
+	repositoryPattern := regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)
 	codePattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
 	pathPattern := regexp.MustCompile(`^\.github/(?:workflows/)?[A-Za-z0-9_./-]+\.ya?ml$`)
 	jobPattern := regexp.MustCompile(`^[A-Za-z0-9_. -]{0,128}$`)
@@ -144,7 +157,7 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 		if err := validateIdentity(entry.Repository, entry.SHA, false); err != nil {
 			return err
 		}
-		if !pathPattern.MatchString(entry.Path) || !jobPattern.MatchString(entry.Job) {
+		if len(entry.Path) > 256 || !pathPattern.MatchString(entry.Path) || !jobPattern.MatchString(entry.Job) {
 			return fmt.Errorf("invalid inventory location")
 		}
 		switch entry.Classification {
@@ -158,12 +171,43 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 			return err
 		}
 		if !codePattern.MatchString(finding.Code) ||
-			(finding.Path != "" && !pathPattern.MatchString(finding.Path)) ||
+			(finding.Path != "" && (len(finding.Path) > 256 || !pathPattern.MatchString(finding.Path))) ||
 			!jobPattern.MatchString(finding.Job) {
 			return fmt.Errorf("invalid finding")
 		}
 	}
 	return nil
+}
+
+func validatedArtifactURL(serverURL, repository, runID, artifactURL string) (string, error) {
+	if len(serverURL) > maxEvidenceURLBytes || len(artifactURL) > maxEvidenceURLBytes {
+		return "", fmt.Errorf("audit artifact URL exceeds bound")
+	}
+	server, err := url.Parse(strings.TrimSpace(serverURL))
+	if err != nil || server.Scheme != "https" || server.Host == "" || server.User != nil ||
+		server.RawQuery != "" || server.Fragment != "" || server.RawPath != "" {
+		return "", fmt.Errorf("invalid GitHub server URL")
+	}
+	if !regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`).MatchString(repository) ||
+		!regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(runID) {
+		return "", fmt.Errorf("invalid GitHub run identity")
+	}
+	artifact, err := url.Parse(strings.TrimSpace(artifactURL))
+	if err != nil || artifact.Scheme != server.Scheme || artifact.Host != server.Host ||
+		artifact.User != nil || artifact.RawQuery != "" || artifact.Fragment != "" ||
+		artifact.RawPath != "" {
+		return "", fmt.Errorf("invalid audit artifact URL")
+	}
+	expectedPrefix := strings.TrimSuffix(server.Path, "/") + "/" + repository +
+		"/actions/runs/" + runID + "/artifacts/"
+	if !strings.HasPrefix(artifact.Path, expectedPrefix) {
+		return "", fmt.Errorf("audit artifact URL does not match this run")
+	}
+	artifactID := strings.TrimPrefix(artifact.Path, expectedPrefix)
+	if !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(artifactID) {
+		return "", fmt.Errorf("invalid audit artifact identity")
+	}
+	return artifact.String(), nil
 }
 
 func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) (*githubClient, error) {
@@ -188,7 +232,11 @@ func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) 
 	}, nil
 }
 
-func (client *githubClient) sync(ctx context.Context, audit enrollment.UnityOrganizationAudit) error {
+func (client *githubClient) sync(
+	ctx context.Context,
+	audit enrollment.UnityOrganizationAudit,
+	evidenceURL string,
+) error {
 	existing, err := client.findAlert(ctx)
 	if err != nil {
 		return err
@@ -197,7 +245,7 @@ func (client *githubClient) sync(ctx context.Context, audit enrollment.UnityOrga
 	if clean && existing == nil {
 		return nil
 	}
-	body := renderIssueBody(audit)
+	body := renderIssueBody(audit, evidenceURL)
 	if len(body) > maxIssueBodyBytes {
 		return fmt.Errorf("sanitized issue body exceeds bound")
 	}
@@ -252,7 +300,7 @@ func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 	return nil, fmt.Errorf("issue pagination exceeds bound")
 }
 
-func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
+func renderIssueBody(audit enrollment.UnityOrganizationAudit, evidenceURL string) string {
 	var body strings.Builder
 	body.WriteString(alertMarker)
 	body.WriteString("\n\n# Organization Unity enrollment audit\n\n")
@@ -262,9 +310,19 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
 		body.WriteString("Retrieval: **incomplete (fail closed)**\n\n")
 	}
 	body.WriteString("This issue contains sanitized repository, commit, workflow, job, classification, and reason-code evidence only. It never contains matched source lines or credential values.\n\n")
+	fmt.Fprintf(
+		&body,
+		"Summary: **%d findings**, **%d active inventory rows**. [Download the full retained source-free audit artifact](%s).\n\n",
+		len(audit.Findings),
+		len(audit.Inventory),
+		evidenceURL,
+	)
 
 	repositories := append([]enrollment.UnityAuditedRepository(nil), audit.Repositories...)
-	sort.Slice(repositories, func(i, j int) bool { return repositories[i].Repository < repositories[j].Repository })
+	sort.Slice(repositories, func(i, j int) bool {
+		left, right := repositories[i], repositories[j]
+		return left.Repository+"\x00"+left.SHA < right.Repository+"\x00"+right.SHA
+	})
 	body.WriteString("## Audited commits\n\n")
 	if len(repositories) == 0 {
 		body.WriteString("- None; retrieval did not establish an immutable repository snapshot.\n")
@@ -280,7 +338,14 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
 	} else {
 		body.WriteString("| Repository | Commit | Workflow | Job | Reason |\n")
 		body.WriteString("| --- | --- | --- | --- | --- |\n")
-		for _, finding := range audit.Findings {
+		findings := append([]enrollment.UnityAuditFinding(nil), audit.Findings...)
+		sort.Slice(findings, func(i, j int) bool {
+			left, right := findings[i], findings[j]
+			return left.Repository+"\x00"+left.SHA+"\x00"+left.Path+"\x00"+left.Job+"\x00"+left.Code <
+				right.Repository+"\x00"+right.SHA+"\x00"+right.Path+"\x00"+right.Job+"\x00"+right.Code
+		})
+		rendered := min(len(findings), maxRenderedFindings)
+		for _, finding := range findings[:rendered] {
 			fmt.Fprintf(
 				&body,
 				"| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
@@ -291,6 +356,13 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
 				finding.Code,
 			)
 		}
+		if omitted := len(findings) - rendered; omitted > 0 {
+			fmt.Fprintf(
+				&body,
+				"\n_%d additional findings omitted from this bounded preview; use the retained artifact above for the complete sanitized evidence._\n",
+				omitted,
+			)
+		}
 	}
 
 	body.WriteString("\n## Active inventory\n\n")
@@ -299,7 +371,14 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
 	} else {
 		body.WriteString("| Repository | Workflow | Job | Classification |\n")
 		body.WriteString("| --- | --- | --- | --- |\n")
-		for _, entry := range audit.Inventory {
+		inventory := append([]enrollment.UnityInventoryEntry(nil), audit.Inventory...)
+		sort.Slice(inventory, func(i, j int) bool {
+			left, right := inventory[i], inventory[j]
+			return left.Repository+"\x00"+left.SHA+"\x00"+left.Path+"\x00"+left.Job+"\x00"+left.Classification <
+				right.Repository+"\x00"+right.SHA+"\x00"+right.Path+"\x00"+right.Job+"\x00"+right.Classification
+		})
+		rendered := min(len(inventory), maxRenderedInventory)
+		for _, entry := range inventory[:rendered] {
 			fmt.Fprintf(
 				&body,
 				"| `%s` | `%s` | `%s` | `%s` |\n",
@@ -307,6 +386,13 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit) string {
 				entry.Path,
 				entry.Job,
 				entry.Classification,
+			)
+		}
+		if omitted := len(inventory) - rendered; omitted > 0 {
+			fmt.Fprintf(
+				&body,
+				"\n_%d additional inventory rows omitted from this bounded preview; use the retained artifact above for the complete sanitized evidence._\n",
+				omitted,
 			)
 		}
 	}

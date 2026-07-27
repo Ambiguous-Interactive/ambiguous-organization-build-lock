@@ -100,6 +100,13 @@ values, or raw API responses into that issue. The sanitized active inventory
 and exact commit list in the issue are the retained evidence linked to issue
 #42 and rollout tracker #30.
 
+The complete source-free JSON audit is retained as a 30-day Actions artifact.
+The issue includes its validated exact artifact URL, total finding and
+inventory counts, a deterministic bounded preview, and explicit omitted-row
+counts. Use the artifact—not the preview—as the complete evidence set. Artifact
+upload/link validation and issue synchronization are mandatory; failure keeps
+the workflow red.
+
 A complete scan that finds policy drift keeps the workflow run green only after
 the marker-fenced issue has been synchronized; that open issue is the
 operational-red state. Retrieval, analysis, head-revalidation, or issue-sync

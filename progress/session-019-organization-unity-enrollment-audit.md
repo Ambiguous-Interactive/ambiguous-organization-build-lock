@@ -96,8 +96,25 @@ runnable and failure-propagating, with only absent or literal-false
 and failure-suppressed cleanup/aggregate paths. The final fresh review reported
 no actionable findings.
 
+PR #110 merged as `1f57bc3d29da0366d7a256aa3aded4fff11fc755`,
+and Build lock CI succeeded on that merged `main` commit. The first post-merge
+live audit run `30312519176` proved the reader App could retrieve all 6/6
+registered repositories, audited 113 active jobs with 286 findings, and
+successfully revalidated every default-branch head. It then failed issue
+synchronization because the synchronizer still enforced the obsolete 256-row
+bound.
+
+The post-failure delivery remediation accepts a larger still-bounded
+source-free audit, uploads the complete JSON as a 30-day Actions artifact, and
+links it from a deterministic issue preview below GitHub's body limit with
+exact totals and omission counts. Missing/hostile run-artifact identity, upload
+failure, incomplete evidence, and sync failure remain workflow-red. Artifact
+names include both the run ID and run attempt so immutable v4 uploads also
+remain valid on workflow reruns.
+
 `node tools/llm-harness.mjs generate` refreshed the knowledge index.
 `.devcontainer/scripts/verify.sh` then passed 556 Node tests, every Go package,
 actionlint, module verification, tidy-diff, workflow credential policy, and the
-knowledge harness. Pull-request review, live registered-repository audit evidence,
-merge, and post-merge main verification remain pending.
+knowledge harness. Publishing the delivery remediation, its post-fix
+main-branch verification and issue synchronization, and issue #42 closure
+remain pending.
