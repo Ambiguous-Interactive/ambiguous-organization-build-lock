@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:30242368360:unity-compile-check:unity-ci-compile-check",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-compile-check",
-    "runId": "30242368360",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30242368360",
-    "queuedAt": "2026-07-27T06:29:03.826Z",
-    "acquiredAt": "2026-07-27T06:30:02.704Z",
-    "expiresAt": "2026-07-27T10:30:02.704Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:30242368360:unity-compile-check:unity-ci-compile-check",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-compile-check",
-      "runId": "30242368360",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30242368360",
-      "queuedAt": "2026-07-27T06:29:03.826Z",
-      "acquiredAt": "2026-07-27T06:30:02.704Z",
-      "expiresAt": "2026-07-27T10:30:02.704Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30241179146:platform-build-windows:platform-build-windows",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-27T06:12:11.310Z"
+    },
+    {
+      "reservationId": "284e3d72-efa6-4724-804c-224c5e5191f2",
+      "holderId": "Ambiguous-Interactive/IshoBoy:30242368360:unity-compile-check:unity-ci-compile-check",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-compile-check",
+      "runId": "30242368360",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30242368360",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-27T06:32:00.993Z",
+      "availableAt": "2026-07-27T06:32:01.993Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T06:30:47.141Z"
+  "updatedAt": "2026-07-27T06:32:00.994Z"
 }
