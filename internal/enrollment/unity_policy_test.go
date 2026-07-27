@@ -253,6 +253,12 @@ func TestUnityEnrollmentRejectsMissingSafetySurfaces(t *testing.T) {
 		{"runner preflight", func(value string) string {
 			return strings.Replace(value, "    needs: preflight\n", "", 1)
 		}, "missing-runner-preflight"},
+		{"disabled runner preflight step", func(value string) string {
+			return strings.Replace(value, "      - uses: "+preflightActionRef, "      - if: false\n        uses: "+preflightActionRef, 1)
+		}, "missing-runner-preflight"},
+		{"disabled acquire", func(value string) string {
+			return strings.Replace(value, "      - id: acquire\n        uses:", "      - id: acquire\n        if: false\n        uses:", 1)
+		}, "missing-lock-acquire"},
 		{"aggregate", func(value string) string {
 			return strings.Split(value, "  aggregate:")[0]
 		}, "missing-unity-aggregate"},
@@ -313,6 +319,210 @@ func TestUnityEnrollmentRejectsMissingSafetySurfaces(t *testing.T) {
 				t.Fatalf("missing %s: %#v", testCase.code, result.Findings)
 			}
 		})
+	}
+}
+
+func TestUnityEnrollmentRejectsAcquireBehindDisabledComposite(t *testing.T) {
+	steps := strings.Replace(
+		safeLicensedSteps(),
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
+		"      - id: acquire\n        if: false\n        uses: ./.github/actions/acquire-wrapper",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": unityWorkflow(steps, safeAggregate()),
+		".github/actions/acquire-wrapper/action.yml": `name: Acquire wrapper
+runs:
+  using: composite
+  steps:
+    - id: inner_acquire
+      uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+`,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-lock-acquire") {
+		t.Fatalf("disabled acquire composite passed: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentDisabledPreflightCannotSatisfyAggregate(t *testing.T) {
+	workflow := unityWorkflow(safeLicensedSteps(), safeAggregate())
+	workflow = strings.Replace(
+		workflow,
+		"      - uses: "+preflightActionRef,
+		"      - if: false\n        uses: "+preflightActionRef,
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := findingCodes(result.Findings)
+	if !strings.Contains(codes, "missing-runner-preflight") ||
+		!strings.Contains(codes, "missing-unity-aggregate") {
+		t.Fatalf("disabled preflight satisfied lifecycle evidence: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRejectsContinueOnErrorLifecycleEvidence(t *testing.T) {
+	tests := []struct {
+		name              string
+		workflowMutation  func(string) string
+		compositeMutation func(string) string
+		code              string
+	}{
+		{
+			name: "preflight job",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "  preflight:\n    runs-on:", "  preflight:\n    continue-on-error: true\n    runs-on:", 1)
+			},
+			code: "missing-runner-preflight",
+		},
+		{
+			name: "preflight step",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - uses: "+preflightActionRef, "      - continue-on-error: true\n        uses: "+preflightActionRef, 1)
+			},
+			code: "missing-runner-preflight",
+		},
+		{
+			name: "aggregate job",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "  aggregate:\n    if:", "  aggregate:\n    continue-on-error: true\n    if:", 1)
+			},
+			code: "missing-unity-aggregate",
+		},
+		{
+			name: "aggregate step",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - run: |", "      - continue-on-error: true\n        run: |", 1)
+			},
+			code: "missing-unity-aggregate",
+		},
+		{
+			name: "acquire",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - id: acquire\n        uses:", "      - id: acquire\n        continue-on-error: true\n        uses:", 1)
+			},
+			code: "missing-lock-acquire",
+		},
+		{
+			name: "licensed job",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "  unity:\n    needs:", "  unity:\n    continue-on-error: true\n    needs:", 1)
+			},
+			code: "missing-lock-acquire",
+		},
+		{
+			name: "acquire expression",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - id: acquire\n        uses:", "      - id: acquire\n        continue-on-error: ${{ false }}\n        uses:", 1)
+			},
+			code: "missing-lock-acquire",
+		},
+		{
+			name: "cleanup wrapper",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - id: return_cleanup\n        if:", "      - id: return_cleanup\n        continue-on-error: true\n        if:", 1)
+			},
+			code: "release-inputs-not-typed",
+		},
+		{
+			name:             "classifier",
+			workflowMutation: func(value string) string { return value },
+			compositeMutation: func(value string) string {
+				return strings.Replace(value, "    - id: classify_return\n      if:", "    - id: classify_return\n      continue-on-error: true\n      if:", 1)
+			},
+			code: "release-inputs-not-typed",
+		},
+		{
+			name: "release",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - id: release\n        if:", "      - id: release\n        continue-on-error: true\n        if:", 1)
+			},
+			code: "missing-typed-release",
+		},
+		{
+			name: "final gate",
+			workflowMutation: func(value string) string {
+				return strings.Replace(value, "      - name: Require confirmed cleanup\n        if:", "      - name: Require confirmed cleanup\n        continue-on-error: true\n        if:", 1)
+			},
+			code: "missing-cleanup-gate",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflowMutation := testCase.workflowMutation
+			if workflowMutation == nil {
+				workflowMutation = func(value string) string { return value }
+			}
+			compositeMutation := testCase.compositeMutation
+			if compositeMutation == nil {
+				compositeMutation = func(value string) string { return value }
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflowMutation(
+					unityWorkflow(safeLicensedSteps(), safeAggregate()),
+				),
+				".github/actions/return-unity-license/action.yml": compositeMutation(
+					cleanupComposite("classify_return"),
+				),
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), testCase.code) {
+				t.Fatalf("continue-on-error %s passed: %#v", testCase.name, result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRejectsAcquireBehindContinueOnErrorComposite(t *testing.T) {
+	steps := strings.Replace(
+		safeLicensedSteps(),
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
+		"      - id: acquire\n        continue-on-error: true\n        uses: ./.github/actions/acquire-wrapper",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": unityWorkflow(steps, safeAggregate()),
+		".github/actions/acquire-wrapper/action.yml": `name: Acquire wrapper
+runs:
+  using: composite
+  steps:
+    - id: inner_acquire
+      uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+`,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-lock-acquire") {
+		t.Fatalf("continue-on-error acquire composite passed: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentAcceptsLiteralFalseContinueOnError(t *testing.T) {
+	workflow := unityWorkflow(safeLicensedSteps(), safeAggregate())
+	workflow = strings.Replace(
+		workflow,
+		"      - id: release\n        if:",
+		"      - id: release\n        continue-on-error: false\n        if:",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("literal false continue-on-error produced findings: %#v", result.Findings)
 	}
 }
 
@@ -427,6 +637,32 @@ func TestUnityEnrollmentRejectsAggregateThatCannotFailClosed(t *testing.T) {
     steps:
       - run: |
           exit 0
+          test "${{ needs.preflight.result }}" = success
+          test "${{ needs.unity.result }}" = success
+`,
+		},
+		{
+			name: "disabled enforcement step",
+			aggregate: `  aggregate:
+    if: always()
+    needs: [preflight, unity]
+    runs-on: ubuntu-latest
+    steps:
+      - if: false
+        run: |
+          test "${{ needs.preflight.result }}" = success
+          test "${{ needs.unity.result }}" = success
+`,
+		},
+		{
+			name: "conditional enforcement step",
+			aggregate: `  aggregate:
+    if: always()
+    needs: [preflight, unity]
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ steps.prepare.outcome == 'success' }}
+        run: |
           test "${{ needs.preflight.result }}" = success
           test "${{ needs.unity.result }}" = success
 `,

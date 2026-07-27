@@ -88,6 +88,14 @@ refs, workflow-output injection, canonical baseline/exception casing, and raw
 REST fragment ambiguity. The final fresh review reported no actionable
 findings.
 
+Cursor Bugbot then found that disabled acquire and preflight steps could count
+as affirmative evidence. The remediator generalized the contract across
+critical jobs, direct steps, and enclosing composite calls: evidence must be
+runnable and failure-propagating, with only absent or literal-false
+`continue-on-error` accepted. Follow-up review also closed disabled aggregate
+and failure-suppressed cleanup/aggregate paths. The final fresh review reported
+no actionable findings.
+
 `node tools/llm-harness.mjs generate` refreshed the knowledge index.
 `.devcontainer/scripts/verify.sh` then passed 556 Node tests, every Go package,
 actionlint, module verification, tidy-diff, workflow credential policy, and the

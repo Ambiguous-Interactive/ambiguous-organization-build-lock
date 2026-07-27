@@ -135,6 +135,13 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   Git-ref validation, workflow-output injection, baseline/exception casing
   mismatches, and raw REST fragment ambiguity. The latest independent review
   reported no actionable findings.
+- Hosted-review outcome: Bugbot found disabled acquire and preflight evidence
+  on the prior head. The remediation generalized affirmative evidence to
+  require runnable, failure-propagating jobs, direct steps, and enclosing
+  composite calls across acquire, preflight, cleanup, and aggregate contracts.
+  Follow-up review found and closed disabled aggregate and
+  `continue-on-error` suppression paths. The final fresh review reported no
+  actionable findings.
 - Main-thread fallback reason: not applicable; independent agents are available.
 
 ## Knowledge retention

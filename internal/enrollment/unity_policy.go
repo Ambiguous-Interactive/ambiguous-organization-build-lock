@@ -65,6 +65,7 @@ type flattenedUnityStep struct {
 	node                *yaml.Node
 	scope               string
 	enclosingConditions []*yaml.Node
+	enclosingSteps      []*yaml.Node
 	cleanupWrapper      bool
 }
 
@@ -194,6 +195,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				make(map[string]bool),
 				"job",
 				nil,
+				nil,
 			)
 			if err != nil {
 				return UnityEnrollmentResult{}, fmt.Errorf("%s:%s: %w", workflowPath, jobName, err)
@@ -317,9 +319,13 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	classifierIsWrapper := false
 	classifierTyped, classifierAlways := false, false
 	releaseAlways, releaseTyped, gateAlways, gateTyped := false, false, false, false
+	jobFailurePropagates := criticalNodeFailurePropagates(job)
 	for index, step := range steps {
 		node := step.node
 		if step.cleanupWrapper {
+			if !jobFailurePropagates || !criticalStepFailurePropagates(step) {
+				continue
+			}
 			unityReturn = index
 			returnID = stepID(node)
 			returnScope = step.scope
@@ -343,7 +349,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 				}
 			}
 			if acquire, ref := acquireReference(uses); acquire {
-				if firstAcquire < 0 {
+				if firstAcquire < 0 && jobFailurePropagates && affirmativeStepRunnable(step) {
 					firstAcquire = index
 					acquireID = stepID(node)
 					acquireScope = step.scope
@@ -356,16 +362,28 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			}
 			switch lockActionName(uses) {
 			case cleanupClassifierAction:
+				if !jobFailurePropagates || !cleanupStepAlways(step) {
+					a.analyzer.add("classifier-not-always", workflowPath, jobName)
+					continue
+				}
 				classifier = index
 				classifierID = stepID(node)
 				classifierScope = step.scope
 				classifierAlways = cleanupStepAlways(step)
 				classifierIsWrapper = false
 			case releaseAction:
+				if !jobFailurePropagates || !cleanupStepAlways(step) {
+					a.analyzer.add("release-not-always", workflowPath, jobName)
+					continue
+				}
 				release = index
 				releaseID = stepID(node)
 				releaseAlways = cleanupStepAlways(step)
 			case cleanupGateAction:
+				if !jobFailurePropagates || !cleanupStepAlways(step) {
+					a.analyzer.add("cleanup-gate-not-always", workflowPath, jobName)
+					continue
+				}
 				gate = index
 				gateAlways = cleanupStepAlways(step)
 			}
@@ -451,6 +469,7 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 	visiting map[string]bool,
 	scope string,
 	enclosingConditions []*yaml.Node,
+	enclosingSteps []*yaml.Node,
 ) ([]flattenedUnityStep, error) {
 	result := make([]flattenedUnityStep, 0, len(steps))
 	for index, step := range steps {
@@ -460,6 +479,7 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 				node:                step,
 				scope:               scope,
 				enclosingConditions: append([]*yaml.Node(nil), enclosingConditions...),
+				enclosingSteps:      append([]*yaml.Node(nil), enclosingSteps...),
 			})
 			continue
 		}
@@ -485,6 +505,7 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 				node:                step,
 				scope:               scope,
 				enclosingConditions: append([]*yaml.Node(nil), enclosingConditions...),
+				enclosingSteps:      append([]*yaml.Node(nil), enclosingSteps...),
 			})
 			continue
 		}
@@ -493,11 +514,14 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 		if condition := mappingValue(step, "if"); condition != nil {
 			nestedConditions = append(nestedConditions, condition)
 		}
+		nestedEnclosingSteps := append([]*yaml.Node(nil), enclosingSteps...)
+		nestedEnclosingSteps = append(nestedEnclosingSteps, step)
 		nested, err := a.flattenedSteps(
 			sequenceValues(mappingValue(runs, "steps")),
 			visiting,
 			fmt.Sprintf("%s/%d", scope, index),
 			nestedConditions,
+			nestedEnclosingSteps,
 		)
 		delete(visiting, manifestPath)
 		if err != nil {
@@ -508,6 +532,7 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 			node:                step,
 			scope:               scope,
 			enclosingConditions: append([]*yaml.Node(nil), enclosingConditions...),
+			enclosingSteps:      append([]*yaml.Node(nil), enclosingSteps...),
 		}
 		if a.validCleanupComposite(wrapper, manifest) {
 			wrapper.cleanupWrapper = true
@@ -542,7 +567,7 @@ func (a *unityPolicyAnalyzer) validCleanupComposite(
 		}
 		if lockActionName(stepUses(step)) != cleanupClassifierAction ||
 			!a.approved[strings.ToLower(actionRef(stepUses(step)))] ||
-			stepID(step) == "" {
+			stepID(step) == "" || !criticalNodeFailurePropagates(step) {
 			continue
 		}
 		if returnIndex >= 0 && index > returnIndex &&
@@ -630,9 +655,16 @@ func (a *unityPolicyAnalyzer) preflightJobs(jobs *yaml.Node) map[string]bool {
 	result := make(map[string]bool)
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName, job := jobs.Content[index].Value, jobs.Content[index+1]
+		if !affirmativeCondition(mappingValue(job, "if")) ||
+			!criticalNodeFailurePropagates(job) {
+			continue
+		}
 		for _, step := range sequenceValues(mappingValue(job, "steps")) {
 			uses := stepUses(step)
-			if lockActionName(uses) == preflightAction && a.approved[strings.ToLower(actionRef(uses))] {
+			if lockActionName(uses) == preflightAction &&
+				a.approved[strings.ToLower(actionRef(uses))] &&
+				affirmativeCondition(mappingValue(step, "if")) &&
+				criticalNodeFailurePropagates(step) {
 				result[jobName] = true
 			}
 		}
@@ -778,7 +810,8 @@ func conditionIsSafeAlways(node *yaml.Node) bool {
 }
 
 func cleanupStepAlways(step flattenedUnityStep) bool {
-	if !conditionIsSafeAlways(mappingValue(step.node, "if")) {
+	if !conditionIsSafeAlways(mappingValue(step.node, "if")) ||
+		!criticalStepFailurePropagates(step) {
 		return false
 	}
 	for _, condition := range step.enclosingConditions {
@@ -787,6 +820,43 @@ func cleanupStepAlways(step flattenedUnityStep) bool {
 		}
 	}
 	return true
+}
+
+func affirmativeStepRunnable(step flattenedUnityStep) bool {
+	if !affirmativeCondition(mappingValue(step.node, "if")) ||
+		!criticalStepFailurePropagates(step) {
+		return false
+	}
+	for _, condition := range step.enclosingConditions {
+		if !affirmativeCondition(condition) {
+			return false
+		}
+	}
+	return true
+}
+
+func affirmativeCondition(condition *yaml.Node) bool {
+	return condition == nil || conditionIsSafeAlways(condition)
+}
+
+func criticalStepFailurePropagates(step flattenedUnityStep) bool {
+	if !criticalNodeFailurePropagates(step.node) {
+		return false
+	}
+	for _, enclosing := range step.enclosingSteps {
+		if !criticalNodeFailurePropagates(enclosing) {
+			return false
+		}
+	}
+	return true
+}
+
+func criticalNodeFailurePropagates(node *yaml.Node) bool {
+	value := mappingValue(node, "continue-on-error")
+	if value == nil {
+		return true
+	}
+	return value.Kind == yaml.ScalarNode && value.Tag == "!!bool" && value.Value == "false"
 }
 
 func stepID(step *yaml.Node) string {
@@ -996,7 +1066,8 @@ func stepReturnsUnity(step *yaml.Node) bool {
 }
 
 func compositeReturnEvidence(step *yaml.Node) bool {
-	if !stepReturnsUnity(step) || !conditionIsSafeAlways(mappingValue(step, "if")) {
+	if !stepReturnsUnity(step) || !conditionIsSafeAlways(mappingValue(step, "if")) ||
+		!criticalNodeFailurePropagates(step) {
 		return false
 	}
 	shell := mappingValue(step, "shell")
@@ -1084,7 +1155,8 @@ func hasAggregate(
 	for index := 0; index < len(jobs.Content); index += 2 {
 		job := jobs.Content[index+1]
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
-			!conditionIsSafeAlways(mappingValue(job, "if")) {
+			!conditionIsSafeAlways(mappingValue(job, "if")) ||
+			!criticalNodeFailurePropagates(job) {
 			continue
 		}
 		for _, step := range sequenceValues(mappingValue(job, "steps")) {
@@ -1119,6 +1191,10 @@ func neededCandidates(job *yaml.Node, candidates map[string]bool) map[string]boo
 }
 
 func aggregateStepEnforces(step *yaml.Node, licensedJob, preflightJob string) bool {
+	if !affirmativeCondition(mappingValue(step, "if")) ||
+		!criticalNodeFailurePropagates(step) {
+		return false
+	}
 	run := mappingValue(step, "run")
 	if run == nil || run.Kind != yaml.ScalarNode {
 		return false
