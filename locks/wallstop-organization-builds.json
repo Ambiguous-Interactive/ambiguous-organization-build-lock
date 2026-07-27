@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30297243132:platform-build-windows:platform-build-windows",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "platform-build-windows",
-    "runId": "30297243132",
-    "runAttempt": "2",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30297243132",
-    "queuedAt": "2026-07-27T19:34:54.399Z",
-    "acquiredAt": "2026-07-27T19:34:57.155Z",
-    "expiresAt": "2026-07-27T23:34:57.155Z",
-    "runnerId": "ELI-MACHINE"
+    "holderId": "Ambiguous-Interactive/IshoBoy:30298105389:unity-tests:unity-ci-tests-EditMode",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "30298105389",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30298105389",
+    "queuedAt": "2026-07-27T19:36:47.275Z",
+    "acquiredAt": "2026-07-27T19:36:49.838Z",
+    "expiresAt": "2026-07-27T23:36:49.838Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30297243132:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30297243132",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30297243132",
-      "queuedAt": "2026-07-27T19:34:54.399Z",
-      "acquiredAt": "2026-07-27T19:34:57.155Z",
-      "expiresAt": "2026-07-27T23:34:57.155Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:30298105389:unity-tests:unity-ci-tests-EditMode",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "73e095d7-a903-4c4a-bb03-be5f306269b9",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30297243132:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "30297243132",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30297243132",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-27T19:40:08.708Z",
+      "availableAt": "2026-07-27T19:40:09.708Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T19:36:49.839Z"
+  "updatedAt": "2026-07-27T19:40:08.708Z"
 }
