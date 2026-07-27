@@ -1,7 +1,7 @@
 ---
 summary: Task record for the fail-closed organization Unity enrollment audit.
 ---
-<!-- summary: Build and validate the fail-closed six-repository Unity enrollment audit. -->
+<!-- summary: Build and validate the fail-closed extensible Unity enrollment audit. -->
 # Task: organization Unity enrollment audit
 
 ## Acceptance criteria
@@ -21,6 +21,8 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   complete clean audit.
 - Run daily, manually, and after relevant policy changes without consuming a
   Unity license.
+- Let operators onboard additional organization repositories through a
+  trusted-main manual workflow that opens a reviewable policy pull request.
 
 ## Baseline
 
@@ -65,14 +67,18 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   the alert synchronizer runs after failed analysis.
 - Determinism/isolation: sorted outputs, fixed clocks in tests, exact Git
   objects, no consumer code execution.
-- Contract synchronization: registry, workflow, analyzer, tests, docs,
-  operations facts, and generated knowledge index.
+- Contract synchronization: one authoritative registry drives reader scope,
+  checkout targets, and revalidation; tests, docs, operations facts, and the
+  generated knowledge index remain synchronized.
 
 ## Green
 
-- Minimal change: strict six-repository registry; exact-object analyzer;
+- Minimal change: strict extensible registry with an immutable six-repository
+  baseline; exact-object analyzer;
   source-free bounded artifact; marker-fenced issue synchronizer; daily/manual
-  reader-App workflow with exact-head revalidation; policy/docs invariants.
+  reader-App workflow with registry-derived scope and exact-head revalidation;
+  trusted-main manual onboarding that opens a registry-only PR; policy/docs
+  invariants.
 - Focused result: enrollment and command Go packages pass; workflow and
   documentation policy suites pass. A no-Unity dry run over the three public
   consumers produces only retrieval findings for the unavailable private
@@ -119,6 +125,16 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   hatches. The remediator replaced permissive inference with conservative
   canonical contracts and added regressions. Final focused re-review reported
   no findings.
+- Pull-request feedback: PR #110 requested a manual path for future repository
+  onboarding. The remediation made the registry the single runtime source for
+  reader scope, checkout, and revalidation, and added the `Onboard Unity
+  repository` workflow plus a validated atomic registry editor.
+- Onboarding review outcome: three adversarial rounds found and closed
+  selected-ref write-token exposure, green-skipped requests, missing
+  authoritative metadata evidence, case-insensitive identity gaps, incomplete
+  Git-ref validation, workflow-output injection, baseline/exception casing
+  mismatches, and raw REST fragment ambiguity. The latest independent review
+  reported no actionable findings.
 - Main-thread fallback reason: not applicable; independent agents are available.
 
 ## Knowledge retention

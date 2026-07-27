@@ -51,6 +51,17 @@ func TestRunFailsClosedAndWritesSanitizedArtifactWhenRepositoriesAreMissing(t *t
 	}
 }
 
+func TestRunCanValidatePolicyWithoutRepositoryAccess(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"--policy", "../../unity-enrollment-policy.json",
+		"--validate-policy-only",
+	}, &stdout, &stderr)
+	if exit != 0 || !strings.Contains(stdout.String(), "policy is valid") {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+}
+
 func TestRunAuditsCompleteExactRepositorySet(t *testing.T) {
 	root := t.TempDir()
 	policyContent, err := os.ReadFile("../../unity-enrollment-policy.json")

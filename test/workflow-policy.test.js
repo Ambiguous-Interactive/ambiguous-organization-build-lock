@@ -14,7 +14,9 @@ const expectedWorkflowJobs = new Map([
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
+  ["onboard-unity-repository.yml", ["onboard"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
+  ["request-unity-repository-onboarding.yml", ["request"]],
   ["unity-enrollment-audit.yml", ["audit"]],
   ["recover-build-lock.yml", ["recover"]],
   ["reaper-delivery-audit.yml", ["audit"]],
@@ -55,12 +57,31 @@ const expectedWorkflowRunScriptSignatures = new Map([
     ]
   ],
   [
+    "onboard-unity-repository.yml",
+    [
+      'set -euo pipefail\ntest "${REQUEST_CONCLUSION}" = "success"',
+      "set -euo pipefail\njq -e '",
+      'set -euo pipefail\nmetadata="$(GH_TOKEN="${READER_AUTHORIZATION}" gh api "repos/${TARGET_REPOSITORY}")"',
+      "set -euo pipefail\ngo run ./cmd/onboard-unity-repository \\",
+      'set -euo pipefail\ngit config user.name "github-actions[bot]"'
+    ]
+  ],
+  [
+    "request-unity-repository-onboarding.yml",
+    [
+      'set -euo pipefail\ntest "${REQUEST_REF}" = "refs/heads/main"',
+      "set -euo pipefail\njq -n \\"
+    ]
+  ],
+  [
     "request-unity-enrollment-audit.yml",
     ['echo "The completed request triggers the secret-bearing audit from\nthe trusted default-branch workflow."']
   ],
   [
     "unity-enrollment-audit.yml",
     [
+      "set -euo pipefail\ngo test ./internal/enrollment ./cmd/audit-unity-enrollment",
+      "set -euo pipefail\nmkdir -p .policy-consumers",
       "go run ./cmd/audit-unity-enrollment\n--policy unity-enrollment-policy.json",
       "set -euo pipefail\nfailed=false",
       'go run ./cmd/sync-unity-enrollment-issue\n--audit "${RUNNER_TEMP}/unity-enrollment-audit.json"',
@@ -1245,8 +1266,9 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   const requestText = readWorkflow("request-unity-enrollment-audit.yml");
   const job = jobSections(text).find((candidate) => candidate.name === "audit");
   const steps = workflowJobStepMaps(text, "audit");
+  const scope = steps.find((step) => step.name === "Resolve exact reader scope from reviewed registry");
   const token = steps.find((step) => step.name === "Mint exact repository-scoped reader token");
-  const checkouts = steps.filter((step) => /^Checkout .* default branch$/.test(step.name || ""));
+  const checkout = steps.find((step) => step.name === "Checkout reviewed repository default branches");
   const audit = steps.find((step) => step.name === "Audit exact consumer snapshots");
   const revalidate = steps.find((step) => step.name === "Revalidate default-branch heads");
   const sync = steps.find((step) => step.name === "Synchronize deduplicated drift issue");
@@ -1265,6 +1287,7 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.match(text, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
   for (const requiredPath of [
     ".github/workflows/request-unity-enrollment-audit.yml",
+    ".github/workflows/onboard-unity-repository.yml",
     ".github/actions/**",
     ".github/dist/**",
     "internal/enrollment/**",
@@ -1275,31 +1298,23 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   }
 
   assert.match(token.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.ok(scope);
+  assert.match(text, /--validate-policy-only/);
+  assert.ok(
+    text.indexOf("--validate-policy-only") <
+      text.indexOf('gh api "repos/${repository}/git/ref/heads/${branch}"'),
+    "registry branch validation must precede continuous revalidation REST paths"
+  );
+  assert.match(text, /\.repositories\[\]\.repository/);
+  assert.match(text, /\^Ambiguous-Interactive\/\[A-Za-z0-9_.-\]\+\$/);
+  assert.match(text, /echo "repositories=\$\{repositories\}" >> "\$\{GITHUB_OUTPUT\}"/);
   assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_READER_APP_ID }}");
   assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}");
   assert.equal(token.with["permission-contents"], "read");
-  assert.equal(
-    token.with.repositories,
-    "DoxReloaded,DxMessaging,IshoBoy,qora-redux,unity-builder,unity-helpers"
-  );
-
-  assert.deepEqual(
-    checkouts.map((step) => step.with.repository).sort(),
-    [
-      "Ambiguous-Interactive/DoxReloaded",
-      "Ambiguous-Interactive/DxMessaging",
-      "Ambiguous-Interactive/IshoBoy",
-      "Ambiguous-Interactive/qora-redux",
-      "Ambiguous-Interactive/unity-builder",
-      "Ambiguous-Interactive/unity-helpers"
-    ]
-  );
-  for (const checkout of checkouts) {
-    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
-    assert.equal(checkout.with.token, "${{ steps.reader-token.outputs.token }}");
-    assert.equal(checkout.with["persist-credentials"], "false");
-    assert.equal(Object.hasOwn(checkout.with, "ref"), false);
-  }
+  assert.equal(token.with.repositories, "${{ steps.enrollment-scope.outputs.repositories }}");
+  assert.equal(checkout.env.READER_AUTHORIZATION, "${{ steps.reader-token.outputs.token }}");
+  assert.match(text, /GH_TOKEN="\$\{READER_AUTHORIZATION\}" gh repo clone "\$\{repository\}" "\$\{directory\}"/);
+  assert.match(text, /\.repositories\[\] \| \[\.repository, \.defaultBranch\] \| @tsv/);
 
   assert.equal(audit.if, "${{ always() }}");
   assert.equal(audit["continue-on-error"], "true");
@@ -1310,6 +1325,54 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.match(text, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH\}"\)" != "true" \]; then/);
   const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");
   assert.equal(trustedCheckout.with.ref, "main");
+});
+
+test("Unity repository onboarding opens a reviewable registry-only PR from trusted main", () => {
+  const text = readWorkflow("onboard-unity-repository.yml");
+  const requestText = readWorkflow("request-unity-repository-onboarding.yml");
+  const job = jobSections(text).find((candidate) => candidate.name === "onboard");
+  const steps = workflowJobStepMaps(text, "onboard");
+  const checkout = steps.find((step) => step.name === "Checkout trusted default branch");
+  const update = steps.find((step) => step.name === "Add validated registry entry");
+  const pullRequest = steps.find((step) => step.name === "Open enrollment pull request with retained evidence");
+
+  assert.ok(job);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), false);
+  assert.equal(workflowHasTrigger(text, "workflow_run"), true);
+  assert.equal(workflowHasTrigger(requestText, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(requestText, "workflow_run"), false);
+  assert.equal(workflowHasTrigger(text, "pull_request"), false);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "pull-requests", "write"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "actions", "read"), true);
+  assert.doesNotMatch(requestText, /secrets\.|contents:\s*write|pull-requests:\s*write/);
+  assert.match(requestText, /test "\$\{REQUEST_REF\}" = "refs\/heads\/main"/);
+  assert.doesNotMatch(job.text, /^\s+if:/m, "privileged onboarding must run and fail instead of green-skipping");
+  assert.match(text, /test "\$\{REQUEST_HEAD_BRANCH\}" = "main"/);
+  assert.match(text, /test "\$\{REQUEST_HEAD_REPOSITORY\}" = "\$\{TRUSTED_REPOSITORY\}"/);
+  assert.equal(checkout.with.ref, "main");
+  assert.match(text, /go run \.\/cmd\/onboard-unity-repository/);
+  assert.equal(update.env.TARGET_REPOSITORY, "${{ steps.request.outputs.repository }}");
+  assert.equal(update.env.TARGET_DEFAULT_BRANCH, "${{ steps.request.outputs.default_branch }}");
+  assert.equal(pullRequest.env.GH_TOKEN, "${{ github.token }}");
+  assert.match(text, /git add unity-enrollment-policy\.json/);
+  assert.match(text, /gh pr create/);
+  assert.match(text, /Mint target-scoped reader token/);
+  assert.match(text, /--validate-only/);
+  assert.ok(
+    text.indexOf("--validate-only") < text.indexOf('echo "repository=${repository}"'),
+    "trusted Go validation must run before request values reach GITHUB_OUTPUT"
+  );
+  assert.match(text, /\^\[a-f0-9\]\{40\}\$/);
+  assert.match(text, /gh api "repos\/\$\{TARGET_REPOSITORY\}"/);
+  assert.match(text, /gh api "repos\/\$\{TARGET_REPOSITORY\}\/git\/ref\/heads\/\$\{TARGET_DEFAULT_BRANCH\}"/);
+  assert.ok(
+    text.indexOf("--validate-only") <
+      text.indexOf('gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_DEFAULT_BRANCH}"'),
+    "target branch validation must precede onboarding REST paths"
+  );
+  assert.match(text, /Authoritative pre-merge evidence/);
+  assert.match(text, /Reader App installation and Contents-read access: verified/);
 });
 
 test("CI isolates actionlint while keeping production Go dependencies upgradable", () => {
@@ -1559,7 +1622,10 @@ test("workflows that query Actions REST APIs declare actions read permission", (
     }
   }
 
-  assert.deepEqual(checkedJobs, ["dependabot-auto-merge.yml:dependabot"]);
+  assert.deepEqual(checkedJobs, [
+    "dependabot-auto-merge.yml:dependabot",
+    "onboard-unity-repository.yml:onboard"
+  ]);
 });
 
 test("permission parser handles flow maps and fails closed on narrowed job overrides", () => {

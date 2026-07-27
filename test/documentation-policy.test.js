@@ -68,9 +68,17 @@ test("steady-state runbook reports the registered release and consumer inventory
   const facts = JSON.parse(read(factsPath));
   const enrollmentPolicy = JSON.parse(read(enrollmentPolicyPath));
   const operations = read(operationsPath);
-  const listedConsumers = [...operations.matchAll(/^- `([^`]+)` <!-- enrolled-consumer -->$/gm)].map(
+  const listedBaseline = [...operations.matchAll(/^- `([^`]+)` <!-- enrollment-baseline -->$/gm)].map(
     (match) => match[1]
   );
+  const requiredBaseline = [
+    "Ambiguous-Interactive/DoxReloaded",
+    "Ambiguous-Interactive/DxMessaging",
+    "Ambiguous-Interactive/IshoBoy",
+    "Ambiguous-Interactive/qora-redux",
+    "Ambiguous-Interactive/unity-builder",
+    "Ambiguous-Interactive/unity-helpers"
+  ];
 
   assert.match(facts.publishedRelease.tag, /^v\d+\.\d+\.\d+$/);
   assert.match(facts.publishedRelease.commit, /^[a-f0-9]{40}$/);
@@ -80,11 +88,12 @@ test("steady-state runbook reports the registered release and consumer inventory
       `- Published compatibility release: \`${facts.publishedRelease.tag}\` at\\s+\`${facts.publishedRelease.commit}\``
     )
   );
-  assert.deepEqual(listedConsumers.sort(), [...facts.enrolledConsumers].sort());
-  assert.deepEqual(
-    enrollmentPolicy.repositories.map((entry) => entry.repository).sort(),
-    [...facts.enrolledConsumers].sort()
-  );
+  assert.deepEqual(listedBaseline.sort(), requiredBaseline.sort());
+  const registered = new Set(enrollmentPolicy.repositories.map((entry) => entry.repository));
+  for (const repository of requiredBaseline) {
+    assert.equal(registered.has(repository), true);
+  }
+  assert.match(operations, /`unity-enrollment-policy\.json` is the authoritative reviewed/);
   assert.equal(enrollmentPolicy.repositories.find((entry) => entry.repository.endsWith("/unity-builder")).fork, true);
   assert.ok(enrollmentPolicy.approvedLockShas.includes(facts.publishedRelease.commit));
 });
@@ -97,7 +106,7 @@ test("continuous enrollment audit facts and guidance stay synchronized", () => {
   assert.deepEqual(facts.unityEnrollmentAudit, {
     policyPath: "unity-enrollment-policy.json",
     schedule: "23 8 * * *",
-    repositoryCount: 6,
+    onboardingWorkflow: "Request Unity repository onboarding",
     alertMarker: "unity-enrollment-audit:v1"
   });
   assert.match(operations, /`Organization Unity enrollment audit`/);
@@ -106,7 +115,10 @@ test("continuous enrollment audit facts and guidance stay synchronized", () => {
   assert.match(operations, /repository, commit, workflow path, job, classification, and stable reason\s+code/);
   assert.match(operations, /complete clean audit/);
   assert.match(operations, /registry exception with repository, path, classification, owner, and RFC3339\s+expiry/);
+  assert.match(operations, /`Request Unity repository\s+onboarding` workflow on `main`/);
+  assert.match(operations, /reader-App token scope, checkout targets, and exact-head\s+revalidation set from the validated registry/);
   assert.match(readme, /`unity-enrollment-policy\.json`/);
+  assert.match(readme, /secretless `Request Unity repository\s+onboarding` workflow on `main`/);
   assert.match(readme, /one\s+deduplicated issue/);
 });
 

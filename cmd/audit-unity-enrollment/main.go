@@ -27,10 +27,15 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	policyPath := flags.String("policy", "unity-enrollment-policy.json", "reviewed enrollment policy JSON")
 	repositoriesRoot := flags.String("repositories-root", ".policy-consumers", "checked-out consumer root")
 	outputPath := flags.String("output", "", "bounded JSON audit artifact")
+	validatePolicyOnly := flags.Bool(
+		"validate-policy-only",
+		false,
+		"validate the reviewed registry without loading repositories",
+	)
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return 2
 	}
-	if *outputPath == "" || *repositoriesRoot == "" {
+	if !*validatePolicyOnly && (*outputPath == "" || *repositoriesRoot == "") {
 		fmt.Fprintln(stderr, "policy, repositories-root, and output are required")
 		return 2
 	}
@@ -43,6 +48,10 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "invalid Unity enrollment policy: %v\n", err)
 		return 2
+	}
+	if *validatePolicyOnly {
+		fmt.Fprintln(stdout, "Unity enrollment policy is valid.")
+		return 0
 	}
 
 	audit := enrollment.UnityOrganizationAudit{

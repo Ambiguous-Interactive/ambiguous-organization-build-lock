@@ -37,34 +37,52 @@ incident blocks all new admission regardless of nominal capacity.
 
 ## Enrolled consumers
 
-The reviewed paid or lock-aware perimeter from `operations-facts.json` contains
-six repositories:
+`unity-enrollment-policy.json` is the authoritative reviewed paid or
+lock-aware perimeter. It retains this required baseline:
 
-- `Ambiguous-Interactive/DoxReloaded` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/DxMessaging` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/IshoBoy` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/qora-redux` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/unity-builder` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/unity-helpers` <!-- enrolled-consumer -->
+- `Ambiguous-Interactive/DoxReloaded` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/DxMessaging` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/IshoBoy` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/qora-redux` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/unity-builder` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/unity-helpers` <!-- enrollment-baseline -->
 
 Enrollment changes are reviewed policy changes, not automatic consequences of
-organization ownership. Follow [Consumer Enrollment](consumer-enrollment.md)
-and update the continuous audit tracked by issue #42.
+organization ownership. Run the secretless `Request Unity repository
+onboarding` workflow from `main`; its trusted consumer verifies the requested
+repository metadata and opens a registry-only pull request. Review the retained
+metadata evidence before merging. The continuous audit evaluates the new
+repository's workflows after the policy reaches `main` and reports any drift in
+the central issue. Follow [Consumer Enrollment](consumer-enrollment.md) for the
+consumer-side rollout.
 
 ## Continuous enrollment audit
 
-`unity-enrollment-policy.json` is the reviewed six-repository registry and
-immutable lock-action allowlist. The `Organization Unity enrollment audit`
+`unity-enrollment-policy.json` is the reviewed extensible repository registry
+and immutable lock-action allowlist. The `Organization Unity enrollment audit`
 workflow runs daily at `23 8 * * *`, can be dispatched manually, and also runs
 after relevant policy changes reach `main`. It uses the reader App to check out
 each current default branch without persisting credentials, analyzes exact Git
 objects without executing consumer code, and revalidates every default-branch
 head before reporting.
 
-The repository set is an exact generated-coordination boundary, not an
-open-ended registry. Additions require the registry, reader-App token
-repository list, checkout steps, and exact-head revalidation list to change
-together; registry-only expansion is rejected.
+The audit derives the reader-App token scope, checkout targets, and exact-head
+revalidation set from the validated registry. The required baseline cannot be
+removed, repositories outside `Ambiguous-Interactive` are rejected, and
+duplicate or malformed entries fail closed.
+
+Repository additions start with the secretless `Request Unity repository
+onboarding` workflow on `main`. Its trusted-main `workflow_run` consumer rejects
+unsuccessful, off-main, and cross-repository requests before using credentials.
+It then scopes a reader-App token to the requested repository and verifies the
+canonical full name, default branch, fork status, and exact branch-head SHA.
+The generated registry-only PR retains those sanitized facts and the evidence
+run URL. A repository typo, stale branch declaration, or missing reader-App
+installation therefore fails before a PR can be opened or merged.
+Default branches are additionally restricted to the audited URL-safe ASCII
+subset (`A-Z`, `a-z`, `0-9`, `.`, `_`, `@`, `+`, `-`, and `/`) before they are
+used in any GitHub REST ref path; percent escapes and fragment markers are
+rejected rather than interpreted.
 
 Manual operation starts the secretless `Request organization Unity enrollment
 audit` workflow. Its completed run triggers the secret-bearing audit through

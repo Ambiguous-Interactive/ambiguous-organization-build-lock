@@ -423,15 +423,20 @@ mirrored first holder conservatively, its state write can drop additional
 ## Organization enrollment audit
 
 The daily and manually dispatchable `Organization Unity enrollment audit`
-workflow enforces the reviewed six-repository perimeter in
-`unity-enrollment-policy.json`. It mints one Contents-read token for exactly
-those repositories, checks out their current default branches, audits immutable
+workflow enforces the reviewed extensible perimeter in
+`unity-enrollment-policy.json`. It derives one exact Contents-read token scope
+from that validated registry, checks out current default branches, audits immutable
 Git objects without executing consumer code, and revalidates the heads before
 reporting. Missing or moving repositories, malformed workflows, unsafe
 licensed lifecycles, mutable actions, and stale policy exceptions fail closed.
-Expanding that perimeter requires one coordinated change to the registry,
-reader-App token scope, checkout steps, and exact-head revalidation; the parser
-rejects registry-only expansion.
+
+Operators expand the perimeter through the secretless `Request Unity repository
+onboarding` workflow on `main`. A trusted-main `workflow_run` then validates the
+request, proves the reader App can access the exact repository, verifies its
+canonical name, default branch, fork status, and exact branch-head commit, and
+opens a registry-only pull request. Those sanitized facts and the evidence-run
+link are retained in the PR body before merge. A typo, stale branch declaration,
+off-main request, or missing App installation fails before PR creation.
 
 Output is intentionally source-free: repository, commit SHA, workflow path,
 job, classification, and stable reason code only. Drift opens or updates one

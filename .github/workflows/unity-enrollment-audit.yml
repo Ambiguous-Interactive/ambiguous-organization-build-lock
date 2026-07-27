@@ -6,10 +6,13 @@ on:
       - main
     paths:
       - ".github/workflows/request-unity-enrollment-audit.yml"
+      - ".github/workflows/request-unity-repository-onboarding.yml"
+      - ".github/workflows/onboard-unity-repository.yml"
       - ".github/workflows/unity-enrollment-audit.yml"
       - ".github/actions/**"
       - ".github/dist/**"
       - "cmd/audit-unity-enrollment/**"
+      - "cmd/onboard-unity-repository/**"
       - "cmd/sync-unity-enrollment-issue/**"
       - "internal/enrollment/**"
       - "locks/**"
@@ -56,6 +59,43 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Resolve exact reader scope from reviewed registry
+        id: enrollment-scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/enrollment ./cmd/audit-unity-enrollment
+          go run ./cmd/audit-unity-enrollment \
+            --policy unity-enrollment-policy.json \
+            --validate-policy-only
+          repository_count="$(jq -er '.repositories | length' unity-enrollment-policy.json)"
+          if [ "${repository_count}" -lt 6 ]; then
+            echo "The Unity enrollment baseline is incomplete." >&2
+            exit 1
+          fi
+          if ! jq -e '
+            .organization == "Ambiguous-Interactive" and
+            ([.repositories[].repository] | length == (unique | length)) and
+            all(
+              .repositories[];
+              (.repository | test("^Ambiguous-Interactive/[A-Za-z0-9_.-]+$")) and
+              (.defaultBranch | type == "string" and length > 0)
+            )
+          ' unity-enrollment-policy.json >/dev/null; then
+            echo "The Unity enrollment registry cannot define reader scope." >&2
+            exit 1
+          fi
+          repositories="$(
+            jq -r '.repositories[].repository | split("/")[1]' unity-enrollment-policy.json |
+              LC_ALL=C sort |
+              paste -sd, -
+          )"
+          if [ -z "${repositories}" ]; then
+            echo "The Unity enrollment reader scope is empty." >&2
+            exit 1
+          fi
+          echo "repositories=${repositories}" >> "${GITHUB_OUTPUT}"
+
       - name: Mint exact repository-scoped reader token
         id: reader-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -63,56 +103,26 @@ jobs:
           app-id: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
           private-key: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}
           owner: Ambiguous-Interactive
-          repositories: DoxReloaded,DxMessaging,IshoBoy,qora-redux,unity-builder,unity-helpers
+          repositories: ${{ steps.enrollment-scope.outputs.repositories }}
           permission-contents: read
 
-      - name: Checkout DoxReloaded default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/DoxReloaded
-          path: .policy-consumers/DoxReloaded
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Checkout DxMessaging default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/DxMessaging
-          path: .policy-consumers/DxMessaging
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Checkout IshoBoy default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/IshoBoy
-          path: .policy-consumers/IshoBoy
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Checkout qora-redux default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/qora-redux
-          path: .policy-consumers/qora-redux
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Checkout unity-builder default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/unity-builder
-          path: .policy-consumers/unity-builder
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Checkout unity-helpers default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Ambiguous-Interactive/unity-helpers
-          path: .policy-consumers/unity-helpers
-          token: ${{ steps.reader-token.outputs.token }}
-          persist-credentials: false
+      - name: Checkout reviewed repository default branches
+        env:
+          READER_AUTHORIZATION: ${{ steps.reader-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .policy-consumers
+          while IFS=$'\t' read -r repository branch; do
+            directory=".policy-consumers/${repository#*/}"
+            GH_TOKEN="${READER_AUTHORIZATION}" gh repo clone "${repository}" "${directory}" -- \
+              --branch "${branch}" \
+              --single-branch \
+              --no-tags
+          done < <(
+            jq -r '.repositories[] | [.repository, .defaultBranch] | @tsv' \
+              unity-enrollment-policy.json
+          )
 
       - name: Audit exact consumer snapshots
         id: enrollment-audit
@@ -161,12 +171,15 @@ jobs:
               record_finding "${repository}" "${audited_sha}" "default-branch-advanced"
             fi
           }
-          verify_head Ambiguous-Interactive/DoxReloaded main .policy-consumers/DoxReloaded
-          verify_head Ambiguous-Interactive/DxMessaging master .policy-consumers/DxMessaging
-          verify_head Ambiguous-Interactive/IshoBoy main .policy-consumers/IshoBoy
-          verify_head Ambiguous-Interactive/qora-redux main .policy-consumers/qora-redux
-          verify_head Ambiguous-Interactive/unity-builder main .policy-consumers/unity-builder
-          verify_head Ambiguous-Interactive/unity-helpers main .policy-consumers/unity-helpers
+          while IFS=$'\t' read -r repository branch; do
+            verify_head \
+              "${repository}" \
+              "${branch}" \
+              ".policy-consumers/${repository#*/}"
+          done < <(
+            jq -r '.repositories[] | [.repository, .defaultBranch] | @tsv' \
+              unity-enrollment-policy.json
+          )
           if [ "${failed}" = true ]; then
             exit 1
           fi

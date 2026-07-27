@@ -23,6 +23,22 @@ var minimumUnityEnrollmentRepositories = map[string]bool{
 	"Ambiguous-Interactive/unity-helpers": false,
 }
 
+type requiredUnityRepository struct {
+	canonical string
+	fork      bool
+}
+
+var minimumUnityEnrollmentRepositoriesByFold = func() map[string]requiredUnityRepository {
+	result := make(map[string]requiredUnityRepository, len(minimumUnityEnrollmentRepositories))
+	for repository, fork := range minimumUnityEnrollmentRepositories {
+		result[strings.ToLower(repository)] = requiredUnityRepository{
+			canonical: repository,
+			fork:      fork,
+		}
+	}
+	return result
+}()
+
 // UnityEnrollmentRepository declares one exact default-branch audit target.
 type UnityEnrollmentRepository struct {
 	Repository            string `json:"repository"`
@@ -41,9 +57,9 @@ type UnityEnrollmentRegistry struct {
 }
 
 // ParseUnityEnrollmentRegistry strictly validates the required baseline and
-// requires the exact workflow-coordinated repository set without accepting
-// unknown JSON fields or trailing values. Expansion must update the registry,
-// reader-App token scope, checkout steps, and head revalidation together.
+// any reviewed additions without accepting unknown JSON fields or trailing
+// values. The audit derives its reader scope, checkouts, and head revalidation
+// directly from this registry.
 func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, error) {
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment policy size is invalid")
@@ -64,32 +80,32 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	if registry.Organization != UnityEnrollmentOrganization {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment policy organization is not authorized")
 	}
-	if len(registry.Repositories) != len(minimumUnityEnrollmentRepositories) {
-		return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository set must match the workflow audit scope")
+	if len(registry.Repositories) < len(minimumUnityEnrollmentRepositories) {
+		return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository set is incomplete")
 	}
 	seen := make(map[string]bool, len(registry.Repositories))
+	canonicalRepositories := make(map[string]string, len(registry.Repositories))
 	for _, repository := range registry.Repositories {
-		if !validRepository(repository.Repository) ||
-			!strings.HasPrefix(repository.Repository, registry.Organization+"/") {
-			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment policy contains a repository outside the organization")
+		if err := ValidateUnityEnrollmentRepository(repository); err != nil {
+			return UnityEnrollmentRegistry{}, err
 		}
-		if seen[repository.Repository] {
+		repositoryKey := strings.ToLower(repository.Repository)
+		if seen[repositoryKey] {
 			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment policy contains a duplicate repository")
 		}
-		seen[repository.Repository] = true
-		if expectedFork, required := minimumUnityEnrollmentRepositories[repository.Repository]; required &&
-			expectedFork != repository.Fork {
-			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository fork classification is incorrect")
-		}
-		if _, required := minimumUnityEnrollmentRepositories[repository.Repository]; !required {
-			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository is outside the workflow audit scope")
-		}
-		if !validRefName(repository.DefaultBranch) {
-			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment default branch is invalid")
+		seen[repositoryKey] = true
+		canonicalRepositories[repositoryKey] = repository.Repository
+		if required, ok := minimumUnityEnrollmentRepositoriesByFold[repositoryKey]; ok {
+			if repository.Repository != required.canonical {
+				return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment baseline repository spelling is not canonical")
+			}
+			if repository.Fork != required.fork {
+				return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository fork classification is incorrect")
+			}
 		}
 	}
 	for repository := range minimumUnityEnrollmentRepositories {
-		if !seen[repository] {
+		if !seen[strings.ToLower(repository)] {
 			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository set is incomplete")
 		}
 	}
@@ -108,8 +124,12 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 		return UnityEnrollmentRegistry{}, err
 	}
 	for _, exception := range registry.Exceptions {
-		if !seen[exception.Repository] {
+		exceptionKey := strings.ToLower(exception.Repository)
+		if !seen[exceptionKey] {
 			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment exception repository is not registered")
+		}
+		if canonicalRepositories[exceptionKey] != exception.Repository {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment exception repository spelling is not canonical")
 		}
 	}
 	sort.Slice(registry.Repositories, func(i, j int) bool {
@@ -118,12 +138,64 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	return registry, nil
 }
 
+// ValidateUnityEnrollmentRepository validates one repository declaration
+// without serializing it or exposing any of its values as workflow commands.
+func ValidateUnityEnrollmentRepository(repository UnityEnrollmentRepository) error {
+	if !validRepository(repository.Repository) ||
+		!strings.HasPrefix(repository.Repository, UnityEnrollmentOrganization+"/") {
+		return fmt.Errorf("Unity enrollment policy contains a repository outside the organization")
+	}
+	if !validRefName(repository.DefaultBranch) {
+		return fmt.Errorf("Unity enrollment default branch is invalid")
+	}
+	return nil
+}
+
+// AddUnityEnrollmentRepository validates and returns a sorted registry with one
+// reviewed organization repository added. It never mutates the input registry.
+func AddUnityEnrollmentRepository(
+	registry UnityEnrollmentRegistry,
+	repository UnityEnrollmentRepository,
+) (UnityEnrollmentRegistry, error) {
+	for _, current := range registry.Repositories {
+		if strings.EqualFold(current.Repository, repository.Repository) {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("Unity enrollment repository is already registered")
+		}
+	}
+	registry.Repositories = append(
+		append([]UnityEnrollmentRepository(nil), registry.Repositories...),
+		repository,
+	)
+	content, err := json.Marshal(registry)
+	if err != nil {
+		return UnityEnrollmentRegistry{}, fmt.Errorf("encode Unity enrollment policy: %w", err)
+	}
+	return ParseUnityEnrollmentRegistry(content)
+}
+
 func validRefName(value string) bool {
-	if value == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n ~^:?*[\\") {
+	if value == "" || value == "@" || strings.HasPrefix(value, "-") ||
+		strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") ||
+		strings.Contains(value, "//") || strings.Contains(value, "..") ||
+		strings.Contains(value, "@{") || strings.HasSuffix(value, ".") {
 		return false
 	}
-	return !strings.HasPrefix(value, ".") && !strings.HasSuffix(value, ".") &&
-		!strings.Contains(value, "..") && !strings.Contains(value, "@{")
+	for _, char := range value {
+		if char < 0x20 || char == 0x7f || strings.ContainsRune(" ~^:?*[\\", char) {
+			return false
+		}
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune("._@+-/", char)) {
+			return false
+		}
+	}
+	for _, component := range strings.Split(value, "/") {
+		if component == "" || strings.HasPrefix(component, ".") ||
+			strings.HasSuffix(component, ".lock") {
+			return false
+		}
+	}
+	return true
 }
 
 // UnityAuditFinding adds immutable repository provenance to a source-free

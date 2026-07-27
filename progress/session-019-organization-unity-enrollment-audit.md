@@ -22,9 +22,9 @@ on an incompatible YAML API. No dependency pull requests were open.
 - Starting Build lock CI run `30304824741`: successful at that exact commit.
 - Red proof: the focused enrollment package did not compile before the new
   organization policy API existed.
-- Added a strict reviewed registry for the six enrolled repositories, including
-  the `unity-builder` fork, approved immutable releases from v1.8.2 through
-  v1.10.0, and owned expiring synthetic-workflow exceptions.
+- Added a strict reviewed extensible registry with an immutable six-repository
+  baseline, including the `unity-builder` fork, approved releases from v1.8.2
+  through v1.10.0, and owned expiring synthetic-workflow exceptions.
 - Added an exact-Git-object analyzer that flattens local composite actions and
   classifies Unity-related jobs without executing consumer code.
 - Paid jobs are checked for eligible triggers, acquire-before-activation,
@@ -34,9 +34,13 @@ on an incompatible YAML API. No dependency pull requests were open.
 - Added a bounded source-free JSON artifact and a marker-fenced issue
   synchronizer that creates, updates, reopens, or closes one central drift
   issue.
-- Added a daily/manual workflow that mints a Contents-read token for exactly the
-  six repositories, checks out default branches without persisted credentials,
-  audits exact commits, and revalidates every head before reporting.
+- Added a daily/manual workflow that derives a least-privilege Contents-read
+  token scope, checkout targets, and head revalidation from the reviewed
+  registry.
+- PR #110 feedback requested a repeatable expansion path. The `Onboard Unity
+  repository` manual workflow now validates one organization entry on trusted
+  `main`, updates the registry atomically, and opens a registry-only pull
+  request. Runtime coordination no longer requires four hand-maintained lists.
 
 ## Public dry-run evidence
 
@@ -77,8 +81,15 @@ cleanup conditions, and aggregate fallthrough/preflight mismatches. The
 remediator closed each path with negative fixtures and conservative canonical
 contracts. Final focused re-review reported no findings.
 
+PR #110 feedback requested an operator onboarding path. Three additional
+adversarial rounds closed selected-ref write-token exposure, green-skipped
+requests, missing metadata evidence, case-insensitive identities, unsafe Git
+refs, workflow-output injection, canonical baseline/exception casing, and raw
+REST fragment ambiguity. The final fresh review reported no actionable
+findings.
+
 `node tools/llm-harness.mjs generate` refreshed the knowledge index.
-`.devcontainer/scripts/verify.sh` then passed 555 Node tests, every Go package,
+`.devcontainer/scripts/verify.sh` then passed 556 Node tests, every Go package,
 actionlint, module verification, tidy-diff, workflow credential policy, and the
-knowledge harness. Pull-request review, live six-repository audit evidence,
+knowledge harness. Pull-request review, live registered-repository audit evidence,
 merge, and post-merge main verification remain pending.
