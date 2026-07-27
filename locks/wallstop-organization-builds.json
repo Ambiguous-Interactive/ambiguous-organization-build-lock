@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:30254059756:unity-tests-standalone:2022.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "30254059756",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/30254059756",
+    "queuedAt": "2026-07-27T10:11:08.770Z",
+    "acquiredAt": "2026-07-27T10:11:27.206Z",
+    "expiresAt": "2026-07-27T14:11:27.206Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:30254059756:unity-tests-standalone:2022.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,9 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/30254059756",
       "queuedAt": "2026-07-27T10:11:08.770Z",
+      "acquiredAt": "2026-07-27T10:11:27.206Z",
+      "expiresAt": "2026-07-27T14:11:27.206Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "0fdaccee-9851-4174-9417-b92f530e9e4c",
@@ -30,23 +44,8 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-07-27T06:12:11.310Z"
-    },
-    {
-      "reservationId": "e7ea81bd-0af9-4f6c-8ee2-3b1661d7ca17",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30254280375:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30254280375",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30254280375",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-27T10:10:38.824Z",
-      "availableAt": "2026-07-27T10:10:39.824Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T10:10:38.824Z"
+  "updatedAt": "2026-07-27T10:11:27.206Z"
 }
