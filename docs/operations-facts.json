@@ -1,8 +1,8 @@
 {
   "stateSchema": 5,
   "publishedRelease": {
-    "tag": "v1.9.1",
-    "commit": "a00614ace745152a659c5c2654f7cefb68a5a628"
+    "tag": "v1.10.0",
+    "commit": "3741b56ceab4a68ba4c09fe7e91e804b53ff2412"
   },
   "reaperDelivery": {
     "requestedSchedule": "*/5 * * * *",
@@ -10,12 +10,10 @@
     "maximumDeliveryDelaySeconds": 1800,
     "maximumRunDurationSeconds": 900
   },
-  "enrolledConsumers": [
-    "Ambiguous-Interactive/DoxReloaded",
-    "Ambiguous-Interactive/DxMessaging",
-    "Ambiguous-Interactive/IshoBoy",
-    "Ambiguous-Interactive/qora-redux",
-    "Ambiguous-Interactive/unity-builder",
-    "Ambiguous-Interactive/unity-helpers"
-  ]
+  "unityEnrollmentAudit": {
+    "policyPath": "unity-enrollment-policy.json",
+    "schedule": "23 8 * * *",
+    "onboardingWorkflow": "Request Unity repository onboarding",
+    "alertMarker": "unity-enrollment-audit:v1"
+  }
 }

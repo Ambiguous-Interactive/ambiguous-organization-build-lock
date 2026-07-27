@@ -420,6 +420,42 @@ pre-semaphore client against the active two-holder state: although it sees the
 mirrored first holder conservatively, its state write can drop additional
 `holders` entries.
 
+## Organization enrollment audit
+
+The daily and manually dispatchable `Organization Unity enrollment audit`
+workflow enforces the reviewed extensible perimeter in
+`unity-enrollment-policy.json`. It derives one exact Contents-read token scope
+from that validated registry, checks out current default branches, audits immutable
+Git objects without executing consumer code, and revalidates the heads before
+reporting. Missing or moving repositories, malformed workflows, unsafe
+licensed lifecycles, mutable actions, and stale policy exceptions fail closed.
+
+Operators expand the perimeter through the secretless `Request Unity repository
+onboarding` workflow on `main`. A trusted-main `workflow_run` then validates the
+request, proves the reader App can access the exact repository, verifies its
+canonical name, default branch, fork status, and exact branch-head commit, and
+opens a registry-only pull request. Those sanitized facts and the evidence-run
+link are retained in the PR body before merge. A typo, stale branch declaration,
+off-main request, or missing App installation fails before PR creation.
+
+Output is intentionally source-free: repository, commit SHA, workflow path,
+job, classification, and stable reason code only. Drift opens or updates one
+deduplicated issue; a complete clean audit closes it. The issue is the retained
+sanitized inventory for issue #42 and rollout tracker #30. Synthetic or disabled
+Unity-shaped files require an owned, expiring registry exception; paid-secret
+jobs cannot use exceptions to bypass acquire, cleanup, preflight, or aggregate
+requirements.
+
+Manual requests use the secretless `Request organization Unity enrollment
+audit` launcher. The reader credential is available only to the resulting
+`workflow_run`, which GitHub loads from trusted `main`; the secret-bearing audit
+cannot be dispatched directly at a selected feature-branch ref.
+
+The command exits nonzero on drift. In the scheduled workflow, a complete scan
+is green only after its drift issue has synchronized; the issue remains the
+operational-red signal. Incomplete retrieval, analysis, head revalidation, or
+issue synchronization keeps the workflow itself red.
+
 ## Transient Auth Failures
 
 GitHub intermittently rejects valid tokens with `401 Bad credentials` (auth

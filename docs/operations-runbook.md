@@ -21,13 +21,13 @@ The committed sources of truth are
 - Runner serialization: `enabled`
 - Resource lifecycle: `enabled`
 - Confirmed-cleanup cooldown: `1` second
-- Published compatibility release: `v1.9.1` at
-  `a00614ace745152a659c5c2654f7cefb68a5a628`
+- Published compatibility release: `v1.10.0` at
+  `3741b56ceab4a68ba4c09fe7e91e804b53ff2412`
 
-The one-second cooldown is transitional. Issue #60 tracks publishing and
-deploying allow-zero action code before changing the committed value to zero.
-Until that sequence is complete, do not describe zero as live and do not change
-the config independently of consumer compatibility.
+The one-second cooldown remains the live value. Issue #60 tracks literal zero,
+but the concurrent shared-entitlement return collision in issue #83 must be
+resolved with independently returnable identities and live reconciliation
+before a zero-cooldown claim is safe. Do not describe zero as live.
 
 Effective capacity is `maxHolders` minus active holders and
 capacity-consuming reservations. A normal confirmed-cleanup cooldown consumes
@@ -37,19 +37,80 @@ incident blocks all new admission regardless of nominal capacity.
 
 ## Enrolled consumers
 
-The reviewed paid or lock-aware perimeter from `operations-facts.json` contains
-six repositories:
+`unity-enrollment-policy.json` is the authoritative reviewed paid or
+lock-aware perimeter. It retains this required baseline:
 
-- `Ambiguous-Interactive/DoxReloaded` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/DxMessaging` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/IshoBoy` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/qora-redux` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/unity-builder` <!-- enrolled-consumer -->
-- `Ambiguous-Interactive/unity-helpers` <!-- enrolled-consumer -->
+- `Ambiguous-Interactive/DoxReloaded` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/DxMessaging` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/IshoBoy` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/qora-redux` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/unity-builder` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/unity-helpers` <!-- enrollment-baseline -->
 
 Enrollment changes are reviewed policy changes, not automatic consequences of
-organization ownership. Follow [Consumer Enrollment](consumer-enrollment.md)
-and update the continuous audit tracked by issue #42.
+organization ownership. Run the secretless `Request Unity repository
+onboarding` workflow from `main`; its trusted consumer verifies the requested
+repository metadata and opens a registry-only pull request. Review the retained
+metadata evidence before merging. The continuous audit evaluates the new
+repository's workflows after the policy reaches `main` and reports any drift in
+the central issue. Follow [Consumer Enrollment](consumer-enrollment.md) for the
+consumer-side rollout.
+
+## Continuous enrollment audit
+
+`unity-enrollment-policy.json` is the reviewed extensible repository registry
+and immutable lock-action allowlist. The `Organization Unity enrollment audit`
+workflow runs daily at `23 8 * * *`, can be dispatched manually, and also runs
+after relevant policy changes reach `main`. It uses the reader App to check out
+each current default branch without persisting credentials, analyzes exact Git
+objects without executing consumer code, and revalidates every default-branch
+head before reporting.
+
+The audit derives the reader-App token scope, checkout targets, and exact-head
+revalidation set from the validated registry. The required baseline cannot be
+removed, repositories outside `Ambiguous-Interactive` are rejected, and
+duplicate or malformed entries fail closed.
+
+Repository additions start with the secretless `Request Unity repository
+onboarding` workflow on `main`. Its trusted-main `workflow_run` consumer rejects
+unsuccessful, off-main, and cross-repository requests before using credentials.
+It then scopes a reader-App token to the requested repository and verifies the
+canonical full name, default branch, fork status, and exact branch-head SHA.
+The generated registry-only PR retains those sanitized facts and the evidence
+run URL. A repository typo, stale branch declaration, or missing reader-App
+installation therefore fails before a PR can be opened or merged.
+Default branches are additionally restricted to the audited URL-safe ASCII
+subset (`A-Z`, `a-z`, `0-9`, `.`, `_`, `@`, `+`, `-`, and `/`) before they are
+used in any GitHub REST ref path; percent escapes and fragment markers are
+rejected rather than interpreted.
+
+Manual operation starts the secretless `Request organization Unity enrollment
+audit` workflow. Its completed run triggers the secret-bearing audit through
+`workflow_run`, whose definition and executable policy are loaded from trusted
+`main`. The secret-bearing workflow deliberately has no direct
+`workflow_dispatch` trigger, so selecting a feature-branch ref cannot expose the
+reader App credential to branch-controlled workflow code.
+
+The audit fails closed if a repository, workflow, commit, reader credential,
+exception, or revalidation result is missing or ambiguous. Findings contain
+only repository, commit, workflow path, job, classification, and stable reason
+code. The workflow opens or updates one marker-fenced drift issue and closes it
+only after a complete clean audit. Never copy matched workflow source, secret
+values, or raw API responses into that issue. The sanitized active inventory
+and exact commit list in the issue are the retained evidence linked to issue
+#42 and rollout tracker #30.
+
+A complete scan that finds policy drift keeps the workflow run green only after
+the marker-fenced issue has been synchronized; that open issue is the
+operational-red state. Retrieval, analysis, head-revalidation, or issue-sync
+ambiguity keeps the workflow run red because no trustworthy policy result was
+established. The standalone audit command returns nonzero for both drift and
+incomplete evidence.
+
+Synthetic or deliberately disabled Unity-shaped workflows require an explicit
+registry exception with repository, path, classification, owner, and RFC3339
+expiry. An expired, unused, duplicate, or unregistered exception is drift. A
+paid-serial job cannot be excepted from lifecycle enforcement.
 
 ## Credential and App boundary
 

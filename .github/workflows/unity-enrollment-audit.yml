@@ -1,0 +1,213 @@
+name: Organization Unity enrollment audit
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/request-unity-enrollment-audit.yml"
+      - ".github/workflows/request-unity-repository-onboarding.yml"
+      - ".github/workflows/onboard-unity-repository.yml"
+      - ".github/workflows/unity-enrollment-audit.yml"
+      - ".github/actions/**"
+      - ".github/dist/**"
+      - "cmd/audit-unity-enrollment/**"
+      - "cmd/onboard-unity-repository/**"
+      - "cmd/sync-unity-enrollment-issue/**"
+      - "internal/enrollment/**"
+      - "locks/**"
+      - "unity-enrollment-policy.json"
+  schedule:
+    - cron: "23 8 * * *"
+  workflow_run:
+    workflows:
+      - Request organization Unity enrollment audit
+    types:
+      - completed
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: organization-unity-enrollment-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Audit enrolled Unity consumers
+    if: >-
+      ${{
+        github.event_name != 'workflow_run' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted policy repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve exact reader scope from reviewed registry
+        id: enrollment-scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./internal/enrollment ./cmd/audit-unity-enrollment
+          go run ./cmd/audit-unity-enrollment \
+            --policy unity-enrollment-policy.json \
+            --validate-policy-only
+          repository_count="$(jq -er '.repositories | length' unity-enrollment-policy.json)"
+          if [ "${repository_count}" -lt 6 ]; then
+            echo "The Unity enrollment baseline is incomplete." >&2
+            exit 1
+          fi
+          if ! jq -e '
+            .organization == "Ambiguous-Interactive" and
+            ([.repositories[].repository] | length == (unique | length)) and
+            all(
+              .repositories[];
+              (.repository | test("^Ambiguous-Interactive/[A-Za-z0-9_.-]+$")) and
+              (.defaultBranch | type == "string" and length > 0)
+            )
+          ' unity-enrollment-policy.json >/dev/null; then
+            echo "The Unity enrollment registry cannot define reader scope." >&2
+            exit 1
+          fi
+          repositories="$(
+            jq -r '.repositories[].repository | split("/")[1]' unity-enrollment-policy.json |
+              LC_ALL=C sort |
+              paste -sd, -
+          )"
+          if [ -z "${repositories}" ]; then
+            echo "The Unity enrollment reader scope is empty." >&2
+            exit 1
+          fi
+          echo "repositories=${repositories}" >> "${GITHUB_OUTPUT}"
+
+      - name: Mint exact repository-scoped reader token
+        id: reader-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}
+          owner: Ambiguous-Interactive
+          repositories: ${{ steps.enrollment-scope.outputs.repositories }}
+          permission-contents: read
+
+      - name: Checkout reviewed repository default branches
+        env:
+          READER_AUTHORIZATION: ${{ steps.reader-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .policy-consumers
+          while IFS=$'\t' read -r repository branch; do
+            directory=".policy-consumers/${repository#*/}"
+            GH_TOKEN="${READER_AUTHORIZATION}" gh repo clone "${repository}" "${directory}" -- \
+              --branch "${branch}" \
+              --single-branch \
+              --no-tags
+          done < <(
+            jq -r '.repositories[] | [.repository, .defaultBranch] | @tsv' \
+              unity-enrollment-policy.json
+          )
+
+      - name: Audit exact consumer snapshots
+        id: enrollment-audit
+        if: ${{ always() }}
+        continue-on-error: true
+        run: >-
+          go run ./cmd/audit-unity-enrollment
+          --policy unity-enrollment-policy.json
+          --repositories-root .policy-consumers
+          --output "${RUNNER_TEMP}/unity-enrollment-audit.json"
+
+      - name: Revalidate default-branch heads
+        id: head-revalidation
+        if: ${{ always() && steps.reader-token.outcome == 'success' }}
+        shell: bash
+        env:
+          READER_AUTHORIZATION: ${{ steps.reader-token.outputs.token }}
+          AUDIT_PATH: ${{ runner.temp }}/unity-enrollment-audit.json
+        run: |
+          set -euo pipefail
+          failed=false
+          record_finding() {
+            local repository="$1"
+            local sha="$2"
+            local code="$3"
+            local temporary
+            temporary="$(mktemp "${RUNNER_TEMP}/unity-enrollment-audit.XXXXXX")"
+            jq --arg repository "${repository}" --arg sha "${sha}" --arg code "${code}" \
+              '.complete = false | .findings += [{repository: $repository, sha: $sha, code: $code}]' \
+              "${AUDIT_PATH}" > "${temporary}"
+            mv "${temporary}" "${AUDIT_PATH}"
+            failed=true
+          }
+          verify_head() {
+            local repository="$1"
+            local branch="$2"
+            local directory="$3"
+            local audited_sha=""
+            local current_sha=""
+            if [ -d "${directory}/.git" ]; then
+              audited_sha="$(git -C "${directory}" rev-parse HEAD)"
+            fi
+            if ! current_sha="$(GH_TOKEN="${READER_AUTHORIZATION}" gh api "repos/${repository}/git/ref/heads/${branch}" --jq .object.sha)"; then
+              record_finding "${repository}" "${audited_sha}" "default-branch-revalidation-incomplete"
+            elif [ "${audited_sha}" != "${current_sha}" ]; then
+              record_finding "${repository}" "${audited_sha}" "default-branch-advanced"
+            fi
+          }
+          while IFS=$'\t' read -r repository branch; do
+            verify_head \
+              "${repository}" \
+              "${branch}" \
+              ".policy-consumers/${repository#*/}"
+          done < <(
+            jq -r '.repositories[] | [.repository, .defaultBranch] | @tsv' \
+              unity-enrollment-policy.json
+          )
+          if [ "${failed}" = true ]; then
+            exit 1
+          fi
+
+      - name: Synchronize deduplicated drift issue
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          go run ./cmd/sync-unity-enrollment-issue
+          --audit "${RUNNER_TEMP}/unity-enrollment-audit.json"
+
+      - name: Record sanitized audit counts
+        if: ${{ always() }}
+        env:
+          AUDIT_PATH: ${{ runner.temp }}/unity-enrollment-audit.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "${AUDIT_PATH}" ]; then
+            echo "Unity enrollment audit artifact unavailable." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          expected_repositories="$(jq -r '.repositories | length' unity-enrollment-policy.json)"
+          jq -r --arg expected "${expected_repositories}" \
+            '"Repositories: \(.repositories | length)/\($expected)\nActive jobs: \(.inventory | length)\nFindings: \(.findings | length)\nComplete: \(.complete)"' \
+            "${AUDIT_PATH}" >> "${GITHUB_STEP_SUMMARY}"
+          if [ "$(jq -r '.complete' "${AUDIT_PATH}")" != "true" ]; then
+            echo "The organization audit is incomplete; policy status is unknown." >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi

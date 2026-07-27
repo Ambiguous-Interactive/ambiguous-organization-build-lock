@@ -1,0 +1,21 @@
+name: Request organization Unity enrollment audit
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: request-organization-unity-enrollment-audit
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Request trusted default-branch audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Request accepted
+        run: >-
+          echo "The completed request triggers the secret-bearing audit from
+          the trusted default-branch workflow."

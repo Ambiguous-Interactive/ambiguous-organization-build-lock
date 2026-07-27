@@ -1,0 +1,72 @@
+name: Request Unity repository onboarding
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Full Ambiguous-Interactive/Repository name
+        required: true
+        type: string
+      default_branch:
+        description: Current default branch
+        required: true
+        type: string
+      fork:
+        description: Repository is a fork
+        required: true
+        default: false
+        type: boolean
+      allow_workflow_dispatch:
+        description: Audited workflows may use workflow_dispatch
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: request-unity-repository-onboarding
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Request trusted default-branch onboarding
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject non-default-branch request
+        env:
+          REQUEST_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${REQUEST_REF}" = "refs/heads/main"
+
+      - name: Record inert onboarding request
+        env:
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+          TARGET_DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          TARGET_FORK: ${{ inputs.fork }}
+          TARGET_ALLOW_WORKFLOW_DISPATCH: ${{ inputs.allow_workflow_dispatch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg repository "${TARGET_REPOSITORY}" \
+            --arg defaultBranch "${TARGET_DEFAULT_BRANCH}" \
+            --argjson fork "${TARGET_FORK}" \
+            --argjson allowWorkflowDispatch "${TARGET_ALLOW_WORKFLOW_DISPATCH}" \
+            '{
+              repository: $repository,
+              defaultBranch: $defaultBranch,
+              fork: $fork,
+              allowWorkflowDispatch: $allowWorkflowDispatch
+            }' > "${RUNNER_TEMP}/unity-onboarding-request.json"
+
+      - name: Upload inert onboarding request
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unity-onboarding-request
+          path: ${{ runner.temp }}/unity-onboarding-request.json
+          if-no-files-found: error
+          retention-days: 1

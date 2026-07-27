@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "organization": "Ambiguous-Interactive",
+  "approvedLockShas": [
+    "a8d43dd87a938f1b3417fd8a9310354bf38e2fd1",
+    "59a2fa98224569e5a697f271a3ac4b866c53ac2c",
+    "0854a7d586640e5d12e3559d789c481c232ed044",
+    "a00614ace745152a659c5c2654f7cefb68a5a628",
+    "673eb65e7d863a1a8a8a70882bd980e189d41754",
+    "3741b56ceab4a68ba4c09fe7e91e804b53ff2412"
+  ],
+  "repositories": [
+    {
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "defaultBranch": "main",
+      "fork": false,
+      "allowWorkflowDispatch": true
+    },
+    {
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "defaultBranch": "master",
+      "fork": false,
+      "allowWorkflowDispatch": true
+    },
+    {
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "defaultBranch": "main",
+      "fork": false,
+      "allowWorkflowDispatch": true
+    },
+    {
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "defaultBranch": "main",
+      "fork": false,
+      "allowWorkflowDispatch": true
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "defaultBranch": "main",
+      "fork": true,
+      "allowWorkflowDispatch": true
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "defaultBranch": "main",
+      "fork": false,
+      "allowWorkflowDispatch": true
+    }
+  ],
+  "exceptions": [
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/activation.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/build-tests-mac.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/build-tests-ubuntu.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/build-tests-windows.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/upstream-sync.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "path": ".github/workflows/validate-orchestrator-integration.yml",
+      "classification": "synthetic",
+      "owner": "unity-builder-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "path": ".github/workflows/unity-benchmarks.yml",
+      "classification": "synthetic",
+      "owner": "unity-helpers-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "path": ".github/workflows/unity-tests.yml",
+      "classification": "synthetic",
+      "owner": "unity-helpers-maintainers",
+      "expiresAt": "2026-10-31T00:00:00Z"
+    }
+  ]
+}
