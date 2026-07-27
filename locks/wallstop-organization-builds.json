@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30300879512:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "30300879512",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30300879512",
+    "queuedAt": "2026-07-27T20:11:26.438Z",
+    "acquiredAt": "2026-07-27T20:11:28.506Z",
+    "expiresAt": "2026-07-28T00:11:28.506Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "6bce1560-f057-4721-b3c9-3d0623e3b436",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30300879512:unity-tests:unity-tests-0",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30300879512:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
-      "job": "unity-tests",
+      "job": "platform-build-windows",
       "runId": "30300879512",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30300879512",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-27T20:11:10.958Z",
-      "availableAt": "2026-07-27T20:11:11.958Z"
+      "queuedAt": "2026-07-27T20:11:26.438Z",
+      "acquiredAt": "2026-07-27T20:11:28.506Z",
+      "expiresAt": "2026-07-28T00:11:28.506Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-27T20:11:10.958Z"
+  "updatedAt": "2026-07-27T20:11:28.506Z"
 }
