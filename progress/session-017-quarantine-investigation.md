@@ -2,7 +2,7 @@
 
 Date: 2026-07-27
 
-Status: implementation and local review complete; delivery pending
+Status: complete; issue closed, PR merged, and default branch green
 
 ## Objective and safety boundary
 
@@ -136,3 +136,17 @@ The continuous-improvement result is `no durable learning`: central cleanup
 ownership, same-runner recovery, and fail-closed unknown cleanup are already
 authoritative repository guidance. This record preserves the incident-specific
 evidence without duplicating those rules.
+
+## Delivery
+
+PR #104 passed Build lock CI run `30281240294` on exact head
+`198da6cb4726b6e0719c6b9f0d5e2baa62bf4d29`. Cursor Bugbot reviewed that head
+and reported no issue. Copilot was explicitly requested and reported reviewer
+quota exhaustion. No review thread was open.
+
+The PR was squash-merged with an exact-head fence as
+`1be789c576025b419b85586162bb33cb684d27b4`, and its `Closes #84` directive
+closed the issue as completed. On that exact `main` commit, Build lock CI run
+`30282665500` and scheduled reaper run `30282730033` passed; the
+workflow-run-triggered Dependabot follow-up correctly skipped. The local
+checkout and `origin/main` were then synchronized to the same verified commit.
