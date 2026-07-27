@@ -12,6 +12,8 @@ import (
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
 )
 
+const testArtifactURL = "https://github.com/Ambiguous-Interactive/lock/actions/runs/123/artifacts/456"
+
 func sampleAudit() enrollment.UnityOrganizationAudit {
 	return enrollment.UnityOrganizationAudit{
 		Complete: true,
@@ -38,7 +40,7 @@ func TestRenderIssueBodyContainsOnlySanitizedFields(t *testing.T) {
 		Path:       ".github/workflows/unity.yml",
 		Job:        "unity",
 	}}
-	body := renderIssueBody(audit)
+	body := renderIssueBody(audit, testArtifactURL)
 	for _, expected := range []string{
 		alertMarker, "Ambiguous-Interactive/DoxReloaded", ".github/workflows/unity.yml",
 		"missing-lock-acquire", "paid-serial",
@@ -93,19 +95,19 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 		Path:       ".github/workflows/unity.yml",
 		Job:        "unity",
 	}}
-	if err := client.sync(t.Context(), drift); err != nil {
+	if err := client.sync(t.Context(), drift, testArtifactURL); err != nil {
 		t.Fatal(err)
 	}
 	if len(current) != 1 || current[0].State != "open" {
 		t.Fatalf("alert was not created: %#v", current)
 	}
-	if err := client.sync(t.Context(), drift); err != nil {
+	if err := client.sync(t.Context(), drift, testArtifactURL); err != nil {
 		t.Fatal(err)
 	}
 	if len(current) != 1 {
 		t.Fatalf("alert was duplicated: %#v", current)
 	}
-	if err := client.sync(t.Context(), sampleAudit()); err != nil {
+	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err != nil {
 		t.Fatal(err)
 	}
 	if current[0].State != "closed" {
@@ -128,7 +130,7 @@ func TestSyncRejectsDuplicateMarkerIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.sync(t.Context(), sampleAudit()); err == nil {
+	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err == nil {
 		t.Fatal("duplicate marker issues passed")
 	}
 }
@@ -165,23 +167,111 @@ func TestAuditAndIssueBodyAreBounded(t *testing.T) {
 	}
 
 	audit = sampleAudit()
-	audit.Inventory[0].Job = strings.Repeat("x", 128)
-	audit.Inventory = make([]enrollment.UnityInventoryEntry, maxAuditRows)
+	audit.Inventory = make([]enrollment.UnityInventoryEntry, 113)
 	for index := range audit.Inventory {
 		audit.Inventory[index] = sampleAudit().Inventory[0]
-		audit.Inventory[index].Job = strings.Repeat("x", 128)
+		audit.Inventory[index].Job = "unity"
 	}
-	audit.Findings = make([]enrollment.UnityAuditFinding, maxAuditRows)
+	audit.Findings = make([]enrollment.UnityAuditFinding, 286)
 	for index := range audit.Findings {
 		audit.Findings[index] = enrollment.UnityAuditFinding{
 			Repository: "Ambiguous-Interactive/DoxReloaded",
 			SHA:        strings.Repeat("a", 40),
 			Code:       "missing-lock-acquire",
 			Path:       ".github/workflows/unity.yml",
-			Job:        strings.Repeat("x", 128),
+			Job:        "unity",
 		}
 	}
-	if len(renderIssueBody(audit)) <= maxIssueBodyBytes {
-		t.Fatal("fixture did not exceed the issue-body bound")
+	if err := validateAudit(audit); err != nil {
+		t.Fatalf("live-scale sanitized audit was rejected: %v", err)
+	}
+	body := renderIssueBody(audit, testArtifactURL)
+	if len(body) > maxIssueBodyBytes {
+		t.Fatalf("bounded issue body has %d bytes", len(body))
+	}
+	for _, expected := range []string{
+		"286 findings", "113 active inventory rows", "246 additional findings omitted",
+		"97 additional inventory rows omitted", testArtifactURL,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("bounded issue body missing %q", expected)
+		}
+	}
+}
+
+func TestMaximumValidatedPreviewFitsIssueBodyLimit(t *testing.T) {
+	repository := "Ambiguous-Interactive/" + strings.Repeat("r", 100)
+	workflowPath := ".github/workflows/" + strings.Repeat("p", 232) + ".yml"
+	audit := enrollment.UnityOrganizationAudit{
+		Complete: true,
+	}
+	for range maxRepositories {
+		audit.Repositories = append(audit.Repositories, enrollment.UnityAuditedRepository{
+			Repository: repository,
+			SHA:        strings.Repeat("a", 40),
+		})
+	}
+	for range maxAuditRows {
+		audit.Findings = append(audit.Findings, enrollment.UnityAuditFinding{
+			Repository: repository,
+			SHA:        strings.Repeat("b", 40),
+			Code:       "c" + strings.Repeat("d", 79),
+			Path:       workflowPath,
+			Job:        strings.Repeat("j", 128),
+		})
+		audit.Inventory = append(audit.Inventory, enrollment.UnityInventoryEntry{
+			Repository:     repository,
+			SHA:            strings.Repeat("c", 40),
+			Path:           workflowPath,
+			Job:            strings.Repeat("k", 128),
+			Classification: "controlled-canary",
+		})
+	}
+	if err := validateAudit(audit); err != nil {
+		t.Fatalf("maximum validated audit was rejected: %v", err)
+	}
+	body := renderIssueBody(audit, testArtifactURL)
+	if len(body) > maxIssueBodyBytes {
+		t.Fatalf("maximum validated preview has %d bytes", len(body))
+	}
+}
+
+func TestValidatedArtifactURLRejectsMaliciousRunIdentity(t *testing.T) {
+	valid, err := validatedArtifactURL(
+		"https://github.com",
+		"Ambiguous-Interactive/lock",
+		"123",
+		testArtifactURL,
+	)
+	if err != nil || valid != testArtifactURL {
+		t.Fatalf("valid artifact URL failed: %q %v", valid, err)
+	}
+	tests := []struct {
+		name       string
+		server     string
+		repository string
+		runID      string
+		artifact   string
+	}{
+		{"run newline", "https://github.com", "Ambiguous-Interactive/lock", "123\n456", testArtifactURL},
+		{"wrong run", "https://github.com", "Ambiguous-Interactive/lock", "124", testArtifactURL},
+		{"wrong repository", "https://github.com", "Ambiguous-Interactive/other", "123", testArtifactURL},
+		{"query", "https://github.com", "Ambiguous-Interactive/lock", "123", testArtifactURL + "?token=secret"},
+		{"fragment", "https://github.com", "Ambiguous-Interactive/lock", "123", testArtifactURL + "#evil"},
+		{"foreign host", "https://github.com", "Ambiguous-Interactive/lock", "123", "https://example.com/Ambiguous-Interactive/lock/actions/runs/123/artifacts/456"},
+		{"encoded path", "https://github.com", "Ambiguous-Interactive/lock", "123", "https://github.com/Ambiguous-Interactive/lock/actions/runs/123/artifacts/456%2F789"},
+		{"oversized URL", "https://github.com", "Ambiguous-Interactive/lock", "123", "https://github.com/" + strings.Repeat("a", maxEvidenceURLBytes)},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := validatedArtifactURL(
+				testCase.server,
+				testCase.repository,
+				testCase.runID,
+				testCase.artifact,
+			); err == nil {
+				t.Fatal("malicious artifact identity passed")
+			}
+		})
 	}
 }

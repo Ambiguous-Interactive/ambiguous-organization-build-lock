@@ -117,9 +117,13 @@ test("continuous enrollment audit facts and guidance stay synchronized", () => {
   assert.match(operations, /registry exception with repository, path, classification, owner, and RFC3339\s+expiry/);
   assert.match(operations, /`Request Unity repository\s+onboarding` workflow on `main`/);
   assert.match(operations, /reader-App token scope, checkout targets, and exact-head\s+revalidation set from the validated registry/);
+  assert.match(operations, /complete source-free JSON audit is retained as a 30-day Actions artifact/);
+  assert.match(operations, /deterministic bounded preview, and explicit omitted-row\s+counts/);
   assert.match(readme, /`unity-enrollment-policy\.json`/);
   assert.match(readme, /secretless `Request Unity repository\s+onboarding` workflow on `main`/);
   assert.match(readme, /one\s+deduplicated issue/);
+  assert.match(readme, /complete source-free JSON audit for 30 days/);
+  assert.match(readme, /deterministic bounded preview with explicit omission counts/);
 });
 
 test("steady-state runbook distinguishes required credential scope from the live gap", () => {

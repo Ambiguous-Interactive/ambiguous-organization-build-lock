@@ -446,6 +446,13 @@ Unity-shaped files require an owned, expiring registry exception; paid-secret
 jobs cannot use exceptions to bypass acquire, cleanup, preflight, or aggregate
 requirements.
 
+Every run uploads the complete source-free JSON audit for 30 days. The central
+issue links that exact run artifact, reports total finding/inventory counts,
+and renders a deterministic bounded preview with explicit omission counts so
+large drift sets cannot exceed GitHub's issue-body limit. Missing artifact
+identity, upload failure, incomplete evidence, or synchronization failure keeps
+the workflow red.
+
 Manual requests use the secretless `Request organization Unity enrollment
 audit` launcher. The reader credential is available only to the resulting
 `workflow_run`, which GitHub loads from trusted `main`; the secret-bearing audit

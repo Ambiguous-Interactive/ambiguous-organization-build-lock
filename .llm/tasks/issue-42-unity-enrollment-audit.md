@@ -60,7 +60,8 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
 - Error: missing repository, checkout failure, malformed YAML/policy, moving
   default branch, API/issue synchronization failure.
 - Boundary/extreme: zero Unity references, duplicate repositories/exceptions,
-  empty inventory, bounded issue output.
+  empty inventory, and 286 findings plus 113 inventory rows delivered through
+  a retained full artifact and bounded issue preview.
 - Concurrency/ordering: acquire precedes activation; release/classifier/gate
   ordering is preserved; default heads are revalidated after analysis.
 - Cancellation/recovery: audit concurrency never cancels a running audit and
@@ -88,7 +89,7 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
 ## Full validation
 
 - Commands and exact outcomes: `node tools/llm-harness.mjs generate` updated
-  the generated index; `.devcontainer/scripts/verify.sh` passed 555 Node tests,
+  the generated index; `.devcontainer/scripts/verify.sh` passed 556 Node tests,
   every Go package, actionlint, both module-verification checks, tidy-diff,
   workflow credential audit, and knowledge-harness checks.
 
@@ -100,13 +101,15 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   alerts, hostile output fields, and oversized issue content.
 - Intent-to-diff status: implementation covers exact reads, classification,
   lifecycle/trigger/preflight/aggregate enforcement, sanitization, issue
-  synchronization, daily/manual delivery, and retained evidence. Live
-  reader-App and private-repository behavior remains post-push evidence.
-- Unverifiable items and open questions: live reader-App checkout and issue
-  synchronization require exact-head Actions evidence.
-- Remaining uncertainty: private/internal repository access, live reader-App
-  scope, `workflow_run` delivery, exact-head revalidation, and real issue
-  create/update/close require post-push Actions evidence.
+  synchronization, daily/manual delivery, and retained evidence. Run
+  `30312519176` established live reader-App access, complete 6/6 repository
+  retrieval, and successful exact-head revalidation; it failed before issue
+  delivery because the synchronizer still enforced the obsolete 256-row bound.
+- Unverifiable items and open questions: the revised retained-artifact upload,
+  bounded issue synchronization, and clean-close path require post-fix Actions
+  evidence.
+- Remaining uncertainty: successful post-fix issue create/update/close and the
+  corresponding main-branch verification remain pending.
 - Implementer: root agent.
 - Reviewer and evidence: independent `issue42_adversarial` agent reviewed the
   complete worktree and ran focused Go, Node, and credential-audit checks.
@@ -151,8 +154,10 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   noncanonical shell evidence; adversarial fixtures proved substring-based
   shell recognition and name-based secret checks are unsafe.
 - Observed facts, inferences, and open questions: exact workflow structure can
-  be proven statically; arbitrary shell semantics cannot. Private-repository
-  retrieval and App scope remain live-only facts.
+  be proven statically; arbitrary shell semantics cannot. Run `30312519176`
+  proved live reader-App scope, private/internal repository retrieval, and
+  exact-head revalidation, while its issue synchronization failure proved the
+  original 256-row delivery bound was too low for 286 findings.
 - Root cause or reusable insight: security policy analyzers should recognize
   narrow canonical contracts and fail closed on dynamic secret lookup or
   unstructured evidence rather than infer intent from substrings.
@@ -161,4 +166,5 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
 - Destination or rationale: these are durable enrollment and incident-response
   contracts used by maintainers and future policy changes.
 - Independent review outcome: final focused re-review reported no findings;
-  live-only evidence remains explicitly deferred to the post-push workflow.
+  post-fix artifact delivery, issue synchronization, main verification, and
+  issue #42 closure remain explicitly pending.
