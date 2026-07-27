@@ -20,6 +20,9 @@ description: Apply repository GitHub Actions safety policy. Use when editing wor
   interpolation in shell.
 - Preserve fork and missing-secret fail-closed behavior.
 - Current-head checks and acquire-time revalidation are complementary.
+- Release association is not issue-completion proof. Automated release comments
+  must describe linkage without claiming resolution, and must not apply a
+  `released` label unless acceptance evidence is independently enforced.
 
 ## Validation
 

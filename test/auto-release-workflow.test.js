@@ -30,12 +30,20 @@ test("auto release workflow is scheduled and uses semantic-release", () => {
   assert.doesNotMatch(text, /https:\/\/[^\n]*\$\{\{\s*secrets\./);
 });
 
-test("semantic-release is configured without npm publishing", () => {
+test("semantic-release publishes without claiming referenced issues are resolved", () => {
   const config = JSON.parse(fs.readFileSync(releaseConfigPath, "utf8"));
 
   assert.deepEqual(config.plugins, [
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
-    "@semantic-release/github"
+    [
+      "@semantic-release/github",
+      {
+        successComment:
+          "This <%= issue.pull_request ? 'pull request' : 'issue' %> is associated with a pull request or commit included in version <%= nextRelease.version %>.\n\n" +
+          "This automated notice records release linkage only; it does not establish that the <%= issue.pull_request ? 'pull request' : 'issue' %> is resolved. Use its current state and acceptance evidence as the authority.",
+        releasedLabels: false
+      }
+    ]
   ]);
 });
