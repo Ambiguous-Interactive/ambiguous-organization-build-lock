@@ -101,15 +101,15 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   alerts, hostile output fields, and oversized issue content.
 - Intent-to-diff status: implementation covers exact reads, classification,
   lifecycle/trigger/preflight/aggregate enforcement, sanitization, issue
-  synchronization, daily/manual delivery, and retained evidence. Run
-  `30312519176` established live reader-App access, complete 6/6 repository
-  retrieval, and successful exact-head revalidation; it failed before issue
-  delivery because the synchronizer still enforced the obsolete 256-row bound.
-- Unverifiable items and open questions: the revised retained-artifact upload,
-  bounded issue synchronization, and clean-close path require post-fix Actions
-  evidence.
-- Remaining uncertainty: successful post-fix issue create/update/close and the
-  corresponding main-branch verification remain pending.
+  synchronization, daily/manual delivery, onboarding, and retained evidence.
+  Run `30313533707` established live reader-App access, complete 6/6 repository
+  retrieval and exact-head revalidation, a successful 30-day artifact upload,
+  and bounded issue synchronization for 286 findings and 113 inventory rows.
+- Unverifiable items and open questions: the automatic clean-audit closure path
+  has deterministic command-level coverage but cannot be exercised against the
+  current organization state while real drift remains.
+- Remaining uncertainty: consumer remediation tracked by alert #113 and rollout
+  tracker #30 is intentionally outside this implementation issue.
 - Implementer: root agent.
 - Reviewer and evidence: independent `issue42_adversarial` agent reviewed the
   complete worktree and ran focused Go, Node, and credential-audit checks.
@@ -165,6 +165,7 @@ summary: Task record for the fail-closed organization Unity enrollment audit.
   README, and operations runbook.
 - Destination or rationale: these are durable enrollment and incident-response
   contracts used by maintainers and future policy changes.
-- Independent review outcome: final focused re-review reported no findings;
-  post-fix artifact delivery, issue synchronization, main verification, and
-  issue #42 closure remain explicitly pending.
+- Independent review outcome: final focused re-review reported no findings.
+  PRs #110 and #112 merged; final-main Build lock CI run `30313533700` and
+  organization audit run `30313533707` passed, and issue #42 was closed after
+  the live evidence was recorded.
