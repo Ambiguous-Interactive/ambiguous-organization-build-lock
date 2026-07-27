@@ -221,9 +221,12 @@ allowlisted reason. Detected `20111` reports `unknown/blocked` with
 The final cleanup gate is intentionally separate from release. Holder removal can
 be followed by a cooldown, quarantine, or account incident, so `released=true`
 alone is not capacity-safety proof. Keep the gate under `if: always()` without
-`continue-on-error`; it accepts only a coherent confirmed classification and
-safe central release. Delete raw return and activation logs afterward under a
-separate `if: always()` step, and never upload those logs as artifacts.
+`continue-on-error`. Exact `acquired=false` makes the gate non-applicable because
+licensed work is guarded by `acquired == 'true'`; missing or invalid acquisition
+state remains fail-closed. For an acquired job, the gate accepts only a coherent
+confirmed classification and safe central release. Delete raw return and
+activation logs afterward under a separate `if: always()` step, and never upload
+those logs as artifacts.
 
 The release action is intentionally safe to run even when acquire never reached
 the front of the queue. It reports `cleanup-result=cooldown-started`,

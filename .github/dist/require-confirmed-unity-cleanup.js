@@ -52,10 +52,16 @@ function evaluateCleanupGate(values) {
   const observed = Object.fromEntries(
     Object.entries(values).map(([key, value]) => [key, text(value)])
   );
-  const failures = [];
-  if (observed.acquired !== "true") {
-    failures.push("the organization Unity lock was not acquired");
+  if (observed.acquired === "false") {
+    return { safe: true, failures: [] };
   }
+  if (observed.acquired !== "true") {
+    return {
+      safe: false,
+      failures: ["the organization Unity lock acquisition state is missing or invalid"]
+    };
+  }
+  const failures = [];
   if (observed.classificationComplete !== "true") {
     failures.push("Unity cleanup classification did not complete");
   }
@@ -141,6 +147,13 @@ function run({ values, outputPath, log = console.log, error = console.error }) {
     return result;
   }
   appendOutput(outputPath, true);
+  if (text(values.acquired) === "false") {
+    log(
+      "Licensed Unity cleanup confirmation was not required because the organization Unity lock was not acquired. " +
+        diagnostic
+    );
+    return result;
+  }
   log(`Licensed Unity cleanup is confirmed. ${diagnostic}`);
   return result;
 }
