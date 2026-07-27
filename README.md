@@ -35,12 +35,16 @@ force-updates the `v1` major alias when publishing a new `v1.x.y` release.
 The workflow has a stable `auto-release` concurrency group with
 `cancel-in-progress: false`, so scheduled and manual release runs queue instead
 of racing or canceling an active publish/tag update.
-Because `@semantic-release/github` publishes GitHub releases and performs its
-default issue/PR updates, the workflow grants `contents: write`, `issues: write`,
-and `pull-requests: write`. The `v1` alias is pushed through the authenticated
-`origin` configured by `actions/checkout`; workflow policy tests reject
-credentialed GitHub HTTPS URLs and direct `${{ secrets.* }}` or
-`${{ github.token }}` interpolation in shell scripts.
+Because `@semantic-release/github` publishes GitHub releases and records release
+linkage on associated issues and pull requests, the workflow grants
+`contents: write`, `issues: write`, and `pull-requests: write`. Those automated
+notices are deliberately non-resolving and do not apply the plugin's default
+`released` label: an issue may be referenced by a released change without its
+acceptance criteria being complete. Issue state and acceptance evidence remain
+authoritative. The `v1` alias is pushed through the authenticated `origin`
+configured by `actions/checkout`; workflow policy tests reject credentialed
+GitHub HTTPS URLs and direct `${{ secrets.* }}` or `${{ github.token }}`
+interpolation in shell scripts.
 
 ## Consumer Workflow Pattern
 

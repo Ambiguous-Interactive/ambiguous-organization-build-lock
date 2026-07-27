@@ -2,6 +2,12 @@
   "plugins": [
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
-    "@semantic-release/github"
+    [
+      "@semantic-release/github",
+      {
+        "successComment": "This <%= issue.pull_request ? 'pull request' : 'issue' %> is associated with a pull request or commit included in version <%= nextRelease.version %>.\n\nThis automated notice records release linkage only; it does not establish that the <%= issue.pull_request ? 'pull request' : 'issue' %> is resolved. Use its current state and acceptance evidence as the authority.",
+        "releasedLabels": false
+      }
+    ]
   ]
 }
