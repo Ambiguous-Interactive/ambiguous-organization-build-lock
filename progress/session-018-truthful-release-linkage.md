@@ -2,7 +2,7 @@
 
 Date: 2026-07-27
 
-Status: local implementation complete; delivery pending
+Status: complete; selected issue closed and default branch green
 
 ## Objective and safety boundary
 
@@ -132,14 +132,27 @@ skill now states that release comments must remain non-resolving and release
 labels require independently enforced acceptance evidence. The focused
 configuration test mechanically enforces the repository's exact policy.
 
-## Pending delivery
+## Delivery
 
-- Commit, push, and open the pull request.
-- Request Cursor Bugbot and GitHub Copilot on every pushed head, then address
-  all actionable feedback and CI failures.
-- Merge with an exact-head fence.
-- Remove the misleading `released` label from #83 and add a clarifying issue
-  note without deleting historical evidence.
-- Close #106 with the classification request explicitly retained in #83.
-- Verify Build lock CI and scheduled safety workflows remain green on the
-  resulting `main`.
+The exact locally verified tree was published through the connected GitHub App
+after the environment's SSH push and unauthenticated `gh` transports were
+unavailable. Remote commit `3b53c247de1e6a809df2a4211c3e6c0c334384a2`
+had tree `03cf98f74ad6c0a99cddf1a59477027ff427c177`, exactly matching
+the local verified tree.
+
+PR #107 passed Build lock CI run `30303612805` on that exact head. Cursor
+Bugbot's exact-head artifact reported zero findings. Copilot was triggered by
+the reviewer and tagged-comment paths and returned its terminal requester-quota
+response without code feedback. The thread inventory was empty.
+
+PR #107 was squash-merged with an expected-head fence as
+`5ef3352ccdfcb3058c8090e6433813126a67f379`. Its `Closes #106`
+directive closed the selected issue as completed. Issue #83 remains open: the
+misleading `released` label was removed and correction comment
+`5096615949` records that v1.10.0 did not fix the collision, while preserving
+the historical bot notice as evidence.
+
+On the exact merged `main` commit, Build lock CI run `30303825866` and Reaper
+delivery audit run `30304087463` passed. The workflow-run-triggered Dependabot
+follow-up correctly skipped. No Unity workflow, live lock-state mutation,
+consumer repin, credential update, or organization-policy change occurred.
