@@ -21,6 +21,19 @@ export const POINTERS = [
 
 const INDEX_PATH = ".llm/index.md";
 const SKILL_PATTERN = /^\.llm\/skills\/([^/]+)\/SKILL\.md$/;
+const CREDENTIAL_PATTERNS = [
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
+  /\bglpat-[A-Za-z0-9_-]{20,}\b/,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
+  /\bnpm_[A-Za-z0-9]{20,}\b/,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/
+];
+const CREDENTIAL_ASSIGNMENT =
+  /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -122,6 +135,38 @@ function markdown(value) {
 export function pointerContent(pointer) {
   return `${pointer.frontmatter || ""}# ${pointer.title}\n\nRead and follow the canonical repository instructions in\n` +
     `[\`${pointer.target}\`](${pointer.target}) before working.\n`;
+}
+
+function hasCredentialShapedLiteral(text) {
+  if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
+    const value = (match[1] || match[2] || match[3] || "").trim();
+    if (/^(?:\$\{\{|\$|<|\*{3}|\[)/.test(value) ||
+        /^(?:redacted|placeholder|omitted|unavailable|none|unknown)(?:[-_].*)?$/i.test(value)) {
+      continue;
+    }
+    if (value.length >= 12) return true;
+  }
+  return false;
+}
+
+function auditProgressRecords(root) {
+  const errors = [];
+  let files = [];
+  try {
+    files = walk(root, "progress");
+  } catch (error) {
+    return [error.message];
+  }
+  for (const relativePath of files) {
+    const bytes = fs.readFileSync(path.join(root, relativePath));
+    if (hasCredentialShapedLiteral(bytes.toString("utf8"))) {
+      errors.push(
+        `${relativePath}: credential-shaped literal detected; retain only sanitized evidence`
+      );
+    }
+  }
+  return errors;
 }
 
 function catalog(root) {
@@ -306,6 +351,7 @@ export function verifyRepository(root = process.cwd(), options = {}) {
       }
     }
   }
+  errors.push(...auditProgressRecords(root));
   return { errors: [...new Set(errors)] };
 }
 

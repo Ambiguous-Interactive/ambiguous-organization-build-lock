@@ -175,3 +175,49 @@ test("line counting treats 300 as valid and 301 as invalid", async (t) => {
     /301 lines exceeds 300/
   );
 });
+
+test("progress records reject credential-shaped literals without echoing them", async (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { generateIndex, verifyRepository } = await loadHarness();
+  fs.writeFileSync(path.join(root, ".llm", "index.md"), generateIndex(root));
+  fs.mkdirSync(path.join(root, "progress"));
+  const record = path.join(root, "progress", "session-001-example.md");
+
+  const credentials = [
+    ["GitHub token", ["ghp", "_", "A".repeat(24)].join("")],
+    ["AWS access key", ["AKIA", "B".repeat(16)].join("")],
+    ["private key", "-----BEGIN PRIVATE KEY-----"],
+    ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],
+    ["lowercase assignment", "password=correcthorsebatterystaple"]
+  ];
+  for (const [name, credential] of credentials) {
+    fs.writeFileSync(record, `# Session 001\n\nAccidentally retained ${credential}.\n`);
+    const errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+    assert.match(
+      errors,
+      /progress\/session-001-example\.md: credential-shaped literal/,
+      name
+    );
+    assert.ok(!errors.includes(credential), `${name} must not be echoed`);
+  }
+
+  const binaryCredential = ["github_pat", "_", "C".repeat(24)].join("");
+  fs.writeFileSync(record, Buffer.concat([
+    Buffer.from([0]),
+    Buffer.from(binaryCredential)
+  ]));
+  let errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.match(errors, /credential-shaped literal/, "NUL-containing file");
+  assert.ok(!errors.includes(binaryCredential), "binary credential must not be echoed");
+
+  fs.writeFileSync(record, [
+    "# Session 001",
+    "",
+    "Use `${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}`.",
+    "Record `UNITY_SERIAL=<redacted>`, `API_TOKEN=$API_TOKEN`, and",
+    "`password=REDACTED-VALUE`."
+  ].join("\n") + "\n");
+  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.doesNotMatch(errors, /credential-shaped literal/);
+});

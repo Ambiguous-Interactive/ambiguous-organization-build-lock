@@ -40,6 +40,14 @@ test("repository harness is complete and current", async () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("progress records are explicitly public and sanitized", () => {
+  const context = fs.readFileSync(path.join(repoRoot, ".llm", "context.md"), "utf8");
+  assert.match(
+    context,
+    /Treat `progress\/` records as public audit evidence:[\s\S]*never credential literals, raw logs, personal data, or live lock\s+state\./
+  );
+});
+
 test("substantial work requires an evidence-backed improvement and review contract", () => {
   const context = fs.readFileSync(path.join(repoRoot, ".llm", "context.md"), "utf8");
   const skill = fs.readFileSync(
