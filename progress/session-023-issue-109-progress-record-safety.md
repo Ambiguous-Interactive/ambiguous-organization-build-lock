@@ -184,5 +184,12 @@ The assignment scan now requires every captured value to end at end-of-input
 or a conservative prose/Markdown delimiter before placeholder allowlisting,
 so allowlisted prefixes cannot hide trailing literals.
 
+The next exact-head pass found stacked Markdown key decorators and YAML block
+scalars. Red-green fixtures cover nested emphasis and both literal and folded
+scalar headers. The key grammar now accepts arbitrary runs of recognized
+Markdown decorators, placeholder normalization unwraps nested paired markers
+iteratively, and every credential-named YAML block scalar fails closed because
+its value is outside the captured line.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

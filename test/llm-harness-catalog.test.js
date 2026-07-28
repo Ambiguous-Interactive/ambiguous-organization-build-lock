@@ -202,8 +202,11 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["bold Markdown key", "**password**: correcthorsebatterystaple"],
     ["italic Markdown key", "_UNITY_SERIAL_: ABCD-1234-EFGH-5678"],
     ["struck Markdown key", "~~password~~: correcthorsebatterystaple"],
+    ["nested Markdown key", "~~**password**~~: correcthorsebatterystaple"],
     ["JSON assignment", "\"password\": \"correcthorsebatterystaple\""],
     ["quoted YAML assignment", "'UNITY_SERIAL': 'ABCD-1234-EFGH-5678'"],
+    ["literal YAML block scalar", "password: |\n  correcthorsebatterystaple"],
+    ["folded YAML block scalar", "UNITY_SERIAL: >-\n  ABCD-1234-EFGH-5678"],
     [
       "compact expression concatenation",
       "GITHUB_TOKEN=${{github.token}}correcthorsebatterystaple"
@@ -253,6 +256,7 @@ test("progress records reject credential-shaped literals without echoing them", 
     "JSON may retain `\"password\": \"<redacted>\"` and",
     "Markdown may retain `UNITY_SERIAL=`<redacted>``.",
     "Markdown may also retain **password**: **<redacted>**.",
+    "Nested Markdown may retain ~~**password**~~: ~~**<redacted>**~~.",
     "Workflow examples may use `GITHUB_TOKEN=${{github.token}}` or",
     "`GH_TOKEN=${{ github.token }}`."
   ].join("\n") + "\n");

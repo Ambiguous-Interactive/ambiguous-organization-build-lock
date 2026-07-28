@@ -33,7 +33,7 @@ const CREDENTIAL_PATTERNS = [
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
-  /(?<![A-Za-z0-9])(?:["'`]|[*_]{1,3}|~{2})?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*(?:["'`]|[*_]{1,3}|~{2})?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
+  /(?<![A-Za-z0-9])["'`*_~]*(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*["'`*_~]*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -143,12 +143,18 @@ function hasCredentialShapedLiteral(text) {
     const value = (match.slice(1).find(Boolean) || "").trim();
     const following = text[match.index + match[0].length];
     if (following !== undefined && !/[\s`.,;:)\]}]/.test(following)) return true;
+    if (/^[|>][0-9+-]*$/.test(value)) return true;
     let placeholder = value.replace(/[.,;:]$/, "");
-    for (const marker of ["***", "___", "**", "__", "~~", "*", "_"]) {
-      if (placeholder.startsWith(marker) && placeholder.endsWith(marker) &&
-          placeholder.length > marker.length * 2) {
-        placeholder = placeholder.slice(marker.length, -marker.length).trim();
-        break;
+    let unwrapped = true;
+    while (unwrapped) {
+      unwrapped = false;
+      for (const marker of ["***", "___", "**", "__", "~~", "*", "_"]) {
+        if (placeholder.startsWith(marker) && placeholder.endsWith(marker) &&
+            placeholder.length > marker.length * 2) {
+          placeholder = placeholder.slice(marker.length, -marker.length).trim();
+          unwrapped = true;
+          break;
+        }
       }
     }
     if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(placeholder) ||
