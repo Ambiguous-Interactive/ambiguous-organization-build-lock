@@ -177,5 +177,12 @@ decorators. It unwraps the same value decorators only for exact placeholder
 evaluation, so emphasized redactions remain safe while emphasized literal
 values retain their original length and are rejected.
 
+The next exact-head review found that an otherwise safe expression or quoted
+placeholder could match only a prefix of a concatenated right-hand side.
+Compact, spaced, and quoted concatenation fixtures first reproduced the gap.
+The assignment scan now requires every captured value to end at end-of-input
+or a conservative prose/Markdown delimiter before placeholder allowlisting,
+so allowlisted prefixes cannot hide trailing literals.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

@@ -204,6 +204,15 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["struck Markdown key", "~~password~~: correcthorsebatterystaple"],
     ["JSON assignment", "\"password\": \"correcthorsebatterystaple\""],
     ["quoted YAML assignment", "'UNITY_SERIAL': 'ABCD-1234-EFGH-5678'"],
+    [
+      "compact expression concatenation",
+      "GITHUB_TOKEN=${{github.token}}correcthorsebatterystaple"
+    ],
+    [
+      "spaced expression concatenation",
+      "GITHUB_TOKEN=${{ github.token }}correcthorsebatterystaple"
+    ],
+    ["quoted placeholder concatenation", "password=\"<redacted>\"correcthorsebatterystaple"],
     ["angle-wrapped assignment", "UNITY_SERIAL=<ABCD-1234-EFGH-5678>"],
     ["none-prefixed assignment", "password=none_correcthorsebatterystaple"],
     ["unknown-prefixed assignment", "password=unknown-correcthorsebatterystaple"],
