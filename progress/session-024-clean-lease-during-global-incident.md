@@ -120,4 +120,13 @@ every Go package, actionlint, both module verification and tidy checks, the
 workflow credential audit, and the generated LLM harness. `git diff --check`
 also passed.
 
-Pending pull-request review, merge, and post-merge `main` verification.
+PR #123 opened with remote head
+`1ea35c938e122016bea41aa2654959025ec2f276`; its tree
+`70262448c496929be71456a3ee9b066cd2731ce4` exactly matched the fully verified
+local tree. Build lock CI run `30329311109` passed. Cursor Bugbot's exact-head
+summary reported the intended evidence boundary and no finding or review
+thread. Copilot was requested through both the reviewer API and an exact-head
+tagged comment, then returned its terminal requester-quota-exhaustion response.
+
+Pending exact-head review of this evidence update, merge, and post-merge `main`
+verification.
