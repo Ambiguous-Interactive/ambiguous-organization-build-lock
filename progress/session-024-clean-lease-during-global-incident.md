@@ -166,3 +166,11 @@ versions in actionlint's upstream module graph, but `go mod why` confirms that
 the isolated module does not need either module and `go mod tidy -diff` removes
 attempted direct pins, so retaining them would create unused dependency
 requirements.
+
+Dependency PR #125 opened with initial exact head
+`674e9761e931cf72ce93452dd838cf3639d76b6b`; its tree
+`98b874962b55b986b020fee07fa1c230bd9c204c` exactly matched the fully verified
+local tree. Build lock CI run `30332351778` passed. Cursor Bugbot's exact-head
+summary classified the update as low risk and reported no finding or review
+thread. Copilot was requested through both the reviewer API and an exact-head
+tagged comment, then returned its terminal requester-quota-exhaustion response.
