@@ -140,3 +140,29 @@ PR #123 was squash-merged as
 `508662bdde6082f4c12761a172fc9c7cbaa39366`, closing issue #121. Push-triggered
 Build lock CI run `30329458668` and Organization Unity enrollment audit run
 `30329458649` both passed on that exact `main` commit.
+
+## Completion-audit dependency follow-up
+
+A fresh requirement-by-requirement audit found that the first dependency review
+covered the Go modules but had not independently compared every pinned GitHub
+Action with its current upstream release. The audit confirmed that checkout
+v7.0.1, setup-node v7.0.0, setup-go v7.0.0, semantic-release-action v6.0.0,
+devcontainers/ci v0.3.1900000450, and create-github-app-token v3.2.0 were
+current. It found two retainable updates:
+
+- download-artifact v4.3.0 to v8.0.1, including fail-closed digest mismatch
+  handling;
+- upload-artifact v4.6.2 to v7.0.1 in both producer workflows.
+
+The request/onboarding producer-consumer pair moves together. Its existing
+archive upload and authenticated run-scoped download inputs remain supported;
+the audit workflow's archive upload also remains supported. Every use remains
+pinned to the immutable commit behind its release tag.
+
+The module audit also reconfirmed that the root yaml/v4 dependency is current
+and actionlint itself is current. yaml/v4 rc.6 remains blocked by actionlint's
+parser incompatibility under issue #94. `goldmark` and `x/net` appear as newer
+versions in actionlint's upstream module graph, but `go mod why` confirms that
+the isolated module does not need either module and `go mod tidy -diff` removes
+attempted direct pins, so retaining them would create unused dependency
+requirements.
