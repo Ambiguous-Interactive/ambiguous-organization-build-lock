@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-28T20:32:41.480Z",
       "expiresAt": "2026-07-29T00:32:41.480Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "0b3a787b-bed4-4d55-9465-ea68f1923d79",
       "holderId": "Ambiguous-Interactive/DoxReloaded:30395805599:platform-build-linux:platform-build-linux-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -36,14 +40,13 @@
       "runId": "30395805599",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30395805599",
-      "queuedAt": "2026-07-28T20:33:23.153Z",
-      "acquiredAt": "2026-07-28T20:33:24.285Z",
-      "expiresAt": "2026-07-29T00:33:24.285Z",
-      "runnerId": "tiny-box-linux"
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-28T20:37:30.399Z",
+      "availableAt": "2026-07-28T20:37:31.399Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-28T20:33:24.286Z"
+  "updatedAt": "2026-07-28T20:37:30.400Z"
 }
