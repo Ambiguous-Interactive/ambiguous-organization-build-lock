@@ -23,17 +23,17 @@ const INDEX_PATH = ".llm/index.md";
 const SKILL_PATTERN = /^\.llm\/skills\/([^/]+)\/SKILL\.md$/;
 const CREDENTIAL_PATTERNS = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
-  /\bgh[pousr]_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
-  /\bglpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])/,
-  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
-  /\bnpm_[A-Za-z0-9]{20,}\b/,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
+  /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
+  /(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
+  /(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
+  /(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/,
+  /(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])/,
+  /(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
+  /(?<![A-Za-z0-9])npm_[A-Za-z0-9]{20,}(?![A-Za-z0-9])/,
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
-  /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
+  /(?:["'`])?\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*(?:["'`])?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -140,7 +140,7 @@ export function pointerContent(pointer) {
 function hasCredentialShapedLiteral(text) {
   if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
   for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
-    const value = (match[1] || match[2] || match[3] || match[4] || "").trim();
+    const value = (match.slice(1).find(Boolean) || "").trim();
     if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value) ||
         /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value) ||
         /^\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\}$/.test(value) ||

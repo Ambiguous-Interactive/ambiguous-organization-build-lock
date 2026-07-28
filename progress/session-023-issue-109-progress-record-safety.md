@@ -161,5 +161,14 @@ the classic and fine-grained GitHub token patterns to use their complete
 alphabet and exact negative alphabet boundaries, eliminating the adjacent
 boundary variant as well.
 
+The next exact-head pass reported three more valid grammar/boundary gaps:
+AWS and npm literals followed by an underscore could evade word boundaries;
+backtick-wrapped assignment values were not captured; and quoted JSON/YAML
+keys did not match. Data-driven failing cases reproduce each form, plus the
+same key quoting in inline Markdown. Remediation
+replaces word boundaries across every token pattern with alphabet-specific
+lookarounds and teaches the assignment grammar to capture backtick values and
+quoted keys. Safe redactions in those forms remain accepted.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.
