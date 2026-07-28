@@ -40,7 +40,7 @@ outputs:
   queue-cleaned:
     description: "true when this action removed this run from the wait queue."
   cleanup-result:
-    description: "cooldown-started, quarantined, released, queue-cleaned, or noop."
+    description: "cooldown-started, quarantined, global-quarantined, released, queue-cleaned, or noop."
   lock-name:
     description: Target lock name.
   holder-id:
@@ -60,9 +60,9 @@ outputs:
   incident-id:
     description: Active immutable global incident ID, when account health is blocked.
   resource-health:
-    description: Effective resource health after cleanup reporting.
+    description: Caller-local resource health after cleanup reporting.
   resource-reason:
-    description: Stable effective resource reason code.
+    description: Stable caller-local resource reason code.
   report-degraded:
     description: "true when invalid cleanup-report inputs were replaced with unknown/healthy evidence before exact ownership cleanup."
   report-validation-error:

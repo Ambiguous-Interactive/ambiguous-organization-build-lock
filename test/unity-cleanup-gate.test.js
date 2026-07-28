@@ -36,6 +36,7 @@ const safeCooldown = {
   reservationId: "reservation-abc",
   incidentId: ""
 };
+const activeIncidentId = "incident-0123456789abcdef01234567";
 
 test("gate accepts only coherent confirmed cleanup releases", async (t) => {
   await t.test("explicitly not acquired", () => {
@@ -55,6 +56,22 @@ test("gate accepts only coherent confirmed cleanup releases", async (t) => {
       reservationId: ""
     }), { safe: true, failures: [] });
   });
+  await t.test("safe local cooldown while a global incident blocks new admission", () => {
+    assert.deepEqual(evaluateCleanupGate({
+      ...safeCooldown,
+      cleanupResult: "global-quarantined",
+      incidentId: activeIncidentId
+    }), { safe: true, failures: [] });
+  });
+  await t.test("safe local direct release while a global incident blocks new admission", () => {
+    assert.deepEqual(evaluateCleanupGate({
+      ...safeCooldown,
+      cleanupResult: "global-quarantined",
+      reservationState: "",
+      reservationId: "",
+      incidentId: activeIncidentId
+    }), { safe: true, failures: [] });
+  });
 
   const failures = [
     ["classification incomplete", { classificationComplete: "false" }],
@@ -62,13 +79,28 @@ test("gate accepts only coherent confirmed cleanup releases", async (t) => {
     ["blocked account", { cleanupStatus: "unknown", cleanupHealth: "blocked", cleanupReason: "unity-account-limit-20111" }],
     ["release failed", { releaseOutcome: "failure" }],
     ["quarantine", { cleanupResult: "quarantined", released: "true", reservationState: "quarantine" }],
-    ["global quarantine", { cleanupResult: "global-quarantined", incidentId: "incident-abc" }],
+    ["global quarantine without incident identity", { cleanupResult: "global-quarantined" }],
+    ["global quarantine with blocked local release", {
+      cleanupResult: "global-quarantined",
+      releaseHealth: "blocked",
+      releaseReason: "unity-account-limit-20111",
+      incidentId: activeIncidentId
+    }],
     ["queue clean only", { cleanupResult: "queue-cleaned", released: "false" }],
     ["noop", { cleanupResult: "noop", released: "false" }],
     ["holder not removed", { released: "false" }],
     ["release health mismatch", { releaseHealth: "blocked" }],
     ["release reason mismatch", { releaseReason: "return-log-truncated" }],
-    ["incident present", { incidentId: "incident-abc" }],
+    ["incident present without global result", { incidentId: activeIncidentId }],
+    ["global quarantine with malformed incident identity", {
+      cleanupResult: "global-quarantined",
+      incidentId: "incident-abc"
+    }],
+    ["global quarantine with contradictory reservation", {
+      cleanupResult: "global-quarantined",
+      reservationState: "quarantine",
+      incidentId: activeIncidentId
+    }],
     ["cooldown state missing", { reservationState: "", reservationId: "" }],
     ["cooldown id missing", { reservationId: "" }],
     ["direct release has reservation", { cleanupResult: "released" }],
@@ -188,6 +220,15 @@ test("committed gate runtime exits nonzero for unsafe cleanup and zero only for 
   }, "safe.txt");
   assert.equal(safe.status, 0);
   assert.equal(safe.outputs.at(-1), "cleanup-safe=true");
+
+  const safeDuringIncident = execute({
+    ...safeCooldown,
+    cleanupResult: "global-quarantined",
+    incidentId: activeIncidentId
+  }, "safe-during-incident.txt");
+  assert.equal(safeDuringIncident.status, 0);
+  assert.equal(safeDuringIncident.outputs.at(-1), "cleanup-safe=true");
+  assert.match(safeDuringIncident.stdout, /::warning title=Global Unity account incident remains active::/);
 
   const notAcquired = execute({
     ...Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, "missing"])),

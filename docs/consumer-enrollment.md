@@ -54,10 +54,14 @@ or writer App. The current inventory is recorded in
 8. Run `require-confirmed-unity-cleanup` after release with `if: always()` and no
    `continue-on-error`. Exact `acquired=false` makes the gate non-applicable
    because licensed work is guarded by `acquired == 'true'`; missing or invalid
-   acquisition state remains fail-closed. A quarantine, incident, missing
+   acquisition state remains fail-closed. A local quarantine, missing
    classification, holder removal without a safe release result, or contradictory
-   reservation must fail an acquired licensed job. Delete raw evidence afterward
-   under `if: always()` and never upload it.
+   reservation must fail an acquired licensed job. A pre-existing global incident
+   may warn rather than fail only when release reports `global-quarantined`, the
+   exact incident identity, caller-local confirmed/healthy evidence, exact holder
+   removal, and a coherent cooldown or direct release; the incident still blocks
+   all new admission. Delete raw evidence afterward under `if: always()` and never
+   upload it.
 9. Emit one stable, always-reporting aggregate. It fails on preflight failure,
    cancellation, unexpected skip, missing matrix output, partial execution,
    missing cleanup evidence, release failure, or final-gate failure.
