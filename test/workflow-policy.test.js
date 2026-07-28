@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
@@ -130,12 +131,34 @@ test("all remote workflow actions are pinned to immutable commit SHAs", () => {
 
 function listPolicyTextFiles(root = repoRoot) {
   return childProcess
-    .execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
+    .execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { cwd: root, encoding: "utf8" }
+    )
     .split("\0")
     .filter(Boolean)
     .filter((file) => policyTextExtensions.has(path.extname(file).toLowerCase()))
-    .map((file) => path.join(root, file));
+    .map((file) => path.join(root, file))
+    .filter((file) => fs.existsSync(file));
 }
+
+test("policy text inventory includes untracked files and omits deleted tracked files", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "policy-text-files-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  childProcess.execFileSync("git", ["init", "-q"], { cwd: root });
+  fs.writeFileSync(path.join(root, "tracked.js"), "tracked\n");
+  fs.writeFileSync(path.join(root, "deleted.md"), "deleted\n");
+  childProcess.execFileSync("git", ["add", "."], { cwd: root });
+  fs.rmSync(path.join(root, "deleted.md"));
+  fs.writeFileSync(path.join(root, "untracked.yml"), "untracked\n");
+  fs.writeFileSync(path.join(root, "ignored.txt"), "ignored extension\n");
+
+  assert.deepEqual(
+    listPolicyTextFiles(root).map((file) => path.basename(file)).sort(),
+    ["tracked.js", "untracked.yml"]
+  );
+});
 
 function stripYamlComment(value) {
   let quote = null;
