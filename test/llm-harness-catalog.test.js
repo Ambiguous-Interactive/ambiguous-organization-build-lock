@@ -186,6 +186,11 @@ test("progress records reject credential-shaped literals without echoing them", 
 
   const credentials = [
     ["GitHub token", ["ghp", "_", "A".repeat(24)].join("")],
+    [
+      "underscore-containing GitHub token",
+      ["ghp", "_", "A".repeat(10), "_", "B".repeat(12)].join("")
+    ],
+    ["underscore-ending GitHub token", ["ghp", "_", "C".repeat(19), "_"].join("")],
     ["AWS access key", ["AKIA", "B".repeat(16)].join("")],
     ["private key", "-----BEGIN PRIVATE KEY-----"],
     ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],

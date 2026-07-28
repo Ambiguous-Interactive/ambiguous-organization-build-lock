@@ -23,8 +23,8 @@ const INDEX_PATH = ".llm/index.md";
 const SKILL_PATTERN = /^\.llm\/skills\/([^/]+)\/SKILL\.md$/;
 const CREDENTIAL_PATTERNS = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
   /\bglpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])/,

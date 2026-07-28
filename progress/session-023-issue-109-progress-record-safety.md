@@ -154,5 +154,12 @@ compact and spaced `github.token` forms. The guard accepts that one exact
 GitHub context expression without broadening literal or placeholder
 acceptance.
 
+The next exact-head rereview found a high-severity GitHub token bypass: the
+classic token alphabet also permits underscores, while the matcher did not.
+Red-green cases cover both internal and final underscores. Remediation updates
+the classic and fine-grained GitHub token patterns to use their complete
+alphabet and exact negative alphabet boundaries, eliminating the adjacent
+boundary variant as well.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.
