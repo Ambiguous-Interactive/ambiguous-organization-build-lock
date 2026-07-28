@@ -128,5 +128,15 @@ summary reported the intended evidence boundary and no finding or review
 thread. Copilot was requested through both the reviewer API and an exact-head
 tagged comment, then returned its terminal requester-quota-exhaustion response.
 
-Pending exact-head review of this evidence update, merge, and post-merge `main`
-verification.
+The evidence update produced final implementation head
+`51588d8b629799c15ee8ee3c486e66a1c1cbcfb9`; its tree
+`4b98296652e648c784a29fdfaa87db181f43028c` exactly matched the verified local
+tree. Build lock CI run `30329409085` passed on that exact head. Cursor Bugbot's
+fresh exact-head summary reported no finding or review thread. Copilot was
+requested again through both the reviewer API and an exact-head tagged comment
+and returned its terminal requester-quota-exhaustion response.
+
+PR #123 was squash-merged as
+`508662bdde6082f4c12761a172fc9c7cbaa39366`, closing issue #121. Push-triggered
+Build lock CI run `30329458668` and Organization Unity enrollment audit run
+`30329458649` both passed on that exact `main` commit.
