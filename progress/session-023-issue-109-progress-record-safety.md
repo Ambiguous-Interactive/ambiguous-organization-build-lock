@@ -210,5 +210,14 @@ continuation uninspected. Multiline red-green fixtures reproduce both quote
 forms. The assignment parser now tracks every quote delimiter explicitly and
 fails closed when its matching closer is absent.
 
-Fresh verification, exact-head rereview, merge, and post-merge evidence are
-recorded below as they complete.
+The final implementation head was
+`cf89ab5938b1268d81568ea7eea62d0204db6865`, with tree
+`4bb95d2d26aaa28186d9848109cbdc4ed1464fd9` matching the fully verified local
+tree. Build lock CI run `30324692918` passed. Cursor's exact-head summary
+reported no new finding, every review thread was resolved, and Copilot's
+formal response was limited by the requester's review quota.
+
+PR #120 merged through an exact-head fence as squash commit
+`aa0639f43f75bbc3ad8e34741a49376d1609085b`, automatically closing issue #109.
+The push-triggered main Build lock CI run `30325157657` then passed on that
+exact merge commit.
