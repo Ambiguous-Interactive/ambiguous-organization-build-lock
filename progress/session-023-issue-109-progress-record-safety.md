@@ -204,5 +204,11 @@ fixtures reproduce all three. Backtick value capture now fails closed at a
 line ending even without a closer, sentence punctuation remains subject to
 the complete terminator rule, and assignment spacing is horizontal-only.
 
+The following exact-head review found that unclosed single- and double-quoted
+assignments could similarly stop at a short first line and leave a credential
+continuation uninspected. Multiline red-green fixtures reproduce both quote
+forms. The assignment parser now tracks every quote delimiter explicitly and
+fails closed when its matching closer is absent.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

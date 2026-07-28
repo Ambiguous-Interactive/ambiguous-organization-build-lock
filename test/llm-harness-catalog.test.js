@@ -199,6 +199,14 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["lowercase assignment", "password=correcthorsebatterystaple"],
     ["backtick-wrapped assignment", "password=`correcthorsebatterystaple`"],
     ["unclosed backtick assignment", "password=`correcthorsebatterystaple"],
+    [
+      "unclosed double-quoted multiline assignment",
+      "password=\"short\ncorrecthorsebatterystaple"
+    ],
+    [
+      "unclosed single-quoted multiline assignment",
+      "UNITY_SERIAL='short\nABCD-1234-EFGH-5678"
+    ],
     ["backtick-wrapped key", "`password`: correcthorsebatterystaple"],
     ["bold Markdown key", "**password**: correcthorsebatterystaple"],
     ["italic Markdown key", "_UNITY_SERIAL_: ABCD-1234-EFGH-5678"],

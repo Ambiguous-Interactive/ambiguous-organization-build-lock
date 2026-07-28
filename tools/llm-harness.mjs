@@ -33,7 +33,7 @@ const CREDENTIAL_PATTERNS = [
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
-  /(?<![A-Za-z0-9])["'`*_~]*(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*["'`*_~]*[ \t]*[:=][ \t]*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`?|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
+  /(?<![A-Za-z0-9])["'`*_~]*(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*["'`*_~]*[ \t]*[:=][ \t]*(?:"([^"\r\n]+)("?)|'([^'\r\n]+)('?)|`([^`\r\n]+)(`?)|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -140,7 +140,13 @@ export function pointerContent(pointer) {
 function hasCredentialShapedLiteral(text) {
   if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
   for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
-    const value = (match.slice(1).find(Boolean) || "").trim();
+    const quotedValue = [
+      { value: match[1], closer: match[2], expected: "\"" },
+      { value: match[3], closer: match[4], expected: "'" },
+      { value: match[5], closer: match[6], expected: "`" }
+    ].find(({ value }) => value !== undefined);
+    if (quotedValue && quotedValue.closer !== quotedValue.expected) return true;
+    const value = (quotedValue?.value ?? match[7] ?? match[8] ?? "").trim();
     const remainder = text.slice(match.index + match[0].length);
     if (remainder && !/^\s/.test(remainder) &&
         !/^[`.,;:!?)\]}]+(?:\s|$)/.test(remainder)) {
