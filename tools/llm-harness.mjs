@@ -141,8 +141,11 @@ function hasCredentialShapedLiteral(text) {
   if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
   for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
     const value = (match.slice(1).find(Boolean) || "").trim();
-    const following = text[match.index + match[0].length];
-    if (following !== undefined && !/[\s`.,;:)\]}]/.test(following)) return true;
+    const remainder = text.slice(match.index + match[0].length);
+    if (remainder && !/^\s/.test(remainder) &&
+        !/^[`.,;:)\]}]+(?:\s|$)/.test(remainder)) {
+      return true;
+    }
     if (/^[|>][0-9+-]*$/.test(value)) return true;
     let placeholder = value.replace(/[.,;:]$/, "");
     let unwrapped = true;

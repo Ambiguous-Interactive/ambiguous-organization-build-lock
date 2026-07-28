@@ -191,5 +191,11 @@ Markdown decorators, placeholder normalization unwraps nested paired markers
 iteratively, and every credential-named YAML block scalar fails closed because
 its value is outside the captured line.
 
+The next exact-head review found that punctuation was treated as a terminator
+without proving it ended the surrounding prose. Expression, quoted, and
+backtick placeholder fixtures with punctuation followed immediately by a
+literal reproduced the bypass. Closing Markdown/prose punctuation is now
+accepted only as a complete run followed by whitespace or end-of-input.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

@@ -216,6 +216,18 @@ test("progress records reject credential-shaped literals without echoing them", 
       "GITHUB_TOKEN=${{ github.token }}correcthorsebatterystaple"
     ],
     ["quoted placeholder concatenation", "password=\"<redacted>\"correcthorsebatterystaple"],
+    [
+      "punctuated expression concatenation",
+      "GITHUB_TOKEN=${{github.token}}.correcthorsebatterystaple"
+    ],
+    [
+      "punctuated quoted concatenation",
+      "password=\"<redacted>\",correcthorsebatterystaple"
+    ],
+    [
+      "punctuated backtick concatenation",
+      "password=`<redacted>`;correcthorsebatterystaple"
+    ],
     ["angle-wrapped assignment", "UNITY_SERIAL=<ABCD-1234-EFGH-5678>"],
     ["none-prefixed assignment", "password=none_correcthorsebatterystaple"],
     ["unknown-prefixed assignment", "password=unknown-correcthorsebatterystaple"],
