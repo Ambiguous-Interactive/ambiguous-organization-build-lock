@@ -49,22 +49,41 @@ function walk(root, relativeDirectory) {
   return files;
 }
 
-function parseMetadata(text, relativePath) {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) throw new Error(`${relativePath}: skill must start with YAML frontmatter`);
+function parseMetadataDocuments(documents) {
+  const requests = [];
+  const requestIndexes = [];
+  const results = new Array(documents.length);
+  for (let index = 0; index < documents.length; index += 1) {
+    const { text, relativePath } = documents[index];
+    const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+    if (!match) {
+      results[index] = {
+        error: `${relativePath}: skill must start with YAML frontmatter`
+      };
+      continue;
+    }
+    requests.push({ path: relativePath, yaml: match[1] });
+    requestIndexes.push(index);
+  }
+  if (!requests.length) return results;
   const output = childProcess.execFileSync(
     "go",
     ["run", "./cmd/llm-skill-metadata"],
     {
       cwd: toolRoot,
       encoding: "utf8",
-      input: JSON.stringify({ path: relativePath, yaml: match[1] }),
+      input: JSON.stringify(requests),
       stdio: ["pipe", "pipe", "pipe"]
     }
   );
-  const result = JSON.parse(output);
-  if (result.error) throw new Error(result.error);
-  return result.metadata;
+  const parsed = JSON.parse(output);
+  if (!Array.isArray(parsed) || parsed.length !== requests.length) {
+    throw new Error("skill metadata parser returned an invalid result count");
+  }
+  for (let index = 0; index < parsed.length; index += 1) {
+    results[requestIndexes[index]] = parsed[index];
+  }
+  return results;
 }
 
 function validateMetadata(metadata, relativePath, slug) {
@@ -108,6 +127,7 @@ export function pointerContent(pointer) {
 function catalog(root) {
   const entries = [];
   const errors = [];
+  const skillDocuments = [];
   const skillsRoot = path.join(root, ".llm", "skills");
   const skillNames = new Set();
   if (fs.existsSync(skillsRoot)) {
@@ -143,16 +163,10 @@ function catalog(root) {
     const skillMatch = relativePath.match(SKILL_PATTERN);
     try {
       if (skillMatch) {
-        const metadata = parseMetadata(text, relativePath);
-        errors.push(...validateMetadata(
-          metadata,
+        skillDocuments.push({
           relativePath,
-          path.posix.basename(path.posix.dirname(relativePath))
-        ));
-        entries.push({
-          section: "Skills",
-          path: relativePath,
-          description: metadata.description || ""
+          text,
+          slug: path.posix.basename(path.posix.dirname(relativePath))
         });
       } else {
         const resource = relativePath.match(/^\.llm\/skills\/([^/]+)\/.+/);
@@ -174,6 +188,32 @@ function catalog(root) {
               `${separator ? " " : ""}${letter.toUpperCase()}`),
           path: relativePath,
           description: summary(text, relativePath)
+        });
+      }
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+  if (skillDocuments.length) {
+    try {
+      const results = parseMetadataDocuments(skillDocuments);
+      for (let index = 0; index < skillDocuments.length; index += 1) {
+        const document = skillDocuments[index];
+        const result = results[index];
+        if (result.error) {
+          errors.push(result.error);
+          continue;
+        }
+        const metadata = result.metadata || {};
+        errors.push(...validateMetadata(
+          metadata,
+          document.relativePath,
+          document.slug
+        ));
+        entries.push({
+          section: "Skills",
+          path: document.relativePath,
+          description: metadata.description || ""
         });
       }
     } catch (error) {
