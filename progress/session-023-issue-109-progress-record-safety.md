@@ -170,5 +170,12 @@ replaces word boundaries across every token pattern with alphabet-specific
 lookarounds and teaches the assignment grammar to capture backtick values and
 quoted keys. Safe redactions in those forms remain accepted.
 
+The next exact-head review found the remaining Markdown emphasis variant:
+asterisk or underscore wrappers around assignment keys could evade the
+grammar. Remediation covers italic, bold/bold-italic, and strikethrough key
+decorators. It unwraps the same value decorators only for exact placeholder
+evaluation, so emphasized redactions remain safe while emphasized literal
+values retain their original length and are rejected.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

@@ -33,7 +33,7 @@ const CREDENTIAL_PATTERNS = [
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
-  /(?:["'`])?\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*(?:["'`])?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
+  /(?<![A-Za-z0-9])(?:["'`]|[*_]{1,3}|~{2})?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*(?:["'`]|[*_]{1,3}|~{2})?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -141,11 +141,19 @@ function hasCredentialShapedLiteral(text) {
   if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
   for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
     const value = (match.slice(1).find(Boolean) || "").trim();
-    if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value) ||
-        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value) ||
-        /^\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\}$/.test(value) ||
-        /^(?:<(?:redacted|placeholder|omitted|unavailable|none|unknown)>|\[(?:redacted|placeholder|omitted|unavailable|none|unknown)\])$/i.test(value) ||
-        /^(?:\*{3}|redacted|redacted-value|placeholder|omitted|unavailable|none|unknown)$/i.test(value)) {
+    let placeholder = value.replace(/[.,;:]$/, "");
+    for (const marker of ["***", "___", "**", "__", "~~", "*", "_"]) {
+      if (placeholder.startsWith(marker) && placeholder.endsWith(marker) &&
+          placeholder.length > marker.length * 2) {
+        placeholder = placeholder.slice(marker.length, -marker.length).trim();
+        break;
+      }
+    }
+    if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(placeholder) ||
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(placeholder) ||
+        /^\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\}$/.test(placeholder) ||
+        /^(?:<(?:redacted|placeholder|omitted|unavailable|none|unknown)>|\[(?:redacted|placeholder|omitted|unavailable|none|unknown)\])$/i.test(placeholder) ||
+        /^(?:\*{3}|redacted|redacted-value|placeholder|omitted|unavailable|none|unknown)$/i.test(placeholder)) {
       continue;
     }
     if (value.length >= 12) return true;
