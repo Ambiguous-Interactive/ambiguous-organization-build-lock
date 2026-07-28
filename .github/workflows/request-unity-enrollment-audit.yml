@@ -16,6 +16,4 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Request accepted
-        run: >-
-          echo "The completed request triggers the secret-bearing audit from
-          the trusted default-branch workflow."
+        run: echo "The completed request triggers the secret-bearing audit from the trusted default-branch workflow."

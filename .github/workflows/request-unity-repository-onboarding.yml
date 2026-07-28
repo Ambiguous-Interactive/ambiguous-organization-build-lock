@@ -34,13 +34,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Checkout request automation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+
       - name: Reject non-default-branch request
         env:
           REQUEST_REF: ${{ github.ref }}
         shell: bash
-        run: |
-          set -euo pipefail
-          test "${REQUEST_REF}" = "refs/heads/main"
+        run: bash tools/workflows/request-unity-repository-onboarding.sh validate-ref
 
       - name: Record inert onboarding request
         env:
@@ -49,19 +53,7 @@ jobs:
           TARGET_FORK: ${{ inputs.fork }}
           TARGET_ALLOW_WORKFLOW_DISPATCH: ${{ inputs.allow_workflow_dispatch }}
         shell: bash
-        run: |
-          set -euo pipefail
-          jq -n \
-            --arg repository "${TARGET_REPOSITORY}" \
-            --arg defaultBranch "${TARGET_DEFAULT_BRANCH}" \
-            --argjson fork "${TARGET_FORK}" \
-            --argjson allowWorkflowDispatch "${TARGET_ALLOW_WORKFLOW_DISPATCH}" \
-            '{
-              repository: $repository,
-              defaultBranch: $defaultBranch,
-              fork: $fork,
-              allowWorkflowDispatch: $allowWorkflowDispatch
-            }' > "${RUNNER_TEMP}/unity-onboarding-request.json"
+        run: bash tools/workflows/request-unity-repository-onboarding.sh write-request
 
       - name: Upload inert onboarding request
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

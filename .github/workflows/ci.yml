@@ -33,23 +33,14 @@ jobs:
             tools/actionlint/go.sum
 
       - name: Check JavaScript syntax
-        run: |
-          node --check tools/llm-harness.mjs
-          for action_file in .github/dist/*.js; do
-            node --check "${action_file}"
-          done
-          for test_file in test/*.test.js; do
-            node --check "${test_file}"
-          done
+        run: bash tools/workflows/ci.sh syntax
 
       - name: Validate agent context harness
         run: node tools/llm-harness.mjs check
 
       - name: Lint GitHub Actions workflows
         shell: bash
-        run: |
-          set -euo pipefail
-          go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
+        run: go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
       - name: Run fast action tests
         run: node --test test/*.test.js
@@ -58,14 +49,10 @@ jobs:
         run: go test ./...
 
       - name: Verify Go module checksums
-        run: |
-          go mod verify
-          go -C tools/actionlint mod verify
+        run: bash tools/workflows/ci.sh verify-modules
 
       - name: Verify Go modules are tidy
-        run: |
-          go mod tidy -diff
-          go -C tools/actionlint mod tidy -diff
+        run: bash tools/workflows/ci.sh tidy-modules
 
       - name: Reject credential-shaped workflow env literals
         run: go run ./cmd/workflow-credential-audit .

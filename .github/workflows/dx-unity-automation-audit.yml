@@ -41,14 +41,4 @@ jobs:
         run: echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Reject unregistered Unity automation
-        run: >-
-          go run ./cmd/workflow-credential-audit
-          unity-automation
-          .policy-consumers/DxMessaging
-          .github/actions/return-unity-license/action.yml
-          .github/actions/validate-unity-license/action.yml
-          .github/workflows/perf-numbers.yml
-          .github/workflows/release.yml
-          .github/workflows/unity-benchmarks.yml
-          .github/workflows/unity-gameci-experiment.yml
-          .github/workflows/unity-tests.yml
+        run: go run ./cmd/workflow-credential-audit unity-automation .policy-consumers/DxMessaging .github/actions/return-unity-license/action.yml .github/actions/validate-unity-license/action.yml .github/workflows/perf-numbers.yml .github/workflows/release.yml .github/workflows/unity-benchmarks.yml .github/workflows/unity-gameci-experiment.yml .github/workflows/unity-tests.yml
