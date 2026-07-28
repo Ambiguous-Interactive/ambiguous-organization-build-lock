@@ -4,19 +4,23 @@
   "holder": null,
   "holders": [],
   "queue": [],
-  "reservations": [],
-  "activeIncident": {
-    "incidentId": "incident-00aa68fb286067fe80d87fa3",
-    "repository": "Ambiguous-Interactive/qora-redux",
-    "workflow": "Unity Tests",
-    "job": "unity",
-    "runId": "30321246597",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30321246597",
-    "runnerId": "ELI-MACHINE",
-    "reportedAt": "2026-07-28T01:51:57.885Z",
-    "reason": "unity-account-limit-20111",
-    "evidenceDigest": "00aa68fb286067fe80d87fa362a89a28ede8588132158fdd63b2ee6c09933008"
-  },
-  "updatedAt": "2026-07-28T01:57:04.298Z"
+  "reservations": [
+    {
+      "reservationId": "48f4558e-3dc8-47aa-9b30-d403c14ac620",
+      "holderId": "Ambiguous-Interactive/qora-redux:30321246597:unity:incident-recovery",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "30321246597",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30321246597",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "portal cleanup confirmed for incident-00aa68fb286067fe80d87fa3",
+      "createdAt": "2026-07-28T03:02:06.962Z",
+      "availableAt": "2026-07-28T03:02:07.962Z"
+    }
+  ],
+  "activeIncident": null,
+  "updatedAt": "2026-07-28T03:02:06.963Z"
 }
