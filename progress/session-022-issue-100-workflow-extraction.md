@@ -114,4 +114,16 @@ requires exact JSON schema validation before extraction and forbids `jq -e`
 when a typed boolean may validly be false. The behavioral regression remains
 the mechanical enforcement for the affected workflow.
 
-Pending hosted review, CI, merge, and post-merge `main` evidence.
+PR #118 published exact head `06bf3c5de1c165293cb1c7aa1b34c222c67c3f02`.
+The lock validation passed in Actions run `30317937637`; Cursor Bugbot
+completed successfully with no findings. Copilot was requested both through
+the reviewer API and with an exact-head comment, but its two checks reported
+only that the requester's monthly review quota was exhausted. There was no
+Copilot code feedback to remediate.
+
+GitHub reported the PR cleanly mergeable, and the exact-head guarded squash
+merge produced `4af5176fc7653dc42efb17ac27dd4aca05673d91` on `main`, closing
+#100 as completed. On that exact merge commit, lock validation run
+`30318243869` and enrollment audit run `30318243935` both completed
+successfully; the Dependabot auto-merge workflow-run check skipped as
+expected. No licensed Unity job ran and no organization policy changed.
