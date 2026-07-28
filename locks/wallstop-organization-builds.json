@@ -27,19 +27,6 @@
       "acquiredAt": "2026-07-28T04:14:59.226Z",
       "expiresAt": "2026-07-28T08:14:59.226Z",
       "runnerId": "DAD-MACHINE"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30321297510:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30321297510",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30321297510",
-      "queuedAt": "2026-07-28T04:15:54.016Z",
-      "acquiredAt": "2026-07-28T04:15:55.185Z",
-      "expiresAt": "2026-07-28T08:15:55.185Z",
-      "runnerId": "ELI-MACHINE"
     }
   ],
   "queue": [
@@ -66,7 +53,23 @@
       "runnerId": "tiny-box-linux"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "eb7477a1-66aa-404e-9281-ba037f07100e",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30321297510:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "30321297510",
+      "runAttempt": "2",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30321297510",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-28T04:21:24.700Z",
+      "availableAt": "2026-07-28T04:21:25.700Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-28T04:17:35.798Z"
+  "updatedAt": "2026-07-28T04:21:24.701Z"
 }
