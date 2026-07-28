@@ -129,5 +129,14 @@ normative rule.
 
 ## Delivery
 
-PR, hosted review, CI, merge, issue closure, and final `main` verification
-evidence will be appended after those steps complete.
+PR #116 ran Build lock CI successfully at exact head
+`35f560110e62f151db2db034d66a9c372e224e2a` in run `30316024730`.
+Cursor Bugbot reviewed that exact head and reported no issues. Copilot was
+explicitly requested but could not review because the requesting account's
+quota was exhausted; it produced no actionable feedback or review threads.
+
+PR #116 squash-merged as
+`38edf3f23be80723876a21335aa8c0b9eb5a5ca3` and closed issue #101 as
+completed. The merged tree is byte-for-byte identical to the verified PR head.
+Post-merge Build lock CI push run `30316310016` passed on that exact `main`
+commit.
