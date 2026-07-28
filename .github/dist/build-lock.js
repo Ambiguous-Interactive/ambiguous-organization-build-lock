@@ -619,6 +619,23 @@ function jitter(ms) {
   return ms + Math.floor(Math.random() * Math.max(250, Math.floor(ms / 3)));
 }
 
+function acquirePollDelayMs(baseDelayMs, reservations, now = Date.now(), random = Math.random) {
+  const nextCooldownAt = reservations
+    .filter((reservation) => reservation.state === "cooldown")
+    .map((reservation) => parseTime(reservation.availableAt))
+    .filter((availableAt) => availableAt > now)
+    .reduce((earliest, availableAt) => Math.min(earliest, availableAt), Number.POSITIVE_INFINITY);
+  const cooldownDelayMs = nextCooldownAt - now;
+  if (Number.isFinite(cooldownDelayMs) && cooldownDelayMs < baseDelayMs) {
+    return cooldownDelayMs + Math.floor(random() * 250);
+  }
+  return baseDelayMs + Math.floor(random() * Math.max(250, Math.floor(baseDelayMs / 3)));
+}
+
+function acquireRetryDelayMs(proposedDelayMs, deadline, now = Date.now()) {
+  return Math.max(0, Math.min(proposedDelayMs, deadline - now));
+}
+
 function base64Encode(text) {
   return Buffer.from(text, "utf8").toString("base64");
 }
@@ -2831,7 +2848,7 @@ async function acquire(config) {
                 quarantineRecovered = true;
               }
             }
-            await sleep(jitter(1000), { signal: apiOptions.signal });
+            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           if (canRecoverQuarantine) {
@@ -2854,7 +2871,7 @@ async function acquire(config) {
                 verifiedHolder.runnerId !== identity.runnerId ||
                 verifiedHolder.runAttempt !== identity.runAttempt))
           ) {
-            await sleep(jitter(1000), { signal: apiOptions.signal });
+            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           await revalidatePrHead({ force: true, cleanup: true });
@@ -2883,14 +2900,16 @@ async function acquire(config) {
               lockStateMayNeedCleanup = true;
               recordPostCleanupNeeded();
             }
-            await sleep(jitter(1000), { signal: apiOptions.signal });
+            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           lockStateMayNeedCleanup = true;
           recordPostCleanupNeeded();
         }
 
-        await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
+        const pollNow = Date.now();
+        const pollDelayMs = acquirePollDelayMs(config.pollSeconds * 1000, reservations, pollNow);
+        await sleep(acquireRetryDelayMs(pollDelayMs, deadline, pollNow), { signal: apiOptions.signal });
       } catch (error) {
         if (isCancellationError(error, cancellation)) {
           throw error;
@@ -2914,7 +2933,11 @@ async function acquire(config) {
                 `(${Math.max(0, authGraceMs - authFailureMs)} ms of auth grace remaining). ` +
                 `Verify build-lock credential permissions if this persists.`
             );
-            await sleep(jitter(config.pollSeconds * 1000), { signal: apiOptions.signal });
+            const authDeadline = Math.min(deadline, authFailureSince + authGraceMs);
+            await sleep(
+              acquireRetryDelayMs(jitter(config.pollSeconds * 1000), authDeadline, now),
+              { signal: apiOptions.signal }
+            );
             continue;
           }
         }
@@ -3408,6 +3431,8 @@ if (require.main === module) {
 
 module.exports = {
   acquire,
+  acquirePollDelayMs,
+  acquireRetryDelayMs,
   api,
   authorizeCaller,
   cleanupIdentity,

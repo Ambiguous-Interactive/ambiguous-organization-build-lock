@@ -4,6 +4,10 @@
 - State writes use compare-and-swap semantics; conflicts are retried from a
   newly validated snapshot.
 - Admission never exceeds configured capacity and respects queued order.
+- Every explicit acquire-loop delay, including normal polling, cooldown-aware
+  polling, authentication grace, and CAS/verification retry, is capped by the
+  remaining acquire deadline. Deadline cleanup still runs afterward so an exact
+  queued identity is not abandoned.
 - Holder and queue cleanup targets the caller's exact logical identity.
 - A newer run attempt cannot be deleted by an older attempt.
 - Schema versions newer than the client fail closed.
