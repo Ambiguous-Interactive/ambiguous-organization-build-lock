@@ -79,6 +79,9 @@ when the development-container files are present.
 - Admission, runner inventory, lifecycle cleanup, and incident recovery fail
   closed when evidence is missing or ambiguous.
 - Never expose credentials in workflow shell interpolation or logs.
+- Treat `progress/` records as public audit evidence: retain sanitized facts and
+  decisions, never credential literals, raw logs, personal data, or live lock
+  state.
 - Keep action manifests, committed runtime files, tests, docs, and operational
   facts synchronized when a public contract changes.
 

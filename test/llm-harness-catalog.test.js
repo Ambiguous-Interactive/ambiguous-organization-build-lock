@@ -175,3 +175,117 @@ test("line counting treats 300 as valid and 301 as invalid", async (t) => {
     /301 lines exceeds 300/
   );
 });
+
+test("progress records reject credential-shaped literals without echoing them", async (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { generateIndex, verifyRepository } = await loadHarness();
+  fs.writeFileSync(path.join(root, ".llm", "index.md"), generateIndex(root));
+  fs.mkdirSync(path.join(root, "progress"));
+  const record = path.join(root, "progress", "session-001-example.md");
+
+  const credentials = [
+    ["GitHub token", ["ghp", "_", "A".repeat(24)].join("")],
+    [
+      "underscore-containing GitHub token",
+      ["ghp", "_", "A".repeat(10), "_", "B".repeat(12)].join("")
+    ],
+    ["underscore-ending GitHub token", ["ghp", "_", "C".repeat(19), "_"].join("")],
+    ["AWS access key", ["AKIA", "B".repeat(16)].join("")],
+    ["underscore-suffixed AWS access key", ["ASIA", "D".repeat(16), "_"].join("")],
+    ["underscore-suffixed npm token", ["npm", "_", "E".repeat(20), "_"].join("")],
+    ["private key", "-----BEGIN PRIVATE KEY-----"],
+    ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],
+    ["lowercase assignment", "password=correcthorsebatterystaple"],
+    ["backtick-wrapped assignment", "password=`correcthorsebatterystaple`"],
+    ["unclosed backtick assignment", "password=`correcthorsebatterystaple"],
+    [
+      "unclosed double-quoted multiline assignment",
+      "password=\"short\ncorrecthorsebatterystaple"
+    ],
+    [
+      "unclosed single-quoted multiline assignment",
+      "UNITY_SERIAL='short\nABCD-1234-EFGH-5678"
+    ],
+    ["backtick-wrapped key", "`password`: correcthorsebatterystaple"],
+    ["bold Markdown key", "**password**: correcthorsebatterystaple"],
+    ["italic Markdown key", "_UNITY_SERIAL_: ABCD-1234-EFGH-5678"],
+    ["struck Markdown key", "~~password~~: correcthorsebatterystaple"],
+    ["nested Markdown key", "~~**password**~~: correcthorsebatterystaple"],
+    ["JSON assignment", "\"password\": \"correcthorsebatterystaple\""],
+    ["quoted YAML assignment", "'UNITY_SERIAL': 'ABCD-1234-EFGH-5678'"],
+    ["literal YAML block scalar", "password: |\n  correcthorsebatterystaple"],
+    ["folded YAML block scalar", "UNITY_SERIAL: >-\n  ABCD-1234-EFGH-5678"],
+    [
+      "compact expression concatenation",
+      "GITHUB_TOKEN=${{github.token}}correcthorsebatterystaple"
+    ],
+    [
+      "spaced expression concatenation",
+      "GITHUB_TOKEN=${{ github.token }}correcthorsebatterystaple"
+    ],
+    ["quoted placeholder concatenation", "password=\"<redacted>\"correcthorsebatterystaple"],
+    [
+      "punctuated expression concatenation",
+      "GITHUB_TOKEN=${{github.token}}.correcthorsebatterystaple"
+    ],
+    [
+      "punctuated quoted concatenation",
+      "password=\"<redacted>\",correcthorsebatterystaple"
+    ],
+    [
+      "punctuated backtick concatenation",
+      "password=`<redacted>`;correcthorsebatterystaple"
+    ],
+    ["angle-wrapped assignment", "UNITY_SERIAL=<ABCD-1234-EFGH-5678>"],
+    ["none-prefixed assignment", "password=none_correcthorsebatterystaple"],
+    ["unknown-prefixed assignment", "password=unknown-correcthorsebatterystaple"],
+    ["hyphen-ending GitLab token", `glpat-${"A".repeat(19)}-`],
+    ["hyphen-ending Slack token", `xoxb-${"B".repeat(9)}-`],
+    ["hyphen-ending OpenAI token", `sk-${"C".repeat(19)}-`],
+    [
+      "hyphen-ending JWT",
+      `eyJ${"D".repeat(8)}.${"E".repeat(8)}.${"F".repeat(7)}-`
+    ]
+  ];
+  for (const [name, credential] of credentials) {
+    fs.writeFileSync(record, `# Session 001\n\nAccidentally retained ${credential}.\n`);
+    const errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+    assert.match(
+      errors,
+      /progress\/session-001-example\.md: credential-shaped literal/,
+      name
+    );
+    assert.ok(!errors.includes(credential), `${name} must not be echoed`);
+  }
+
+  const binaryCredential = ["github_pat", "_", "C".repeat(24)].join("");
+  fs.writeFileSync(record, Buffer.concat([
+    Buffer.from([0]),
+    Buffer.from(binaryCredential)
+  ]));
+  let errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.match(errors, /credential-shaped literal/, "NUL-containing file");
+  assert.ok(!errors.includes(binaryCredential), "binary credential must not be echoed");
+
+  fs.writeFileSync(record, [
+    "# Session 001",
+    "",
+    "Use `${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}`.",
+    "Record `UNITY_SERIAL=<redacted>`, `API_TOKEN=$API_TOKEN`, and",
+    "`password=REDACTED-VALUE`, `secret=[placeholder]`, and `token=***`.",
+    "JSON may retain `\"password\": \"<redacted>\"` and",
+    "Markdown may retain `UNITY_SERIAL=`<redacted>``.",
+    "Markdown may also retain **password**: **<redacted>**.",
+    "Nested Markdown may retain ~~**password**~~: ~~**<redacted>**~~.",
+    "Workflow examples may use `GITHUB_TOKEN=${{github.token}}` or",
+    "`GH_TOKEN=${{ github.token }}`.",
+    "Sentence endings may use `password=\"<redacted>\"!` or",
+    "`GITHUB_TOKEN=${{github.token}}?`.",
+    "TOKEN:",
+    "",
+    "Documentation remains intentionally sanitized."
+  ].join("\n") + "\n");
+  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.doesNotMatch(errors, /credential-shaped literal/);
+});

@@ -21,6 +21,19 @@ export const POINTERS = [
 
 const INDEX_PATH = ".llm/index.md";
 const SKILL_PATTERN = /^\.llm\/skills\/([^/]+)\/SKILL\.md$/;
+const CREDENTIAL_PATTERNS = [
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
+  /(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])/,
+  /(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
+  /(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/,
+  /(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])/,
+  /(?<![A-Za-z0-9])sk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
+  /(?<![A-Za-z0-9])npm_[A-Za-z0-9]{20,}(?![A-Za-z0-9])/,
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
+];
+const CREDENTIAL_ASSIGNMENT =
+  /(?<![A-Za-z0-9])["'`*_~]*(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*["'`*_~]*[ \t]*[:=][ \t]*(?:"([^"\r\n]+)("?)|'([^'\r\n]+)('?)|`([^`\r\n]+)(`?)|(\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -122,6 +135,66 @@ function markdown(value) {
 export function pointerContent(pointer) {
   return `${pointer.frontmatter || ""}# ${pointer.title}\n\nRead and follow the canonical repository instructions in\n` +
     `[\`${pointer.target}\`](${pointer.target}) before working.\n`;
+}
+
+function hasCredentialShapedLiteral(text) {
+  if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
+    const quotedValue = [
+      { value: match[1], closer: match[2], expected: "\"" },
+      { value: match[3], closer: match[4], expected: "'" },
+      { value: match[5], closer: match[6], expected: "`" }
+    ].find(({ value }) => value !== undefined);
+    if (quotedValue && quotedValue.closer !== quotedValue.expected) return true;
+    const value = (quotedValue?.value ?? match[7] ?? match[8] ?? "").trim();
+    const remainder = text.slice(match.index + match[0].length);
+    if (remainder && !/^\s/.test(remainder) &&
+        !/^[`.,;:!?)\]}]+(?:\s|$)/.test(remainder)) {
+      return true;
+    }
+    if (/^[|>][0-9+-]*$/.test(value)) return true;
+    let placeholder = value.replace(/[.,;:!?]$/, "");
+    let unwrapped = true;
+    while (unwrapped) {
+      unwrapped = false;
+      for (const marker of ["***", "___", "**", "__", "~~", "*", "_"]) {
+        if (placeholder.startsWith(marker) && placeholder.endsWith(marker) &&
+            placeholder.length > marker.length * 2) {
+          placeholder = placeholder.slice(marker.length, -marker.length).trim();
+          unwrapped = true;
+          break;
+        }
+      }
+    }
+    if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(placeholder) ||
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(placeholder) ||
+        /^\$\{\{\s*(?:(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*|github\.token)\s*\}\}$/.test(placeholder) ||
+        /^(?:<(?:redacted|placeholder|omitted|unavailable|none|unknown)>|\[(?:redacted|placeholder|omitted|unavailable|none|unknown)\])$/i.test(placeholder) ||
+        /^(?:\*{3}|redacted|redacted-value|placeholder|omitted|unavailable|none|unknown)$/i.test(placeholder)) {
+      continue;
+    }
+    if (value.length >= 12) return true;
+  }
+  return false;
+}
+
+function auditProgressRecords(root) {
+  const errors = [];
+  let files = [];
+  try {
+    files = walk(root, "progress");
+  } catch (error) {
+    return [error.message];
+  }
+  for (const relativePath of files) {
+    const bytes = fs.readFileSync(path.join(root, relativePath));
+    if (hasCredentialShapedLiteral(bytes.toString("utf8"))) {
+      errors.push(
+        `${relativePath}: credential-shaped literal detected; retain only sanitized evidence`
+      );
+    }
+  }
+  return errors;
 }
 
 function catalog(root) {
@@ -306,6 +379,7 @@ export function verifyRepository(root = process.cwd(), options = {}) {
       }
     }
   }
+  errors.push(...auditProgressRecords(root));
   return { errors: [...new Set(errors)] };
 }
 
