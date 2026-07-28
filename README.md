@@ -13,6 +13,13 @@ Node.js 24, GitHub Actions tooling, persistent build caches, zsh, and matching
 editor extensions. After reopening the repository in the container, run
 `.devcontainer/scripts/verify.sh` for the complete CI-equivalent local check.
 
+Nontrivial repository-owned workflow programs live under `tools/workflows/`;
+workflow YAML delegates to one command per `run` step so the shell behavior can
+be syntax-checked and exercised directly. The privileged Dependabot
+`pull_request_target` workflow is the deliberate exception: it keeps its three
+inline programs so it never checks out pull-request or repository code into a
+write-token job.
+
 Agent front ends share the canonical [`.llm/context.md`](.llm/context.md) and
 its generated knowledge index. See [`.llm/README.md`](.llm/README.md) for the
 skill metadata contract, exact 300-line policy scope, generation commands, and

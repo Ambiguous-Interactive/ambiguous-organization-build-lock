@@ -19,6 +19,9 @@ description: Apply repository GitHub Actions safety policy. Use when editing wor
 - Keep credentials out of command text, URLs, diagnostics, and direct secret
   interpolation in shell.
 - Preserve fork and missing-secret fail-closed behavior.
+- Validate JSON value types before extraction. Do not use `jq -e` to read a
+  boolean that may validly be `false`; its truthiness exit status rejects that
+  value. After an exact schema check, read typed booleans with `jq -r`.
 - Current-head checks and acquire-time revalidation are complementary.
 - Release association is not issue-completion proof. Automated release comments
   must describe linkage without claiming resolution, and must not apply a

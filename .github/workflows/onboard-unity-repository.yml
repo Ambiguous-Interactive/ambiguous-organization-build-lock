@@ -22,6 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
       - name: Reject untrusted or unsuccessful request
         env:
           REQUEST_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -29,11 +34,7 @@ jobs:
           REQUEST_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
           TRUSTED_REPOSITORY: ${{ github.repository }}
         shell: bash
-        run: |
-          set -euo pipefail
-          test "${REQUEST_CONCLUSION}" = "success"
-          test "${REQUEST_HEAD_BRANCH}" = "main"
-          test "${REQUEST_HEAD_REPOSITORY}" = "${TRUSTED_REPOSITORY}"
+        run: bash tools/workflows/onboard-unity-repository.sh reject-untrusted-request
 
       - name: Download inert onboarding request
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -42,11 +43,6 @@ jobs:
           path: ${{ runner.temp }}/unity-onboarding-request
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-
-      - name: Checkout trusted default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -59,34 +55,7 @@ jobs:
         env:
           REQUEST_PATH: ${{ runner.temp }}/unity-onboarding-request/unity-onboarding-request.json
         shell: bash
-        run: |
-          set -euo pipefail
-          jq -e '
-            type == "object" and
-            (keys | sort) == ["allowWorkflowDispatch", "defaultBranch", "fork", "repository"] and
-            (.repository | type == "string") and
-            (.defaultBranch | type == "string") and
-            (.fork | type == "boolean") and
-            (.allowWorkflowDispatch | type == "boolean")
-          ' "${REQUEST_PATH}" >/dev/null
-          repository="$(jq -er .repository "${REQUEST_PATH}")"
-          default_branch="$(jq -er .defaultBranch "${REQUEST_PATH}")"
-          fork="$(jq -er .fork "${REQUEST_PATH}")"
-          allow_dispatch="$(jq -er .allowWorkflowDispatch "${REQUEST_PATH}")"
-          go run ./cmd/onboard-unity-repository \
-            --policy unity-enrollment-policy.json \
-            --repository "${repository}" \
-            --default-branch "${default_branch}" \
-            --fork="${fork}" \
-            --allow-workflow-dispatch="${allow_dispatch}" \
-            --validate-only
-          {
-            echo "repository=${repository}"
-            echo "repository_name=${repository#*/}"
-            echo "default_branch=${default_branch}"
-            echo "fork=${fork}"
-            echo "allow_dispatch=${allow_dispatch}"
-          } >> "${GITHUB_OUTPUT}"
+        run: bash tools/workflows/onboard-unity-repository.sh validate-request
 
       - name: Mint target-scoped reader token
         id: reader-token
@@ -106,22 +75,7 @@ jobs:
           TARGET_DEFAULT_BRANCH: ${{ steps.request.outputs.default_branch }}
           TARGET_FORK: ${{ steps.request.outputs.fork }}
         shell: bash
-        run: |
-          set -euo pipefail
-          metadata="$(GH_TOKEN="${READER_AUTHORIZATION}" gh api "repos/${TARGET_REPOSITORY}")"
-          test "$(jq -r .full_name <<<"${metadata}")" = "${TARGET_REPOSITORY}"
-          test "$(jq -r .default_branch <<<"${metadata}")" = "${TARGET_DEFAULT_BRANCH}"
-          test "$(jq -r .fork <<<"${metadata}")" = "${TARGET_FORK}"
-          target_sha="$(
-            GH_TOKEN="${READER_AUTHORIZATION}" \
-              gh api "repos/${TARGET_REPOSITORY}/git/ref/heads/${TARGET_DEFAULT_BRANCH}" \
-              --jq .object.sha
-          )"
-          if [[ ! "${target_sha}" =~ ^[a-f0-9]{40}$ ]]; then
-            echo "The target branch head is not an immutable commit SHA." >&2
-            exit 1
-          fi
-          echo "sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+        run: bash tools/workflows/onboard-unity-repository.sh verify-target
 
       - name: Add validated registry entry
         env:
@@ -130,15 +84,7 @@ jobs:
           TARGET_FORK: ${{ steps.request.outputs.fork }}
           TARGET_ALLOW_WORKFLOW_DISPATCH: ${{ steps.request.outputs.allow_dispatch }}
         shell: bash
-        run: |
-          set -euo pipefail
-          go run ./cmd/onboard-unity-repository \
-            --policy unity-enrollment-policy.json \
-            --repository "${TARGET_REPOSITORY}" \
-            --default-branch "${TARGET_DEFAULT_BRANCH}" \
-            --fork="${TARGET_FORK}" \
-            --allow-workflow-dispatch="${TARGET_ALLOW_WORKFLOW_DISPATCH}"
-          go test ./internal/enrollment ./cmd/onboard-unity-repository
+        run: bash tools/workflows/onboard-unity-repository.sh update-policy
 
       - name: Open enrollment pull request with retained evidence
         env:
@@ -150,28 +96,4 @@ jobs:
           ONBOARDING_BRANCH: automation/unity-enrollment-${{ github.run_id }}-${{ github.run_attempt }}
           EVIDENCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${ONBOARDING_BRANCH}"
-          git add unity-enrollment-policy.json
-          git commit -m "chore: enroll ${TARGET_REPOSITORY} in Unity audit"
-          git push origin "${ONBOARDING_BRANCH}"
-          body="$(
-            printf '%s\n' \
-              'Generated by trusted-main Unity repository onboarding.' \
-              '' \
-              'Authoritative pre-merge evidence:' \
-              "- Repository: \`${TARGET_REPOSITORY}\`" \
-              "- Default branch: \`${TARGET_DEFAULT_BRANCH}\`" \
-              "- Fork: \`${TARGET_FORK}\`" \
-              "- Verified target head: \`${TARGET_SHA}\`" \
-              "- Reader App installation and Contents-read access: verified" \
-              "- Evidence run: ${EVIDENCE_RUN_URL}"
-          )"
-          gh pr create \
-            --base main \
-            --head "${ONBOARDING_BRANCH}" \
-            --title "chore: enroll ${TARGET_REPOSITORY} in Unity audit" \
-            --body "${body}"
+        run: bash tools/workflows/onboard-unity-repository.sh open-pr
