@@ -20,16 +20,16 @@ inputs:
     description: GitHub outcome of the release-build-lock step.
     required: true
   cleanup-result:
-    description: Typed cleanup result from release-build-lock.
+    description: Typed caller cleanup and global-incident result from release-build-lock.
     required: true
   released:
     description: Whether release-build-lock removed holder ownership.
     required: true
   release-health:
-    description: Effective resource health from release-build-lock.
+    description: Caller-local resource health from release-build-lock.
     required: true
   release-reason:
-    description: Effective resource reason from release-build-lock.
+    description: Caller-local resource reason from release-build-lock.
     required: true
   reservation-state:
     description: Lifecycle reservation state when one was created.
@@ -42,7 +42,7 @@ inputs:
     required: false
 outputs:
   cleanup-safe:
-    description: True when the lock was explicitly not acquired or all cleanup and release evidence is coherent and safe.
+    description: True when the lock was explicitly not acquired or this lease's cleanup and release evidence is coherent and safe.
 runs:
   using: node24
   main: ../../dist/require-confirmed-unity-cleanup.js

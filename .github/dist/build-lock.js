@@ -2021,8 +2021,8 @@ async function cleanupIdentity(config, identity, options = {}) {
       ? {
           globalQuarantined: true,
           incidentId: incident.incidentId,
-          resourceHealth: "blocked",
-          resourceReason: incident.reason
+          resourceHealth: options.resourceHealth || "healthy",
+          resourceReason: options.resourceReason || ""
         }
       : {
           globalQuarantined: false,

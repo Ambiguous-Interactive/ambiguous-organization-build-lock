@@ -7027,7 +7027,10 @@ function accountHealthFetchStore(initialState, options = {}) {
           maxHolders,
           runnerSerialization: true,
           resourceLifecycle: true,
-          accountHealth: true
+          accountHealth: true,
+          ...(options.releaseCooldownSeconds === undefined
+            ? {}
+            : { releaseCooldownSeconds: options.releaseCooldownSeconds })
         }, "cfg");
       }
       if (parsed.pathname === SEMAPHORE_STATE_PATH) {
@@ -7410,6 +7413,82 @@ test("schema 5 blocked release creates one immutable global incident", async () 
   assert.equal(state.holders.length, 0);
   assert.equal(state.reservations.length, 0);
   assert.equal(state.activeIncident.reason, "unity-account-limit-20111");
+});
+
+test("schema 5 clean releases preserve local evidence while reporting a pre-existing incident", async (t) => {
+  const incident = accountIncident({
+    repository: "other/repo",
+    runId: "999",
+    runUrl: "https://github.com/other/repo/actions/runs/999",
+    runnerId: "runner-a"
+  });
+  const cases = [
+    {
+      name: "typed report with cooldown",
+      releaseConfig: {
+        resourceReport: {
+          cleanupStatus: "confirmed",
+          health: "healthy",
+          reason: "cleanup-confirmed"
+        }
+      },
+      expectedReservationState: "cooldown"
+    },
+    {
+      name: "legacy report with cooldown",
+      releaseConfig: { resourceSafe: true },
+      expectedReservationState: "cooldown"
+    },
+    {
+      name: "typed report with zero cooldown",
+      releaseConfig: {
+        resourceReport: {
+          cleanupStatus: "confirmed",
+          health: "healthy",
+          reason: "cleanup-confirmed"
+        }
+      },
+      releaseCooldownSeconds: 0,
+      expectedReservationState: ""
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-b");
+      const store = accountHealthFetchStore(
+        accountHealthState([held], [], [], incident),
+        { releaseCooldownSeconds: testCase.releaseCooldownSeconds }
+      );
+
+      await withTempFile(async (outputFile) => {
+        await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+          await withMockedFetch(store.fetch, () => release(semaphoreConfig({
+            runnerId: "runner-b",
+            ...testCase.releaseConfig
+          })));
+        });
+
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "true");
+        assert.equal(outputs["cleanup-result"], "global-quarantined");
+        assert.equal(outputs["reservation-state"], testCase.expectedReservationState);
+        assert.equal(outputs["reservation-id"] === "", testCase.expectedReservationState === "");
+        assert.equal(outputs["incident-id"], incident.incidentId);
+        assert.equal(outputs["resource-health"], "healthy");
+        assert.equal(outputs["resource-reason"], "cleanup-confirmed");
+      });
+
+      assert.equal(store.state().holders.length, 0);
+      assert.equal(store.state().reservations.length, testCase.expectedReservationState ? 1 : 0);
+      if (testCase.expectedReservationState) {
+        assert.equal(store.state().reservations[0].state, "cooldown");
+        assert.equal(store.state().reservations[0].runnerId, "runner-b");
+      }
+      assert.deepEqual(store.state().activeIncident, incident);
+    });
+  }
 });
 
 test("schema 5 uncertainty reasons remain runner-local and never create account incidents", async (t) => {

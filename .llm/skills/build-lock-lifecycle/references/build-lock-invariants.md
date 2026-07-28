@@ -14,6 +14,9 @@
   and fail only after the cleanup attempt.
 - Unconfirmed resource cleanup creates quarantine or an account-level block; it
   does not silently return capacity.
+- Caller-local cleanup evidence and account-global incident evidence remain
+  distinct. An unrelated active incident never rewrites the caller's cleanup
+  report, while all new admission remains blocked until exact incident recovery.
 - A final licensed-cleanup gate may be non-applicable only for exact
   `acquired=false`, with licensed work guarded by exact `acquired == 'true'`
   and acquisition failures allowed to propagate. Missing or invalid acquisition

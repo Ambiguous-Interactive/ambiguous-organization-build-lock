@@ -5,6 +5,7 @@ const fs = require("node:fs");
 
 const ABSENT_VALUES = new Set(["", "missing", "none"]);
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const INCIDENT_ID_PATTERN = /^incident-[a-f0-9]{24}$/;
 const ALLOWED = {
   boolean: new Set(["true", "false"]),
   cleanupStatus: new Set(["confirmed", "unknown"]),
@@ -77,7 +78,8 @@ function evaluateCleanupGate(values) {
   if (observed.releaseOutcome !== "success") {
     failures.push("the central release step did not succeed");
   }
-  if (!new Set(["cooldown-started", "released"]).has(observed.cleanupResult)) {
+  const globalIncidentResult = observed.cleanupResult === "global-quarantined";
+  if (!new Set(["cooldown-started", "global-quarantined", "released"]).has(observed.cleanupResult)) {
     failures.push("the central release did not report a safe holder-release result");
   }
   if (observed.released !== "true") {
@@ -89,15 +91,22 @@ function evaluateCleanupGate(values) {
   if (observed.releaseReason !== "cleanup-confirmed") {
     failures.push("the central release did not preserve the confirmed-cleanup reason");
   }
-  if (!safeOpaque(observed.incidentId)) {
+  const incidentIdentifierValid = safeOpaque(observed.incidentId);
+  const incidentPresent = present(observed.incidentId);
+  if (!incidentIdentifierValid || (incidentPresent && !INCIDENT_ID_PATTERN.test(observed.incidentId))) {
     failures.push("the central release emitted an invalid incident identifier");
-  } else if (present(observed.incidentId)) {
-    failures.push("the central release reported an active account incident");
+  } else if (globalIncidentResult && !incidentPresent) {
+    failures.push("the central release reported a global incident without its identifier");
+  } else if (!globalIncidentResult && incidentPresent) {
+    failures.push("the central release reported an active account incident without the global result");
   }
   if (!safeOpaque(observed.reservationId)) {
     failures.push("the central release emitted an invalid reservation identifier");
   }
-  if (observed.cleanupResult === "cooldown-started") {
+  if (
+    observed.cleanupResult === "cooldown-started"
+    || (globalIncidentResult && (present(observed.reservationState) || present(observed.reservationId)))
+  ) {
     if (observed.reservationState !== "cooldown" || !present(observed.reservationId)) {
       failures.push("the central release did not identify its cooldown reservation");
     }
@@ -153,6 +162,13 @@ function run({ values, outputPath, log = console.log, error = console.error }) {
         diagnostic
     );
     return result;
+  }
+  if (text(values.cleanupResult) === "global-quarantined" && present(values.incidentId)) {
+    log(
+      "::warning title=Global Unity account incident remains active::" +
+        "This lease completed confirmed cleanup and released its holder, but new admission remains blocked. " +
+        "Follow the central incident recovery runbook."
+    );
   }
   log(`Licensed Unity cleanup is confirmed. ${diagnostic}`);
   return result;

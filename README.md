@@ -231,15 +231,23 @@ alone is not capacity-safety proof. Keep the gate under `if: always()` without
 `continue-on-error`. Exact `acquired=false` makes the gate non-applicable because
 licensed work is guarded by `acquired == 'true'`; missing or invalid acquisition
 state remains fail-closed. For an acquired job, the gate accepts only a coherent
-confirmed classification and safe central release. Delete raw return and
-activation logs afterward under a separate `if: always()` step, and never upload
-those logs as artifacts.
+confirmed classification and safe central release. A pre-existing global incident
+does not turn another lease's already-confirmed cleanup into a failure: release
+preserves that caller-local health and reason, reports `global-quarantined` plus
+the incident ID, and the gate emits a warning only after confirming exact holder
+removal and a coherent cooldown or direct release. The incident continues to
+block every new admission. A lease that reports the account-limit evidence
+itself, has unknown cleanup, fails release, or leaves contradictory lifecycle
+state remains red. Delete raw return and activation logs afterward under a
+separate `if: always()` step, and never upload those logs as artifacts.
 
 The release action is intentionally safe to run even when acquire never reached
 the front of the queue. It reports `cleanup-result=cooldown-started`,
 `cleanup-result=quarantined`, `cleanup-result=queue-cleaned`, or
 `cleanup-result=noop`. Under schema 5, `cleanup-result=global-quarantined`
-identifies an active account incident. `cleanup-result=released` is also possible before schema 4
+identifies an active account incident while `resource-health` and
+`resource-reason` continue to describe this caller's cleanup report.
+`cleanup-result=released` is also possible before schema 4
 or when an ambiguous schema-4 release is confirmed after its reservation expires.
 `released=true` remains the backward-compatible
 indication that holder ownership was removed. `queue-cleaned` means
