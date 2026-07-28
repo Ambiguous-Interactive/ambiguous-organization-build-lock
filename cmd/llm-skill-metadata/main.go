@@ -92,11 +92,15 @@ func validate(input request) response {
 }
 
 func run(reader io.Reader, writer io.Writer) error {
-	var input request
-	if err := json.NewDecoder(reader).Decode(&input); err != nil {
-		return fmt.Errorf("decode request: %w", err)
+	var inputs []request
+	if err := json.NewDecoder(reader).Decode(&inputs); err != nil {
+		return fmt.Errorf("decode requests: %w", err)
 	}
-	return json.NewEncoder(writer).Encode(validate(input))
+	results := make([]response, len(inputs))
+	for index, input := range inputs {
+		results[index] = validate(input)
+	}
+	return json.NewEncoder(writer).Encode(results)
 }
 
 func main() {

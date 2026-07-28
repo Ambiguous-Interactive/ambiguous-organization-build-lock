@@ -9,7 +9,7 @@ import (
 
 func execute(t *testing.T, yamlText string) response {
 	t.Helper()
-	input, err := json.Marshal(request{Path: "skill/SKILL.md", YAML: yamlText})
+	input, err := json.Marshal([]request{{Path: "skill/SKILL.md", YAML: yamlText}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,11 +17,14 @@ func execute(t *testing.T, yamlText string) response {
 	if err := run(bytes.NewReader(input), &output); err != nil {
 		t.Fatal(err)
 	}
-	var result response
-	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+	var results []response
+	if err := json.Unmarshal(output.Bytes(), &results); err != nil {
 		t.Fatal(err)
 	}
-	return result
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	return results[0]
 }
 
 func TestValidateStandardYAML(t *testing.T) {
@@ -58,5 +61,32 @@ func TestValidateTypesAndUnknownFields(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", result.Error, testCase.want)
 			}
 		})
+	}
+}
+
+func TestRunValidatesMetadataBatchInOrder(t *testing.T) {
+	input, err := json.Marshal([]request{
+		{Path: "first/SKILL.md", YAML: "name: first\ndescription: valid"},
+		{Path: "second/SKILL.md", YAML: "name: second\ndescription: valid\nunknown: value"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := run(bytes.NewReader(input), &output); err != nil {
+		t.Fatal(err)
+	}
+	var results []response
+	if err := json.Unmarshal(output.Bytes(), &results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if got := results[0].Metadata["name"]; got != "first" {
+		t.Fatalf("first result name = %q, want first", got)
+	}
+	if !strings.Contains(results[1].Error, "second/SKILL.md: unknown metadata") {
+		t.Fatalf("second result error = %q", results[1].Error)
 	}
 }

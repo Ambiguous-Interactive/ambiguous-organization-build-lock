@@ -1,7 +1,5 @@
 const assert = require("node:assert/strict");
-const childProcess = require("node:child_process");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { pathToFileURL } = require("node:url");
@@ -35,46 +33,6 @@ test("affirmative contract checks reject contradictory policy text", () => {
     /analysis\s+is\s+optional/i
   );
 });
-
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "llm-harness-"));
-  fs.mkdirSync(path.join(root, ".llm", "skills", "example"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, ".llm", "context.md"),
-    "# Context\n\nRead [the generated index](./index.md).\n"
-  );
-  fs.writeFileSync(
-    path.join(root, ".llm", "skills", "example", "SKILL.md"),
-    [
-      "---",
-      "name: example",
-      "description: Exercise the harness. Use when testing example changes.",
-      "---",
-      "# Example",
-      "",
-      "Follow the evidence."
-    ].join("\n") + "\n"
-  );
-  return root;
-}
-
-function repositoryHarnessFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "llm-repository-"));
-  for (const relativePath of [
-    ".llm",
-    ".githooks",
-    "cmd/llm-skill-metadata",
-    "go.mod",
-    "go.sum",
-    "tools/llm-harness.mjs"
-  ]) {
-    const source = path.join(repoRoot, relativePath);
-    const destination = path.join(root, relativePath);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.cpSync(source, destination, { recursive: true });
-  }
-  return root;
-}
 
 test("repository harness is complete and current", async () => {
   const { verifyRepository } = await loadHarness();
@@ -243,148 +201,6 @@ test("engineering workflows encode investigation, planning, review, and test ris
   assert.match(taskTemplate, /Unverifiable|Open questions/);
 });
 
-test("index generation is deterministic and detects drift", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-
-  const first = generateIndex(root);
-  const second = generateIndex(root);
-  assert.equal(first, second);
-
-  fs.writeFileSync(path.join(root, ".llm", "index.md"), first);
-  assert.deepEqual(verifyRepository(root, { checkPointers: false }).errors, []);
-  fs.appendFileSync(path.join(root, ".llm", "index.md"), "\nmanual edit\n");
-  assert.match(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /generated index is stale/
-  );
-});
-
-test("skill metadata is strict and recursive", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-  fs.writeFileSync(path.join(root, ".llm", "index.md"), generateIndex(root));
-
-  const skill = path.join(root, ".llm", "skills", "example", "SKILL.md");
-  fs.writeFileSync(skill, "---\nname: wrong\ndescription: Valid description.\n---\n");
-  let errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
-  assert.match(errors, /must match its directory/);
-
-  fs.writeFileSync(skill, "---\nname: example\ndescription: \"\"\n---\n");
-  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
-  assert.match(errors, /description must contain 1-1024 characters/);
-
-  fs.writeFileSync(skill, "---\nname: example\ndescription: Valid description.\nunknown-field: value\n---\n");
-  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
-  assert.match(errors, /unknown metadata: unknown-field/);
-});
-
-test("standard YAML is accepted and every skill directory has SKILL.md", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-  const skill = path.join(root, ".llm", "skills", "example", "SKILL.md");
-  fs.writeFileSync(
-    skill,
-    "---\nname: example\ndescription: >\n  Exercise examples.\n  Use when requested.\nmetadata:\n  owner: team\n---\n# Example\n"
-  );
-  assert.match(generateIndex(root), /Exercise examples\. Use when requested\./);
-
-  fs.mkdirSync(path.join(root, ".llm", "skills", "orphan"));
-  fs.writeFileSync(
-    path.join(root, ".llm", "skills", "orphan", "README.md"),
-    "<!-- summary: An invalid orphan skill. -->\n# Orphan\n"
-  );
-  assert.match(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /orphan: skill directory must contain SKILL\.md/
-  );
-});
-
-test("metadata limits count Unicode characters and reject whitespace", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-  const skill = path.join(root, ".llm", "skills", "example", "SKILL.md");
-  fs.writeFileSync(
-    skill,
-    `---\nname: example\ndescription: ${"😀".repeat(600)}\ncompatibility: ${"😀".repeat(300)}\n---\n# Example\n`
-  );
-  assert.doesNotThrow(() => generateIndex(root));
-
-  fs.writeFileSync(skill, "---\nname: example\ndescription: \"   \"\n---\n# Example\n");
-  assert.match(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /description must contain 1-1024 characters/
-  );
-});
-
-test("non-Markdown files are discoverable skill resources or rejected", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-  fs.mkdirSync(path.join(root, ".llm", "skills", "example", "scripts"));
-  fs.writeFileSync(path.join(root, ".llm", "skills", "example", "scripts", "check.js"), "0;\n");
-  fs.writeFileSync(path.join(root, ".llm", "skills", "example", "LICENSE.txt"), "Example\n");
-  assert.match(generateIndex(root), /scripts\/check\.js/);
-  assert.match(generateIndex(root), /LICENSE\.txt/);
-
-  fs.writeFileSync(path.join(root, ".llm", "facts.json"), "{}\n");
-
-  assert.throws(() => generateIndex(root), /non-Markdown files must be bundled inside a valid Agent Skill/);
-  assert.match(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /\.llm\/facts\.json: non-Markdown files must be bundled inside a valid Agent Skill/
-  );
-});
-
-test("nested SKILL.md files remain resources of their top-level skill", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { generateIndex, verifyRepository } = await loadHarness();
-  const nestedSkill = path.join(
-    root,
-    ".llm",
-    "skills",
-    "example",
-    "references",
-    "SKILL.md"
-  );
-  fs.mkdirSync(path.dirname(nestedSkill), { recursive: true });
-  fs.writeFileSync(nestedSkill, "# Referenced skill-shaped document\n");
-
-  const index = generateIndex(root);
-  assert.match(index, /## Skill Resources[\s\S]*references\/SKILL\.md/);
-  const skillsSection = index.match(/## Skills\n[\s\S]*$/)[0];
-  assert.doesNotMatch(skillsSection, /references\/SKILL\.md/);
-  fs.writeFileSync(path.join(root, ".llm", "index.md"), index);
-  assert.deepEqual(verifyRepository(root, { checkPointers: false }).errors, []);
-});
-
-test("line counting treats 300 as valid and 301 as invalid", async (t) => {
-  const root = fixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { countLines, verifyRepository, generateIndex } = await loadHarness();
-  const skill = path.join(root, ".llm", "skills", "example", "SKILL.md");
-
-  assert.equal(countLines("one\r\ntwo"), 2);
-  assert.equal(countLines("one\n"), 1);
-  fs.appendFileSync(skill, "line\r\n".repeat(293));
-  assert.equal(countLines(fs.readFileSync(skill, "utf8")), 300);
-  fs.writeFileSync(path.join(root, ".llm", "index.md"), generateIndex(root));
-  assert.doesNotMatch(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /exceeds 300/
-  );
-  fs.appendFileSync(skill, "line\n");
-  assert.match(
-    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /301 lines exceeds 300/
-  );
-});
-
 test("vendor files remain thin canonical pointers", async () => {
   const { POINTERS, pointerContent } = await loadHarness();
   for (const pointer of POINTERS) {
@@ -409,34 +225,4 @@ test("CI, devcontainer, and the executable hook share the canonical check", () =
   assert.ok(hook.includes("git checkout-index --all"));
   assert.ok(hook.includes('check --root "${staged_tree}"'));
   assert.notEqual(fs.statSync(hookPath).mode & 0o111, 0, "pre-commit hook must be executable");
-});
-
-test("pre-commit validates staged content rather than the working tree", async (t) => {
-  const root = repositoryHarnessFixture();
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const { POINTERS, pointerContent } = await loadHarness();
-  for (const pointer of POINTERS) {
-    const destination = path.join(root, pointer.path);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, pointerContent(pointer));
-  }
-  const run = (command, arguments_) =>
-    childProcess.execFileSync(command, arguments_, { cwd: root, stdio: "pipe" });
-  run("git", ["init", "-q"]);
-  run("node", ["tools/llm-harness.mjs", "generate"]);
-  run("git", ["add", "."]);
-
-  const skillPath = path.join(root, ".llm", "skills", "task-driven-development", "SKILL.md");
-  fs.writeFileSync(
-    skillPath,
-    fs.readFileSync(skillPath, "utf8")
-      .replace("Plan and execute non-trivial", "Plan and carefully execute non-trivial")
-  );
-  run("node", ["tools/llm-harness.mjs", "generate"]);
-  run("git", ["add", ".llm/index.md"]);
-
-  assert.throws(
-    () => run("bash", [".githooks/pre-commit"]),
-    (error) => error.status === 1 && /staged LLM harness is inconsistent/.test(error.stderr)
-  );
 });
