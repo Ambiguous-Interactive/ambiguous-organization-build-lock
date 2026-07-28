@@ -25,12 +25,12 @@ const CREDENTIAL_PATTERNS = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
-  /\bglpat-[A-Za-z0-9_-]{20,}\b/,
+  /\bglpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
-  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])/,
+  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/,
   /\bnpm_[A-Za-z0-9]{20,}\b/,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
   /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s`]+))/gi;

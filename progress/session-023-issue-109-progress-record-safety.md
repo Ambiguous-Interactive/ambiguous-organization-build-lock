@@ -125,4 +125,18 @@ The complete `.devcontainer/scripts/verify.sh` passed 566 Node tests, every Go
 package, actionlint, both module verification and tidy checks, the workflow
 credential audit, and the LLM harness.
 
-PR review, merge, and post-merge evidence are recorded below as they complete.
+PR #120 opened at exact head
+`9b37eb900fbe4068343a2989f8cfa432789f1ca4`. Build lock CI run
+`30319402514` passed. Copilot's tagged request returned only requester-quota
+exhaustion, and the reviewer API rejected its bot identity as a
+non-collaborator.
+
+Cursor Bugbot found one valid medium issue: token patterns whose final
+character class allowed `-` used `\b`, which does not match between a
+hyphen-ending token and following punctuation. Remediation replaces those
+boundaries with exact negative character-class lookaheads and adds data-driven
+GitLab, Slack, OpenAI, and JWT reproductions. The focused tests and complete
+verifier passed again after remediation, including all 566 Node tests.
+
+Fresh verification, exact-head rereview, merge, and post-merge evidence are
+recorded below as they complete.

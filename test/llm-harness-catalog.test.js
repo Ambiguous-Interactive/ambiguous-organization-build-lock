@@ -189,7 +189,14 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["AWS access key", ["AKIA", "B".repeat(16)].join("")],
     ["private key", "-----BEGIN PRIVATE KEY-----"],
     ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],
-    ["lowercase assignment", "password=correcthorsebatterystaple"]
+    ["lowercase assignment", "password=correcthorsebatterystaple"],
+    ["hyphen-ending GitLab token", `glpat-${"A".repeat(19)}-`],
+    ["hyphen-ending Slack token", `xoxb-${"B".repeat(9)}-`],
+    ["hyphen-ending OpenAI token", `sk-${"C".repeat(19)}-`],
+    [
+      "hyphen-ending JWT",
+      `eyJ${"D".repeat(8)}.${"E".repeat(8)}.${"F".repeat(7)}-`
+    ]
   ];
   for (const [name, credential] of credentials) {
     fs.writeFileSync(record, `# Session 001\n\nAccidentally retained ${credential}.\n`);
