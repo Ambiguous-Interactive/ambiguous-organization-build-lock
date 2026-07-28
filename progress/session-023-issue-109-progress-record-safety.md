@@ -146,5 +146,13 @@ accepts only exact shell-variable and GitHub-expression references plus a
 small exact set of paired redaction markers. The focused catalog test and
 complete verifier passed again, including all 566 Node tests.
 
+The following exact-head rereview found one valid false positive:
+`${{ github.token }}` is an established safe GitHub reference in this
+repository's workflow credential policy, but the new progress guard accepted
+only `secrets.*` and `vars.*` expressions. A red-green fixture now covers both
+compact and spaced `github.token` forms. The guard accepts that one exact
+GitHub context expression without broadening literal or placeholder
+acceptance.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

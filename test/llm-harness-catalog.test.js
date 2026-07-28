@@ -226,7 +226,9 @@ test("progress records reject credential-shaped literals without echoing them", 
     "",
     "Use `${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}`.",
     "Record `UNITY_SERIAL=<redacted>`, `API_TOKEN=$API_TOKEN`, and",
-    "`password=REDACTED-VALUE`, `secret=[placeholder]`, and `token=***`."
+    "`password=REDACTED-VALUE`, `secret=[placeholder]`, and `token=***`.",
+    "Workflow examples may use `GITHUB_TOKEN=${{github.token}}` or",
+    "`GH_TOKEN=${{ github.token }}`."
   ].join("\n") + "\n");
   errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
   assert.doesNotMatch(errors, /credential-shaped literal/);
