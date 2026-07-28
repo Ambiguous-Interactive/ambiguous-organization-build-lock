@@ -52,7 +52,7 @@ assets have no meaningful physical-line count.
 ```bash
 node tools/llm-harness.mjs generate
 node tools/llm-harness.mjs check
-node --test test/llm-harness.test.js
+node --test test/llm-harness-*.test.js
 bash tools/install-git-hooks.sh
 ```
 
