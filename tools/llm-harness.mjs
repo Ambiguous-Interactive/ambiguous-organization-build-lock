@@ -33,7 +33,7 @@ const CREDENTIAL_PATTERNS = [
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/
 ];
 const CREDENTIAL_ASSIGNMENT =
-  /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s`]+))/gi;
+  /\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|SERIAL|LICENSE|CREDENTIAL)(?:_[A-Z0-9_]+)*\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|(\$\{\{\s*(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*\s*\}\})|([^\s`]+))/gi;
 const toolRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export function countLines(text) {
   if (text.length === 0) return 0;
@@ -140,9 +140,12 @@ export function pointerContent(pointer) {
 function hasCredentialShapedLiteral(text) {
   if (CREDENTIAL_PATTERNS.some((pattern) => pattern.test(text))) return true;
   for (const match of text.matchAll(CREDENTIAL_ASSIGNMENT)) {
-    const value = (match[1] || match[2] || match[3] || "").trim();
-    if (/^(?:\$\{\{|\$|<|\*{3}|\[)/.test(value) ||
-        /^(?:redacted|placeholder|omitted|unavailable|none|unknown)(?:[-_].*)?$/i.test(value)) {
+    const value = (match[1] || match[2] || match[3] || match[4] || "").trim();
+    if (/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value) ||
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value) ||
+        /^\$\{\{\s*(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$/.test(value) ||
+        /^(?:<(?:redacted|placeholder|omitted|unavailable|none|unknown)>|\[(?:redacted|placeholder|omitted|unavailable|none|unknown)\])$/i.test(value) ||
+        /^(?:\*{3}|redacted|redacted-value|placeholder|omitted|unavailable|none|unknown)$/i.test(value)) {
       continue;
     }
     if (value.length >= 12) return true;

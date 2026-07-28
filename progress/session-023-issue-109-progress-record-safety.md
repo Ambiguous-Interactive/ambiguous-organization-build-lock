@@ -138,5 +138,13 @@ boundaries with exact negative character-class lookaheads and adds data-driven
 GitLab, Slack, OpenAI, and JWT reproductions. The focused tests and complete
 verifier passed again after remediation, including all 566 Node tests.
 
+The exact-head rereview found a second valid medium issue: assignment
+placeholder acceptance trusted any angle- or bracket-prefixed value and
+arbitrary suffixes on words such as `none` and `unknown`. Red-green
+reproductions cover wrapped serials and prefixed passwords. Remediation now
+accepts only exact shell-variable and GitHub-expression references plus a
+small exact set of paired redaction markers. The focused catalog test and
+complete verifier passed again, including all 566 Node tests.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

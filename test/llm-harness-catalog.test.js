@@ -190,6 +190,9 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["private key", "-----BEGIN PRIVATE KEY-----"],
     ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],
     ["lowercase assignment", "password=correcthorsebatterystaple"],
+    ["angle-wrapped assignment", "UNITY_SERIAL=<ABCD-1234-EFGH-5678>"],
+    ["none-prefixed assignment", "password=none_correcthorsebatterystaple"],
+    ["unknown-prefixed assignment", "password=unknown-correcthorsebatterystaple"],
     ["hyphen-ending GitLab token", `glpat-${"A".repeat(19)}-`],
     ["hyphen-ending Slack token", `xoxb-${"B".repeat(9)}-`],
     ["hyphen-ending OpenAI token", `sk-${"C".repeat(19)}-`],
@@ -223,7 +226,7 @@ test("progress records reject credential-shaped literals without echoing them", 
     "",
     "Use `${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}`.",
     "Record `UNITY_SERIAL=<redacted>`, `API_TOKEN=$API_TOKEN`, and",
-    "`password=REDACTED-VALUE`."
+    "`password=REDACTED-VALUE`, `secret=[placeholder]`, and `token=***`."
   ].join("\n") + "\n");
   errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
   assert.doesNotMatch(errors, /credential-shaped literal/);
