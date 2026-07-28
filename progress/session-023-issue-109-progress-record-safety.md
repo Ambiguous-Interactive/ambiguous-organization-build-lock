@@ -197,5 +197,12 @@ backtick placeholder fixtures with punctuation followed immediately by a
 literal reproduced the bypass. Closing Markdown/prose punctuation is now
 accepted only as a complete run followed by whitespace or end-of-input.
 
+The next exact-head pass found an unclosed-backtick bypass plus two
+false-positive edges: omitted `!`/`?` sentence closers and whitespace matching
+across Markdown lines. A failing unclosed-value fixture and safe sentence/label
+fixtures reproduce all three. Backtick value capture now fails closed at a
+line ending even without a closer, sentence punctuation remains subject to
+the complete terminator rule, and assignment spacing is horizontal-only.
+
 Fresh verification, exact-head rereview, merge, and post-merge evidence are
 recorded below as they complete.

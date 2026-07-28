@@ -198,6 +198,7 @@ test("progress records reject credential-shaped literals without echoing them", 
     ["credential assignment", "UNITY_SERIAL=ABCD-1234-EFGH-5678"],
     ["lowercase assignment", "password=correcthorsebatterystaple"],
     ["backtick-wrapped assignment", "password=`correcthorsebatterystaple`"],
+    ["unclosed backtick assignment", "password=`correcthorsebatterystaple"],
     ["backtick-wrapped key", "`password`: correcthorsebatterystaple"],
     ["bold Markdown key", "**password**: correcthorsebatterystaple"],
     ["italic Markdown key", "_UNITY_SERIAL_: ABCD-1234-EFGH-5678"],
@@ -270,7 +271,12 @@ test("progress records reject credential-shaped literals without echoing them", 
     "Markdown may also retain **password**: **<redacted>**.",
     "Nested Markdown may retain ~~**password**~~: ~~**<redacted>**~~.",
     "Workflow examples may use `GITHUB_TOKEN=${{github.token}}` or",
-    "`GH_TOKEN=${{ github.token }}`."
+    "`GH_TOKEN=${{ github.token }}`.",
+    "Sentence endings may use `password=\"<redacted>\"!` or",
+    "`GITHUB_TOKEN=${{github.token}}?`.",
+    "TOKEN:",
+    "",
+    "Documentation remains intentionally sanitized."
   ].join("\n") + "\n");
   errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
   assert.doesNotMatch(errors, /credential-shaped literal/);
