@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30411829261:unity-compile-check:unity-ci-compile-check",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-compile-check",
+    "runId": "30411829261",
+    "runAttempt": "3",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30411829261",
+    "queuedAt": "2026-07-29T01:08:38.651Z",
+    "acquiredAt": "2026-07-29T01:08:41.264Z",
+    "expiresAt": "2026-07-29T05:08:41.264Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "ec583a11-1e88-40bb-b83f-45eaaf2be48f",
-      "holderId": "Ambiguous-Interactive/qora-redux:30411127274:unity:incident-recovery",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "30411127274",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30411127274",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "portal cleanup confirmed for incident-02cd8469d5ad53d2bc56d280",
-      "createdAt": "2026-07-29T01:06:45.353Z",
-      "availableAt": "2026-07-29T01:06:46.353Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:30411829261:unity-compile-check:unity-ci-compile-check",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-compile-check",
+      "runId": "30411829261",
+      "runAttempt": "3",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30411829261",
+      "queuedAt": "2026-07-29T01:08:38.651Z",
+      "acquiredAt": "2026-07-29T01:08:41.264Z",
+      "expiresAt": "2026-07-29T05:08:41.264Z",
+      "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T01:06:45.353Z"
+  "updatedAt": "2026-07-29T01:08:41.265Z"
 }
