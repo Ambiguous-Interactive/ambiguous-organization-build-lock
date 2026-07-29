@@ -556,7 +556,8 @@ Operators do not have to read `lock-state` to find that ID. The independent
 minutes with the workflow token only, and synchronizes one deduplicated alert
 issue carrying the exact incident ID, the declared `recover-incident` inputs,
 and sanitized run/runner provenance. Its body is deterministic, so an unchanged
-incident does not churn the issue, and a recovered lock closes it. Unavailable,
+incident does not churn the issue, and a recovered lock closes the alert without
+rewriting it, leaving the incident record readable. Unavailable,
 malformed, unsupported-schema, digest-inconsistent, foreign-authored, or
 duplicated evidence fails the run red and leaves any existing alert untouched;
 the audit never writes lock state and never relaxes the exact-ID portal proof

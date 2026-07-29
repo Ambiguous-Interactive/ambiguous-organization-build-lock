@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -115,6 +117,52 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 	}
 	if len(requests) != 6 {
 		t.Fatalf("unexpected request count %d: %#v", len(requests), requests)
+	}
+}
+
+// A repository accumulates issues indefinitely, so alert discovery must stay
+// inside its response bound as the history grows. Every page must be walked and
+// every response must fit even when each issue carries a maximum-size body.
+func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
+	maximumBody := strings.Repeat("x", 64*1024)
+	pages := make(map[string][]issue)
+	for page := 1; page <= 3; page++ {
+		bulk := make([]issue, issuePageSize)
+		for index := range bulk {
+			bulk[index] = issue{Number: page*1000 + index, State: "closed", Title: "unrelated", Body: maximumBody}
+		}
+		pages[strconv.Itoa(page)] = bulk
+	}
+	pages["3"][0] = issue{Number: 7, State: "open", Title: alertTitle, Body: alertMarker + "\nprevious"}
+	pages["4"] = nil
+
+	var largest int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("per_page") != strconv.Itoa(issuePageSize) {
+			t.Errorf("unexpected page size %q", request.URL.Query().Get("per_page"))
+		}
+		var buffer bytes.Buffer
+		_ = json.NewEncoder(&buffer).Encode(pages[request.URL.Query().Get("page")])
+		if buffer.Len() > largest {
+			largest = buffer.Len()
+		}
+		_, _ = writer.Write(buffer.Bytes())
+	}))
+	defer server.Close()
+
+	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "test-token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := client.findAlert(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.Number != 7 {
+		t.Fatalf("alert on a later page was not discovered: %#v", found)
+	}
+	if largest > maxResponseBytes {
+		t.Fatalf("a full page of maximum-size issues was %d bytes, over the %d byte bound", largest, maxResponseBytes)
 	}
 }
 

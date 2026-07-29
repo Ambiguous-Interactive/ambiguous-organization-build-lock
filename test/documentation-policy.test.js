@@ -85,6 +85,8 @@ test("incident recovery alert facts and guidance stay synchronized", () => {
   assert.match(operations, /never opens, edits, or closes the alert on unprovable state/);
   assert.match(operations, /leaves any existing alert exactly as it was/);
   assert.match(operations, /never relaxes recovery, which still requires the exact incident identifier/);
+  assert.match(operations, /closes the alert without rewriting it/);
+  assert.match(operations, /covers the global account incident only/);
   assert.match(
     locks,
     /Operators do not need to read this branch to recover an incident/,

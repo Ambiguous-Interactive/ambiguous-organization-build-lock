@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -49,7 +50,7 @@ func incidentFixture() incident {
 		RunAttempt:     "1",
 		RunURL:         testServerURL + "/Ambiguous-Interactive/qora-redux/actions/runs/30416530625",
 		RunnerID:       "ELI-MACHINE",
-		ReportedAt:     "2026-07-29T02:19:43Z",
+		ReportedAt:     "2026-07-29T02:19:43.885Z",
 		Reason:         incidentReason,
 		EvidenceDigest: digest,
 	}
@@ -267,11 +268,11 @@ func TestIncidentDigestMatchesCommittedRuntimeCanonicalization(t *testing.T) {
 func TestAlertBodyPublishesRecoveryInstructionsWithoutSecretEvidence(t *testing.T) {
 	t.Parallel()
 	active := incidentFixture()
-	body := alertBody(observation{Reason: reasonIncidentActive, Lock: testLock, Incident: &active}, testServerURL, "owner/repo")
+	body := alertBody(active, testLock, testServerURL, "owner/repo")
 
 	for _, expected := range []string{
 		alertMarker,
-		"State: `alerting`",
+		"`" + testLock + "`",
 		"`" + active.IncidentID + "`",
 		"| `operation` | `" + recoveryOperation + "` |",
 		"| `portal-cleanup-confirmed` | `true` |",
@@ -281,7 +282,7 @@ func TestAlertBodyPublishesRecoveryInstructionsWithoutSecretEvidence(t *testing.
 		"`Ambiguous-Interactive/qora-redux`",
 		"`Unity Tests`",
 		"`ELI-MACHINE`",
-		"`2026-07-29T02:19:43Z`",
+		"`2026-07-29T02:19:43.885Z`",
 		active.RunURL,
 	} {
 		if !strings.Contains(body, expected) {
@@ -298,17 +299,21 @@ func TestAlertBodyPublishesRecoveryInstructionsWithoutSecretEvidence(t *testing.
 	}
 }
 
-func TestAlertBodyIsDeterministicAndResolvedWhenHealthy(t *testing.T) {
+func TestAlertBodyIsDeterministicAndStateless(t *testing.T) {
 	t.Parallel()
-	healthy := observation{Reason: reasonHealthy, Lock: testLock}
-	first := alertBody(healthy, testServerURL, "owner/repo")
-	second := alertBody(healthy, testServerURL, "owner/repo")
+	active := incidentFixture()
+	first := alertBody(active, testLock, testServerURL, "owner/repo")
+	second := alertBody(active, testLock, testServerURL, "owner/repo")
 
 	if first != second {
-		t.Fatal("alert body must be deterministic so an unchanged state does not churn the issue")
+		t.Fatal("alert body must be deterministic so an unchanged incident does not churn the issue")
 	}
-	if !strings.Contains(first, "State: `resolved`") || !strings.Contains(first, alertMarker) {
-		t.Fatalf("healthy body must record a resolved marker state:\n%s", first)
+	// A closed alert keeps its last published body, so the body must never assert
+	// a live status that closing would contradict.
+	for _, forbidden := range []string{"State: `alerting`", "State: `resolved`"} {
+		if strings.Contains(first, forbidden) {
+			t.Fatalf("retained alert record must not claim the live status %q", forbidden)
+		}
 	}
 }
 
@@ -337,7 +342,7 @@ func TestAlertInstructionsMatchTheDeclaredRecoveryWorkflow(t *testing.T) {
 		t.Fatalf("recovery workflow name = %q, want %q", workflow.Name, recoveryWorkflowName)
 	}
 	active := incidentFixture()
-	body := alertBody(observation{Reason: reasonIncidentActive, Lock: testLock, Incident: &active}, testServerURL, "owner/repo")
+	body := alertBody(active, testLock, testServerURL, "owner/repo")
 	for _, input := range []string{"operation", "incident-id", "portal-cleanup-confirmed"} {
 		declared, ok := workflow.On.WorkflowDispatch.Inputs[input]
 		if !ok {
@@ -463,8 +468,7 @@ func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
 	active := incidentFixture()
 	activeState := stateFixture(t, &active)
 	healthyState := stateFixture(t, nil)
-	activeBody := alertBody(observation{Reason: reasonIncidentActive, Lock: testLock, Incident: &active}, testServerURL, "owner/repo")
-	healthyBody := alertBody(observation{Reason: reasonHealthy, Lock: testLock}, testServerURL, "owner/repo")
+	activeBody := alertBody(active, testLock, testServerURL, "owner/repo")
 
 	cases := []struct {
 		name          string
@@ -503,7 +507,7 @@ func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
 		{
 			"healthy lock leaves a closed alert alone",
 			healthyState,
-			existingAlert(t, "closed", healthyBody, alertAuthor),
+			existingAlert(t, "closed", activeBody, alertAuthor),
 			0, 0, 0, "",
 		},
 	}
@@ -537,7 +541,7 @@ func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
 func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 	t.Parallel()
 	active := incidentFixture()
-	activeBody := alertBody(observation{Reason: reasonIncidentActive, Lock: testLock, Incident: &active}, testServerURL, "owner/repo")
+	activeBody := alertBody(active, testLock, testServerURL, "owner/repo")
 
 	cases := []struct {
 		name string
@@ -609,6 +613,67 @@ func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 				t.Fatal("failure must report a single-line reason")
 			}
 		})
+	}
+}
+
+// Missing an existing alert on a later page would republish a duplicate on every
+// scheduled run, so discovery must walk pages and still fit its response bound
+// when each issue carries a maximum-size body.
+func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
+	t.Parallel()
+	maximumBody := strings.Repeat("x", 64*1024)
+	pages := map[string][]map[string]any{}
+	for page := 1; page <= 3; page++ {
+		bulk := make([]map[string]any, issuePageSize)
+		for index := range bulk {
+			bulk[index] = map[string]any{
+				"number": page*1000 + index,
+				"state":  "closed",
+				"title":  "unrelated",
+				"body":   maximumBody,
+				"user":   map[string]any{"login": "someone"},
+			}
+		}
+		pages[strconv.Itoa(page)] = bulk
+	}
+	pages["3"][0] = map[string]any{
+		"number": 7,
+		"state":  "open",
+		"title":  alertTitle,
+		"body":   alertMarker + "\nprevious",
+		"user":   map[string]any{"login": alertAuthor},
+	}
+	pages["4"] = nil
+
+	var largest int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Get("per_page") != strconv.Itoa(issuePageSize) {
+			t.Errorf("unexpected page size %q", request.URL.Query().Get("per_page"))
+		}
+		encoded, err := json.Marshal(pages[request.URL.Query().Get("page")])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(encoded) > largest {
+			largest = len(encoded)
+		}
+		_, _ = writer.Write(encoded)
+	}))
+	defer server.Close()
+
+	client, err := newGitHubClient(server.URL, "owner/repo", "test-token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := client.findAlert(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.Number != 7 {
+		t.Fatalf("alert on a later page was not discovered: %#v", found)
+	}
+	if largest > maxResponseBytes {
+		t.Fatalf("a full page of maximum-size issues was %d bytes, over the %d byte bound", largest, maxResponseBytes)
 	}
 }
 

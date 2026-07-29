@@ -242,8 +242,14 @@ workflow token, proves that any active global incident is internally consistent,
 and synchronizes one marker-identified alert issue carrying the exact incident
 identifier and the declared `recover-incident` inputs. Operators recover from
 that alert instead of reading lock state by hand. The alert body is
-deterministic, so an unchanged incident does not churn the issue, and a
-recovered lock closes it automatically.
+deterministic, so an unchanged incident does not churn the issue. A recovered
+lock closes the alert without rewriting it, so the closed issue stays readable
+as the retained incident record.
+
+The audit covers the global account incident only. A runner quarantine is
+reclaimed by the same physical runner or auto-recovered by the scheduled reaper
+once the owning run is proven terminal, so alerting on one would add noise
+rather than remove manual work.
 
 The audit holds no writer, reader, or Unity credential and never writes lock
 state. It never opens, edits, or closes the alert on unprovable state: an

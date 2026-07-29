@@ -22,7 +22,8 @@ const (
 	incidentMarker   = "<!-- build-lock-reaper-delivery-monitor -->"
 	incidentActor    = "github-actions[bot]"
 	maxResponseBytes = 4 << 20
-	maxIssuePages    = 10
+	maxIssuePages    = 40
+	issuePageSize    = 30
 )
 
 var (
@@ -247,7 +248,7 @@ func (client *githubClient) findIncident(ctx context.Context, repository string)
 	if !repositoryPattern.MatchString(repository) {
 		return nil, errors.New("invalid incident repository")
 	}
-	next := fmt.Sprintf("/repos/%s/issues?state=all&per_page=100", escapeRepository(repository))
+	next := fmt.Sprintf("/repos/%s/issues?state=all&per_page=%d", escapeRepository(repository), issuePageSize)
 	var incident *incidentIssue
 	for page := 0; page < maxIssuePages && next != ""; page++ {
 		var issues []incidentIssue

@@ -49,10 +49,13 @@ const (
 	reasonStateUnavailable = "lock-state-unavailable"
 	reasonSyncFailed       = "alert-sync-failed"
 
-	maxStateBytes     = 1 << 20
-	maxResponseBytes  = 1 << 20
-	maxIssuePages     = 10
-	maxIssuesPerPage  = 100
+	maxStateBytes    = 1 << 20
+	maxResponseBytes = 4 << 20
+	// GitHub caps an issue body at 64 KiB, so a 30-item page cannot exceed
+	// roughly 2 MiB of body plus envelope and stays provably inside the bound
+	// however large the repository's issue history grows.
+	issuePageSize     = 30
+	maxIssuePages     = 40
 	maxTextBytes      = 200
 	maxIdentifierText = 20
 )
@@ -335,25 +338,19 @@ func incidentDigest(active incident) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func alertBody(result observation, serverURL, repository string) string {
+// alertBody renders the retained operator record for one incident. It carries no
+// wall-clock or run-scoped value, so an unchanged incident produces a
+// byte-identical body and the audit does not rewrite the issue. It also states
+// no live status of its own: the issue's open or closed state is the authority,
+// which keeps a closed alert readable as history.
+func alertBody(active incident, lock, serverURL, repository string) string {
 	var body strings.Builder
 	body.WriteString(alertMarker)
 	body.WriteString("\n\n# Unity build lock global account incident\n\n")
-	if result.Incident == nil {
-		body.WriteString("State: `resolved`\n\n")
-		body.WriteString(
-			"The audited lock has no active global account incident. Admission follows normal capacity and queue order.\n",
-		)
-		fmt.Fprintf(&body, "\nTracked by %s.\n", trackedIssue)
-		return body.String()
-	}
-
-	active := result.Incident
-	body.WriteString("State: `alerting`\n\n")
 	fmt.Fprintf(
 		&body,
-		"Every new `%s` admission is blocked until an operator completes proof-bearing recovery. Existing holders may still finish their own cleanup.\n\n",
-		result.Lock,
+		"While this alert is open, every new `%s` admission is blocked until an operator completes proof-bearing recovery. Existing holders may still finish their own cleanup.\n\n",
+		lock,
 	)
 
 	body.WriteString("## Recover\n\n")
@@ -393,7 +390,7 @@ func alertBody(result observation, serverURL, repository string) string {
 	)
 	fmt.Fprintf(
 		&body,
-		"\nTracked by %s. The audit closes this alert automatically once the lock reports no active global incident.\n",
+		"\nTracked by %s. The audit closes this alert automatically once the lock reports no active global incident, and leaves this record in place.\n",
 		trackedIssue,
 	)
 	return body.String()
@@ -431,13 +428,18 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 	if err != nil {
 		return err
 	}
-	body := alertBody(result, serverURL, client.repository)
-	alerting := result.Reason == reasonIncidentActive
 
-	if existing == nil {
-		if !alerting {
+	if result.Reason != reasonIncidentActive {
+		// Recovery closes the alert but never rewrites it. The last published
+		// incident stays readable as the retained operator record.
+		if existing == nil || existing.State == "closed" {
 			return nil
 		}
+		return client.patchAlert(ctx, existing.Number, map[string]any{"state": "closed"})
+	}
+
+	body := alertBody(*result.Incident, result.Lock, serverURL, client.repository)
+	if existing == nil {
 		_, err := client.request(
 			ctx,
 			http.MethodPost,
@@ -448,21 +450,24 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 		)
 		return err
 	}
-
-	state := "closed"
-	if alerting {
-		state = "open"
-	}
-	if existing.State == state && existing.Body == body {
+	if existing.State == "open" && existing.Body == body {
 		// The alert already carries this exact evidence; rewriting it would churn
 		// the operator's record without adding information.
 		return nil
 	}
-	_, err = client.request(
+	return client.patchAlert(
+		ctx,
+		existing.Number,
+		map[string]any{"title": alertTitle, "body": body, "state": "open"},
+	)
+}
+
+func (client *githubClient) patchAlert(ctx context.Context, number int, payload map[string]any) error {
+	_, err := client.request(
 		ctx,
 		http.MethodPatch,
-		client.repositoryPath("/issues/"+strconv.Itoa(existing.Number)),
-		map[string]any{"title": alertTitle, "body": body, "state": state},
+		client.repositoryPath("/issues/"+strconv.Itoa(number)),
+		payload,
 		"application/vnd.github+json",
 		maxResponseBytes,
 	)
@@ -475,7 +480,7 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) {
 	var found *alertIssue
 	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=%d&page=%d", maxIssuesPerPage, page))
+		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=%d&page=%d", issuePageSize, page))
 		content, err := client.request(ctx, http.MethodGet, path, nil, "application/vnd.github+json", maxResponseBytes)
 		if err != nil {
 			return nil, err
@@ -503,7 +508,7 @@ func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) 
 			}
 			found = &candidate
 		}
-		if len(issues) < maxIssuesPerPage {
+		if len(issues) < issuePageSize {
 			return found, nil
 		}
 	}

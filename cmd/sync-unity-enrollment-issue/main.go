@@ -23,8 +23,9 @@ const (
 	alertMarker          = "<!-- unity-enrollment-audit:v1 -->"
 	alertTitle           = "policy: organization Unity enrollment drift detected"
 	maxAuditBytes        = 4 * 1024 * 1024
-	maxResponseBytes     = 1024 * 1024
-	maxIssuePages        = 10
+	maxResponseBytes     = 4 * 1024 * 1024
+	maxIssuePages        = 40
+	issuePageSize        = 30
 	maxAuditRows         = 4096
 	maxIssueBodyBytes    = 60 * 1024
 	maxEvidenceURLBytes  = 2048
@@ -272,7 +273,7 @@ func (client *githubClient) sync(
 func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 	var found *issue
 	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=100&page=%d", page))
+		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=%d&page=%d", issuePageSize, page))
 		content, err := client.request(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
@@ -293,7 +294,7 @@ func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 			copy := *candidate
 			found = &copy
 		}
-		if len(issues) < 100 {
+		if len(issues) < issuePageSize {
 			return found, nil
 		}
 	}
