@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-standalone",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "30473171303",
+    "holderId": "Ambiguous-Interactive/IshoBoy:30473242178:unity-compile-check:unity-ci-compile-check",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-compile-check",
+    "runId": "30473242178",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30473171303",
-    "queuedAt": "2026-07-29T17:10:16.564Z",
-    "acquiredAt": "2026-07-29T17:10:19.384Z",
-    "expiresAt": "2026-07-29T21:10:19.384Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30473242178",
+    "queuedAt": "2026-07-29T17:11:38.814Z",
+    "acquiredAt": "2026-07-29T17:11:41.354Z",
+    "expiresAt": "2026-07-29T21:11:41.354Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30473171303",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30473171303",
-      "queuedAt": "2026-07-29T17:10:16.564Z",
-      "acquiredAt": "2026-07-29T17:10:19.384Z",
-      "expiresAt": "2026-07-29T21:10:19.384Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:30473242178:unity-compile-check:unity-ci-compile-check",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "3ffccd81-4784-4442-b31b-146ad274663b",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-standalone",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "30473171303",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30473171303",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-29T17:12:54.861Z",
+      "availableAt": "2026-07-29T17:12:55.861Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T17:11:41.355Z"
+  "updatedAt": "2026-07-29T17:12:54.861Z"
 }
