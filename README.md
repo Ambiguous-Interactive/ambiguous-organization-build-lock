@@ -393,6 +393,11 @@ writes no reservation. Zero never weakens leak protection: unproven cleanup
 still creates a non-expiring quarantine, and a classified `20111` report still
 raises the global account incident.
 
+While queued, acquire normally uses the configured `poll-seconds` delay. If a
+validated cooldown will expire sooner, it polls at that expiry plus at most 249
+milliseconds of collision-spreading jitter. Quarantines and unknown evidence
+never shorten the wait.
+
 **Consumer requirement:** because the lock no longer holds a slot warm, every
 consumer's licensed Unity step MUST wrap serial activation in a bounded
 retry-with-backoff that retries the transient `20111` "maximum number of

@@ -156,6 +156,23 @@ function yamlRequiredTopLevelMappingKeys(text, blockName, manifestName) {
   return keys;
 }
 
+function yamlTopLevelBlockText(text, blockName, manifestName) {
+  const lines = text.split(/\r?\n/);
+  const startIndexes = lines
+    .map((line, index) => (line === `${blockName}:` ? index : -1))
+    .filter((index) => index !== -1);
+  assert.equal(startIndexes.length, 1, `${manifestName} must define exactly one top-level ${blockName}: block`);
+  const start = startIndexes[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index++) {
+    if (/^\S/.test(lines[index]) && !isYamlBlankOrComment(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 test("all JavaScript actions target the supported GitHub Actions runtime", async (t) => {
   assert.ok(actionManifests.length > 0, "expected at least one local action manifest");
 
@@ -245,6 +262,16 @@ test("legacy and opt-in acquire actions expose the same interface", () => {
   assert.deepEqual(optInOutputs, acquireOutputKeys);
   assert.deepEqual(optInInputs, legacyInputs);
   assert.deepEqual(optInOutputs, legacyOutputs);
+  assert.equal(
+    yamlTopLevelBlockText(optIn, "inputs", optInName),
+    yamlTopLevelBlockText(legacy, "inputs", legacyName),
+    "acquire variants must keep all input descriptions, requirements, and defaults identical"
+  );
+  assert.equal(
+    yamlTopLevelBlockText(optIn, "outputs", optInName),
+    yamlTopLevelBlockText(legacy, "outputs", legacyName),
+    "acquire variants must keep all output descriptions identical"
+  );
 });
 
 test("top-level action errors sanitize workflow-command data", () => {

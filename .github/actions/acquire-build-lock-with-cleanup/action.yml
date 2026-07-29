@@ -37,7 +37,7 @@ inputs:
     required: false
     default: "240"
   poll-seconds:
-    description: Base polling delay while queued.
+    description: Base polling delay while queued; a known earlier cooldown expiry wakes the waiter sooner.
     required: false
     default: "15"
   require-resource-lifecycle:

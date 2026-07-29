@@ -8,6 +8,8 @@ const test = require("node:test");
 
 const {
   acquire,
+  acquirePollDelayMs,
+  acquireRetryDelayMs,
   api,
   authorizeCaller,
   config,
@@ -3005,6 +3007,81 @@ test("acquire fails once 401 responses persist beyond the auth grace window", as
   assert.equal(wrote, false);
 });
 
+test("acquire auth grace sleep stops at the acquire deadline and enters timeout cleanup", async () => {
+  const originalNow = Date.now;
+  const originalRandom = Math.random;
+  const originalSetTimeout = global.setTimeout;
+  let now = Date.parse("2026-06-06T00:00:00.000Z");
+  let stateReads = 0;
+  const observedDelays = [];
+  Date.now = () => now;
+  Math.random = () => 0.999;
+  global.setTimeout = (handler, delay, ...args) => {
+    observedDelays.push(delay);
+    now += delay;
+    return originalSetTimeout(handler, 0, ...args);
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withEnvironment(
+            { BUILD_LOCK_API_MAX_ATTEMPTS: "1", BUILD_LOCK_AUTH_GRACE_MS: "600000" },
+            async () => {
+              await withMockedFetch(async (url) => {
+                const parsed = new URL(url);
+                if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                  return jsonResponse(200, { object: { sha: "branch-sha" } });
+                }
+                if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                  stateReads++;
+                  return jsonResponse(401, { message: "Bad credentials" });
+                }
+                return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+              }, async (logs) => {
+                await assert.rejects(
+                  () =>
+                    acquire({
+                      token: "token",
+                      lockName: "wallstop-organization-builds",
+                      holderIdSuffix: "playmode",
+                      lockRepository: "o/r",
+                      lockRepo: { owner: "o", repo: "r" },
+                      stateBranch: "lock-state",
+                      statePath: "locks/wallstop-organization-builds.json",
+                      timeoutMinutes: 1,
+                      leaseMinutes: 240,
+                      pollSeconds: 120
+                    }),
+                  /Timed out waiting for build lock/
+                );
+                assert.match(logs.join("\n"), /Unable to clean up build-lock state after timeout.*Bad credentials/);
+              });
+            }
+          );
+        }
+      );
+      assert.equal(readEnvironmentFile(outputFile)["admission-result"], "timeout");
+    });
+  } finally {
+    Date.now = originalNow;
+    Math.random = originalRandom;
+    global.setTimeout = originalSetTimeout;
+  }
+
+  assert.deepEqual(observedDelays, [60000]);
+  assert.equal(stateReads, 2, "timeout cleanup must make a final exact-state cleanup attempt");
+});
+
 test("acquire fails fast on 401 when the auth grace window is disabled", async () => {
   let contentReads = 0;
 
@@ -3415,6 +3492,61 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
 
   assert.deepEqual(state.queue, []);
   assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
+});
+
+test("acquire base poll stops exactly at timeout and cleans its queued identity", async () => {
+  const originalNow = Date.now;
+  const originalRandom = Math.random;
+  const originalSetTimeout = global.setTimeout;
+  let now = Date.parse("2026-06-06T00:00:00.000Z");
+  let state = semaphoreState([semaphoreHolder("other/repo", "999", "editmode")]);
+  const observedDelays = [];
+  Date.now = () => now;
+  Math.random = () => 0.999;
+  global.setTimeout = (handler, delay, ...args) => {
+    observedDelays.push(delay);
+    now += delay;
+    return originalSetTimeout(handler, 0, ...args);
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              return jsonResponse(200, { content: { sha: "state-after-write" } });
+            }
+            return base64Content(state, "state-before-read");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async (logs) => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ timeoutMinutes: 1, pollSeconds: 120 })),
+            /Timed out waiting for build lock/
+          );
+          assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
+        });
+      });
+      assert.equal(readEnvironmentFile(outputFile)["wait-ms"], "60000");
+    });
+  } finally {
+    Date.now = originalNow;
+    Math.random = originalRandom;
+    global.setTimeout = originalSetTimeout;
+  }
+
+  assert.deepEqual(observedDelays, [60000]);
+  assert.deepEqual(state.queue, []);
+  assert.equal(state.holders[0].holderId, "other/repo:999:perf-benchmarks:editmode");
 });
 
 
@@ -6475,6 +6607,97 @@ test("schema 4 reservations round-trip and malformed lifecycle state fails close
   }
 });
 
+test("acquire polling wakes promptly only for a known earlier cooldown expiry", async (t) => {
+  const now = Date.parse("2026-06-06T00:01:00.000Z");
+  const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
+  const cooldown = lifecycleReservation(prior, {
+    state: "cooldown",
+    availableAt: "2026-06-06T00:01:01.000Z"
+  });
+  const laterCooldown = lifecycleReservation(
+    withRunner(semaphoreHolder("third/repo", "888", "playmode"), "runner-c"),
+    {
+      state: "cooldown",
+      availableAt: "2026-06-06T00:01:12.000Z"
+    }
+  );
+  const distantCooldown = {
+    ...laterCooldown,
+    availableAt: "2026-06-06T00:01:20.000Z"
+  };
+  const expiredCooldown = {
+    ...cooldown,
+    availableAt: "2026-06-06T00:00:59.000Z"
+  };
+  const quarantine = lifecycleReservation(
+    withRunner(semaphoreHolder("fourth/repo", "777", "playmode"), "runner-d")
+  );
+
+  for (const testCase of [
+    { name: "no reservations", reservations: [], random: 0, expected: 15000 },
+    { name: "quarantine", reservations: [quarantine], random: 0, expected: 15000 },
+    { name: "cooldown after base delay", reservations: [distantCooldown], random: 0, expected: 15000 },
+    { name: "already expired cooldown", reservations: [expiredCooldown], random: 0, expected: 15000 },
+    { name: "earliest future cooldown", reservations: [laterCooldown, cooldown], random: 0, expected: 1000 },
+    { name: "bounded cooldown jitter", reservations: [laterCooldown, cooldown], random: 0.999, expected: 1249 }
+  ]) {
+    await t.test(testCase.name, () => {
+      assert.equal(
+        acquirePollDelayMs(15000, testCase.reservations, now, () => testCase.random),
+        testCase.expected
+      );
+    });
+  }
+});
+
+test("acquire retry delays never exceed their governing deadline", async (t) => {
+  const now = Date.parse("2026-06-06T00:01:00.000Z");
+  const cooldown = lifecycleReservation(
+    withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a"),
+    {
+      state: "cooldown",
+      availableAt: "2026-06-06T00:01:05.000Z"
+    }
+  );
+
+  for (const testCase of [
+    {
+      name: "base poll is capped by acquire deadline",
+      proposed: acquirePollDelayMs(15000, [], now, () => 0),
+      deadline: now + 10000,
+      expected: 10000
+    },
+    {
+      name: "earlier cooldown remains the governing wake-up",
+      proposed: acquirePollDelayMs(15000, [cooldown], now, () => 0),
+      deadline: now + 10000,
+      expected: 5000
+    },
+    {
+      name: "auth grace deadline caps a longer poll",
+      proposed: 15000,
+      deadline: now + 2000,
+      expected: 2000
+    },
+    {
+      name: "CAS retry is capped near timeout",
+      proposed: 1249,
+      deadline: now + 500,
+      expected: 500
+    },
+    {
+      name: "elapsed deadline never produces a negative delay",
+      proposed: 15000,
+      deadline: now - 1,
+      expected: 0
+    }
+  ]) {
+    await t.test(testCase.name, () => {
+      assert.equal(acquireRetryDelayMs(testCase.proposed, testCase.deadline, now), testCase.expected);
+    });
+  }
+});
+
 test("schema 4 release transitions ownership to cooldown or quarantine", async (t) => {
   for (const testCase of [
     { resourceSafe: true, cooldownSeconds: 360, result: "cooldown-started", state: "cooldown", available: true, reservations: 1 },
@@ -6752,13 +6975,22 @@ test("schema 4 quarantine never expires or admits a different runner during conf
 
 test("schema 4 cooldown blocks cross-runner admission until it expires", async () => {
   const originalNow = Date.now;
+  const originalRandom = Math.random;
+  const originalSetTimeout = global.setTimeout;
   let now = Date.parse("2026-06-06T00:01:00.000Z");
+  const observedDelays = [];
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
   let state = lifecycleState([], [], [lifecycleReservation(prior, {
     state: "cooldown",
-    availableAt: "2026-06-06T00:07:00.000Z"
+    availableAt: "2026-06-06T00:01:01.000Z"
   })]);
   Date.now = () => now;
+  Math.random = () => 0;
+  global.setTimeout = (handler, delay, ...args) => {
+    observedDelays.push(delay);
+    now += delay;
+    return originalSetTimeout(handler, 0, ...args);
+  };
   try {
     await withTempFile(async (outputFile) => {
       await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
@@ -6769,21 +7001,21 @@ test("schema 4 cooldown blocks cross-runner admission until it expires", async (
           if (parsed.pathname === SEMAPHORE_STATE_PATH) {
             if (options.method === "PUT") {
               state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
-              now = Date.parse("2026-06-06T00:07:01.000Z");
               return jsonResponse(200, { content: { sha: "write-sha" } });
             }
             return base64Content(state, "state-sha");
           }
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
-        }, async () => {
-          await withImmediateTimers(() => acquire(semaphoreConfig({ runnerId: "runner-b", pollSeconds: 1, timeoutMinutes: 10 })));
-        });
+        }, () => acquire(semaphoreConfig({ runnerId: "runner-b", pollSeconds: 15, timeoutMinutes: 10 })));
       });
       assert.equal(readEnvironmentFile(outputFile).acquired, "true");
     });
   } finally {
     Date.now = originalNow;
+    Math.random = originalRandom;
+    global.setTimeout = originalSetTimeout;
   }
+  assert.deepEqual(observedDelays, [1000]);
   assert.equal(state.reservations.length, 0);
   assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-b"]);
 });
