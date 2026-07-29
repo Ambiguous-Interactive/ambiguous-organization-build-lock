@@ -148,5 +148,19 @@ Validation after remediation:
   tests, all Go packages, both module verification/tidy gates, actionlint, and
   the workflow credential audit were green.
 
-PR review, hosted CI, merge, and post-merge `main` evidence remain pending and
-are not claimed by this handoff.
+### Hosted delivery
+
+- Branch: `agent/investigate-20111-incidents`
+- Implementation commit:
+  `b417a12cda135fccde5165e2a136c7110dda0c6f`
+- Pull request: #142
+- Build lock CI run `30479203775` passed on the exact implementation head.
+- Cursor Bugbot review `4811751398` reported no new issues on that head, and
+  the thread-aware review query returned zero review threads.
+- Copilot was requested through both the reviewer API and an exact-head tagged
+  comment. Reviews `4811592662` and `4811733031` returned only the requester's
+  terminal quota-exhaustion response, with no code feedback.
+
+Both automated reviewers will be requested again after this delivery record
+advances the branch. Merge and post-merge `main` evidence remain pending and
+are not claimed here.
