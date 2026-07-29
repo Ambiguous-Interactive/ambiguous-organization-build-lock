@@ -8,6 +8,10 @@ workflow for exact-ID recovery. A runner quarantine requires Unity portal
 cleanup proof plus its exact reservation ID; a global incident requires portal
 reconciliation plus its exact incident ID.
 
+Operators do not need to read this branch to recover an incident. The scheduled
+`Build lock incident recovery audit` publishes the exact incident ID and the
+declared recovery inputs in one deduplicated alert issue.
+
 ## Lock Config
 
 `<lock-name>.config.json` files in this directory (on the default branch) set

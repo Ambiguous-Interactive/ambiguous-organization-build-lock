@@ -64,6 +64,36 @@ test("reaper delivery SLO facts and guidance stay synchronized", () => {
   assert.doesNotMatch(readme, /reaper(?: workflow)? runs every 5 minutes/i);
 });
 
+test("incident recovery alert facts and guidance stay synchronized", () => {
+  const facts = JSON.parse(read(factsPath));
+  const operations = read(operationsPath).replace(/\s+/g, " ");
+  const locks = read(path.join(repoRoot, "locks", "README.md")).replace(/\s+/g, " ");
+
+  assert.deepEqual(facts.incidentRecoveryAudit, {
+    schedule: "2,12,22,32,42,52 * * * *",
+    alertMarker: "build-lock-incident-recovery",
+    stateRef: "lock-state",
+    recoveryWorkflow: ".github/workflows/recover-build-lock.yml"
+  });
+  assert.match(operations, /`Build lock incident recovery audit`/);
+  assert.match(
+    operations,
+    new RegExp(`runs at \`${facts.incidentRecoveryAudit.schedule.replace(/\*/g, "\\*")}\``)
+  );
+  assert.match(operations, /reads committed `lock-state` JSON through the workflow token/);
+  assert.match(operations, /exact incident identifier and the declared `recover-incident` inputs/);
+  assert.match(operations, /never opens, edits, or closes the alert on unprovable state/);
+  assert.match(operations, /leaves any existing alert exactly as it was/);
+  assert.match(operations, /never relaxes recovery, which still requires the exact incident identifier/);
+  assert.match(operations, /closes the alert without rewriting it/);
+  assert.match(operations, /covers the global account incident only/);
+  assert.match(
+    locks,
+    /Operators do not need to read this branch to recover an incident/,
+    "lock state guidance must point operators at the published alert"
+  );
+});
+
 test("steady-state runbook reports the registered release and consumer inventory", () => {
   const facts = JSON.parse(read(factsPath));
   const enrollmentPolicy = JSON.parse(read(enrollmentPolicyPath));

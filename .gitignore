@@ -8,3 +8,14 @@ pre-push.txt
 job-logs.txt
 *.pem
 GOAL.md
+
+# `go build ./cmd/<name>` without -o drops the binary in the repository root.
+# The tracked-binary policy test is the durable guard; these keep it out of `git add -A`.
+/audit-cancellation-policy
+/audit-unity-enrollment
+/llm-skill-metadata
+/lock-recovery-audit
+/onboard-unity-repository
+/reaper-delivery-audit
+/sync-unity-enrollment-issue
+/workflow-credential-audit

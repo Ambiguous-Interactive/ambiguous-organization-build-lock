@@ -34,6 +34,10 @@
 - Recovery diagnostics name the exact workflow path that accepts every
   instructed input, with a contract test binding emitted guidance to that
   workflow declaration.
+- Recovery evidence may be published automatically only by a read-only path
+  that proves the state it reports. Unprovable state never opens, edits, or
+  closes a published alert, and publication never relaxes the exact identity
+  and external proof that recovery requires.
 - Pull-request admission remains bound to the event head while queued and
   immediately before licensed work.
 - Diagnostics and outputs identify safe next actions without exposing secrets.

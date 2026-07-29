@@ -21,10 +21,12 @@ import (
 
 const (
 	alertMarker          = "<!-- unity-enrollment-audit:v1 -->"
+	alertAuthor          = "github-actions[bot]"
 	alertTitle           = "policy: organization Unity enrollment drift detected"
 	maxAuditBytes        = 4 * 1024 * 1024
-	maxResponseBytes     = 1024 * 1024
-	maxIssuePages        = 10
+	maxResponseBytes     = 4 * 1024 * 1024
+	maxIssuePages        = 40
+	issuePageSize        = 30
 	maxAuditRows         = 4096
 	maxIssueBodyBytes    = 60 * 1024
 	maxEvidenceURLBytes  = 2048
@@ -39,6 +41,9 @@ type issue struct {
 	Title       string          `json:"title"`
 	Body        string          `json:"body"`
 	PullRequest json.RawMessage `json:"pull_request"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
 }
 
 type githubClient struct {
@@ -269,10 +274,26 @@ func (client *githubClient) sync(
 	return err
 }
 
+// alertQuery restricts discovery to the issues this automation created. Scanning
+// the whole issue list would grow with the repository forever and eventually
+// exceed the page budget, at which point discovery of a real alert would fail.
+// Ascending creation order additionally keeps offsets stable, so a concurrently
+// created issue cannot shift the alert out of the walk.
+func alertQuery(page int) url.Values {
+	return url.Values{
+		"state":     {"all"},
+		"creator":   {alertAuthor},
+		"sort":      {"created"},
+		"direction": {"asc"},
+		"per_page":  {strconv.Itoa(issuePageSize)},
+		"page":      {strconv.Itoa(page)},
+	}
+}
+
 func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 	var found *issue
 	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=100&page=%d", page))
+		path := client.repositoryPath("/issues?" + alertQuery(page).Encode())
 		content, err := client.request(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
@@ -284,7 +305,13 @@ func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 		for index := range issues {
 			candidate := &issues[index]
 			pullRequest := strings.TrimSpace(string(candidate.PullRequest))
-			if (pullRequest != "" && pullRequest != "null") || !strings.Contains(candidate.Body, alertMarker) {
+			// The marker is published in this public repository's own alert body, so
+			// authorship is part of the alert's identity: a foreign-authored
+			// lookalike must never be adopted and overwritten, and must not be able
+			// to stall synchronization by colliding with the real alert.
+			if (pullRequest != "" && pullRequest != "null") ||
+				candidate.User.Login != alertAuthor ||
+				!strings.Contains(candidate.Body, alertMarker) {
 				continue
 			}
 			if found != nil {
@@ -293,7 +320,7 @@ func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
 			copy := *candidate
 			found = &copy
 		}
-		if len(issues) < 100 {
+		if len(issues) < issuePageSize {
 			return found, nil
 		}
 	}

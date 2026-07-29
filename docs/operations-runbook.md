@@ -186,7 +186,7 @@ runner quarantine.
 | Normal holder | One slot consumed | Let the owning run finish. Do not cancel it merely because a newer commit exists. |
 | Confirmed-cleanup cooldown | One slot consumed until `availableAt` | Wait for expiry. At the live one-second setting this is normally transient. |
 | Runner quarantine | One slot consumed without expiry | Reasons include `return-ulf-skipped`, `unity-return-400006`, timeout, termination, incomplete logs, and missing positive evidence. Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
-| Global account incident | All new admission blocked; existing holders finish cleanup. A holder with independently confirmed cleanup may pass its terminal gate with an incident warning. | Stop canaries and follow the sanitized source-run provenance in the acquire error. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. Never edit lock state directly. |
+| Global account incident | All new admission blocked; existing holders finish cleanup. A holder with independently confirmed cleanup may pass its terminal gate with an incident warning. | Stop canaries and follow the sanitized source-run provenance in the acquire error or in the `Build lock incident recovery audit` alert issue, which publishes the exact incident ID and dispatch inputs. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. Never edit lock state directly. |
 | Degraded cleanup report | Exact holder/queue cleanup is attempted; under schema 4 or newer, a removed holder becomes a quarantine | Use `report-validation-error` to correct the typed inputs. The rejected value is intentionally not logged. Treat the failed step and unknown cleanup as red, reconcile the resource, and recover only by exact reservation ID when one was created. |
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |
 | Runner unavailable | Licensed work must remain pending or red | Restore eligible runner capacity. Never turn an unavailable required job into skip/green. |
@@ -235,6 +235,47 @@ synchronized; the open issue carries the operational red state without making
 every scheduled monitor run itself fail. The workflow fails red when run
 history is unavailable, malformed, oversized, cross-origin, or otherwise
 ambiguous, or when incident synchronization cannot be confirmed.
+
+The independent `Build lock incident recovery audit` workflow runs at
+`2,12,22,32,42,52 * * * *`. It reads committed `lock-state` JSON through the
+workflow token, proves that any active global incident is internally consistent,
+and synchronizes one marker-identified alert issue carrying the exact incident
+identifier and the declared `recover-incident` inputs. Operators recover from
+that alert instead of reading lock state by hand. The alert body is
+deterministic, so an unchanged incident does not churn the issue. A recovered
+lock closes the alert without rewriting it, so the closed issue stays readable
+as the retained incident record.
+
+The audit covers the global account incident only. A runner quarantine is
+reclaimed by the same physical runner or auto-recovered by the scheduled reaper
+once the owning run is proven terminal, so alerting on one would add noise
+rather than remove manual work.
+
+The audit holds no writer, reader, or Unity credential and never writes lock
+state. It never opens, edits, or closes the alert on unprovable state: an
+unavailable, oversized, malformed, wrong-lock, unsupported-schema, or
+digest-inconsistent read fails the run red and leaves any existing alert exactly
+as it was. Publishing the alert never relaxes recovery, which still requires the
+exact incident identifier plus explicit portal-cleanup proof.
+
+Discovery asks only for the issues this automation created, so it stays bounded
+by that automation's own output rather than by the repository's issue history.
+Publication is self-verifying: after creating an alert the audit re-runs
+discovery and fails red unless it finds exactly what it just created, so a
+discovery filter that stopped matching cannot silently republish the alert on
+every run. Two conditions wedge the audit red until an operator intervenes:
+`duplicate alert issue evidence` means more than one automation-authored marker
+issue exists, and `alert issue pagination exceeded` means discovery ran past its
+page budget. For both, delete or retitle the extra automation-authored marker
+issue so exactly one remains; never resolve them by editing lock state.
+
+The alert is identified by its marker plus this automation's own authorship, not
+by its title. The repository is public, so a foreign-authored lookalike is
+ignored rather than adopted or treated as fatal; treating it as fatal would let
+any user suppress incident publication. Renaming the alert for context is
+therefore safe. Provenance that is awkward to render is escaped and truncated
+rather than rejected, because refusing to publish a provable incident is the
+failure this audit exists to prevent.
 
 The monitor is itself GitHub-scheduled, so it improves detection but does not
 create a bounded recovery SLO. If recovery must be guaranteed within 30

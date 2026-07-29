@@ -22,7 +22,8 @@ const (
 	incidentMarker   = "<!-- build-lock-reaper-delivery-monitor -->"
 	incidentActor    = "github-actions[bot]"
 	maxResponseBytes = 4 << 20
-	maxIssuePages    = 10
+	maxIssuePages    = 40
+	issuePageSize    = 30
 )
 
 var (
@@ -243,11 +244,24 @@ func (client *githubClient) syncIncident(ctx context.Context, repository string,
 	return err
 }
 
+// Discovery is restricted to the issues this automation created, so the walk is
+// bounded by its own output rather than by the repository's issue history, which
+// grows without limit. Ascending creation order keeps offsets stable.
 func (client *githubClient) findIncident(ctx context.Context, repository string) (*incidentIssue, error) {
 	if !repositoryPattern.MatchString(repository) {
 		return nil, errors.New("invalid incident repository")
 	}
-	next := fmt.Sprintf("/repos/%s/issues?state=all&per_page=100", escapeRepository(repository))
+	next := fmt.Sprintf(
+		"/repos/%s/issues?%s",
+		escapeRepository(repository),
+		url.Values{
+			"state":     {"all"},
+			"creator":   {incidentActor},
+			"sort":      {"created"},
+			"direction": {"asc"},
+			"per_page":  {strconv.Itoa(issuePageSize)},
+		}.Encode(),
+	)
 	var incident *incidentIssue
 	for page := 0; page < maxIssuePages && next != ""; page++ {
 		var issues []incidentIssue
