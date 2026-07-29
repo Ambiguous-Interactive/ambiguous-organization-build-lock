@@ -117,7 +117,12 @@ incomplete evidence.
 Synthetic or deliberately disabled Unity-shaped workflows require an explicit
 registry exception with repository, path, classification, owner, and RFC3339
 expiry. An expired, unused, duplicate, or unregistered exception is drift. A
-paid-serial job cannot be excepted from lifecycle enforcement.
+paid-serial job cannot be excepted from lifecycle enforcement. A canonical
+hosted recovery job is inventoried separately as `fallback-cleanup`; it must
+remain incapable of acquisition or activation and must prove exact
+literal source identity, a release-only failure-propagating job, and hosted
+aggregate coverage instead of pretending to perform a second paid Unity
+lifecycle.
 
 ## Credential and App boundary
 

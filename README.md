@@ -467,7 +467,11 @@ deduplicated issue; a complete clean audit closes it. The issue is the retained
 sanitized inventory for issue #42 and rollout tracker #30. Synthetic or disabled
 Unity-shaped files require an owned, expiring registry exception; paid-secret
 jobs cannot use exceptions to bypass acquire, cleanup, preflight, or aggregate
-requirements.
+requirements. Hosted runner-loss recovery jobs use the separate
+`fallback-cleanup` classification only when they have no acquisition,
+activation, or Unity credential path and their exact fail-closed release is
+the job's only executable action, uses the source acquire's literal identity,
+and is covered by a hosted always-reporting aggregate.
 
 Every run uploads the complete source-free JSON audit for 30 days. The central
 issue links that exact run artifact, reports total finding/inventory counts,
