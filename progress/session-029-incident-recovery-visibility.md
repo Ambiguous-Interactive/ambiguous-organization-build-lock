@@ -246,22 +246,23 @@ its own evidence requirements rather than guessed at: issue #139 for the
 seat-probing and automatic-recovery half of #132, and issue #140 for the
 deferred shared issue-synchronization client.
 
-### Incomplete: merge blocked on credential loss
+### Credential interruption
 
-The session's GitHub credential became invalid after the Bugbot remediation was
-committed. `gh api user` returns `Bad credentials` and pushes are rejected;
-re-authentication needs an interactive OAuth flow this session cannot run.
+The session credential became invalid partway through delivery and was restored
+later. During that window the Cursor Bugbot remediation and the round-2
+remediation were committed locally but could not be pushed, so pull request #138
+briefly pointed at a head carrying defects that were already fixed on disk. The
+record was kept accurate at each step rather than describing the fix as
+delivered.
 
-Both the Cursor Bugbot remediation and the round-2 remediation are therefore
-committed locally but **not pushed**. PR #138 still points at `5d145f1de`, which
-carries the high-severity discovery defect and the round-2 P1. Complete
-verification passes on the local head, the branch history contains no build
-artifact, and `git diff --check` is clean.
+### Reviewed and delivered
 
-The pull request must not be merged until the local head is pushed and CI is
-green on that exact head. This session did not merge and did not verify the
-default branch after merge; both remain outstanding, and `main` is unchanged at
-`91a430557`.
+After the credential was restored, head `e3440b422` was pushed. Build lock CI run
+`30421778584` passed on that exact head and the Dependabot auto-merge workflow
+skipped as expected. Cursor Bugbot re-reviewed the exact head and reported no
+issues; its earlier high-severity finding is resolved. GitHub Copilot was
+re-requested through the reviewer API and again returned quota exhaustion without
+code feedback.
 
 ## Continuous-improvement disposition
 
