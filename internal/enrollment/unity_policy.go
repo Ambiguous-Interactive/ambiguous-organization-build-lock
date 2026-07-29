@@ -15,7 +15,30 @@ const (
 	cleanupGateAction       = "require-confirmed-unity-cleanup"
 	preflightAction         = "check-unity-runner-availability"
 	releaseAction           = "release-build-lock"
+
+	UnityInventoryPaidSerial         = "paid-serial"
+	UnityInventoryFallbackCleanup    = "fallback-cleanup"
+	UnityInventoryControlledCanary   = "controlled-canary"
+	UnityInventorySynthetic          = "synthetic"
+	UnityInventoryDisabled           = "disabled"
+	UnityInventoryNonLicensingStatic = "non-licensing-static"
 )
+
+// ValidUnityInventoryClassification is the shared artifact-schema allowlist
+// used by both the analyzer and downstream consumers.
+func ValidUnityInventoryClassification(value string) bool {
+	switch value {
+	case UnityInventoryPaidSerial,
+		UnityInventoryFallbackCleanup,
+		UnityInventoryControlledCanary,
+		UnityInventorySynthetic,
+		UnityInventoryDisabled,
+		UnityInventoryNonLicensingStatic:
+		return true
+	default:
+		return false
+	}
+}
 
 // UnityPolicyException is a reviewed, expiring classification for a workflow
 // that contains Unity-shaped fixture or deliberately disabled content without
@@ -118,7 +141,8 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 			!strings.HasPrefix(clean, ".github/workflows/") {
 			return UnityEnrollmentResult{}, fmt.Errorf("policy exception path must be a normalized workflow YAML path")
 		}
-		if exception.Classification != "synthetic" && exception.Classification != "disabled" {
+		if exception.Classification != UnityInventorySynthetic &&
+			exception.Classification != UnityInventoryDisabled {
 			return UnityEnrollmentResult{}, fmt.Errorf("policy exception classification must be synthetic or disabled")
 		}
 		if strings.TrimSpace(exception.Owner) == "" || strings.ContainsAny(exception.Owner, "\r\n") {
@@ -216,13 +240,13 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				continue
 			}
 
-			classification := "non-licensing-static"
+			classification := UnityInventoryNonLicensingStatic
 			if fallbackCleanup {
-				classification = "fallback-cleanup"
+				classification = UnityInventoryFallbackCleanup
 			} else if paid {
-				classification = "paid-serial"
+				classification = UnityInventoryPaidSerial
 				if workflowDispatchOnly(workflow) {
-					classification = "controlled-canary"
+					classification = UnityInventoryControlledCanary
 				}
 			} else if exception, ok := a.exception(workflowPath); ok {
 				classification = exception.Classification
