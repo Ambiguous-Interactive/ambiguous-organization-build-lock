@@ -105,7 +105,14 @@ diff. It found no actionable issue. The exact incident remains bound at alert
 render time and is revalidated from fresh state by the existing recovery
 action; a changed incident fails closed. The monitor remains read-only.
 
-Pull-request CI and automated reviewer evidence are pending delivery.
+Pull request #145 opened at exact implementation head `0d9c9c401`. Build lock
+CI passed on that head. Cursor Bugbot reviewed that exact commit and found no
+new issue or review thread. GitHub Copilot was requested through both the
+reviewer API and a tagged comment; it responded that the requester's quota was
+exhausted and supplied no code feedback. This documentation-only finalization
+commit records those results; every later PR head remains subject to fresh CI
+and both supported reviewer triggers before merge, with the PR timeline as the
+authoritative final-head evidence.
 
 ## Continuous improvement
 
