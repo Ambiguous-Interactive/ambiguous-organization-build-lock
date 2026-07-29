@@ -122,5 +122,34 @@ reviewers. The count was corrected to 15 and the complete verifier passed
 again. A fresh final re-review of the revised snapshot reported no actionable
 findings.
 
-Pending pull-request review, release, consumer re-pin, and exact-main
-verification.
+## Completed delivery evidence
+
+Build-lock PR #136 was reviewed at exact head
+`bb284782c54e51c1d2ab6f6b0e62911690d0e494`. Cursor reported no actionable
+finding; Copilot returned quota exhaustion without code feedback. Build lock CI
+run `30416463217` passed. The PR was squash-merged as
+`6b7e4321f81fab1fde9c05f86c97c260c0280273`; push Build lock CI run
+`30416530625`, Organization Unity enrollment audit run `30416530628`, and the
+subsequent scheduled stale-lock reaper run `30416912134` all passed on that
+exact default-branch commit.
+
+Because the consumer accepts immutable commit pins, no mutable tag or release
+was required. Qora-redux PR #173 pinned only `acquire-build-lock` to the exact
+build-lock merge commit. The consumer review found one P3 record error: the
+first draft incorrectly claimed that an acquire-only pin adopted build-lock
+#123, whose changes are in separately pinned release and cleanup-gate actions.
+The root agent removed that claim from the record and PR description. Cursor's
+exact-head re-review of `902b6ce08941816ca10c0eea3cb2aab071efca61`
+reported no unresolved findings; Copilot again returned quota exhaustion.
+
+On that same consumer head, LLM Harness run `30417209813` passed and trusted
+Unity Tests run `30417209826` passed acquire, EditMode, PlayMode, positive
+license return, cleanup classification, lock release, no-residue fallback, and
+the aggregate `Unity CI` gate. Qora-redux PR #173 was then squash-merged as
+`9fa15b7047a2a66a4c45e37af9a8665081d30841`. Unrelated dependency freshness
+findings remain isolated in qora-redux issue #172.
+
+Issue #133 received the exact upstream, consumer, review, and workflow evidence
+and was closed completed. The deployed consumer pin now directs incident
+operators to the real proof-bearing recovery workflow without weakening
+admission, cleanup, or incident-recovery semantics.
