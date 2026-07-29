@@ -2512,11 +2512,17 @@ test("no tracked file is a compiled executable", () => {
     { name: "Mach-O", bytes: [0xce, 0xfa, 0xed, 0xfe] },
     { name: "Mach-O universal", bytes: [0xca, 0xfe, 0xba, 0xbe] }
   ];
-  const tracked = childProcess
-    .execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" })
-    .split("\0")
-    .filter(Boolean);
+  const git = (args) => childProcess.execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+  const assertNotExecutable = (label, header, read) => {
+    for (const magic of executableMagics) {
+      assert.ok(
+        !(read >= magic.bytes.length && magic.bytes.every((byte, index) => header[index] === byte)),
+        `${label} is a tracked ${magic.name} executable; build with -o outside the repository and add it to .gitignore`
+      );
+    }
+  };
 
+  const tracked = git(["ls-files", "-z"]).split("\0").filter(Boolean);
   assert.ok(tracked.length > 0, "tracked file inventory must not be empty");
   for (const relativeFile of tracked) {
     const file = path.join(repoRoot, relativeFile);
@@ -2529,11 +2535,40 @@ test("no tracked file is a compiled executable", () => {
     } finally {
       fs.closeSync(handle);
     }
-    for (const magic of executableMagics) {
-      assert.ok(
-        !(read >= magic.bytes.length && magic.bytes.every((byte, index) => header[index] === byte)),
-        `${relativeFile} is a tracked ${magic.name} executable; build with -o outside the repository and add it to .gitignore`
-      );
+    assertNotExecutable(relativeFile, header, read);
+  }
+
+  // Checking only the current tree would miss the very mistake this guards: a
+  // binary committed and later deleted still ships in the branch's history and
+  // is served from a public repository forever.
+  let range = null;
+  for (const base of ["origin/main", "main"]) {
+    try {
+      range = `${git(["merge-base", base, "HEAD"]).trim()}..HEAD`;
+      break;
+    } catch {
+      /* base not present in this checkout */
+    }
+  }
+  if (range === null) return;
+  for (const revision of git(["rev-list", range]).split("\n").filter(Boolean)) {
+    const introduced = git([
+      "diff-tree",
+      "--diff-filter=AM",
+      "-r",
+      "--no-commit-id",
+      "--name-only",
+      "-z",
+      revision
+    ])
+      .split("\0")
+      .filter(Boolean);
+    for (const entry of introduced) {
+      const blob = childProcess.execFileSync("git", ["show", `${revision}:${entry}`], {
+        cwd: repoRoot,
+        maxBuffer: 64 * 1024 * 1024
+      });
+      assertNotExecutable(`${entry} (introduced in ${revision.slice(0, 9)})`, blob, blob.length);
     }
   }
 });
@@ -2968,6 +3003,28 @@ test("incident monitor stays bound to the committed runtime's incident contract"
     monitorFields.slice().sort(),
     runtimeFields.slice().sort(),
     "the monitor's incident struct must accept exactly the runtime's incident fields"
+  );
+
+  // The digest is computed over a specific field list in a specific order. The
+  // monitor's pinned digest vectors only bind it against its own past output, so
+  // without this the runtime could add or reorder a digest field and every real
+  // incident would silently classify as unprovable, leaving the alert unopened.
+  const digestInput = runtime.match(
+    /function incidentEvidenceDigest\(incident\)[\s\S]*?JSON\.stringify\(\{([\s\S]*?)\n {4}\}\)/
+  );
+  assert.ok(digestInput, "incidentEvidenceDigest must keep a readable stringify literal");
+  const runtimeDigestFields = [...digestInput[1].matchAll(/^\s{6}([A-Za-z]+):/gm)].map((match) => match[1]);
+  const monitorDigestFields = [
+    ...monitor
+      .match(/type digestPayload struct \{([\s\S]*?)\n\}/)[1]
+      .matchAll(/`json:"([A-Za-z]+)"`/g)
+  ].map((match) => match[1]);
+
+  assert.ok(runtimeDigestFields.length > 0, "runtime digest fields must be discoverable");
+  assert.deepEqual(
+    monitorDigestFields,
+    runtimeDigestFields,
+    "the monitor's digest payload must match the runtime's digest input field-for-field, in order"
   );
 });
 

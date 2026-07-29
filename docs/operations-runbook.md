@@ -258,6 +258,17 @@ digest-inconsistent read fails the run red and leaves any existing alert exactly
 as it was. Publishing the alert never relaxes recovery, which still requires the
 exact incident identifier plus explicit portal-cleanup proof.
 
+Discovery asks only for the issues this automation created, so it stays bounded
+by that automation's own output rather than by the repository's issue history.
+Publication is self-verifying: after creating an alert the audit re-runs
+discovery and fails red unless it finds exactly what it just created, so a
+discovery filter that stopped matching cannot silently republish the alert on
+every run. Two conditions wedge the audit red until an operator intervenes:
+`duplicate alert issue evidence` means more than one automation-authored marker
+issue exists, and `alert issue pagination exceeded` means discovery ran past its
+page budget. For both, delete or retitle the extra automation-authored marker
+issue so exactly one remains; never resolve them by editing lock state.
+
 The alert is identified by its marker plus this automation's own authorship, not
 by its title. The repository is public, so a foreign-authored lookalike is
 ignored rather than adopted or treated as fatal; treating it as fatal would let

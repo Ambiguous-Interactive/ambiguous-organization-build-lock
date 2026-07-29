@@ -56,9 +56,10 @@
 - Error: unavailable, missing, oversized, malformed, trailing, unsupported
   schema, unknown-field, tampered-digest, foreign-author, and duplicate
   evidence all fail red without touching the alert.
-- Boundary/extreme: one-MiB bounded reads, ten-page bounded issue discovery,
-  200-byte provenance fields, 20-digit run identifiers, and canonical run URLs
-  bound to the configured server origin.
+- Boundary/extreme: one-MiB bounded state reads, four-MiB bounded issue reads,
+  discovery restricted to this automation's own issues over a bounded page
+  budget, 200-rune rendered provenance, 20-digit run identifiers, and canonical
+  run URLs bound to the configured server origin.
 - Concurrency/ordering: a stable concurrency group with cancellation disabled
   keeps a scheduled audit from replacing pending recovery.
 - Cancellation/recovery: the audit never writes lock state and never changes

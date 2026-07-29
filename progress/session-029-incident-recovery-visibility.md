@@ -80,9 +80,11 @@ workflow.
 Cross-runtime digest parity was verified empirically rather than assumed. The
 committed JavaScript `incidentEvidenceDigest` and the Go monitor produced
 identical SHA-256 values for live-shaped, HTML-character, non-ASCII, and
-escape-character provenance. Those runtime-produced digests are now pinned as
-Go regression vectors, so a future canonicalization change fails the suite
-instead of silently invalidating every published identifier.
+escape-character provenance. Those runtime-produced digests are pinned as Go
+regression vectors, which binds the monitor against its own past output. That
+alone would not have caught the runtime changing its digest input, so a contract
+test additionally binds the monitor's digest field list and order to the
+runtime's `incidentEvidenceDigest` literal.
 
 The GitHub contract was verified against the live public repository rather than
 inferred: the raw contents request returns HTTP 200 with
@@ -109,14 +111,16 @@ page always holds the newest 100 issues, so the size is driven by body growth
 rather than total issue count, but a single 60-KiB-capped alert body plus normal
 variance is enough to cross it.
 
-Raising the limit alone would only defer the failure, so the page size is now
+Raising the limit alone would only defer the failure, so the page size became
 the bound: discovery requests 30 issues per page against a 4 MiB response
 limit. GitHub caps an issue body at 64 KiB, so a full page cannot exceed roughly
-2 MiB however large the history grows, and the page budget was raised so
-coverage is unchanged. `cmd/reaper-delivery-audit` had the same shape with more
-headroom and was aligned. Each affected tool gained a regression that walks
-multiple pages of maximum-size issues and asserts the response stays inside its
-bound.
+2 MiB however large the history grows. `cmd/reaper-delivery-audit` had the same
+shape with more headroom and was aligned. Each affected tool gained a regression
+that walks multiple pages of maximum-size issues and asserts the response stays
+inside its bound.
+
+Bounding each response did not bound the walk itself, which is the defect Cursor
+Bugbot found next and which the reviewer round below records.
 
 ## Validation, review, and delivery
 
@@ -125,7 +129,7 @@ Fresh complete local verification passed:
 ```text
 .devcontainer/scripts/verify.sh
 LLM harness checks passed.
-tests 602; pass 602; fail 0
+tests 604; pass 604; fail 0
 all Go packages passed
 all modules verified
 Workflow credential-literal policy passed.
@@ -151,7 +155,7 @@ Every finding and its disposition:
 | P1 | Rejecting a backtick, pipe, or long name classified a genuinely provable incident as unprovable, so the alert would never open. | Fixed. Validation now rejects only what makes evidence unprovable; rendering escapes and truncates instead. |
 | P1 | The task record cited review evidence that did not exist in the referenced progress log. | Fixed by this section. |
 | P2 | Exact-title matching orphaned a renamed alert and could wedge the audit on a rename-back. | Fixed. Identity is marker plus authorship; the title is restored by the update. |
-| P2 | Offset pagination over a newest-first list could skip an alert and publish a duplicate. | Fixed by ordering discovery by ascending creation so accumulating issues cannot shift earlier offsets. The reviewer's suggested `Link` traversal uses the same offsets and would not have fixed the race. |
+| P2 | Offset pagination over a newest-first list could skip an alert and publish a duplicate. | Fixed, but the first fix and its stated rationale were both wrong. Ascending order stabilized offsets yet made every run walk the whole issue history, which Cursor Bugbot then found. The rationale for rejecting the reviewer's `Link` suggestion was false: measured against the live API, `/issues` `rel="next"` carries an opaque `after=` cursor, so Link traversal is cursor-based and would have avoided both the race and the history walk. The accepted fix is server-side `creator` scoping, which also bounds the walk. Two monitors now use page offsets and one uses Link cursors; that divergence belongs to #140. |
 | P2 | Nothing bound the monitor's schema ceiling or incident field set to the committed runtime, so a future runtime change would silently stop publication. | Fixed. A contract test binds both, proven red against a bumped ceiling and a removed field. |
 | P2 | Failure diagnostics collapsed distinct causes into two strings, and a size bound was checked before the status code. | Fixed. The sanitized error class is reported and status is checked first. |
 | P2 | The GitHub client is a third copy of an existing one; the duplication itself produced several of these findings. | Accepted, deferred. The argument is sound, but extracting a shared package rewrites three production monitors and belongs in its own reviewed change rather than in a recovery-visibility PR. Filed as follow-up. |
@@ -197,6 +201,32 @@ stalling discovery.
 
 GitHub Copilot was requested through the reviewer API and returned quota
 exhaustion without code feedback, as in the preceding sessions.
+
+## Independent review round 2
+
+A second independent adversarial sub-agent reviewed the remediated diff with the
+round-1 dispositions in hand and an explicit brief to verify each remediation
+empirically rather than by reading the record. It confirmed the history rewrite,
+re-rendered the alert's escaping through GitHub's own Markdown renderer, and
+measured Go against Node for control-character parity. Verdict: blocking.
+
+| Severity | Finding | Disposition |
+| --- | --- | --- |
+| P1 | The runtime-binding contract test bound the schema ceiling and the incident field names, but nothing bound the digest input's field list and order. A runtime change there would classify every real incident as unprovable, leaving the audit red and the alert unopened, with the whole suite still green. The progress record asserted protection that did not exist. | Fixed. The contract test now binds the digest field list order-sensitively, proven red by reordering two fields. The record claim is corrected. |
+| P2 | Creation was not self-verifying. If the discovery filter ever stopped matching, the audit would publish a new alert every ten minutes and exit zero: an unbounded write with no operator signal. | Fixed. Publication re-runs discovery and fails red unless it finds exactly what it created, with a regression that simulates a filter that stopped matching. |
+| P2 | The round-1 rejection of the reviewer's `Link` suggestion rested on a false technical claim. | Fixed. Measured against the live API and corrected in the round-1 table; the divergence between the two pagination strategies is recorded for #140. |
+| P3 | `provableText` rejected U+007F although both runtimes encode it identically, so a provable incident could be classified unprovable. | Fixed. Measured Go against Node for U+007F, U+0008, U+000C, and U+2028; only U+2028/U+2029 diverge. DEL is accepted and the comment now states the real reasons. |
+| P3 | The tracked-binary guard scanned only the current tree, so the very commit it was written for would have passed it. | Fixed. It now also walks blobs introduced by each branch commit, proven red against a binary added and then deleted in history. |
+| P3 | The table-integrity assertion counts characters and cannot detect a cell split; no backslash-bearing input was covered. | Fixed. Pre-escaped pipe, trailing backslash, and long backtick-run cases were added with exact expected cells. |
+| P3 | No test asserted the stable ordering parameters, so dropping the round-1 fix would pass. | Fixed. |
+| P3 | Two permanently-red terminal states had no operator procedure. | Fixed in the runbook. |
+| P3 | Stale contract numbers in the task record and stale claims in the progress record. | Fixed. |
+| P3 | The alert issue's decoded title is never read. | Fixed. Removed. |
+| P3 | Duplicate handling now diverges across the three copies. | Accepted, deferred to #140 with the other divergence. |
+
+The reviewer independently confirmed the two round-1 findings rejected with
+evidence, and confirmed that deferring the shared-client extraction does not
+block while noting that this change is the strongest argument yet for doing it.
 
 ## Delivery evidence
 

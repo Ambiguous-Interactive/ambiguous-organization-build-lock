@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -170,6 +171,7 @@ func TestClassifyStateRejectsUnprovableIncidentEvidence(t *testing.T) {
 		{name: "timestamp", edit: func(active *incident) { active.ReportedAt = "yesterday" }},
 		{name: "reason", edit: func(active *incident) { active.Reason = "unity-return-400006" }, rebuild: true},
 		{name: "control character in runner", edit: func(active *incident) { active.RunnerID = "ELI\nMACHINE" }, rebuild: true},
+		{name: "tab in workflow", edit: func(active *incident) { active.Workflow = "Unity\tTests" }, rebuild: true},
 		{name: "line separator in workflow", edit: func(active *incident) { active.Workflow = "Unity\u2028Tests" }, rebuild: true},
 		{name: "paragraph separator in job", edit: func(active *incident) { active.Job = "edit\u2029mode" }, rebuild: true},
 	}
@@ -212,6 +214,30 @@ func TestProvableIncidentIsAlwaysPublishable(t *testing.T) {
 			edit: func(active *incident) { active.RunnerID = "`ELI`" },
 			expected: []string{
 				"| Runner | `` `ELI` `` |",
+			},
+		},
+		{
+			// GitHub Flavored Markdown's cell scanner is maximal-munch, so an
+			// already-escaped pipe is absorbed rather than splitting the cell. These
+			// exact renderings were confirmed against GitHub's own renderer.
+			name: "pre-escaped pipe in job",
+			edit: func(active *incident) { active.Job = `a\|b` },
+			expected: []string{
+				"| Job | `a\\\\|b` |",
+			},
+		},
+		{
+			name: "trailing backslash in runner",
+			edit: func(active *incident) { active.RunnerID = `ELI\` },
+			expected: []string{
+				"| Runner | `ELI\\` |",
+			},
+		},
+		{
+			name: "long backtick run in workflow",
+			edit: func(active *incident) { active.Workflow = "```a|b```" },
+			expected: []string{
+				"| Workflow | ```` ```a\\|b``` ```` |",
 			},
 		},
 		{
@@ -446,6 +472,8 @@ type stubGitHub struct {
 	stateBody  []byte
 	stateFail  int
 	issuesFail int
+	mutex      sync.Mutex
+	published  []map[string]any
 }
 
 func (stub *stubGitHub) handler() http.Handler {
@@ -464,12 +492,15 @@ func (stub *stubGitHub) handler() http.Handler {
 				return
 			}
 			writer.Header().Set("Content-Type", "application/json")
-			_, _ = writer.Write([]byte(stub.issues))
+			_, _ = writer.Write([]byte(stub.currentIssues()))
 		case request.Method == http.MethodPost && request.URL.Path == "/repos/owner/repo/issues":
 			stub.created.Add(1)
 			stub.record(request)
+			// Real GitHub returns the created issue from later listings, and the
+			// audit relies on that to prove its own publication is discoverable.
+			stub.publish()
 			writer.WriteHeader(http.StatusCreated)
-			_, _ = writer.Write([]byte(`{"number":1}`))
+			_, _ = writer.Write([]byte(`{"number":4242}`))
 		case request.Method == http.MethodPatch && strings.HasPrefix(request.URL.Path, "/repos/owner/repo/issues/"):
 			stub.patched.Add(1)
 			stub.record(request)
@@ -478,6 +509,38 @@ func (stub *stubGitHub) handler() http.Handler {
 			stub.t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
 			writer.WriteHeader(http.StatusNotFound)
 		}
+	})
+}
+
+// currentIssues returns the seeded listing plus anything this stub published, so
+// discovery behaves like the real API rather than a frozen fixture.
+func (stub *stubGitHub) currentIssues() string {
+	stub.mutex.Lock()
+	defer stub.mutex.Unlock()
+	listing := []map[string]any{}
+	if stub.issues != "" {
+		if err := json.Unmarshal([]byte(stub.issues), &listing); err != nil {
+			stub.t.Fatalf("seeded issue fixture is not a list: %v", err)
+		}
+	}
+	listing = append(listing, stub.published...)
+	encoded, err := json.Marshal(listing)
+	if err != nil {
+		stub.t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func (stub *stubGitHub) publish() {
+	stub.mutex.Lock()
+	defer stub.mutex.Unlock()
+	body, _ := stub.lastBody.Load().(string)
+	stub.published = append(stub.published, map[string]any{
+		"number": 4242,
+		"state":  "open",
+		"title":  alertTitle,
+		"body":   body,
+		"user":   map[string]any{"login": alertAuthor},
 	})
 }
 
@@ -714,6 +777,9 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 		if query.Get("creator") != alertAuthor {
 			t.Errorf("discovery must be restricted to this automation's own issues, got creator %q", query.Get("creator"))
 		}
+		if query.Get("sort") != "created" || query.Get("direction") != "asc" {
+			t.Errorf("discovery must keep offsets stable, got sort=%q direction=%q", query.Get("sort"), query.Get("direction"))
+		}
 		encoded, err := json.Marshal(pages[request.URL.Query().Get("page")])
 		if err != nil {
 			t.Fatal(err)
@@ -786,6 +852,50 @@ func TestRenamedAlertIsStillTheSameAlert(t *testing.T) {
 	}
 	if stub.created.Load() != 0 || stub.patched.Load() != 1 {
 		t.Fatalf("renamed alert must be updated, not duplicated: created %d patched %d", stub.created.Load(), stub.patched.Load())
+	}
+}
+
+// If discovery ever stops resolving what this automation created, an unverified
+// create would republish the alert on every scheduled run while the audit stayed
+// green. That is an unbounded write with no operator signal, so publication must
+// prove itself and fail red instead.
+func TestUndiscoverablePublicationFailsInsteadOfRepublishing(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case strings.HasPrefix(request.URL.Path, "/repos/owner/repo/contents/"):
+			_, _ = writer.Write(stateFixture(t, &active))
+		case request.Method == http.MethodGet:
+			// A discovery filter that has silently stopped matching.
+			_, _ = writer.Write([]byte(`[]`))
+		default:
+			writer.WriteHeader(http.StatusCreated)
+			_, _ = writer.Write([]byte(`{"number":4242}`))
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr strings.Builder
+	code := run(
+		context.Background(),
+		config{
+			Lock:       testLock,
+			StateRef:   "lock-state",
+			Repository: "owner/repo",
+			APIURL:     server.URL,
+			ServerURL:  testServerURL,
+			Token:      "test-token",
+		},
+		server.Client(),
+		&stdout,
+		&stderr,
+	)
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1 when the published alert cannot be rediscovered", code)
+	}
+	if !strings.Contains(stderr.String(), "not discoverable") {
+		t.Fatalf("failure must name the undiscoverable publication, got %q", stderr.String())
 	}
 }
 

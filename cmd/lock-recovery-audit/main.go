@@ -106,7 +106,6 @@ type observation struct {
 type alertIssue struct {
 	Number      int             `json:"number"`
 	State       string          `json:"state"`
-	Title       string          `json:"title"`
 	Body        string          `json:"body"`
 	PullRequest json.RawMessage `json:"pull_request"`
 	User        struct {
@@ -323,18 +322,19 @@ func validIncident(active incident, serverURL string) bool {
 	return true
 }
 
-// provableText rejects only what makes the evidence itself unprovable: an empty
-// value, or a separator whose JSON encoding differs between Go and the committed
-// JavaScript runtime and would therefore break digest parity. Anything else is a
-// rendering concern, handled by codeCell. A provable incident must always be
-// publishable, because refusing to publish one is the failure this audit exists
-// to prevent.
+// provableText rejects an empty value, the two separators whose JSON encoding
+// differs between Go and the committed JavaScript runtime and would therefore
+// break digest parity (measured: Go escapes U+2028/U+2029, the runtime emits
+// them raw), and control characters below U+0020, which end a Markdown table row
+// so codeCell cannot repair them. Everything else is a rendering concern that
+// codeCell handles, because refusing to publish a provable incident is the
+// failure this audit exists to prevent.
 func provableText(value string) bool {
 	if value == "" {
 		return false
 	}
 	for _, symbol := range value {
-		if symbol < 0x20 || symbol == 0x7f || symbol == '\u2028' || symbol == '\u2029' {
+		if symbol < 0x20 || symbol == '\u2028' || symbol == '\u2029' {
 			return false
 		}
 	}
@@ -495,15 +495,7 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 
 	body := alertBody(*result.Incident, result.Lock, serverURL, client.repository)
 	if existing == nil {
-		_, err := client.request(
-			ctx,
-			http.MethodPost,
-			client.repositoryPath("/issues"),
-			map[string]any{"title": alertTitle, "body": body},
-			"application/vnd.github+json",
-			maxResponseBytes,
-		)
-		return err
+		return client.publishAlert(ctx, body)
 	}
 	if existing.State == "open" && existing.Body == body {
 		// The alert already carries this exact evidence; rewriting it would churn
@@ -515,6 +507,38 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 		existing.Number,
 		map[string]any{"title": alertTitle, "body": body, "state": "open"},
 	)
+}
+
+// publishAlert creates the alert and then proves discovery can find exactly what
+// it created. Without that proof, a discovery filter that silently stopped
+// matching would republish the alert on every scheduled run while the audit
+// stayed green, turning a lookup failure into unbounded issue creation.
+func (client *githubClient) publishAlert(ctx context.Context, body string) error {
+	content, err := client.request(
+		ctx,
+		http.MethodPost,
+		client.repositoryPath("/issues"),
+		map[string]any{"title": alertTitle, "body": body},
+		"application/vnd.github+json",
+		maxResponseBytes,
+	)
+	if err != nil {
+		return err
+	}
+	var created struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(content, &created); err != nil || created.Number <= 0 {
+		return errors.New("published alert identity is unreadable")
+	}
+	published, err := client.findAlert(ctx)
+	if err != nil {
+		return err
+	}
+	if published == nil || published.Number != created.Number {
+		return errors.New("published alert is not discoverable; discovery would republish it")
+	}
+	return nil
 }
 
 func (client *githubClient) patchAlert(ctx context.Context, number int, payload map[string]any) error {
