@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -184,7 +182,10 @@ func TestGitHubClientRejectsCrossOriginRedirectBeforeCredentialForwarding(t *tes
 	}))
 	defer source.Close()
 
-	client, err := newGitHubClient(cliConfig{APIURL: source.URL, Token: "test-token"}, source.Client())
+	client, err := newGitHubClient(
+		cliConfig{APIURL: source.URL, Repository: "owner/repo", Token: "test-token"},
+		source.Client(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +194,27 @@ func TestGitHubClientRejectsCrossOriginRedirectBeforeCredentialForwarding(t *tes
 	}
 	if redirected.Load() {
 		t.Fatal("cross-origin redirect reached the destination")
+	}
+}
+
+func TestWorkflowRunsRejectsRepositoryMismatchBeforeRequest(t *testing.T) {
+	t.Parallel()
+	var requested atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requested.Store(true)
+	}))
+	defer server.Close()
+
+	client := testGitHubClient(server.URL, server.Client())
+	if _, err := client.workflowRuns(
+		t.Context(),
+		"other/repository",
+		"reap-stale-locks.yml",
+	); err == nil {
+		t.Fatal("workflowRuns accepted a repository other than the configured one")
+	}
+	if requested.Load() {
+		t.Fatal("repository mismatch reached the server")
 	}
 }
 
@@ -207,7 +229,7 @@ func TestSyncIncidentDeduplicatesAndTransitionsOneIssue(t *testing.T) {
 		wantState  string
 	}{
 		{"create alert", nil, false, http.MethodPost, "/repos/owner/repo/issues", ""},
-		{"update open alert", &incidentIssue{Number: 77, State: "open", Title: incidentTitle, Body: incidentMarker}, false, http.MethodPatch, "/repos/owner/repo/issues/77", ""},
+		{"update open alert", &incidentIssue{Number: 77, State: "open", Title: incidentTitle, Body: incidentMarker}, false, http.MethodPatch, "/repos/owner/repo/issues/77", "open"},
 		{"reopen closed alert", &incidentIssue{Number: 77, State: "closed", Title: incidentTitle, Body: incidentMarker}, false, http.MethodPatch, "/repos/owner/repo/issues/77", "open"},
 		{"close recovered alert", &incidentIssue{Number: 77, State: "open", Title: incidentTitle, Body: incidentMarker}, true, http.MethodPatch, "/repos/owner/repo/issues/77", "closed"},
 		{"leave closed healthy incident unchanged", &incidentIssue{Number: 77, State: "closed", Title: incidentTitle, Body: incidentMarker}, true, "", "", ""},
@@ -252,32 +274,6 @@ func TestSyncIncidentDeduplicatesAndTransitionsOneIssue(t *testing.T) {
 				t.Fatalf("mutation = %s %s state %q, want %s %s state %q", mutationMethod, mutationPath, mutationState, test.wantMethod, test.wantPath, test.wantState)
 			}
 		})
-	}
-}
-
-func TestSyncIncidentFollowsBoundedSameOriginPagination(t *testing.T) {
-	t.Parallel()
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		page, _ := strconv.Atoi(request.URL.Query().Get("page"))
-		if page == 0 {
-			page = 1
-		}
-		if page == 1 {
-			writer.Header().Set("Link", `<`+server.URL+`/repos/owner/repo/issues?state=all&per_page=100&page=2>; rel="next"`)
-			fmt.Fprint(writer, `[]`)
-			return
-		}
-		issue := incidentIssue{Number: 88, State: "open", Title: incidentTitle, Body: incidentMarker}
-		issue.User.Login = incidentActor
-		json.NewEncoder(writer).Encode([]incidentIssue{issue})
-	}))
-	defer server.Close()
-
-	client := testGitHubClient(server.URL, server.Client())
-	observation := classifyRuns(testNow, nil, 30*time.Minute, 15*time.Minute)
-	if err := client.syncIncident(context.Background(), "owner/repo", observation); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -336,20 +332,6 @@ func TestSyncIncidentRejectsUntrustedOrDuplicateMarkerIssues(t *testing.T) {
 				t.Fatalf("untrusted marker resulted in %d creates, want 1", creates)
 			}
 		})
-	}
-}
-
-func TestSyncIncidentRejectsCrossOriginPagination(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Link", `<https://example.invalid/issues?page=2>; rel="next"`)
-		fmt.Fprint(writer, `[]`)
-	}))
-	defer server.Close()
-
-	client := testGitHubClient(server.URL, server.Client())
-	if err := client.syncIncident(context.Background(), "owner/repo", classifyRuns(testNow, nil, 30*time.Minute, 15*time.Minute)); err == nil {
-		t.Fatal("syncIncident followed cross-origin pagination")
 	}
 }
 
@@ -424,9 +406,12 @@ func TestRunFailsClosedAfterSynchronizingAmbiguousEvidence(t *testing.T) {
 }
 
 func testGitHubClient(baseURL string, httpClient *http.Client) *githubClient {
-	parsed, err := url.Parse(baseURL)
+	client, err := newGitHubClient(
+		cliConfig{APIURL: baseURL, Repository: "owner/repo", Token: "test-token"},
+		httpClient,
+	)
 	if err != nil {
 		panic(err)
 	}
-	return &githubClient{baseURL: parsed, token: "test-token", httpClient: httpClient}
+	return client
 }

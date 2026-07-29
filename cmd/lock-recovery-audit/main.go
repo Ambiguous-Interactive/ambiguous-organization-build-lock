@@ -24,9 +24,10 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
 )
 
 const (
@@ -47,13 +48,9 @@ const (
 	reasonStateUnavailable = "lock-state-unavailable"
 	reasonSyncFailed       = "alert-sync-failed"
 
-	maxStateBytes    = 1 << 20
-	maxResponseBytes = 4 << 20
-	// GitHub caps an issue body at 64 KiB, so a 30-item page cannot exceed
-	// roughly 2 MiB of body plus envelope and stays provably inside the bound
-	// however large the repository's issue history grows.
-	issuePageSize     = 30
-	maxIssuePages     = 40
+	maxStateBytes     = 1 << 20
+	maxResponseBytes  = githubissue.DefaultResponseLimit
+	issuePageSize     = githubissue.DefaultPageSize
 	maxRenderedRunes  = 200
 	maxIdentifierText = 20
 
@@ -103,15 +100,7 @@ type observation struct {
 	Incident *incident
 }
 
-type alertIssue struct {
-	Number      int             `json:"number"`
-	State       string          `json:"state"`
-	Body        string          `json:"body"`
-	PullRequest json.RawMessage `json:"pull_request"`
-	User        struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
+type alertIssue = githubissue.Issue
 
 type config struct {
 	Lock       string
@@ -123,10 +112,8 @@ type config struct {
 }
 
 type githubClient struct {
-	base       *url.URL
 	repository string
-	token      string
-	http       *http.Client
+	issues     *githubissue.Client
 }
 
 func main() {
@@ -464,205 +451,61 @@ func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) 
 	if !repositoryPattern.MatchString(repository) || strings.TrimSpace(token) == "" || httpClient == nil {
 		return nil, errors.New("invalid GitHub client configuration")
 	}
-	fenced := *httpClient
-	fenced.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return errors.New("redirects are not allowed")
+	issues, err := githubissue.New(githubissue.Options{
+		APIURL:     base.String(),
+		Repository: repository,
+		Token:      token,
+		UserAgent:  "ambiguous-build-lock-recovery-audit",
+		HTTPClient: httpClient,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return &githubClient{base: base, repository: repository, token: token, http: &fenced}, nil
+	return &githubClient{repository: repository, issues: issues}, nil
 }
 
 func (client *githubClient) lockState(ctx context.Context, lock, ref string) ([]byte, error) {
-	path := client.repositoryPath(
+	path := client.issues.RepositoryPath(
 		"/contents/locks/" + url.PathEscape(lock+".json") + "?ref=" + url.QueryEscape(ref),
 	)
-	return client.request(ctx, http.MethodGet, path, nil, "application/vnd.github.raw", maxStateBytes)
+	content, _, err := client.issues.Request(
+		ctx,
+		http.MethodGet,
+		path,
+		nil,
+		"application/vnd.github.raw",
+		maxStateBytes,
+	)
+	return content, err
 }
 
 func (client *githubClient) syncAlert(ctx context.Context, result observation, serverURL string) error {
-	existing, err := client.findAlert(ctx)
-	if err != nil {
-		return err
-	}
-
 	if result.Reason != reasonIncidentActive {
 		// Recovery closes the alert but never rewrites it. The last published
 		// incident stays readable as the retained operator record.
-		if existing == nil || existing.State == "closed" {
-			return nil
-		}
-		return client.patchAlert(ctx, existing.Number, map[string]any{"state": "closed"})
+		_, err := client.issues.Sync(
+			ctx,
+			alertIdentity(),
+			githubissue.Desired{State: "closed", PreserveBodyOnClose: true},
+		)
+		return err
 	}
 
 	body := alertBody(*result.Incident, result.Lock, serverURL, client.repository)
-	if existing == nil {
-		return client.publishAlert(ctx, body)
-	}
-	if existing.State == "open" && existing.Body == body {
-		// The alert already carries this exact evidence; rewriting it would churn
-		// the operator's record without adding information.
-		return nil
-	}
-	return client.patchAlert(
+	_, err := client.issues.Sync(
 		ctx,
-		existing.Number,
-		map[string]any{"title": alertTitle, "body": body, "state": "open"},
-	)
-}
-
-// publishAlert creates the alert and then proves discovery can find exactly what
-// it created. Without that proof, a discovery filter that silently stopped
-// matching would republish the alert on every scheduled run while the audit
-// stayed green, turning a lookup failure into unbounded issue creation.
-func (client *githubClient) publishAlert(ctx context.Context, body string) error {
-	content, err := client.request(
-		ctx,
-		http.MethodPost,
-		client.repositoryPath("/issues"),
-		map[string]any{"title": alertTitle, "body": body},
-		"application/vnd.github+json",
-		maxResponseBytes,
-	)
-	if err != nil {
-		return err
-	}
-	var created struct {
-		Number int `json:"number"`
-	}
-	if err := json.Unmarshal(content, &created); err != nil || created.Number <= 0 {
-		return errors.New("published alert identity is unreadable")
-	}
-	published, err := client.findAlert(ctx)
-	if err != nil {
-		return err
-	}
-	if published == nil || published.Number != created.Number {
-		return errors.New("published alert is not discoverable; discovery would republish it")
-	}
-	return nil
-}
-
-func (client *githubClient) patchAlert(ctx context.Context, number int, payload map[string]any) error {
-	_, err := client.request(
-		ctx,
-		http.MethodPatch,
-		client.repositoryPath("/issues/"+strconv.Itoa(number)),
-		payload,
-		"application/vnd.github+json",
-		maxResponseBytes,
+		alertIdentity(),
+		githubissue.Desired{
+			State:             "open",
+			Title:             alertTitle,
+			Body:              body,
+			AllowRenamedTitle: true,
+			VerifyCreate:      true,
+		},
 	)
 	return err
 }
 
-// alertQuery restricts discovery to the issues this automation created. Scanning
-// the whole issue list would grow with the repository forever and eventually
-// exceed the page budget, at which point discovery of a real alert would fail.
-// Ascending creation order additionally keeps offsets stable, so a concurrently
-// created issue cannot shift an alert out of the walk.
-func alertQuery(page int) url.Values {
-	return url.Values{
-		"state":     {"all"},
-		"creator":   {alertAuthor},
-		"sort":      {"created"},
-		"direction": {"asc"},
-		"per_page":  {strconv.Itoa(issuePageSize)},
-		"page":      {strconv.Itoa(page)},
-	}
-}
-
-// findAlert resolves at most one alert that this automation owns. A foreign
-// author or a duplicate marker is ambiguous evidence and fails closed rather
-// than letting an untrusted issue be adopted or overwritten.
-func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) {
-	var found *alertIssue
-	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath("/issues?" + alertQuery(page).Encode())
-		content, err := client.request(ctx, http.MethodGet, path, nil, "application/vnd.github+json", maxResponseBytes)
-		if err != nil {
-			return nil, err
-		}
-		var issues []alertIssue
-		if err := json.Unmarshal(content, &issues); err != nil {
-			return nil, errors.New("decode issue list")
-		}
-		for index := range issues {
-			candidate := issues[index]
-			pullRequest := strings.TrimSpace(string(candidate.PullRequest))
-			// The marker plus this automation's own authorship is the alert's
-			// identity. The repository is public and both the title and the marker
-			// are published, so a foreign-authored lookalike must be skipped rather
-			// than adopted or treated as fatal: making it fatal would let any user
-			// permanently suppress incident publication. The title is presentation
-			// only, so an operator rename cannot orphan the alert either.
-			if (pullRequest != "" && pullRequest != "null") ||
-				candidate.User.Login != alertAuthor ||
-				!strings.Contains(candidate.Body, alertMarker) {
-				continue
-			}
-			if candidate.Number <= 0 || candidate.State != "open" && candidate.State != "closed" {
-				return nil, errors.New("invalid alert issue evidence")
-			}
-			if found != nil && found.Number != candidate.Number {
-				return nil, errors.New("duplicate alert issue evidence")
-			}
-			found = &candidate
-		}
-		if len(issues) < issuePageSize {
-			return found, nil
-		}
-	}
-	return nil, errors.New("alert issue pagination exceeded")
-}
-
-func (client *githubClient) repositoryPath(suffix string) string {
-	parts := strings.Split(client.repository, "/")
-	return "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + suffix
-}
-
-func (client *githubClient) request(
-	ctx context.Context,
-	method, path string,
-	payload map[string]any,
-	accept string,
-	limit int,
-) ([]byte, error) {
-	reference, err := url.Parse(path)
-	if err != nil {
-		return nil, errors.New("invalid GitHub API endpoint")
-	}
-	endpoint := client.base.ResolveReference(reference)
-	if !strings.EqualFold(endpoint.Scheme, client.base.Scheme) || !strings.EqualFold(endpoint.Host, client.base.Host) {
-		return nil, errors.New("cross-origin GitHub API endpoint rejected")
-	}
-	var body io.Reader
-	if payload != nil {
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return nil, errors.New("encode request failed")
-		}
-		body = bytes.NewReader(encoded)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
-	if err != nil {
-		return nil, errors.New("create request failed")
-	}
-	request.Header.Set("Accept", accept)
-	request.Header.Set("Authorization", "Bearer "+client.token)
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	request.Header.Set("User-Agent", "ambiguous-build-lock-recovery-audit")
-	if payload != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	response, err := client.http.Do(request)
-	if err != nil {
-		return nil, errors.New("GitHub API request failed")
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
-	if err != nil || len(content) > limit {
-		return nil, errors.New("GitHub API response exceeded limit")
-	}
-	return content, nil
+func alertIdentity() githubissue.Identity {
+	return githubissue.Identity{Marker: alertMarker, Author: alertAuthor}
 }

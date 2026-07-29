@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,10 +12,10 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
 )
 
 const (
@@ -24,9 +23,8 @@ const (
 	alertAuthor          = "github-actions[bot]"
 	alertTitle           = "policy: organization Unity enrollment drift detected"
 	maxAuditBytes        = 4 * 1024 * 1024
-	maxResponseBytes     = 4 * 1024 * 1024
-	maxIssuePages        = 40
-	issuePageSize        = 30
+	maxResponseBytes     = githubissue.DefaultResponseLimit
+	issuePageSize        = githubissue.DefaultPageSize
 	maxAuditRows         = 4096
 	maxIssueBodyBytes    = 60 * 1024
 	maxEvidenceURLBytes  = 2048
@@ -35,22 +33,10 @@ const (
 	maxRenderedInventory = 16
 )
 
-type issue struct {
-	Number      int             `json:"number"`
-	State       string          `json:"state"`
-	Title       string          `json:"title"`
-	Body        string          `json:"body"`
-	PullRequest json.RawMessage `json:"pull_request"`
-	User        struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
+type issue = githubissue.Issue
 
 type githubClient struct {
-	base       *url.URL
-	repository string
-	token      string
-	http       *http.Client
+	issues *githubissue.Client
 }
 
 func main() {
@@ -225,16 +211,17 @@ func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) 
 		strings.TrimSpace(token) == "" || httpClient == nil {
 		return nil, fmt.Errorf("invalid GitHub issue client configuration")
 	}
-	copyClient := *httpClient
-	copyClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		return errors.New("redirects are not allowed")
+	issues, err := githubissue.New(githubissue.Options{
+		APIURL:     base.String(),
+		Repository: repository,
+		Token:      token,
+		UserAgent:  "ambiguous-build-lock-unity-enrollment-audit",
+		HTTPClient: httpClient,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return &githubClient{
-		base:       base,
-		repository: repository,
-		token:      token,
-		http:       &copyClient,
-	}, nil
+	return &githubClient{issues: issues}, nil
 }
 
 func (client *githubClient) sync(
@@ -242,89 +229,25 @@ func (client *githubClient) sync(
 	audit enrollment.UnityOrganizationAudit,
 	evidenceURL string,
 ) error {
-	existing, err := client.findAlert(ctx)
-	if err != nil {
-		return err
-	}
 	clean := audit.Complete && len(audit.Findings) == 0
-	if clean && existing == nil {
-		return nil
-	}
 	body := renderIssueBody(audit, evidenceURL)
 	if len(body) > maxIssueBodyBytes {
 		return fmt.Errorf("sanitized issue body exceeds bound")
-	}
-	if existing == nil {
-		_, err = client.request(ctx, http.MethodPost, client.repositoryPath("/issues"), map[string]any{
-			"title": alertTitle,
-			"body":  body,
-		})
-		return err
 	}
 	state := "open"
 	if clean {
 		state = "closed"
 	}
-	_, err = client.request(
+	_, err := client.issues.Sync(
 		ctx,
-		http.MethodPatch,
-		client.repositoryPath("/issues/"+strconv.Itoa(existing.Number)),
-		map[string]any{"title": alertTitle, "body": body, "state": state},
+		alertIdentity(),
+		githubissue.Desired{Title: alertTitle, Body: body, State: state},
 	)
 	return err
 }
 
-// alertQuery restricts discovery to the issues this automation created. Scanning
-// the whole issue list would grow with the repository forever and eventually
-// exceed the page budget, at which point discovery of a real alert would fail.
-// Ascending creation order additionally keeps offsets stable, so a concurrently
-// created issue cannot shift the alert out of the walk.
-func alertQuery(page int) url.Values {
-	return url.Values{
-		"state":     {"all"},
-		"creator":   {alertAuthor},
-		"sort":      {"created"},
-		"direction": {"asc"},
-		"per_page":  {strconv.Itoa(issuePageSize)},
-		"page":      {strconv.Itoa(page)},
-	}
-}
-
-func (client *githubClient) findAlert(ctx context.Context) (*issue, error) {
-	var found *issue
-	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath("/issues?" + alertQuery(page).Encode())
-		content, err := client.request(ctx, http.MethodGet, path, nil)
-		if err != nil {
-			return nil, err
-		}
-		var issues []issue
-		if err := json.Unmarshal(content, &issues); err != nil {
-			return nil, fmt.Errorf("decode issue list")
-		}
-		for index := range issues {
-			candidate := &issues[index]
-			pullRequest := strings.TrimSpace(string(candidate.PullRequest))
-			// The marker is published in this public repository's own alert body, so
-			// authorship is part of the alert's identity: a foreign-authored
-			// lookalike must never be adopted and overwritten, and must not be able
-			// to stall synchronization by colliding with the real alert.
-			if (pullRequest != "" && pullRequest != "null") ||
-				candidate.User.Login != alertAuthor ||
-				!strings.Contains(candidate.Body, alertMarker) {
-				continue
-			}
-			if found != nil {
-				return nil, fmt.Errorf("duplicate Unity enrollment audit issues")
-			}
-			copy := *candidate
-			found = &copy
-		}
-		if len(issues) < issuePageSize {
-			return found, nil
-		}
-	}
-	return nil, fmt.Errorf("issue pagination exceeds bound")
+func alertIdentity() githubissue.Identity {
+	return githubissue.Identity{Marker: alertMarker, Author: alertAuthor}
 }
 
 func renderIssueBody(audit enrollment.UnityOrganizationAudit, evidenceURL string) string {
@@ -432,52 +355,4 @@ func valueOrDash(value string) string {
 		return "-"
 	}
 	return value
-}
-
-func (client *githubClient) repositoryPath(suffix string) string {
-	parts := strings.Split(client.repository, "/")
-	return "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]) + suffix
-}
-
-func (client *githubClient) request(
-	ctx context.Context,
-	method, path string,
-	payload map[string]any,
-) ([]byte, error) {
-	reference, err := url.Parse(path)
-	if err != nil {
-		return nil, err
-	}
-	endpoint := client.base.ResolveReference(reference)
-	var body io.Reader
-	if payload != nil {
-		content, err := json.Marshal(payload)
-		if err != nil {
-			return nil, err
-		}
-		body = bytes.NewReader(content)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("Authorization", "Bearer "+client.token)
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if payload != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	response, err := client.http.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	content, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(content) > maxResponseBytes {
-		return nil, fmt.Errorf("GitHub response exceeds bound")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("GitHub API request failed with status %d", response.StatusCode)
-	}
-	return content, nil
 }
