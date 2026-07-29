@@ -16,6 +16,7 @@ const expectedWorkflowJobs = new Map([
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
+  ["lock-recovery-audit.yml", ["audit"]],
   ["onboard-unity-repository.yml", ["onboard"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
   ["request-unity-repository-onboarding.yml", ["request"]],
@@ -57,6 +58,10 @@ const expectedWorkflowRunScriptSignatures = new Map([
       'echo "DxMessaging commit $(git -C .policy-consumers/DxMessaging rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"',
       "go run ./cmd/workflow-credential-audit unity-automation .policy-consumers/DxMessaging .github/actions/return-unity-license/action.yml .github/actions/validate-unity-license/action.yml .github/workflows/perf-numbers.yml .github/workflows/release.yml .github/workflows/unity-benchmarks.yml .github/workflows/unity-gameci-experiment.yml .github/workflows/unity-tests.yml"
     ]
+  ],
+  [
+    "lock-recovery-audit.yml",
+    ["go run ./cmd/lock-recovery-audit --lock=wallstop-organization-builds --state-ref=lock-state"]
   ],
   [
     "onboard-unity-repository.yml",
@@ -2729,6 +2734,7 @@ test("scheduled manual workflows declare stable concurrency", () => {
   assert.deepEqual(checkedWorkflows.sort(), [
     "auto-release.yml",
     "dx-unity-automation-audit.yml",
+    "lock-recovery-audit.yml",
     "reap-stale-locks.yml",
     "reaper-delivery-audit.yml"
   ]);
@@ -2814,6 +2820,70 @@ test("reaper delivery audit is independent, least privilege, and fail-closed", (
   assert.match(auditStep.run, /--max-run-duration=15m/);
   assert.doesNotMatch(auditStep.run, /\$\{\{\s*(?:secrets\.|github\.token)/);
   assert.doesNotMatch(text, /BUILD_LOCK_(?:APP|READER|TOKEN)/);
+});
+
+test("build lock incident recovery audit is independent, least privilege, and read-only", () => {
+  const text = readWorkflow("lock-recovery-audit.yml");
+  const facts = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "docs", "operations-facts.json"), "utf8")
+  );
+  const concurrency = workflowConcurrency(text);
+  const jobs = jobSections(text);
+  const steps = workflowJobStepMaps(text, "audit");
+  const checkout = steps.find((step) => step.name === "Checkout");
+  const auditStep = steps.find((step) => step.name === "Audit active build lock incident");
+
+  assert.equal(workflowHasTrigger(text, "schedule"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.deepEqual(jobs.map((job) => job.name), ["audit"]);
+  assert.equal(concurrency.group, "build-lock-incident-recovery-audit");
+  assert.equal(concurrency["cancel-in-progress"], "false");
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "issues", "write"), true);
+  assert.equal(hasEffectivePermission(text, jobs[0].text, "actions", "read"), false);
+  assert.ok(checkout, "audit job must check out the committed monitor source");
+  assert.equal(checkout.with["persist-credentials"], "false");
+  assert.ok(auditStep, "audit job must run the committed monitor command");
+  assert.equal(auditStep.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.equal(auditStep.env.GITHUB_API_URL, "${{ github.api_url }}");
+  assert.equal(auditStep.env.GITHUB_SERVER_URL, "${{ github.server_url }}");
+  assert.equal(auditStep.env.GITHUB_REPOSITORY, "${{ github.repository }}");
+  assert.match(auditStep.run, /--lock=wallstop-organization-builds/);
+  assert.match(auditStep.run, /--state-ref=lock-state/);
+  assert.doesNotMatch(auditStep.run, /\$\{\{\s*(?:secrets\.|github\.token)/);
+  assert.doesNotMatch(text, /BUILD_LOCK_(?:APP|READER|TOKEN)/);
+  assert.match(
+    text,
+    new RegExp(`cron:\\s*"${escapeRegExp(facts.incidentRecoveryAudit.schedule)}"`),
+    "monitor cadence must match the published operational fact"
+  );
+});
+
+test("build lock incident recovery evidence is published only by the read-only monitor", () => {
+  const monitor = fs.readFileSync(
+    path.join(repoRoot, "cmd", "lock-recovery-audit", "main.go"),
+    "utf8"
+  );
+  const facts = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "docs", "operations-facts.json"), "utf8")
+  );
+
+  assert.match(monitor, new RegExp(`alertMarker\\s*=\\s*"<!-- ${facts.incidentRecoveryAudit.alertMarker} -->"`));
+  assert.equal(
+    monitor.includes("BUILD_LOCK_APP") || monitor.includes("BUILD_LOCK_READER"),
+    false,
+    "the monitor must never reference writer or reader App credentials"
+  );
+  for (const mutation of ["http.MethodPut", "http.MethodDelete"]) {
+    assert.equal(monitor.includes(mutation), false, `the monitor must never issue ${mutation} requests`);
+  }
+  assert.equal(
+    workflowJobStepMaps(readWorkflow("lock-recovery-audit.yml"), "audit").some(
+      (step) => step.uses === "./.github/actions/reap-stale-locks"
+    ),
+    false,
+    "the monitor must never invoke the state-writing lock action"
+  );
 });
 
 test("semantic-release GitHub workflows declare required token permissions", () => {

@@ -10,6 +10,12 @@
     "maximumDeliveryDelaySeconds": 1800,
     "maximumRunDurationSeconds": 900
   },
+  "incidentRecoveryAudit": {
+    "schedule": "2,12,22,32,42,52 * * * *",
+    "alertMarker": "build-lock-incident-recovery",
+    "stateRef": "lock-state",
+    "recoveryWorkflow": ".github/workflows/recover-build-lock.yml"
+  },
   "unityEnrollmentAudit": {
     "policyPath": "unity-enrollment-policy.json",
     "schedule": "23 8 * * *",

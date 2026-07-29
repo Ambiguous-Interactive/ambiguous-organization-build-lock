@@ -551,6 +551,17 @@ For schema 5, dispatch `Recover build lock` with
 reconciled. Recovery clears the global incident into a normal cooldown; a
 wrong ID or missing proof fails closed.
 
+Operators do not have to read `lock-state` to find that ID. The independent
+`Build lock incident recovery audit` reads committed lock state every ten
+minutes with the workflow token only, and synchronizes one deduplicated alert
+issue carrying the exact incident ID, the declared `recover-incident` inputs,
+and sanitized run/runner provenance. Its body is deterministic, so an unchanged
+incident does not churn the issue, and a recovered lock closes it. Unavailable,
+malformed, unsupported-schema, digest-inconsistent, foreign-authored, or
+duplicated evidence fails the run red and leaves any existing alert untouched;
+the audit never writes lock state and never relaxes the exact-ID portal proof
+that recovery requires.
+
 `stale-recovered` remains in the versioned output contract but is always false:
 consumer acquire no longer replaces stale holders. The scheduled reaper is the
 sole authority for cross-repository run observation and stale-state transitions.
