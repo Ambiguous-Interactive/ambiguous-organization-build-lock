@@ -216,9 +216,9 @@ all modules verified
 Workflow credential-literal policy passed.
 ```
 
-Independent post-remediation runtime and knowledge review is complete with no
-remaining actionable finding. PR CI/review evidence, merge, and exact-main
-post-merge verification remain pending.
+Independent post-remediation runtime and knowledge review completed with no
+remaining actionable finding. Delivery and exact-main verification completed
+as recorded below.
 
 ## Continuous-improvement disposition
 
@@ -246,3 +246,23 @@ Implementer: root agent. Independent reviewer: `issue131_review2`. Remediator:
 found single-entry queue draining and lost inner ambiguous-write evidence.
 Every finding was accepted and remediated with a regression. The final
 post-remediation review reported no actionable findings after 27 focused cases.
+
+## Delivery evidence
+
+PR #134 opened with exact head
+`a46feabcc494c5cc0ab677f7c779bcc937d6400d`; its tree
+`23c6f4ec9bf3376f7b256766dbbe87f5e4a61f16` exactly matched the fully
+verified local tree. Build lock CI run `30414878541` passed. Cursor Bugbot's
+exact-head summary accurately described the capacity-first phases, internal
+deadlines, partial failure, CAS/version fencing, and unchanged public/schema
+boundaries and produced no finding or inline review thread. Copilot was
+requested through both the reviewer API and an exact-head tagged comment, then
+returned its terminal requester-quota-exhaustion response with no code
+feedback.
+
+PR #134 was squash-merged as
+`e5007de9dbf46bf8a0e5ee9c5f2fd72adc948542`, automatically closing issue
+#131 as completed. Push-triggered Build lock CI run `30414939593` and
+Organization Unity enrollment audit run `30414939569` both passed on that exact
+`main` commit. The expected Dependabot-only workflow-run consumer skipped for
+the non-Dependabot merge. No licensed Unity workflow was dispatched.
