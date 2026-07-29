@@ -1,41 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30429897190:unity-tests:unity-tests-1",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "30429897190",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30429897190",
+    "queuedAt": "2026-07-29T07:06:02.751Z",
+    "acquiredAt": "2026-07-29T07:06:03.941Z",
+    "expiresAt": "2026-07-29T11:06:03.941Z",
+    "runnerId": "box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "82384820-9ba2-412f-9207-57e7c85e36f5",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30429897190:unity-tests:unity-tests-0",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30429897190:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
       "job": "unity-tests",
       "runId": "30429897190",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30429897190",
-      "runnerId": "tiny-box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-29T07:04:41.093Z",
-      "availableAt": "2026-07-29T07:04:42.093Z"
-    },
-    {
-      "reservationId": "d9f54152-8c23-4b38-9bce-7417cfb84bf3",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30428676709:unity-tests:6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30428676709",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30428676709",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-29T07:04:38.497Z",
-      "availableAt": "2026-07-29T07:04:39.497Z"
+      "queuedAt": "2026-07-29T07:06:02.751Z",
+      "acquiredAt": "2026-07-29T07:06:03.941Z",
+      "expiresAt": "2026-07-29T11:06:03.941Z",
+      "runnerId": "box-linux"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T07:04:38.497Z"
+  "updatedAt": "2026-07-29T07:06:03.941Z"
 }
