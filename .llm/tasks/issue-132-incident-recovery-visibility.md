@@ -7,6 +7,8 @@
   reading the `lock-state` branch by hand.
 - One deduplicated alert carries the exact incident identifier and the inputs
   the declared recovery workflow accepts.
+- The alert publishes a prefilled one-command dispatch so an operator does not
+  have to copy the incident identifier separately.
 - Unprovable lock state never opens, edits, or closes that alert.
 - The monitor holds no writer, reader, or Unity credential and never writes
   lock state.
@@ -45,6 +47,10 @@
 - Observed failure: build failure with undefined `incident`,
   `incidentReason`, `reasonHealthy`, `reasonIncidentActive`, and
   `reasonStateInvalid`.
+- Follow-up test: the alert body must contain the exact prefilled
+  `gh workflow run` command.
+- Follow-up observed failure: the existing alert contained only the workflow
+  link and input table, so the expected command was absent.
 
 ## Risk and path matrix
 
@@ -75,7 +81,9 @@
 
 - Minimal change: one standard-library Go monitor, one least-privilege
   scheduled workflow, focused behavioral and contract tests, and synchronized
-  operational facts and guidance.
+  operational facts and guidance. A follow-up adds the equivalent exact-ID
+  `gh workflow run` command to the retained alert without changing recovery
+  semantics or credentials.
 - Focused result: `go test ./cmd/lock-recovery-audit` and the adjacent
   workflow/documentation policy suites pass.
 
