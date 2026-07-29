@@ -252,12 +252,16 @@ The session's GitHub credential became invalid after the Bugbot remediation was
 committed. `gh api user` returns `Bad credentials` and pushes are rejected;
 re-authentication needs an interactive OAuth flow this session cannot run.
 
-The remediation for the one high-severity reviewer finding is therefore
-committed locally at `157bc50ce` but **not pushed**, and PR #138 still points at
-`5d145f1de`, which carries the defect. Complete verification passes on the local
-head. The pull request must not be merged until `157bc50ce` is pushed and CI is
+Both the Cursor Bugbot remediation and the round-2 remediation are therefore
+committed locally but **not pushed**. PR #138 still points at `5d145f1de`, which
+carries the high-severity discovery defect and the round-2 P1. Complete
+verification passes on the local head, the branch history contains no build
+artifact, and `git diff --check` is clean.
+
+The pull request must not be merged until the local head is pushed and CI is
 green on that exact head. This session did not merge and did not verify the
-default branch after merge; both remain outstanding.
+default branch after merge; both remain outstanding, and `main` is unchanged at
+`91a430557`.
 
 ## Continuous-improvement disposition
 
