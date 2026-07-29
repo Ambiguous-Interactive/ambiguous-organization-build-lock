@@ -160,5 +160,19 @@ lifecycle invariant. Fresh independent reviewer `session026_rereview` then
 audited every #128 criterion and the complete revised diff and reported no
 actionable findings.
 
-Delivery, reviewer feedback, merge, and post-merge `main` evidence remain to be
-recorded.
+PR #129 opened with exact head
+`9407ed109f2221d02c0145ab8ea8b13a10ede9b5`; its tree
+`c15a32e9a94dfbf40a95f5207072060ca7edf1bb` exactly matched the fully
+verified local tree. Build lock CI run `30409604381` passed. Cursor Bugbot's
+exact-head summary described the deadline, cooldown, quarantine, cleanup, and
+manifest boundaries and produced no finding or review thread. Copilot was
+requested through both the reviewer API and an exact-head tagged comment, then
+returned its terminal requester-quota-exhaustion response with no code
+feedback.
+
+PR #129 was squash-merged as
+`c33f600e252a552a33118155db7e7f171e6cecd9`, closing issue #128. Push-triggered
+Build lock CI run `30409806278` and Organization Unity enrollment audit run
+`30409806269` both passed on that exact `main` commit. The expected
+Dependabot-only workflow-run consumer skipped for the non-Dependabot merge.
+Issue #99 remains open with the evidence boundary above.
