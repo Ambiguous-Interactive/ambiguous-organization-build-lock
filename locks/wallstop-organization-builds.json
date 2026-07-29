@@ -27,19 +27,6 @@
       "acquiredAt": "2026-07-29T19:36:44.658Z",
       "expiresAt": "2026-07-29T23:36:44.658Z",
       "runnerId": "box-linux"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30478630712:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30478630712",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30478630712",
-      "queuedAt": "2026-07-29T19:36:44.102Z",
-      "acquiredAt": "2026-07-29T19:38:15.563Z",
-      "expiresAt": "2026-07-29T23:38:15.563Z",
-      "runnerId": "DAD-MACHINE"
     }
   ],
   "queue": [
@@ -55,7 +42,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "1ad7946f-4f96-49a4-a280-f64e3c1861d8",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30478630712:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "30478630712",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30478630712",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-29T19:38:52.300Z",
+      "availableAt": "2026-07-29T19:38:53.300Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T19:38:15.563Z"
+  "updatedAt": "2026-07-29T19:38:52.301Z"
 }
