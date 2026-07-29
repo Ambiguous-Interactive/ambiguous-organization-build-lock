@@ -242,6 +242,31 @@ func TestReadAuditRejectsUnknownFieldsAndHostileValues(t *testing.T) {
 	}
 }
 
+func TestValidateAuditAcceptsEveryInventoryClassification(t *testing.T) {
+	for _, classification := range []string{
+		enrollment.UnityInventoryPaidSerial,
+		enrollment.UnityInventoryFallbackCleanup,
+		enrollment.UnityInventoryControlledCanary,
+		enrollment.UnityInventorySynthetic,
+		enrollment.UnityInventoryDisabled,
+		enrollment.UnityInventoryNonLicensingStatic,
+	} {
+		t.Run(classification, func(t *testing.T) {
+			audit := sampleAudit()
+			audit.Inventory[0].Classification = classification
+			if err := validateAudit(audit); err != nil {
+				t.Fatalf("valid inventory classification %q was rejected: %v", classification, err)
+			}
+		})
+	}
+
+	audit := sampleAudit()
+	audit.Inventory[0].Classification = "unknown"
+	if err := validateAudit(audit); err == nil {
+		t.Fatal("unknown inventory classification passed")
+	}
+}
+
 func TestAuditAndIssueBodyAreBounded(t *testing.T) {
 	audit := sampleAudit()
 	audit.Findings = make([]enrollment.UnityAuditFinding, maxAuditRows+1)

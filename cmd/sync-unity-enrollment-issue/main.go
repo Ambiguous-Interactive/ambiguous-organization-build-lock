@@ -151,9 +151,7 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 		if len(entry.Path) > 256 || !pathPattern.MatchString(entry.Path) || !jobPattern.MatchString(entry.Job) {
 			return fmt.Errorf("invalid inventory location")
 		}
-		switch entry.Classification {
-		case "paid-serial", "controlled-canary", "synthetic", "disabled", "non-licensing-static":
-		default:
+		if !enrollment.ValidUnityInventoryClassification(entry.Classification) {
 			return fmt.Errorf("invalid inventory classification")
 		}
 	}
