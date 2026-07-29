@@ -13,6 +13,10 @@
 - Schema versions newer than the client fail closed.
 - Stale ownership is handled by the scheduled reaper, not opportunistic
   admission.
+- Scheduled reaping evaluates and checkpoints capacity-critical ownership
+  before routine queue cleanup. Its status reads and CAS reconciliation use
+  internal deadlines shorter than the outer workflow timeout; unverified
+  identities remain unchanged, while a partial safe checkpoint fails visibly.
 - Invalid or contradictory cleanup diagnostics never veto exact ownership
   cleanup; degrade their evidence conservatively, preserve capacity as unsafe,
   and fail only after the cleanup attempt.
