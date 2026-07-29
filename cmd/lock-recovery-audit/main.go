@@ -414,6 +414,17 @@ func alertBody(active incident, lock, serverURL, repository string) string {
 	fmt.Fprintf(&body, "| `operation` | `%s` |\n", recoveryOperation)
 	fmt.Fprintf(&body, "| `incident-id` | `%s` |\n", active.IncidentID)
 	body.WriteString("| `portal-cleanup-confirmed` | `true` |\n\n")
+	body.WriteString("After completing step 1, the equivalent one-command dispatch is:\n\n```shell\n")
+	fmt.Fprintf(
+		&body,
+		"gh workflow run %s --repo=%s --raw-field %s --raw-field %s --raw-field %s\n",
+		recoveryWorkflowFile(),
+		shellWord(strings.TrimPrefix(serverURL, "https://")+"/"+repository),
+		shellWord("operation="+recoveryOperation),
+		shellWord("incident-id="+active.IncidentID),
+		shellWord("portal-cleanup-confirmed=true"),
+	)
+	body.WriteString("```\n\n")
 	body.WriteString(
 		"Never edit lock state by hand. Recovery with a wrong identifier or without portal proof fails closed.\n\n",
 	)
@@ -440,6 +451,10 @@ func alertBody(active incident, lock, serverURL, repository string) string {
 
 func recoveryWorkflowFile() string {
 	return recoveryWorkflowPath[strings.LastIndex(recoveryWorkflowPath, "/")+1:]
+}
+
+func shellWord(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func newGitHubClient(apiURL, repository, token string, httpClient *http.Client) (*githubClient, error) {

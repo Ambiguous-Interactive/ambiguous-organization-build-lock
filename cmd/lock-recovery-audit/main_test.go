@@ -374,6 +374,7 @@ func TestAlertBodyPublishesRecoveryInstructionsWithoutSecretEvidence(t *testing.
 		testServerURL + "/owner/repo/actions/workflows/recover-build-lock.yml",
 		recoveryWorkflowPath,
 		recoveryWorkflowName,
+		"gh workflow run recover-build-lock.yml --repo='github.com/owner/repo' --raw-field 'operation=recover-incident' --raw-field 'incident-id=" + active.IncidentID + "' --raw-field 'portal-cleanup-confirmed=true'",
 		"`Ambiguous-Interactive/qora-redux`",
 		"`Unity Tests`",
 		"`ELI-MACHINE`",
@@ -391,6 +392,13 @@ func TestAlertBodyPublishesRecoveryInstructionsWithoutSecretEvidence(t *testing.
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("alert body contains forbidden detail %q", forbidden)
 		}
+	}
+}
+
+func TestShellWordQuotesHostileValues(t *testing.T) {
+	t.Parallel()
+	if got, want := shellWord("ghe.example'; echo unsafe"), `'ghe.example'"'"'; echo unsafe'`; got != want {
+		t.Fatalf("shellWord() = %q, want %q", got, want)
 	}
 }
 
