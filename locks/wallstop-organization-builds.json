@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30427219669:unity-tests:unity-ci-tests-EditMode",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-tests",
+    "runId": "30427219669",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30427219669",
+    "queuedAt": "2026-07-29T06:17:29.065Z",
+    "acquiredAt": "2026-07-29T06:17:31.492Z",
+    "expiresAt": "2026-07-29T10:17:31.492Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/IshoBoy:30427219669:unity-tests:unity-ci-tests-EditMode",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-tests",
+      "runId": "30427219669",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30427219669",
+      "queuedAt": "2026-07-29T06:17:29.065Z",
+      "acquiredAt": "2026-07-29T06:17:31.492Z",
+      "expiresAt": "2026-07-29T10:17:31.492Z",
+      "runnerId": "ELI-MACHINE"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "36191186-80ac-4312-9130-1e8033cc49cf",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30427059528:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30427059528",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30427059528",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "return-missing-positive-evidence",
-      "createdAt": "2026-07-29T06:15:16.681Z"
-    },
     {
       "reservationId": "685e9ec3-24f1-4caa-a61c-00daec1b5082",
       "holderId": "Ambiguous-Interactive/DxMessaging:30427059528:unity-tests:2021.3.45f1-standalone",
@@ -35,5 +47,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T06:16:40.255Z"
+  "updatedAt": "2026-07-29T06:17:31.492Z"
 }
