@@ -78,6 +78,29 @@
 - Focused result: `go test ./cmd/lock-recovery-audit` and the adjacent
   workflow/documentation policy suites pass.
 
+## Swept failure mode
+
+- Class: issue-discovery responses bounded by a fixed byte limit while the
+  repository's issue history grows without bound.
+- Evidence: one live `state=all&per_page=100` page is 837,658 bytes, of which
+  only 268,666 bytes are bodies; the rest is fixed per-issue API envelope.
+  `cmd/sync-unity-enrollment-issue` bounded that response at 1,048,576 bytes.
+- Fix: bound by page size rather than by limit. Discovery requests 30 issues per
+  page against a 4 MiB limit, so a full page of maximum-size (64 KiB) bodies
+  cannot exceed roughly 2 MiB, and the page budget is raised to keep coverage.
+  Applied to all three issue-syncing commands with regressions that walk
+  multiple maximum-size pages.
+
+## Scope decisions
+
+- The audit covers the global account incident only. A runner quarantine is
+  reclaimed same-runner or auto-recovered by the scheduled reaper once the
+  owning run is proven terminal, so alerting on one would add noise instead of
+  removing manual work.
+- Recovery closes the alert without rewriting it, and the body asserts no live
+  status of its own, so a closed alert stays readable as the retained incident
+  record.
+
 ## Full validation
 
 - Commands and exact outcomes: recorded in

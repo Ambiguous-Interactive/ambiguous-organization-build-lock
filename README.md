@@ -557,10 +557,12 @@ minutes with the workflow token only, and synchronizes one deduplicated alert
 issue carrying the exact incident ID, the declared `recover-incident` inputs,
 and sanitized run/runner provenance. Its body is deterministic, so an unchanged
 incident does not churn the issue, and a recovered lock closes the alert without
-rewriting it, leaving the incident record readable. Unavailable,
-malformed, unsupported-schema, digest-inconsistent, foreign-authored, or
-duplicated evidence fails the run red and leaves any existing alert untouched;
-the audit never writes lock state and never relaxes the exact-ID portal proof
+rewriting it, leaving the incident record readable. Unavailable, malformed,
+wrong-lock, unsupported-schema, or digest-inconsistent evidence fails the run red
+and leaves any existing alert untouched. The alert is identified by its marker
+plus this automation's own authorship rather than its title, so a foreign
+lookalike in this public repository is ignored and an operator rename is safe.
+The audit never writes lock state and never relaxes the exact-ID portal proof
 that recovery requires.
 
 `stale-recovered` remains in the versioned output contract but is always false:

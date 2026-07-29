@@ -27,14 +27,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const (
-	alertMarker  = "<!-- build-lock-incident-recovery -->"
-	alertTitle   = "ops: Unity build lock global incident requires recovery"
-	alertAuthor  = "github-actions[bot]"
-	trackedIssue = "#132"
+	alertMarker = "<!-- build-lock-incident-recovery -->"
+	alertTitle  = "ops: Unity build lock global incident requires recovery"
+	alertAuthor = "github-actions[bot]"
 
 	recoveryWorkflowPath = ".github/workflows/recover-build-lock.yml"
 	recoveryWorkflowName = "Recover build lock"
@@ -56,8 +54,11 @@ const (
 	// however large the repository's issue history grows.
 	issuePageSize     = 30
 	maxIssuePages     = 40
-	maxTextBytes      = 200
+	maxRenderedRunes  = 200
 	maxIdentifierText = 20
+
+	requestTimeout = 20 * time.Second
+	auditDeadline  = 5 * time.Minute
 )
 
 var (
@@ -135,7 +136,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Build lock incident audit failed: invalid configuration.")
 		os.Exit(1)
 	}
-	os.Exit(run(context.Background(), settings, http.DefaultClient, os.Stdout, os.Stderr))
+	// A stalled request must not consume the whole job budget: the next scheduled
+	// run cannot replace a pending one, so a hang would leave an incident
+	// unpublished for far longer than one interval.
+	ctx, cancel := context.WithTimeout(context.Background(), auditDeadline)
+	defer cancel()
+	os.Exit(run(ctx, settings, &http.Client{Timeout: requestTimeout}, os.Stdout, os.Stderr))
 }
 
 func run(
@@ -151,10 +157,10 @@ func run(
 	}
 	state, err := client.lockState(ctx, settings.Lock, settings.StateRef)
 	if err != nil {
-		fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateUnavailable)
+		fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateUnavailable, err)
 		return 1
 	}
-	result := classifyState(state, settings.ServerURL)
+	result := classifyState(state, settings.ServerURL, settings.Lock)
 	result.Lock = settings.Lock
 	if result.Reason == reasonStateInvalid {
 		// Ambiguous state can neither prove an incident nor prove recovery, so it
@@ -163,7 +169,7 @@ func run(
 		return 1
 	}
 	if err := client.syncAlert(ctx, result, settings.ServerURL); err != nil {
-		fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonSyncFailed)
+		fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonSyncFailed, err)
 		return 1
 	}
 	if result.Reason == reasonIncidentActive {
@@ -215,7 +221,7 @@ func origin(value string) (string, error) {
 	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
-func classifyState(raw []byte, serverURL string) observation {
+func classifyState(raw []byte, serverURL, lock string) observation {
 	invalid := observation{Reason: reasonStateInvalid}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	var fields map[string]json.RawMessage
@@ -225,6 +231,12 @@ func classifyState(raw []byte, serverURL string) observation {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return invalid
+	}
+	if declared, ok := fields["lock"]; ok {
+		var name string
+		if err := json.Unmarshal(declared, &name); err != nil || name != lock {
+			return invalid
+		}
 	}
 	rawSchema, ok := fields["schemaVersion"]
 	if !ok {
@@ -257,6 +269,12 @@ func classifyState(raw []byte, serverURL string) observation {
 	if err := incidentDecoder.Decode(&active); err != nil {
 		return invalid
 	}
+	// normalizeIncident trims these three before it digests and compares, so the
+	// monitor must trim identically or it could publish an identifier that
+	// recovery would reject.
+	active.IncidentID = strings.TrimSpace(active.IncidentID)
+	active.RunnerID = strings.TrimSpace(active.RunnerID)
+	active.EvidenceDigest = strings.TrimSpace(active.EvidenceDigest)
 	if !validIncident(active, serverURL) {
 		return invalid
 	}
@@ -281,8 +299,7 @@ func validIncident(active incident, serverURL string) bool {
 			return false
 		}
 	}
-	if !safeText(active.Workflow, maxTextBytes) || !safeText(active.Job, maxTextBytes) ||
-		!safeText(active.RunnerID, maxTextBytes) {
+	if !provableText(active.Workflow) || !provableText(active.Job) || !provableText(active.RunnerID) {
 		return false
 	}
 	if !countPattern.MatchString(active.RunID) || len(active.RunID) > maxIdentifierText ||
@@ -292,31 +309,71 @@ func validIncident(active incident, serverURL string) bool {
 	if active.RunURL != serverURL+"/"+active.Repository+"/actions/runs/"+active.RunID {
 		return false
 	}
-	if _, err := time.Parse(time.RFC3339, active.ReportedAt); err != nil {
+	reportedAt, err := time.Parse(time.RFC3339, active.ReportedAt)
+	if err != nil || reportedAt.UnixMilli() == 0 {
+		// The committed runtime treats an epoch-zero parse as no timestamp, so an
+		// identifier it would reject must never be published as recoverable.
 		return false
 	}
-	digest, err := incidentDigest(active)
-	if err != nil || digest != active.EvidenceDigest ||
+	digest, digestErr := incidentDigest(active)
+	if digestErr != nil || digest != active.EvidenceDigest ||
 		active.IncidentID != "incident-"+digest[:24] {
 		return false
 	}
 	return true
 }
 
-// safeText rejects text that cannot be published verbatim inside a Markdown code
-// span, and rejects the separators that would break digest parity with the
-// committed JavaScript runtime.
-func safeText(value string, limit int) bool {
-	if value == "" || len(value) > limit || !utf8.ValidString(value) {
+// provableText rejects only what makes the evidence itself unprovable: an empty
+// value, or a separator whose JSON encoding differs between Go and the committed
+// JavaScript runtime and would therefore break digest parity. Anything else is a
+// rendering concern, handled by codeCell. A provable incident must always be
+// publishable, because refusing to publish one is the failure this audit exists
+// to prevent.
+func provableText(value string) bool {
+	if value == "" {
 		return false
 	}
 	for _, symbol := range value {
-		if symbol < 0x20 || symbol == 0x7f || symbol == '`' || symbol == '|' ||
-			symbol == '\u2028' || symbol == '\u2029' {
+		if symbol < 0x20 || symbol == 0x7f || symbol == '\u2028' || symbol == '\u2029' {
 			return false
 		}
 	}
 	return true
+}
+
+// codeCell renders arbitrary provenance inside a Markdown table cell. It fences
+// the value with a backtick run longer than any it contains, escapes the cell
+// separator, and truncates so three oversized fields cannot push the body past
+// the issue-body limit.
+func codeCell(value string) string {
+	runes := []rune(value)
+	truncated := false
+	if len(runes) > maxRenderedRunes {
+		runes = runes[:maxRenderedRunes]
+		truncated = true
+	}
+	rendered := string(runes)
+
+	longest, current := 0, 0
+	for _, symbol := range rendered {
+		if symbol == '`' {
+			current++
+			if current > longest {
+				longest = current
+			}
+			continue
+		}
+		current = 0
+	}
+	fence := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(rendered, "`") || strings.HasSuffix(rendered, "`") {
+		rendered = " " + rendered + " "
+	}
+	cell := fence + rendered + fence
+	if truncated {
+		cell += " (truncated)"
+	}
+	return strings.ReplaceAll(cell, "|", "\\|")
 }
 
 func incidentDigest(active incident) (string, error) {
@@ -334,7 +391,7 @@ func incidentDigest(active incident) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(bytes.TrimRight(buffer.Bytes(), "\n"))
+	sum := sha256.Sum256(bytes.TrimSuffix(buffer.Bytes(), []byte("\n")))
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -376,22 +433,20 @@ func alertBody(active incident, lock, serverURL, repository string) string {
 
 	body.WriteString("## Sanitized incident evidence\n\n")
 	body.WriteString("| Field | Value |\n| --- | --- |\n")
-	fmt.Fprintf(&body, "| Reported at | `%s` |\n", active.ReportedAt)
-	fmt.Fprintf(&body, "| Repository | `%s` |\n", active.Repository)
-	fmt.Fprintf(&body, "| Workflow | `%s` |\n", active.Workflow)
-	fmt.Fprintf(&body, "| Job | `%s` |\n", active.Job)
-	fmt.Fprintf(&body, "| Run attempt | `%s` |\n", active.RunAttempt)
-	fmt.Fprintf(&body, "| Runner | `%s` |\n", active.RunnerID)
-	fmt.Fprintf(&body, "| Reason | `%s` |\n", active.Reason)
+	fmt.Fprintf(&body, "| Reported at | %s |\n", codeCell(active.ReportedAt))
+	fmt.Fprintf(&body, "| Repository | %s |\n", codeCell(active.Repository))
+	fmt.Fprintf(&body, "| Workflow | %s |\n", codeCell(active.Workflow))
+	fmt.Fprintf(&body, "| Job | %s |\n", codeCell(active.Job))
+	fmt.Fprintf(&body, "| Run attempt | %s |\n", codeCell(active.RunAttempt))
+	fmt.Fprintf(&body, "| Runner | %s |\n", codeCell(active.RunnerID))
+	fmt.Fprintf(&body, "| Reason | %s |\n", codeCell(active.Reason))
 	fmt.Fprintf(&body, "| Source run | %s |\n\n", active.RunURL)
 
 	body.WriteString(
 		"This alert contains sanitized repository, workflow, job, run, runner, reason, and timestamp evidence only. It never contains credential values, raw logs, or the incident evidence digest.\n",
 	)
-	fmt.Fprintf(
-		&body,
-		"\nTracked by %s. The audit closes this alert automatically once the lock reports no active global incident, and leaves this record in place.\n",
-		trackedIssue,
+	body.WriteString(
+		"\nThe audit closes this alert automatically once the lock reports no active global incident, and leaves this record in place.\n",
 	)
 	return body.String()
 }
@@ -480,7 +535,11 @@ func (client *githubClient) patchAlert(ctx context.Context, number int, payload 
 func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) {
 	var found *alertIssue
 	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath(fmt.Sprintf("/issues?state=all&per_page=%d&page=%d", issuePageSize, page))
+		path := client.repositoryPath(fmt.Sprintf(
+			"/issues?state=all&sort=created&direction=asc&per_page=%d&page=%d",
+			issuePageSize,
+			page,
+		))
 		content, err := client.request(ctx, http.MethodGet, path, nil, "application/vnd.github+json", maxResponseBytes)
 		if err != nil {
 			return nil, err
@@ -492,13 +551,16 @@ func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) 
 		for index := range issues {
 			candidate := issues[index]
 			pullRequest := strings.TrimSpace(string(candidate.PullRequest))
+			// The marker plus this automation's own authorship is the alert's
+			// identity. The repository is public and both the title and the marker
+			// are published, so a foreign-authored lookalike must be skipped rather
+			// than adopted or treated as fatal: making it fatal would let any user
+			// permanently suppress incident publication. The title is presentation
+			// only, so an operator rename cannot orphan the alert either.
 			if (pullRequest != "" && pullRequest != "null") ||
-				candidate.Title != alertTitle ||
+				candidate.User.Login != alertAuthor ||
 				!strings.Contains(candidate.Body, alertMarker) {
 				continue
-			}
-			if candidate.User.Login != alertAuthor {
-				return nil, errors.New("alert marker is owned by an untrusted author")
 			}
 			if candidate.Number <= 0 || candidate.State != "open" && candidate.State != "closed" {
 				return nil, errors.New("invalid alert issue evidence")
@@ -559,12 +621,12 @@ func (client *githubClient) request(
 		return nil, errors.New("GitHub API request failed")
 	}
 	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
+	}
 	content, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
 	if err != nil || len(content) > limit {
 		return nil, errors.New("GitHub API response exceeded limit")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
 	}
 	return content, nil
 }

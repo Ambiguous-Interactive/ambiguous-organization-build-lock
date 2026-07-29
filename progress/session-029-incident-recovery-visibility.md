@@ -134,6 +134,42 @@ Workflow credential-literal policy passed.
 `go test -race ./cmd/lock-recovery-audit`, `gofmt -l`, `go vet`, and
 `git diff --check` also passed.
 
+## Independent review round 1
+
+Implementer: root agent. Reviewer: independent adversarial sub-agent
+`issue132_review`, given the diff, the safety rules, and an explicit brief to
+find unsafe success paths, untrusted-input vectors, Go/JavaScript divergence,
+GitHub contract errors, and bloat. It re-ran the full suite and verified the
+GitHub contract and the pinned digest vectors independently. Verdict: blocking.
+Every finding and its disposition:
+
+| Severity | Finding | Disposition |
+| --- | --- | --- |
+| P0 | A `go build` without `-o` left an 8.7 MB executable at the repository root and `git add -A` tracked it. | Fixed. Untracked and removed, root binaries ignored, and a policy test now rejects any tracked ELF/PE/Mach-O file. The test was proven red against a real executable before being accepted. |
+| P1 | Treating a foreign-authored marker issue as fatal let any user of this public repository permanently suppress incident publication. | Fixed. Authorship became a match condition, matching the sibling monitor: a lookalike is ignored and the automation publishes its own alert. |
+| P1 | No HTTP or context timeout; a stalled request would consume the whole job budget while the next run could not replace it. | Fixed. Explicit per-request and whole-audit deadlines. |
+| P1 | Rejecting a backtick, pipe, or long name classified a genuinely provable incident as unprovable, so the alert would never open. | Fixed. Validation now rejects only what makes evidence unprovable; rendering escapes and truncates instead. |
+| P1 | The task record cited review evidence that did not exist in the referenced progress log. | Fixed by this section. |
+| P2 | Exact-title matching orphaned a renamed alert and could wedge the audit on a rename-back. | Fixed. Identity is marker plus authorship; the title is restored by the update. |
+| P2 | Offset pagination over a newest-first list could skip an alert and publish a duplicate. | Fixed by ordering discovery by ascending creation so accumulating issues cannot shift earlier offsets. The reviewer's suggested `Link` traversal uses the same offsets and would not have fixed the race. |
+| P2 | Nothing bound the monitor's schema ceiling or incident field set to the committed runtime, so a future runtime change would silently stop publication. | Fixed. A contract test binds both, proven red against a bumped ceiling and a removed field. |
+| P2 | Failure diagnostics collapsed distinct causes into two strings, and a size bound was checked before the status code. | Fixed. The sanitized error class is reported and status is checked first. |
+| P2 | The GitHub client is a third copy of an existing one; the duplication itself produced several of these findings. | Accepted, deferred. The argument is sound, but extracting a shared package rewrites three production monitors and belongs in its own reviewed change rather than in a recovery-visibility PR. Filed as follow-up. |
+| P3 | `runnerId`, `incidentId`, and `evidenceDigest` were not trimmed before digesting, unlike the runtime. | Fixed. Trimming now mirrors `normalizeIncident`. |
+| P3 | An epoch-zero timestamp was accepted although the runtime treats it as absent. | Fixed. |
+| P3 | The state's own `lock` field was never checked against the requested lock. | Fixed. |
+| P3 | `origin()` rejects an API URL with a path, unlike the runtime. | Rejected with evidence. The request builder resolves root-anchored paths, so accepting a path-bearing API URL would silently drop it. Failing closed on an unsupported deployment is correct. |
+| P3 | `TrimRight` over-trims relative to the encoder contract; a UTF-8 guard was dead after JSON decoding. | Fixed. `TrimSuffix` and the dead guard removed. |
+| P3 | A permanent operational alert cited `#132`, which will close. | Fixed. Removed from the alert body. |
+| P3 | The alert marker is not lock-scoped. | Rejected with evidence. One lock exists and its name is a required flag; scoping the marker now would be speculative. |
+| P3 | An unreachable same-origin check in the request builder. | Kept as defense in depth for future call sites. |
+
+The reviewer independently confirmed no unsafe success path, no Markdown or link
+injection vector, correct GitHub API usage verified against the live repository,
+and that the pinned digest vectors are genuine cross-runtime evidence. It also
+confirmed the 1 MiB discovery bound this session had already fixed, having
+measured the same 837,658-byte page independently.
+
 ## Continuous-improvement disposition
 
 Trigger: a public operational contract and a fail-closed recovery surface

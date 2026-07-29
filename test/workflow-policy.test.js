@@ -2499,6 +2499,45 @@ env:
   );
 });
 
+test("no tracked file is a compiled executable", () => {
+  // `go build ./cmd/<name>` without -o drops an executable in the repository
+  // root, where `git add -A` will happily track it. A public repository must
+  // never publish an unsigned binary that looks like a release artifact.
+  const executableMagics = [
+    { name: "ELF", bytes: [0x7f, 0x45, 0x4c, 0x46] },
+    { name: "PE", bytes: [0x4d, 0x5a] },
+    { name: "Mach-O", bytes: [0xfe, 0xed, 0xfa, 0xce] },
+    { name: "Mach-O", bytes: [0xfe, 0xed, 0xfa, 0xcf] },
+    { name: "Mach-O", bytes: [0xcf, 0xfa, 0xed, 0xfe] },
+    { name: "Mach-O", bytes: [0xce, 0xfa, 0xed, 0xfe] },
+    { name: "Mach-O universal", bytes: [0xca, 0xfe, 0xba, 0xbe] }
+  ];
+  const tracked = childProcess
+    .execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean);
+
+  assert.ok(tracked.length > 0, "tracked file inventory must not be empty");
+  for (const relativeFile of tracked) {
+    const file = path.join(repoRoot, relativeFile);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+    const header = Buffer.alloc(4);
+    const handle = fs.openSync(file, "r");
+    let read = 0;
+    try {
+      read = fs.readSync(handle, header, 0, 4, 0);
+    } finally {
+      fs.closeSync(handle);
+    }
+    for (const magic of executableMagics) {
+      assert.ok(
+        !(read >= magic.bytes.length && magic.bytes.every((byte, index) => header[index] === byte)),
+        `${relativeFile} is a tracked ${magic.name} executable; build with -o outside the repository and add it to .gitignore`
+      );
+    }
+  }
+});
+
 test("repository text files do not contain token-bearing GitHub HTTPS URLs", () => {
   const tokenExpression = /\$\{\{\s*(?:secrets\.[A-Za-z0-9_]+|github\.token)\s*\}\}/i;
   const credentialedGitHubTokenUser = new RegExp("x-access-" + "token", "i");
@@ -2877,12 +2916,58 @@ test("build lock incident recovery evidence is published only by the read-only m
   for (const mutation of ["http.MethodPut", "http.MethodDelete"]) {
     assert.equal(monitor.includes(mutation), false, `the monitor must never issue ${mutation} requests`);
   }
+  assert.match(
+    monitor,
+    new RegExp(`recoveryWorkflowPath\\s*=\\s*"${escapeRegExp(facts.incidentRecoveryAudit.recoveryWorkflow)}"`),
+    "the published recovery workflow path must match the operational fact"
+  );
+  assert.match(
+    workflowJobStepMaps(readWorkflow("lock-recovery-audit.yml"), "audit").find(
+      (step) => step.name === "Audit active build lock incident"
+    ).run,
+    new RegExp(`--state-ref=${escapeRegExp(facts.incidentRecoveryAudit.stateRef)}\\b`),
+    "the audited state ref must match the operational fact"
+  );
   assert.equal(
     workflowJobStepMaps(readWorkflow("lock-recovery-audit.yml"), "audit").some(
       (step) => step.uses === "./.github/actions/reap-stale-locks"
     ),
     false,
     "the monitor must never invoke the state-writing lock action"
+  );
+});
+
+test("incident monitor stays bound to the committed runtime's incident contract", () => {
+  // The monitor reads state the committed runtime writes. If the runtime raises
+  // its schema ceiling or adds an incident field, the monitor would silently
+  // classify every real incident as unprovable and stop publishing alerts, and
+  // nothing else in the repository would fail.
+  const runtime = fs.readFileSync(path.join(repoRoot, ".github", "dist", "build-lock.js"), "utf8");
+  const monitor = fs.readFileSync(path.join(repoRoot, "cmd", "lock-recovery-audit", "main.go"), "utf8");
+
+  const runtimeSchema = runtime.match(/const MAX_SCHEMA_VERSION = (\d+);/);
+  const monitorSchema = monitor.match(/supportedSchemaVersion\s*=\s*(\d+)/);
+  assert.ok(runtimeSchema && monitorSchema, "both schema ceilings must be declared as literals");
+  assert.equal(
+    monitorSchema[1],
+    runtimeSchema[1],
+    "the monitor's supported schema ceiling must track MAX_SCHEMA_VERSION"
+  );
+
+  const normalized = runtime.match(/function normalizeIncident\(incident\)[\s\S]*?const normalized = \{([\s\S]*?)\n {2}\};/);
+  assert.ok(normalized, "normalizeIncident must keep a readable normalized field list");
+  const runtimeFields = [...normalized[1].matchAll(/^\s{4}([A-Za-z]+):/gm)].map((match) => match[1]);
+  const monitorFields = [
+    ...monitor
+      .match(/type incident struct \{([\s\S]*?)\n\}/)[1]
+      .matchAll(/`json:"([A-Za-z]+)"`/g)
+  ].map((match) => match[1]);
+
+  assert.ok(runtimeFields.length > 0, "runtime incident fields must be discoverable");
+  assert.deepEqual(
+    monitorFields.slice().sort(),
+    runtimeFields.slice().sort(),
+    "the monitor's incident struct must accept exactly the runtime's incident fields"
   );
 });
 

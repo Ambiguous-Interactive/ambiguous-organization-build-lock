@@ -253,11 +253,18 @@ rather than remove manual work.
 
 The audit holds no writer, reader, or Unity credential and never writes lock
 state. It never opens, edits, or closes the alert on unprovable state: an
-unavailable, oversized, malformed, unsupported-schema, or digest-inconsistent
-read fails the run red and leaves any existing alert exactly as it was. A
-foreign-authored or duplicated marker issue is also ambiguous and fails red.
-Publishing the alert never relaxes recovery, which still requires the exact
-incident identifier plus explicit portal-cleanup proof.
+unavailable, oversized, malformed, wrong-lock, unsupported-schema, or
+digest-inconsistent read fails the run red and leaves any existing alert exactly
+as it was. Publishing the alert never relaxes recovery, which still requires the
+exact incident identifier plus explicit portal-cleanup proof.
+
+The alert is identified by its marker plus this automation's own authorship, not
+by its title. The repository is public, so a foreign-authored lookalike is
+ignored rather than adopted or treated as fatal; treating it as fatal would let
+any user suppress incident publication. Renaming the alert for context is
+therefore safe. Provenance that is awkward to render is escaped and truncated
+rather than rejected, because refusing to publish a provable incident is the
+failure this audit exists to prevent.
 
 The monitor is itself GitHub-scheduled, so it improves detection but does not
 create a bounded recovery SLO. If recovery must be guaranteed within 30

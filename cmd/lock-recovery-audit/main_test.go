@@ -111,7 +111,7 @@ func TestClassifyStateSeparatesHealthyIncidentAndAmbiguousEvidence(t *testing.T)
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got := classifyState(test.state(), testServerURL)
+			got := classifyState(test.state(), testServerURL, testLock)
 			if got.Reason != test.reason {
 				t.Fatalf("classifyState() reason = %q, want %q", got.Reason, test.reason)
 			}
@@ -169,10 +169,9 @@ func TestClassifyStateRejectsUnprovableIncidentEvidence(t *testing.T) {
 		{name: "empty runner", edit: func(active *incident) { active.RunnerID = "" }, rebuild: true},
 		{name: "timestamp", edit: func(active *incident) { active.ReportedAt = "yesterday" }},
 		{name: "reason", edit: func(active *incident) { active.Reason = "unity-return-400006" }, rebuild: true},
-		{name: "markdown injection in job", edit: func(active *incident) { active.Job = "editmode` | evil" }, rebuild: true},
 		{name: "control character in runner", edit: func(active *incident) { active.RunnerID = "ELI\nMACHINE" }, rebuild: true},
 		{name: "line separator in workflow", edit: func(active *incident) { active.Workflow = "Unity\u2028Tests" }, rebuild: true},
-		{name: "oversized workflow", edit: func(active *incident) { active.Workflow = strings.Repeat("w", 201) }, rebuild: true},
+		{name: "paragraph separator in job", edit: func(active *incident) { active.Job = "edit\u2029mode" }, rebuild: true},
 	}
 	for _, test := range cases {
 		test := test
@@ -183,7 +182,7 @@ func TestClassifyStateRejectsUnprovableIncidentEvidence(t *testing.T) {
 			if test.rebuild {
 				reseal(&active)
 			}
-			got := classifyState(stateFixture(t, &active), testServerURL)
+			got := classifyState(stateFixture(t, &active), testServerURL, testLock)
 			if got.Reason != reasonStateInvalid || got.Incident != nil {
 				t.Fatalf("classifyState() = %q with incident %v, want %q", got.Reason, got.Incident != nil, reasonStateInvalid)
 			}
@@ -191,11 +190,81 @@ func TestClassifyStateRejectsUnprovableIncidentEvidence(t *testing.T) {
 	}
 }
 
+// Refusing to publish a provable incident is the failure this audit exists to
+// prevent, so provenance that is merely awkward to render must still be
+// published, with the rendering made safe instead.
+func TestProvableIncidentIsAlwaysPublishable(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		edit     func(*incident)
+		expected []string
+	}{
+		{
+			name: "table and code separators in job",
+			edit: func(active *incident) { active.Job = "editmode` | evil" },
+			expected: []string{
+				"| Job | ``editmode` \\| evil`` |",
+			},
+		},
+		{
+			name: "leading and trailing backticks in runner",
+			edit: func(active *incident) { active.RunnerID = "`ELI`" },
+			expected: []string{
+				"| Runner | `` `ELI` `` |",
+			},
+		},
+		{
+			name: "workflow longer than the rendered bound",
+			edit: func(active *incident) { active.Workflow = strings.Repeat("w", maxRenderedRunes+50) },
+			expected: []string{
+				"| Workflow | `" + strings.Repeat("w", maxRenderedRunes) + "` (truncated) |",
+			},
+		},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			active := incidentFixture()
+			test.edit(&active)
+			reseal(&active)
+
+			got := classifyState(stateFixture(t, &active), testServerURL, testLock)
+			if got.Reason != reasonIncidentActive {
+				t.Fatalf("classifyState() reason = %q, want %q", got.Reason, reasonIncidentActive)
+			}
+			body := alertBody(active, testLock, testServerURL, "owner/repo")
+			for _, expected := range test.expected {
+				if !strings.Contains(body, expected) {
+					t.Fatalf("alert body missing safely rendered %q:\n%s", expected, body)
+				}
+			}
+			for _, line := range strings.Split(body, "\n") {
+				if !strings.HasPrefix(line, "| ") {
+					continue
+				}
+				if cells := strings.Count(line, "|") - strings.Count(line, "\\|"); cells != 3 {
+					t.Fatalf("rendered table row has %d separators, breaking the table: %q", cells, line)
+				}
+			}
+		})
+	}
+}
+
+func TestClassifyStateRejectsStateForAnotherLock(t *testing.T) {
+	t.Parallel()
+	state := `{"lock":"some-other-lock","schemaVersion":5,"activeIncident":null}`
+	if got := classifyState([]byte(state), testServerURL, testLock); got.Reason != reasonStateInvalid {
+		t.Fatalf("classifyState() reason = %q, want %q", got.Reason, reasonStateInvalid)
+	}
+}
+
 func TestClassifyStateRejectsUnknownIncidentFields(t *testing.T) {
 	t.Parallel()
 	state := `{"schemaVersion":5,"activeIncident":{"incidentId":"incident-` +
 		strings.Repeat("a", 24) + `","surprise":true}}`
-	if got := classifyState([]byte(state), testServerURL); got.Reason != reasonStateInvalid {
+	if got := classifyState([]byte(state), testServerURL, testLock); got.Reason != reasonStateInvalid {
 		t.Fatalf("classifyState() reason = %q, want %q", got.Reason, reasonStateInvalid)
 	}
 }
@@ -258,7 +327,7 @@ func TestIncidentDigestMatchesCommittedRuntimeCanonicalization(t *testing.T) {
 			active.EvidenceDigest = digest
 			active.IncidentID = "incident-" + digest[:24]
 			active.RunURL = testServerURL + "/" + active.Repository + "/actions/runs/" + active.RunID
-			if got := classifyState(stateFixture(t, &active), testServerURL); got.Reason != reasonIncidentActive {
+			if got := classifyState(stateFixture(t, &active), testServerURL, testLock); got.Reason != reasonIncidentActive {
 				t.Fatalf("classifyState() reason = %q, want %q", got.Reason, reasonIncidentActive)
 			}
 		})
@@ -586,15 +655,6 @@ func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 				}
 			},
 		},
-		{
-			"foreign alert author",
-			func() *stubGitHub {
-				return &stubGitHub{
-					stateBody: stateFixture(t, &active),
-					issues:    existingAlert(t, "open", activeBody, "impostor"),
-				}
-			},
-		},
 	}
 	for _, test := range cases {
 		test := test
@@ -674,6 +734,54 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 	}
 	if largest > maxResponseBytes {
 		t.Fatalf("a full page of maximum-size issues was %d bytes, over the %d byte bound", largest, maxResponseBytes)
+	}
+}
+
+// The repository is public and both the title and the marker are published, so
+// an outsider can post a lookalike. It must be ignored, not adopted and not
+// treated as fatal: a fatal reading would let any user permanently suppress
+// incident publication, which is exactly the visibility gap this audit closes.
+func TestForeignLookalikeCannotSuppressOrCaptureTheAlert(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+	issues, err := json.Marshal([]map[string]any{{
+		"number": 99,
+		"state":  "open",
+		"title":  alertTitle,
+		"body":   alertMarker + "\nplease ignore the real incident",
+		"user":   map[string]any{"login": "impostor"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := &stubGitHub{t: t, stateBody: stateFixture(t, &active), issues: string(issues)}
+	code, stdout, stderr := runAudit(t, stub)
+
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if stub.created.Load() != 1 || stub.patched.Load() != 0 {
+		t.Fatalf("expected one freshly published alert, got created %d patched %d", stub.created.Load(), stub.patched.Load())
+	}
+	if !strings.Contains(stdout, active.IncidentID) {
+		t.Fatalf("run() must report the published incident, got %q", stdout)
+	}
+}
+
+// The title is presentation, so an operator who renames the alert for context
+// must not orphan it and cause a duplicate to be published.
+func TestRenamedAlertIsStillTheSameAlert(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+	renamed := existingAlert(t, "open", alertMarker+"\nsuperseded evidence", alertAuthor)
+	renamed = strings.Replace(renamed, alertTitle, "[P0] "+alertTitle, 1)
+
+	stub := &stubGitHub{t: t, stateBody: stateFixture(t, &active), issues: renamed}
+	if code, _, stderr := runAudit(t, stub); code != 0 {
+		t.Fatalf("run() = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if stub.created.Load() != 0 || stub.patched.Load() != 1 {
+		t.Fatalf("renamed alert must be updated, not duplicated: created %d patched %d", stub.created.Load(), stub.patched.Load())
 	}
 }
 
