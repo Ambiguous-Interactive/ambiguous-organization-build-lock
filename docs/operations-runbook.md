@@ -191,6 +191,17 @@ runner quarantine.
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |
 | Runner unavailable | Licensed work must remain pending or red | Restore eligible runner capacity. Never turn an unavailable required job into skip/green. |
 
+Do not auto-expire, bulk-recover, or activation-probe a `20111` incident.
+Historical evidence includes an operator statement that one incident had no
+seat leak, but lacks incident-specific portal observations at latch time, so no
+outcome is independently classifiable and no safe false-positive rate or
+automatic-recovery signature is established. Unity activation consumes the
+resource it would be asked to probe. Keep exact-ID, portal-confirmed recovery
+until a supported read-only seat query or incident-specific outcome dataset
+provides stronger evidence. The bounded investigation and revalidation
+triggers are recorded in
+[Unity 20111 Incident Outcomes](../.llm/research/20111-incident-outcomes-2026-07-29.md).
+
 Never edit or delete `lock-state` JSON directly. A recovery with a wrong ID,
 missing portal proof, or incomplete run-status evidence must fail closed.
 
