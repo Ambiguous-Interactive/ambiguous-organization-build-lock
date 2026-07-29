@@ -1,41 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "30473171303",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30473171303",
+    "queuedAt": "2026-07-29T17:10:16.564Z",
+    "acquiredAt": "2026-07-29T17:10:19.384Z",
+    "expiresAt": "2026-07-29T21:10:19.384Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "2963f833-6f41-4cb8-8cb3-6fa03746eae2",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-playmode",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30473171303:unity-tests:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
       "job": "unity-tests",
       "runId": "30473171303",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30473171303",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-29T17:09:29.360Z",
-      "availableAt": "2026-07-29T17:09:30.360Z"
-    },
-    {
-      "reservationId": "b9c02126-98cb-472b-bd45-a40b3abdf0e3",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30471934095:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30471934095",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30471934095",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-29T17:09:25.694Z",
-      "availableAt": "2026-07-29T17:09:26.694Z"
+      "queuedAt": "2026-07-29T17:10:16.564Z",
+      "acquiredAt": "2026-07-29T17:10:19.384Z",
+      "expiresAt": "2026-07-29T21:10:19.384Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T17:09:25.694Z"
+  "updatedAt": "2026-07-29T17:10:19.385Z"
 }
