@@ -81,5 +81,22 @@ every Go package, actionlint, module verification, workflow credential policy,
 and the LLM harness. The exact local organization audit remains complete at
 6/6 repositories and 113 inventory rows, with 278 truthful findings.
 
-Hosted reviewers, PR delivery, merge, and post-merge audit remain to be
-recorded.
+## Hosted delivery
+
+Draft PR #143 opened on exact head
+`4f78a8c5e6f313b791a8e470160b62023f15b2dc`. Build lock CI run
+`30488336558` passed. Copilot was requested through both the reviewer API and
+an exact-head tagged comment; review `4812639886` returned the terminal
+requester-quota response without code feedback. The thread-aware audit found
+no inline review threads.
+
+Cursor Bugbot was requested with `bugbot run`. Check run `90699733126`
+remained stuck at its four-second progress state. After a bounded wait, the
+documented alternate `@cursor review` mechanism was retried for the same exact
+head; check run `90701596593` also remained stuck at four seconds. Neither
+request produced a finding or review thread. This bounded reviewer-unavailable
+result is backed by the fresh independent no-findings adversarial review and
+the complete local verifier above.
+
+Both automated reviewers must be requested again after this delivery record
+advances the branch. Merge and post-merge audit evidence remain pending.
