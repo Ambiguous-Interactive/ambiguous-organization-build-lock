@@ -207,10 +207,27 @@ no commit that reaches the remote. The rewritten head has a byte-identical tree
 to the pre-rewrite head, confirmed with `git diff --stat`, and complete
 verification passed again afterwards.
 
+Pull request #138 was opened from head `5d145f1de`. Push-triggered Build lock CI
+run `30420721491` passed on that exact head; the Dependabot auto-merge workflow
+skipped as expected.
+
 Follow-up work found in scope but deliberately not attempted here was filed with
 its own evidence requirements rather than guessed at: issue #139 for the
 seat-probing and automatic-recovery half of #132, and issue #140 for the
 deferred shared issue-synchronization client.
+
+### Incomplete: merge blocked on credential loss
+
+The session's GitHub credential became invalid after the Bugbot remediation was
+committed. `gh api user` returns `Bad credentials` and pushes are rejected;
+re-authentication needs an interactive OAuth flow this session cannot run.
+
+The remediation for the one high-severity reviewer finding is therefore
+committed locally at `157bc50ce` but **not pushed**, and PR #138 still points at
+`5d145f1de`, which carries the defect. Complete verification passes on the local
+head. The pull request must not be merged until `157bc50ce` is pushed and CI is
+green on that exact head. This session did not merge and did not verify the
+default branch after merge; both remain outstanding.
 
 ## Continuous-improvement disposition
 
