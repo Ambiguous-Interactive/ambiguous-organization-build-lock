@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30478404613:platform-build-linux:platform-build-linux-0",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30478404613:platform-build-windows:platform-build-windows",
     "repository": "Ambiguous-Interactive/DoxReloaded",
     "workflow": "Build and Deploy",
-    "job": "platform-build-linux",
+    "job": "platform-build-windows",
     "runId": "30478404613",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30478404613",
-    "queuedAt": "2026-07-29T18:23:27.685Z",
-    "acquiredAt": "2026-07-29T18:24:23.237Z",
-    "expiresAt": "2026-07-29T22:24:23.237Z",
-    "runnerId": "box-linux"
+    "queuedAt": "2026-07-29T18:24:40.190Z",
+    "acquiredAt": "2026-07-29T18:24:41.387Z",
+    "expiresAt": "2026-07-29T22:24:41.387Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30478404613:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "30478404613",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30478404613",
-      "queuedAt": "2026-07-29T18:23:27.685Z",
-      "acquiredAt": "2026-07-29T18:24:23.237Z",
-      "expiresAt": "2026-07-29T22:24:23.237Z",
-      "runnerId": "box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30478404613:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -55,7 +42,23 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "53669c84-02e4-4cab-a0b2-2a7a38a058b4",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30478404613:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "30478404613",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30478404613",
+      "runnerId": "box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-29T18:29:01.539Z",
+      "availableAt": "2026-07-29T18:29:02.539Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-29T18:24:37.081Z"
+  "updatedAt": "2026-07-29T18:29:01.540Z"
 }
