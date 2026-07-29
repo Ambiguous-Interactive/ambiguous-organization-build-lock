@@ -117,7 +117,9 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 	if current[0].State != "closed" {
 		t.Fatalf("clean audit did not close alert: %#v", current)
 	}
-	if len(requests) != 6 {
+	// The second identical drift observation is read-only; only the final clean
+	// observation needs to patch and close the alert.
+	if len(requests) != 5 {
 		t.Fatalf("unexpected request count %d: %#v", len(requests), requests)
 	}
 }
@@ -162,7 +164,7 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, err := client.findAlert(t.Context())
+	found, err := client.issues.Find(t.Context(), alertIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +209,7 @@ func TestForeignAuthoredMarkerIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, err := client.findAlert(t.Context())
+	found, err := client.issues.Find(t.Context(), alertIdentity())
 	if err != nil {
 		t.Fatalf("a foreign lookalike must not stall discovery: %v", err)
 	}

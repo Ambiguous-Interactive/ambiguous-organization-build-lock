@@ -86,11 +86,13 @@
 - Evidence: one live `state=all&per_page=100` page is 837,658 bytes, of which
   only 268,666 bytes are bodies; the rest is fixed per-issue API envelope.
   `cmd/sync-unity-enrollment-issue` bounded that response at 1,048,576 bytes.
-- Fix: bound by page size rather than by limit. Discovery requests 30 issues per
-  page against a 4 MiB limit, so a full page of maximum-size (64 KiB) bodies
-  cannot exceed roughly 2 MiB, and the page budget is raised to keep coverage.
-  Applied to all three issue-syncing commands with regressions that walk
-  multiple maximum-size pages.
+- Fix: bound by page size rather than by limit. Issue #140 later proved the
+  original 30-item calculation incomplete because JSON escaping can expand one
+  input byte to six response bytes. Shared discovery now requests five issues
+  per page against a 4 MiB limit and retains the same 1,200-issue total walk
+  budget. A central regression encodes a representative full API envelope,
+  maximum-size worst-case escaped bodies, and 400 KiB of additional envelope
+  reserve per issue, then proves the response stays within the byte limit.
 
 ## Scope decisions
 

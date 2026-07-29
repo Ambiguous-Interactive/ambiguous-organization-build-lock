@@ -795,7 +795,7 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, err := client.findAlert(context.Background())
+	found, err := client.issues.Find(context.Background(), alertIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
