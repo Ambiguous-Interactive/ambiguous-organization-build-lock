@@ -22,6 +22,8 @@ const DEFAULT_API_RETRY_MAX_MS = 10000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
+const DEFAULT_REAP_SCAN_BUDGET_MS = 8 * 60 * 1000;
+const DEFAULT_REAP_TOTAL_BUDGET_MS = 9 * 60 * 1000;
 const APP_TOKEN_REFRESH_MS = 5 * 60 * 1000;
 const ACTIVE_RUN_STATUSES = new Set(["queued", "in_progress", "requested", "waiting", "pending"]);
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
@@ -3090,18 +3092,107 @@ async function runPostCleanup() {
   }
 }
 
-async function reap(config) {
+function reapDeadlineError(phase) {
+  const error = new Error(
+    `Scheduled reaper ${phase} deadline elapsed; unverified lock entries were retained fail-closed.`
+  );
+  error.code = "REAP_DEADLINE_ELAPSED";
+  return error;
+}
+
+function reapDeadlineElapsed(error, signal) {
+  return Boolean(
+    signal &&
+      signal.aborted &&
+      (isAbortError(error, signal) || (error && error.code === "GITHUB_API_RETRY_EXHAUSTED"))
+  );
+}
+
+function reapDeadlineBudgets() {
+  return {
+    scanMs: DEFAULT_REAP_SCAN_BUDGET_MS,
+    totalMs: DEFAULT_REAP_TOTAL_BUDGET_MS
+  };
+}
+
+function sameReapRunVersion(candidate, proven) {
+  return [
+    "holderId",
+    "repository",
+    "workflow",
+    "job",
+    "runId",
+    "runAttempt",
+    "runUrl",
+    "queuedAt",
+    "acquiredAt",
+    "expiresAt",
+    "runnerId"
+  ].every((field) => String(candidate[field] || "") === String(proven[field] || ""));
+}
+
+function sameReapReservationVersion(candidate, proven) {
+  return [
+    "reservationId",
+    "holderId",
+    "repository",
+    "workflow",
+    "job",
+    "runId",
+    "runAttempt",
+    "runUrl",
+    "runnerId",
+    "state",
+    "reason",
+    "createdAt",
+    "availableAt"
+  ].every((field) => String(candidate[field] || "") === String(proven[field] || ""));
+}
+
+async function retryReapCheckpoint(config, message, apiOptions, applyProvenChanges) {
+  let ambiguous = false;
+  for (let attempts = 2; attempts <= 10; attempts++) {
+    await sleep(jitter(1000), { signal: apiOptions.signal });
+    const { state, sha } = await readState(config, { apiOptions });
+    if (!applyProvenChanges(state)) {
+      return { conflict: false, sha: sha || "", changed: false, ambiguous };
+    }
+    const write = await writeState(config, sha, state, message, { apiOptions });
+    if (!write.conflict) {
+      return { ...write, changed: true, ambiguous };
+    }
+    ambiguous = ambiguous || Boolean(write.ambiguous);
+  }
+  throw new Error(`Failed to checkpoint reap of ${config.lockName} after repeated CAS conflicts.`);
+}
+
+async function reap(config, options = {}) {
   validateLockName(config.lockName);
   config.operation = config.operation || "reap";
   if (config.operation !== "reap" && config.operation !== "recover" && config.operation !== "recover-incident") {
     throw new Error("operation must be reap, recover, or recover-incident.");
   }
-  await ensureStateBranch(config);
+  const scheduledReap = config.operation === "reap";
+  const reapBudgets = reapDeadlineBudgets();
+  const scanSignal = scheduledReap
+    ? options.scanSignal || AbortSignal.timeout(reapBudgets.scanMs)
+    : undefined;
+  const totalSignal = scheduledReap
+    ? options.writeSignal || AbortSignal.timeout(reapBudgets.totalMs)
+    : undefined;
+  const scanApiOptions = scanSignal ? { signal: scanSignal } : undefined;
+  const writeApiOptions = () => {
+    if (!scheduledReap) {
+      return undefined;
+    }
+    return { signal: totalSignal };
+  };
+  await ensureStateBranch(config, { apiOptions: scanApiOptions });
   console.log(`::group::Reap stale build lock ${config.lockName}`);
   let ambiguousReap = false;
 
   for (let attempts = 1; attempts <= 10; attempts++) {
-    const { state, sha } = await readState(config);
+    const { state, sha } = await readState(config, { apiOptions: scanApiOptions });
     const expiredCooldowns = pruneExpiredCooldowns(state);
     for (const reservation of expiredCooldowns) {
       console.log(`Expired cooldown reservation ${reservation.reservationId} for runner ${reservation.runnerId}.`);
@@ -3208,35 +3299,117 @@ async function reap(config) {
       console.log("::endgroup::");
       return;
     }
-    const beforeQueue = state.queue.length;
-    const keptQueue = [];
-    for (const entry of state.queue) {
-      if (await queueEntryIsFinished(entry, config.readerToken)) {
-        console.log(`Dropping completed queue entry ${entry.holderId}.`);
-      } else {
-        keptQueue.push(entry);
-      }
-    }
-    state.queue = keptQueue;
-
     let holderReaped = false;
+    let holderScanIncomplete = false;
+    const provenHolderChanges = [];
     const keptHolders = [];
-    for (const holder of state.holders) {
-      const stale = await evaluateStale(holder, config.readerToken);
+    for (let index = 0; index < state.holders.length; index++) {
+      const holder = state.holders[index];
+      let stale;
+      try {
+        stale = await evaluateStale(holder, config.readerToken, { apiOptions: scanApiOptions });
+      } catch (error) {
+        if (reapDeadlineElapsed(error, scanSignal)) {
+          keptHolders.push(...state.holders.slice(index));
+          state.holders = keptHolders;
+          holderScanIncomplete = true;
+          break;
+        }
+        throw error;
+      }
       if (stale.stale) {
         console.log(`${state.schemaVersion >= 4 ? "Quarantining" : "Reaping"} holder ${holder.holderId}: ${stale.reason}.`);
         holderReaped = true;
+        const reservation = state.schemaVersion >= 4
+          ? reservationFromHolder(holder, "quarantine", `scheduled stale reaping: ${stale.reason}`)
+          : null;
+        provenHolderChanges.push({ holder: structuredClone(holder), reservation });
         if (state.schemaVersion >= 4) {
-          state.reservations.push(
-            reservationFromHolder(holder, "quarantine", `scheduled stale reaping: ${stale.reason}`)
-          );
+          state.reservations.push(reservation);
         }
+        keptHolders.push(...state.holders.slice(index + 1));
+        holderScanIncomplete = Boolean(scanSignal && scanSignal.aborted);
+        break;
       } else {
         console.log(`Keeping holder ${holder.holderId}: ${stale.reason}.`);
         keptHolders.push(holder);
       }
     }
     state.holders = keptHolders;
+
+    // Capacity-critical ownership is checkpointed before routine queue cleanup.
+    // A large FIFO must never consume the outer workflow budget before a proven
+    // terminal holder is quarantined/reaped and capacity recovery is persisted.
+    if (holderReaped || expiredCooldowns.length > 0) {
+      const checkpointMessage = `Reap capacity-critical stale state for ${config.lockName}`;
+      let write = await writeState(
+        config,
+        sha,
+        state,
+        checkpointMessage,
+        { apiOptions: writeApiOptions() }
+      );
+      if (write.conflict) {
+        if (write.ambiguous) {
+          ambiguousReap = true;
+        }
+        const expiredCooldownVersions = expiredCooldowns.map((reservation) => structuredClone(reservation));
+        write = await retryReapCheckpoint(
+          config,
+          checkpointMessage,
+          writeApiOptions(),
+          (freshState) => {
+            let changed = false;
+            if (freshState.schemaVersion >= 4 && expiredCooldownVersions.length) {
+              const beforeReservations = freshState.reservations.length;
+              freshState.reservations = freshState.reservations.filter(
+                (candidate) =>
+                  !expiredCooldownVersions.some((proven) => sameReapReservationVersion(candidate, proven))
+              );
+              changed = freshState.reservations.length !== beforeReservations;
+            }
+            for (const proven of provenHolderChanges) {
+              const holderIndex = freshState.holders.findIndex(
+                (candidate) => sameReapRunVersion(candidate, proven.holder)
+              );
+              if (holderIndex === -1) {
+                continue;
+              }
+              freshState.holders.splice(holderIndex, 1);
+              if (
+                freshState.schemaVersion >= 4 &&
+                proven.reservation &&
+                !freshState.reservations.some(
+                  (candidate) => candidate.reservationId === proven.reservation.reservationId
+                )
+              ) {
+                freshState.reservations.push(structuredClone(proven.reservation));
+              }
+              changed = true;
+            }
+            return changed;
+          }
+        );
+        ambiguousReap = ambiguousReap || Boolean(write.ambiguous);
+      }
+      const checkpointApplied = write.changed !== false || ambiguousReap;
+      writeReapOutputs({ reaped: checkpointApplied, stateSha: write.sha });
+      appendSummary(
+        !checkpointApplied
+          ? `Skipped stale holder checkpoint for ${config.lockName}; fresh state no longer matched the proven version.`
+          : holderScanIncomplete
+          ? `Checkpointed capacity-critical stale state for ${config.lockName}, but the bounded holder scan did not finish.`
+          : `Reaped capacity-critical stale state for ${config.lockName}.`
+      );
+      if (holderScanIncomplete) {
+        throw reapDeadlineError("holder scan after checkpoint");
+      }
+      console.log("::endgroup::");
+      return;
+    }
+    if (holderScanIncomplete) {
+      throw reapDeadlineError("holder scan");
+    }
 
     // Auto-recover stale quarantines (issue #61). A quarantine tied to an ephemeral
     // (GitHub-hosted) runner can never be same-runner-reclaimed, and before consumer
@@ -3253,6 +3426,8 @@ async function reap(config) {
     // does not exist, so recovering there would be unsafe. Fails closed on unknown run
     // status (keeps the quarantine) and skips while an incident is already active.
     let quarantineRecovered = false;
+    let quarantineScanIncomplete = false;
+    const provenQuarantineChanges = [];
     if (state.schemaVersion >= 5 && !state.activeIncident) {
       const graceMs = (Number.isInteger(config.leaseMinutes) ? config.leaseMinutes : 240) * 60 * 1000;
       const now = Date.now();
@@ -3266,15 +3441,28 @@ async function reap(config) {
         if (!(createdMs > 0 && now - createdMs >= graceMs)) {
           continue;
         }
-        const finished = await queueEntryIsFinished(
-          { ...reservation, queuedAt: reservation.createdAt },
-          config.readerToken
-        );
+        let finished;
+        try {
+          finished = await queueEntryIsFinished(
+            { ...reservation, queuedAt: reservation.createdAt },
+            config.readerToken,
+            { apiOptions: scanApiOptions }
+          );
+        } catch (error) {
+          if (reapDeadlineElapsed(error, scanSignal)) {
+            quarantineScanIncomplete = true;
+            break;
+          }
+          throw error;
+        }
         if (!finished) {
           continue;
         }
+        const reservationBefore = structuredClone(reservation);
         if (recoveryCooldownSeconds === null) {
-          recoveryCooldownSeconds = (await readLockConfig(config)).releaseCooldownSeconds;
+          recoveryCooldownSeconds = (
+            await readLockConfig(config, { apiOptions: scanApiOptions })
+          ).releaseCooldownSeconds;
         }
         quarantineRecovered = true;
         if (recoveryCooldownSeconds <= 0) {
@@ -3295,6 +3483,12 @@ async function reap(config) {
               "owning run is terminal and aged past the lease, so it becomes a cooldown."
           );
         }
+        provenQuarantineChanges.push({
+          before: reservationBefore,
+          after: recoveryCooldownSeconds <= 0 ? null : structuredClone(reservation)
+        });
+        quarantineScanIncomplete = Boolean(scanSignal && scanSignal.aborted);
+        break;
       }
       if (releasedImmediately.size) {
         state.reservations = state.reservations.filter(
@@ -3303,9 +3497,97 @@ async function reap(config) {
       }
     }
 
-    const changed =
-      holderReaped || beforeQueue !== state.queue.length || expiredCooldowns.length > 0 || quarantineRecovered;
-    if (!changed) {
+    if (quarantineRecovered) {
+      const checkpointMessage = `Auto-recover stale quarantine for ${config.lockName}`;
+      let write = await writeState(
+        config,
+        sha,
+        state,
+        checkpointMessage,
+        { apiOptions: writeApiOptions() }
+      );
+      if (write.conflict) {
+        if (write.ambiguous) {
+          ambiguousReap = true;
+        }
+        write = await retryReapCheckpoint(
+          config,
+          checkpointMessage,
+          writeApiOptions(),
+          (freshState) => {
+            if (freshState.schemaVersion < 5 || freshState.activeIncident) {
+              return false;
+            }
+            let changed = false;
+            for (const proven of provenQuarantineChanges) {
+              const index = freshState.reservations.findIndex(
+                (candidate) => sameReapReservationVersion(candidate, proven.before)
+              );
+              if (index === -1) {
+                continue;
+              }
+              if (proven.after) {
+                freshState.reservations[index] = structuredClone(proven.after);
+              } else {
+                freshState.reservations.splice(index, 1);
+              }
+              changed = true;
+            }
+            return changed;
+          }
+        );
+        ambiguousReap = ambiguousReap || Boolean(write.ambiguous);
+      }
+      const checkpointApplied = write.changed !== false || ambiguousReap;
+      writeReapOutputs({ reaped: checkpointApplied, stateSha: write.sha });
+      appendSummary(
+        !checkpointApplied
+          ? `Skipped stale quarantine recovery for ${config.lockName}; fresh safety preconditions no longer held.`
+          : quarantineScanIncomplete
+          ? `Checkpointed stale quarantine recovery for ${config.lockName}, but the bounded quarantine scan did not finish.`
+          : `Auto-recovered stale quarantine for ${config.lockName}.`
+      );
+      if (quarantineScanIncomplete) {
+        throw reapDeadlineError("quarantine scan after checkpoint");
+      }
+      console.log("::endgroup::");
+      return;
+    }
+    if (quarantineScanIncomplete) {
+      throw reapDeadlineError("quarantine scan");
+    }
+
+    const beforeQueue = state.queue.length;
+    const keptQueue = [];
+    const completedQueueEntries = [];
+    let queueScanIncomplete = false;
+    for (let index = 0; index < state.queue.length; index++) {
+      const entry = state.queue[index];
+      try {
+        if (await queueEntryIsFinished(entry, config.readerToken, { apiOptions: scanApiOptions })) {
+          console.log(`Dropping completed queue entry ${entry.holderId}.`);
+          completedQueueEntries.push(structuredClone(entry));
+          queueScanIncomplete = Boolean(scanSignal && scanSignal.aborted);
+          if (queueScanIncomplete) {
+            keptQueue.push(...state.queue.slice(index + 1));
+            break;
+          }
+        } else {
+          keptQueue.push(entry);
+        }
+      } catch (error) {
+        if (!reapDeadlineElapsed(error, scanSignal)) {
+          throw error;
+        }
+        keptQueue.push(...state.queue.slice(index));
+        queueScanIncomplete = true;
+        break;
+      }
+    }
+    state.queue = keptQueue;
+
+    const queueChanged = beforeQueue !== state.queue.length;
+    if (!queueChanged && !queueScanIncomplete) {
       writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
       appendSummary(
         ambiguousReap ? `Reaped stale state for ${config.lockName}.` : `No stale state found for ${config.lockName}.`
@@ -3314,17 +3596,50 @@ async function reap(config) {
       return;
     }
 
-    const write = await writeState(config, sha, state, `Reap stale ${config.lockName}`);
+    if (!queueChanged) {
+      throw reapDeadlineError("queue scan");
+    }
+
+    const checkpointMessage = `Reap completed queue entries for ${config.lockName}`;
+    let write = await writeState(
+      config,
+      sha,
+      state,
+      checkpointMessage,
+      { apiOptions: writeApiOptions() }
+    );
     if (write.conflict) {
       if (write.ambiguous) {
         ambiguousReap = true;
       }
-      await sleep(jitter(1000));
-      continue;
+      write = await retryReapCheckpoint(
+        config,
+        checkpointMessage,
+        writeApiOptions(),
+        (freshState) => {
+          const before = freshState.queue.length;
+          freshState.queue = freshState.queue.filter(
+            (candidate) =>
+              !completedQueueEntries.some((proven) => sameReapRunVersion(candidate, proven))
+          );
+          return freshState.queue.length !== before;
+        }
+      );
+      ambiguousReap = ambiguousReap || Boolean(write.ambiguous);
     }
 
-    writeReapOutputs({ reaped: true, stateSha: write.sha });
-    appendSummary(`Reaped stale state for ${config.lockName}.`);
+    const checkpointApplied = write.changed !== false || ambiguousReap;
+    writeReapOutputs({ reaped: checkpointApplied, stateSha: write.sha });
+    appendSummary(
+      !checkpointApplied
+        ? `Skipped completed queue checkpoint for ${config.lockName}; fresh state no longer matched the proven version.`
+        : queueScanIncomplete
+        ? `Checkpointed completed queue entries for ${config.lockName}, but the bounded scan did not finish.`
+        : `Reaped completed queue entries for ${config.lockName}.`
+    );
+    if (queueScanIncomplete) {
+      throw reapDeadlineError("queue scan after checkpoint");
+    }
     console.log("::endgroup::");
     return;
   }
@@ -3454,6 +3769,7 @@ module.exports = {
   readState,
   release,
   reap,
+  reapDeadlineBudgets,
   resolveReleaseReport,
   run,
   runCancellationCleanup,

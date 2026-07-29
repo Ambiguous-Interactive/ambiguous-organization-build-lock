@@ -29,6 +29,7 @@ const {
   readerCredentialRequired,
   release,
   reap,
+  reapDeadlineBudgets,
   resolveReleaseReport,
   runCancellationCleanup,
   selectEligibleQueueEntries,
@@ -4226,6 +4227,423 @@ test("reap writes full output contract when a stale holder is removed", async ()
   assert.equal(state.holder, null);
 });
 
+test("scheduled reap checkpoints stale-holder recovery before inspecting queued runs", async () => {
+  const staleHolder = withRunner(semaphoreHolder("holder/repo", "123", "editmode"), "runner-a");
+  const queued = withRunner(semaphoreQueueEntry("queue/repo", "888", "playmode"), "runner-b");
+  let state = lifecycleState([staleHolder], [queued]);
+  const operations = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            operations.push("write");
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-holder-reap" } });
+          }
+          return base64Content(state, "state-before-holder-reap");
+        }
+        if (parsed.pathname === "/repos/holder/repo/actions/runs/123") {
+          operations.push("holder-status");
+          return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+        }
+        if (parsed.pathname === "/repos/queue/repo/actions/runs/888") {
+          operations.push("queue-status");
+          return jsonResponse(200, { status: "completed", conclusion: "cancelled", run_attempt: 1 });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig());
+      });
+    });
+  });
+
+  assert.deepEqual(
+    operations,
+    ["holder-status", "write"],
+    "capacity-critical stale ownership must be persisted before routine queue traversal"
+  );
+  assert.deepEqual(state.holders, []);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.deepEqual(state.queue, [queued], "unscanned queue entries remain in their original FIFO order");
+});
+
+test("scheduled reap reserves bounded checkpoint time before the workflow timeout", () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "../.github/workflows/reap-stale-locks.yml"),
+    "utf8"
+  );
+  const timeoutMatch = workflow.match(/^\s+timeout-minutes:\s+([0-9]+)\s*$/m);
+  assert.ok(timeoutMatch, "the scheduled reaper must declare a numeric job timeout");
+  const workflowBudgetMs = Number(timeoutMatch[1]) * 60 * 1000;
+  const budgets = reapDeadlineBudgets();
+
+  assert.deepEqual(budgets, { scanMs: 8 * 60 * 1000, totalMs: 9 * 60 * 1000 });
+  assert.ok(budgets.scanMs < budgets.totalMs, "status scanning must stop before checkpoint writes");
+  assert.ok(budgets.totalMs < workflowBudgetMs, "the action must stop before GitHub kills the job");
+});
+
+test("scheduled reap checkpoints a proven stale holder before later holder scans", async () => {
+  const completed = withRunner(semaphoreHolder("holder/repo", "201", "completed"), "runner-a");
+  const ambiguous = withRunner(semaphoreHolder("holder/repo", "202", "ambiguous"), "runner-b");
+  const queued = withRunner(semaphoreQueueEntry("queue/repo", "203", "queued"), "runner-c");
+  let state = lifecycleState([completed, ambiguous], [queued]);
+  const operations = [];
+  const scanController = new AbortController();
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            operations.push("write");
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-holder-checkpoint" } });
+          }
+          return base64Content(state, "state-before-holder-checkpoint");
+        }
+        if (parsed.pathname === "/repos/holder/repo/actions/runs/201") {
+          operations.push("completed-holder");
+          return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+        }
+        if (parsed.pathname === "/repos/holder/repo/actions/runs/202") {
+          operations.push("ambiguous-holder");
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+            scanController.abort(new DOMException("reaper holder budget elapsed", "TimeoutError"));
+          });
+        }
+        if (parsed.pathname === "/repos/queue/repo/actions/runs/203") {
+          operations.push("queue-status");
+          return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig(), {
+          scanSignal: scanController.signal,
+          writeSignal: AbortSignal.timeout(1_000)
+        });
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-holder-checkpoint");
+  });
+
+  assert.deepEqual(operations, ["completed-holder", "write"]);
+  assert.deepEqual(state.holders, [ambiguous]);
+  assert.equal(state.reservations.length, 1);
+  assert.equal(state.reservations[0].holderId, completed.holderId);
+  assert.deepEqual(state.queue, [queued]);
+});
+
+test("scheduled reap checkpoints proven queue entries before reporting an incomplete scan", async () => {
+  const completed = withRunner(semaphoreQueueEntry("queue/repo", "101", "completed"), "runner-a");
+  const ambiguous = withRunner(semaphoreQueueEntry("queue/repo", "102", "ambiguous"), "runner-b");
+  const unscanned = withRunner(semaphoreQueueEntry("queue/repo", "103", "unscanned"), "runner-c");
+  let state = lifecycleState([], [completed, ambiguous, unscanned]);
+  const operations = [];
+  const scanController = new AbortController();
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            operations.push("write");
+            assert.notEqual(options.signal, scanController.signal, "checkpoint writes retain a separate deadline budget");
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-queue-checkpoint" } });
+          }
+          return base64Content(state, "state-before-queue-checkpoint");
+        }
+        if (parsed.pathname === "/repos/queue/repo/actions/runs/101") {
+          operations.push("completed-status");
+          assert.equal(options.signal, scanController.signal);
+          return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+        }
+        if (parsed.pathname === "/repos/queue/repo/actions/runs/102") {
+          operations.push("ambiguous-status");
+          assert.equal(options.signal, scanController.signal);
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+            scanController.abort(new DOMException("reaper scan budget elapsed", "TimeoutError"));
+          });
+        }
+        if (parsed.pathname === "/repos/queue/repo/actions/runs/103") {
+          operations.push("unscanned-status");
+          return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await assert.rejects(
+          () => reap(semaphoreConfig(), {
+            scanSignal: scanController.signal,
+            writeSignal: AbortSignal.timeout(1_000)
+          }),
+          /queue scan after checkpoint deadline elapsed/
+        );
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-queue-checkpoint");
+  });
+
+  assert.deepEqual(operations, ["completed-status", "ambiguous-status", "write"]);
+  assert.deepEqual(
+    state.queue,
+    [ambiguous, unscanned],
+    "the timed-out identity and every unscanned identity remain in original FIFO order"
+  );
+});
+
+test("scheduled reap batches multiple completed queue entries before a live FIFO tail", async () => {
+  const completedFirst = withRunner(semaphoreQueueEntry("queue/repo", "111", "first"), "runner-a");
+  const completedSecond = withRunner(semaphoreQueueEntry("queue/repo", "112", "second"), "runner-b");
+  const liveTail = withRunner(semaphoreQueueEntry("queue/repo", "113", "live"), "runner-c");
+  let state = lifecycleState([], [completedFirst, completedSecond, liveTail]);
+  const operations = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            operations.push("write");
+            state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "state-after-batch" } });
+          }
+          return base64Content(state, "state-before-batch");
+        }
+        const statusByPath = new Map([
+          ["/repos/queue/repo/actions/runs/111", ["first-status", "completed"]],
+          ["/repos/queue/repo/actions/runs/112", ["second-status", "completed"]],
+          ["/repos/queue/repo/actions/runs/113", ["tail-status", "in_progress"]]
+        ]);
+        if (statusByPath.has(parsed.pathname)) {
+          const [operation, status] = statusByPath.get(parsed.pathname);
+          operations.push(operation);
+          return jsonResponse(200, {
+            status,
+            conclusion: status === "completed" ? "success" : null,
+            run_attempt: 1
+          });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, () => reap(semaphoreConfig()));
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-batch");
+  });
+
+  assert.deepEqual(operations, ["first-status", "second-status", "tail-status", "write"]);
+  assert.deepEqual(state.queue, [liveTail]);
+});
+
+test("scheduled reap refreshes a conflicted deadline checkpoint under the live write budget", async () => {
+  const completed = withRunner(semaphoreQueueEntry("queue/repo", "301", "completed"), "runner-a");
+  const waiting = withRunner(semaphoreQueueEntry("queue/repo", "302", "waiting"), "runner-b");
+  const refreshedWaiting = { ...waiting, runAttempt: "2" };
+  const concurrent = withRunner(semaphoreQueueEntry("queue/repo", "303", "concurrent"), "runner-c");
+  let state = lifecycleState([], [completed, waiting]);
+  let stateSha = "state-before-conflict";
+  let stateReads = 0;
+  let stateWrites = 0;
+  const scanController = new AbortController();
+  const writeController = new AbortController();
+  const operations = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method !== "PUT") {
+              stateReads++;
+              operations.push(`get-${stateReads}`);
+              assert.equal(
+                options.signal,
+                stateReads === 1 ? scanController.signal : writeController.signal,
+                "the conflict refresh must stop using the elapsed scan budget"
+              );
+              return base64Content(state, stateSha);
+            }
+            stateWrites++;
+            operations.push(`put-${stateWrites}`);
+            assert.equal(options.signal, writeController.signal);
+            const body = JSON.parse(options.body);
+            if (stateWrites === 1) {
+              assert.equal(body.sha, "state-before-conflict");
+              state = lifecycleState([], [completed, refreshedWaiting, concurrent]);
+              stateSha = "state-after-concurrent-change";
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            assert.equal(body.sha, "state-after-concurrent-change");
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            stateSha = "state-after-checkpoint";
+            return jsonResponse(200, { content: { sha: stateSha } });
+          }
+          if (parsed.pathname === "/repos/queue/repo/actions/runs/301") {
+            operations.push("completed-status");
+            assert.equal(options.signal, scanController.signal);
+            scanController.abort(new DOMException("reaper scan budget elapsed", "TimeoutError"));
+            return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => reap(semaphoreConfig(), {
+              scanSignal: scanController.signal,
+              writeSignal: writeController.signal
+            }),
+            /queue scan after checkpoint deadline elapsed/
+          );
+        });
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "true");
+    assert.equal(outputs["state-sha"], "state-after-checkpoint");
+  });
+
+  assert.deepEqual(operations, ["get-1", "completed-status", "put-1", "get-2", "put-2"]);
+  assert.deepEqual(
+    state.queue,
+    [refreshedWaiting, concurrent],
+    "the retry removes only the proven exact attempt while preserving concurrent FIFO state"
+  );
+});
+
+test("scheduled reap preserves ambiguous evidence from an accepted retry checkpoint", async () => {
+  const completed = withRunner(semaphoreQueueEntry("queue/repo", "305", "completed"), "runner-a");
+  const concurrent = withRunner(semaphoreQueueEntry("queue/repo", "306", "concurrent"), "runner-b");
+  let state = lifecycleState([], [completed]);
+  let stateSha = "state-before-conflict";
+  let stateReads = 0;
+  let putRequests = 0;
+  const operations = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method !== "PUT") {
+              stateReads++;
+              operations.push(`get-${stateReads}`);
+              return base64Content(state, stateSha);
+            }
+            putRequests++;
+            operations.push(`put-${putRequests}`);
+            if (putRequests === 1) {
+              return jsonResponse(409, { message: "initial sha does not match" });
+            }
+            if (putRequests === 2) {
+              state = lifecycleState([], [concurrent]);
+              stateSha = "state-after-accepted-retry";
+              return jsonResponse(500, { message: "accepted but response failed" });
+            }
+            return jsonResponse(409, { message: "retry sha does not match" });
+          }
+          if (parsed.pathname === "/repos/queue/repo/actions/runs/305") {
+            operations.push("completed-status");
+            return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => reap(semaphoreConfig()));
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "true", "accepted retry evidence must survive the helper conflict");
+    assert.equal(outputs["state-sha"], "state-after-accepted-retry");
+  });
+
+  assert.deepEqual(
+    operations,
+    ["get-1", "completed-status", "put-1", "get-2", "put-2", "put-3", "get-3"]
+  );
+  assert.deepEqual(state.queue, [concurrent]);
+});
+
+test("scheduled reap does not delete a queue entry whose proven version changed after conflict", async () => {
+  const completed = withRunner(semaphoreQueueEntry("queue/repo", "304", "completed"), "runner-a");
+  const refreshed = { ...completed, queuedAt: "2026-06-06T00:02:00.000Z" };
+  let state = lifecycleState([], [completed]);
+  let stateSha = "state-before-conflict";
+  let puts = 0;
+  const operations = [];
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              puts++;
+              operations.push("put");
+              state = lifecycleState([], [refreshed]);
+              stateSha = "state-after-refresh";
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            operations.push("get");
+            return base64Content(state, stateSha);
+          }
+          if (parsed.pathname === "/repos/queue/repo/actions/runs/304") {
+            operations.push("completed-status");
+            return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => reap(semaphoreConfig()));
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "false");
+    assert.equal(outputs["state-sha"], "state-after-refresh");
+  });
+
+  assert.equal(puts, 1, "changed proof provenance must prevent a second mutation attempt");
+  assert.deepEqual(operations, ["get", "completed-status", "put", "get"]);
+  assert.deepEqual(state.queue, [refreshed]);
+});
+
 test("reap reports reaped after an accepted write returns retryable failure then conflict", async () => {
   let state = {
     ...emptyState("wallstop-organization-builds"),
@@ -4350,6 +4768,74 @@ test("scheduled reap auto-recovers a stale quarantine (schema 5, terminal run) t
   assert.equal(state.reservations[0].state, "cooldown");
   assert.ok(state.reservations[0].availableAt);
   assert.match(state.reservations[0].reason, /auto-recovered stale quarantine/);
+});
+
+test("scheduled reap keeps quarantine when an incident appears during checkpoint conflict", async () => {
+  const owner = withRunner(
+    semaphoreHolder("owner/repo", "998", "unitypackage-smoke"),
+    "GitHub Actions 1000111524"
+  );
+  const quarantine = lifecycleReservation(owner, {
+    reservationId: "incident-race-quarantine",
+    state: "quarantine",
+    reason: "return-missing-positive-evidence",
+    createdAt: "2026-06-06T00:01:00.000Z"
+  });
+  const concurrentIncident = accountIncident({
+    runId: "777",
+    runUrl: "https://github.com/owner/repo/actions/runs/777",
+    runnerId: "runner-incident"
+  });
+  let state = accountHealthState([], [], [quarantine]);
+  let stateSha = "state-before-conflict";
+  let puts = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content(
+              {
+                maxHolders: 2,
+                runnerSerialization: true,
+                resourceLifecycle: true,
+                accountHealth: true,
+                releaseCooldownSeconds: 1
+              },
+              "cfg"
+            );
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              puts++;
+              state = accountHealthState([], [], [quarantine], concurrentIncident);
+              stateSha = "state-with-incident";
+              return jsonResponse(409, { message: "sha does not match" });
+            }
+            return base64Content(state, stateSha);
+          }
+          if (parsed.pathname === "/repos/owner/repo/actions/runs/998") {
+            return jsonResponse(200, { status: "completed", conclusion: "success", run_attempt: 1 });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, () => reap(semaphoreConfig()));
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs.reaped, "false");
+    assert.equal(outputs["state-sha"], "state-with-incident");
+  });
+
+  assert.equal(puts, 1, "the fresh incident must veto quarantine recovery before a second PUT");
+  assert.deepEqual(state.activeIncident, concurrentIncident);
+  assert.equal(state.reservations[0].state, "quarantine");
+  assert.equal(state.reservations[0].reason, "return-missing-positive-evidence");
 });
 
 test("scheduled reap releases a stale quarantine immediately when the cooldown is 0", async () => {

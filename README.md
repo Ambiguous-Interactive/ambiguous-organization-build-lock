@@ -511,7 +511,15 @@ reaping uses a stable group with `cancel-in-progress: false`; proof-bearing
 recovery uses a separate workflow with no automatic concurrency cancellation.
 A new schedule cannot cancel running or pending recovery; concurrent state
 attempts remain inside the existing compare-and-swap retry contract. Before
-schema 4 the reaper clears a holder when the holder workflow run has completed,
+routine queue cleanup, scheduled reaping evaluates the capacity-critical
+holders and checkpoints any proven stale-holder transition. A bounded
+eight-minute status-scan deadline leaves a separate one-minute write budget
+inside the workflow's ten-minute timeout. If the scan deadline expires, every
+unverified holder, reservation, and queue entry remains unchanged; a completed
+queue entry already proven safe within the scanned FIFO prefix is checkpointed
+without reordering, and the action fails visibly so delivery monitoring can
+escalate it. Before schema 4 the reaper clears a holder when the holder workflow
+run has completed,
 or when the lease has expired and the run cannot be proven active. The same
 stale predicate is used by acquire and the reaper.
 

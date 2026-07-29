@@ -249,6 +249,18 @@ cancellation. The scheduled/manual reaper has a stable group with cancellation
 disabled, so a schedule cannot replace or cancel running or pending recovery.
 Concurrent reaping and recovery still use the lock action's compare-and-swap
 retry and exact-ID fencing.
+
+Scheduled reaping is capacity-first. It evaluates holders before routine queue
+cleanup and commits a proven stale-holder quarantine/reap immediately, leaving
+the FIFO unchanged for the next five-minute run. Status scanning has an
+eight-minute deadline, while state writes share a separate nine-minute total
+deadline inside the workflow's ten-minute timeout. A timed-out lookup never
+proves cleanup:
+the current and all unscanned identities remain in their original order. If a
+completed queue entry was already proven within the scanned FIFO prefix, that
+bounded cleanup is checkpointed and the action still fails red to make the
+incomplete scan operator-visible.
+
 Monitor and alert on:
 
 - `20111` or any account-blocked classification;
