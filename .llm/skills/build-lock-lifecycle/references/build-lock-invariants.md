@@ -31,6 +31,9 @@
   state remains fail-closed.
 - Recovery requires the exact reservation or incident identity plus external
   evidence required by the public contract.
+- Recovery diagnostics name the exact workflow path that accepts every
+  instructed input, with a contract test binding emitted guidance to that
+  workflow declaration.
 - Pull-request admission remains bound to the event head while queued and
   immediately before licensed work.
 - Diagnostics and outputs identify safe next actions without exposing secrets.

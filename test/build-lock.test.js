@@ -7725,6 +7725,20 @@ function accountIncident(overrides = {}) {
   };
 }
 
+function assertIncidentRecoveryWorkflowContract(message) {
+  const recoveryTarget =
+    /dispatch ([^(]+?) \((\.github\/workflows\/[^)]+\.ya?ml)\) with operation=recover-incident/.exec(message);
+  assert.ok(recoveryTarget, "incident denial must identify the proof-bearing recovery workflow and path");
+
+  const [, workflowName, workflowPath] = recoveryTarget;
+  const workflow = fs.readFileSync(path.join(__dirname, "..", workflowPath), "utf8");
+  assert.match(workflow, new RegExp(`^name: ${workflowName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+  assert.match(workflow, /^\s{6}operation:\s*$/m);
+  assert.match(workflow, /^\s{10}- recover-incident\s*$/m);
+  assert.match(workflow, /^\s{6}incident-id:\s*$/m);
+  assert.match(workflow, /^\s{6}portal-cleanup-confirmed:\s*$/m);
+}
+
 function accountHealthState(holders = [], queue = [], reservations = [], activeIncident = null) {
   return { ...lifecycleState(holders, queue, reservations), schemaVersion: 5, activeIncident };
 }
@@ -8284,6 +8298,7 @@ test("schema 5 global incident blocks acquire immediately without growing the qu
   ]) {
     assert.match(rejection.message, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  assertIncidentRecoveryWorkflowContract(rejection.message);
   assert.doesNotMatch(rejection.message, /[\r\n]/);
   assert.doesNotMatch(rejection.message, new RegExp(incident.evidenceDigest));
   assert.equal(store.writes(), 0);
@@ -8422,6 +8437,7 @@ test("schema 5 incident cleanup failure reports a typed fail-closed result", asy
   assert.match(rejection.message, new RegExp(`incident-id=${incident.incidentId}`));
   assert.match(rejection.message, /portal-cleanup-confirmed=true/);
   assert.match(rejection.message, /Only then rerun the consumer/);
+  assertIncidentRecoveryWorkflowContract(rejection.message);
   assert.equal(store.writes(), 3);
   assert.deepEqual(store.state().queue, [callerQueue]);
   assert.deepEqual(store.state().holders, []);
