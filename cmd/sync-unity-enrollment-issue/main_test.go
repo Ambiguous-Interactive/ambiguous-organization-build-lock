@@ -70,7 +70,9 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 		case request.Method == http.MethodPost:
 			var payload map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&payload)
-			current = []issue{{Number: 42, State: "open", Title: alertTitle, Body: payload["body"].(string)}}
+			created := issue{Number: 42, State: "open", Title: alertTitle, Body: payload["body"].(string)}
+			created.User.Login = alertAuthor
+			current = []issue{created}
 			writer.WriteHeader(http.StatusCreated)
 			_, _ = writer.Write([]byte(`{}`))
 		case request.Method == http.MethodPatch:
@@ -130,16 +132,22 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 		bulk := make([]issue, issuePageSize)
 		for index := range bulk {
 			bulk[index] = issue{Number: page*1000 + index, State: "closed", Title: "unrelated", Body: maximumBody}
+			bulk[index].User.Login = alertAuthor
 		}
 		pages[strconv.Itoa(page)] = bulk
 	}
 	pages["3"][0] = issue{Number: 7, State: "open", Title: alertTitle, Body: alertMarker + "\nprevious"}
+	pages["3"][0].User.Login = alertAuthor
 	pages["4"] = nil
 
 	var largest int
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Get("per_page") != strconv.Itoa(issuePageSize) {
-			t.Errorf("unexpected page size %q", request.URL.Query().Get("per_page"))
+		query := request.URL.Query()
+		if query.Get("per_page") != strconv.Itoa(issuePageSize) {
+			t.Errorf("unexpected page size %q", query.Get("per_page"))
+		}
+		if query.Get("creator") != alertAuthor {
+			t.Errorf("discovery must be restricted to this automation's own issues, got creator %q", query.Get("creator"))
 		}
 		var buffer bytes.Buffer
 		_ = json.NewEncoder(&buffer).Encode(pages[request.URL.Query().Get("page")])
@@ -168,10 +176,11 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 
 func TestSyncRejectsDuplicateMarkerIssues(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(writer).Encode([]issue{
-			{Number: 1, Body: alertMarker},
-			{Number: 2, Body: alertMarker},
-		})
+		first := issue{Number: 1, Body: alertMarker}
+		first.User.Login = alertAuthor
+		second := issue{Number: 2, Body: alertMarker}
+		second.User.Login = alertAuthor
+		_ = json.NewEncoder(writer).Encode([]issue{first, second})
 	}))
 	defer server.Close()
 	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "token", server.Client())
@@ -180,6 +189,30 @@ func TestSyncRejectsDuplicateMarkerIssues(t *testing.T) {
 	}
 	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err == nil {
 		t.Fatal("duplicate marker issues passed")
+	}
+}
+
+// The marker is published in this public repository's own alert body, so an
+// outsider can post a lookalike. It must be ignored rather than adopted and
+// overwritten, and must not stall synchronization.
+func TestForeignAuthoredMarkerIsIgnored(t *testing.T) {
+	impostor := issue{Number: 5, State: "open", Title: alertTitle, Body: alertMarker + "\nnot ours"}
+	impostor.User.Login = "impostor"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(writer).Encode([]issue{impostor})
+	}))
+	defer server.Close()
+
+	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "test-token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := client.findAlert(t.Context())
+	if err != nil {
+		t.Fatalf("a foreign lookalike must not stall discovery: %v", err)
+	}
+	if found != nil {
+		t.Fatalf("a foreign lookalike must never be adopted: %#v", found)
 	}
 }
 

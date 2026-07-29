@@ -707,8 +707,12 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 
 	var largest int
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Get("per_page") != strconv.Itoa(issuePageSize) {
-			t.Errorf("unexpected page size %q", request.URL.Query().Get("per_page"))
+		query := request.URL.Query()
+		if query.Get("per_page") != strconv.Itoa(issuePageSize) {
+			t.Errorf("unexpected page size %q", query.Get("per_page"))
+		}
+		if query.Get("creator") != alertAuthor {
+			t.Errorf("discovery must be restricted to this automation's own issues, got creator %q", query.Get("creator"))
 		}
 		encoded, err := json.Marshal(pages[request.URL.Query().Get("page")])
 		if err != nil {

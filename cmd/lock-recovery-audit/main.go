@@ -529,17 +529,29 @@ func (client *githubClient) patchAlert(ctx context.Context, number int, payload 
 	return err
 }
 
+// alertQuery restricts discovery to the issues this automation created. Scanning
+// the whole issue list would grow with the repository forever and eventually
+// exceed the page budget, at which point discovery of a real alert would fail.
+// Ascending creation order additionally keeps offsets stable, so a concurrently
+// created issue cannot shift an alert out of the walk.
+func alertQuery(page int) url.Values {
+	return url.Values{
+		"state":     {"all"},
+		"creator":   {alertAuthor},
+		"sort":      {"created"},
+		"direction": {"asc"},
+		"per_page":  {strconv.Itoa(issuePageSize)},
+		"page":      {strconv.Itoa(page)},
+	}
+}
+
 // findAlert resolves at most one alert that this automation owns. A foreign
 // author or a duplicate marker is ambiguous evidence and fails closed rather
 // than letting an untrusted issue be adopted or overwritten.
 func (client *githubClient) findAlert(ctx context.Context) (*alertIssue, error) {
 	var found *alertIssue
 	for page := 1; page <= maxIssuePages; page++ {
-		path := client.repositoryPath(fmt.Sprintf(
-			"/issues?state=all&sort=created&direction=asc&per_page=%d&page=%d",
-			issuePageSize,
-			page,
-		))
+		path := client.repositoryPath("/issues?" + alertQuery(page).Encode())
 		content, err := client.request(ctx, http.MethodGet, path, nil, "application/vnd.github+json", maxResponseBytes)
 		if err != nil {
 			return nil, err

@@ -170,6 +170,48 @@ and that the pinned digest vectors are genuine cross-runtime evidence. It also
 confirmed the 1 MiB discovery bound this session had already fixed, having
 measured the same 837,658-byte page independently.
 
+## Automated reviewer round
+
+Cursor Bugbot reviewed exact head `5d145f1de` and reported one high-severity
+finding: ascending-order discovery walked the repository's entire issue history
+and stopped at the page budget, so once the history exceeded that budget an alert
+created later would never be found. The finding was correct, and it was a
+regression introduced by the round-1 remediation that made offsets stable.
+
+Raising the budget would only defer it, so discovery is now restricted
+server-side to the issues this automation created. The filter was verified
+against the live repository before being adopted: `creator=github-actions[bot]`
+returns exactly the two bot-authored issues rather than the full history. The
+walk is therefore bounded by this automation's own output instead of by
+repository activity, and remains ascending so offsets stay stable.
+
+Sweeping that fix exposed a further defect in existing production code:
+`cmd/sync-unity-enrollment-issue` matched its alert on the marker alone, with no
+authorship condition. Its marker is published in the public alert body, so an
+outsider could post a lookalike and have it adopted and overwritten, or post two
+and stall synchronization. Authorship is now part of that alert's identity, as it
+already was for the reaper monitor. Existing fixtures failed on the new condition
+until they carried an author, which confirms the check is real rather than
+tautological, and a regression now proves a foreign lookalike is ignored without
+stalling discovery.
+
+GitHub Copilot was requested through the reviewer API and returned quota
+exhaustion without code feedback, as in the preceding sessions.
+
+## Delivery evidence
+
+Before the branch was pushed, the round-1 P0 build artifact was removed from the
+branch history rather than only from the working tree: the middle commit was
+amended and the remediation commit replayed onto it, so the 8.7 MB blob exists in
+no commit that reaches the remote. The rewritten head has a byte-identical tree
+to the pre-rewrite head, confirmed with `git diff --stat`, and complete
+verification passed again afterwards.
+
+Follow-up work found in scope but deliberately not attempted here was filed with
+its own evidence requirements rather than guessed at: issue #139 for the
+seat-probing and automatic-recovery half of #132, and issue #140 for the
+deferred shared issue-synchronization client.
+
 ## Continuous-improvement disposition
 
 Trigger: a public operational contract and a fail-closed recovery surface
