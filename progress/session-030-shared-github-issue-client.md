@@ -186,6 +186,25 @@ The root Go module is already current. The isolated actionlint module has only
 unused transitive candidates, while the actionlint upgrade remains constrained
 by the incompatible YAML release candidate already tracked in #94.
 
+## Hosted delivery
+
+- Branch: `agent/issue-140-githubissue-client`
+- Initial implementation commit: `205299ecb1135c09f9f46f6f6a45efe7add812f0`
+- Pull request: #141
+- Hosted validation run: `30427873642` passed.
+- Copilot review `4804676604` returned the terminal account-quota response
+  without a code finding.
+- Cursor review `4804698084` raised one pagination claim. A live authenticated
+  API probe showed GitHub's current `rel="next"` URL contains both `page=2` and
+  a nonempty `after` cursor on `/repositories/{id}/issues`. The existing
+  canonical-cursor regression covers that exact shape and proves it is rebased
+  onto the configured repository before use. The claim was answered with the
+  live evidence and review thread `PRRT_kwDOSjIWFM6UpTUJ` was resolved as not
+  actionable.
+
+Both automated reviewers were explicitly requested for the initial head. They
+will be requested again after this delivery record advances the branch.
+
 ## Knowledge retention
 
 Trigger: substantial shared safety architecture plus a falsified response-bound
