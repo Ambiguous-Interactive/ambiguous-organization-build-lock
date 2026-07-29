@@ -123,6 +123,437 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
+	licensedSteps := strings.Replace(
+		safeLicensedSteps(),
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+
+			"\n        with:\n          lock-name: wallstop-organization-builds\n          holder-id-suffix: default",
+		1,
+	)
+	snapshot := unityFixture(map[string]string{
+		".github/workflows/unity.yml": unityWorkflow(licensedSteps, `  cleanup:
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: unity
+    runs-on: ubuntu-latest
+    steps:
+      - id: fallback_release
+        if: always()
+        uses: `+releaseActionRef+`
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:default
+          holder-id-suffix: default
+          runner-id: ${{ runner.name }}
+          resource-cleanup-status: unknown
+          resource-health: healthy
+          resource-reason: return-terminated
+        env:
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+  aggregate:
+    if: always()
+    needs: [preflight, unity, cleanup]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          test "${{ needs.preflight.result }}" = success
+          test "${{ needs.unity.result }}" = success
+      - shell: bash
+        run: |
+          test "${{ needs.unity.result }}" = success
+          test "${{ needs.cleanup.result }}" = success
+`),
+	})
+	result, err := AnalyzeUnityEnrollment(snapshot, unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("canonical paid lifecycle and fallback produced findings: %#v", result.Findings)
+	}
+	fallbacks := make([]UnityInventoryEntry, 0, 1)
+	for _, entry := range result.Inventory {
+		if entry.Classification == "fallback-cleanup" {
+			fallbacks = append(fallbacks, entry)
+		}
+	}
+	if len(fallbacks) != 1 || fallbacks[0].Job != "cleanup" {
+		t.Fatalf("unexpected fallback inventory: %#v", result.Inventory)
+	}
+}
+
+func TestUnityEnrollmentRejectsMalformedFallbackCleanup(t *testing.T) {
+	base := `on:
+  push:
+    branches: [main]
+jobs:
+  unity:
+    runs-on: ubuntu-latest
+    steps:
+      - id: acquire
+        uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id-suffix: qora
+      - run: echo source
+  cleanup:
+    if: always()
+    needs: unity
+    runs-on: ubuntu-latest
+    steps:
+      - id: fallback_release
+        if: always()
+        uses: ` + releaseActionRef + `
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:qora
+          holder-id-suffix: qora
+          runner-id: ${{ runner.name }}
+          resource-cleanup-status: unknown
+          resource-health: healthy
+          resource-reason: return-terminated
+        env:
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+  aggregate:
+    if: always()
+    needs: [unity, cleanup]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          test "${{ needs.unity.result }}" = success
+          test "${{ needs.cleanup.result }}" = success
+`
+	tests := []struct {
+		name   string
+		mutate func(string) string
+		code   string
+	}{
+		{
+			name: "source job is not paid",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+"\n        with:\n          lock-name: wallstop-organization-builds\n          holder-id-suffix: qora\n",
+					"",
+					1,
+				)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "source acquire is disabled",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: acquire\n        uses:", "      - id: acquire\n        if: false\n        uses:", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "holder source is not a dependency",
+			mutate: func(value string) string {
+				return strings.Replace(value, ":unity:qora", ":other:qora", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "holder suffix does not match",
+			mutate: func(value string) string {
+				return strings.Replace(value, "holder-id-suffix: qora", "holder-id-suffix: other", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "holder suffix depends on source job context",
+			mutate: func(value string) string {
+				return strings.ReplaceAll(value, "qora", "${{ github.job }}")
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "holder suffix depends on source matrix context",
+			mutate: func(value string) string {
+				return strings.ReplaceAll(value, "qora", "${{ matrix.mode }}")
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "cleanup evidence claims confirmation",
+			mutate: func(value string) string {
+				return strings.Replace(value, "resource-cleanup-status: unknown", "resource-cleanup-status: confirmed", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback targets another lock",
+			mutate: func(value string) string {
+				return strings.Replace(value, "lock-name: wallstop-organization-builds", "lock-name: another-lock", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback targets another state branch",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          holder-id: ${{ github.repository }}",
+					"          state-branch: other-state\n          holder-id: ${{ github.repository }}",
+					1,
+				)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback depends on the lost self-hosted runner",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  cleanup:\n    if: always()\n    needs: unity\n    runs-on: ubuntu-latest", "  cleanup:\n    if: always()\n    needs: unity\n    runs-on: [self-hosted, Windows]", 1)
+			},
+			code: "fallback-cleanup-not-hosted",
+		},
+		{
+			name: "fallback runner is dynamic",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  cleanup:\n    if: always()\n    needs: unity\n    runs-on: ubuntu-latest", "  cleanup:\n    if: always()\n    needs: unity\n    runs-on: ${{ vars.RUNNER }}", 1)
+			},
+			code: "fallback-cleanup-not-hosted",
+		},
+		{
+			name: "fallback has an opaque executable step",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  aggregate:\n", "      - run: ./activate-license.sh\n  aggregate:\n", 1)
+			},
+			code: "unexpected-fallback-step",
+		},
+		{
+			name: "release action is mutable",
+			mutate: func(value string) string {
+				return strings.Replace(value, releaseActionRef, lockActionPrefix+"release-build-lock@main", 1)
+			},
+			code: "mutable-action-ref",
+		},
+		{
+			name: "release action uses noncanonical repository casing",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					releaseActionRef,
+					strings.Replace(releaseActionRef, "Ambiguous-Interactive", "ambiguous-interactive", 1),
+					1,
+				)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "release action is not approved",
+			mutate: func(value string) string {
+				return strings.Replace(value, testSHA, "abcdefabcdefabcdefabcdefabcdefabcdefabcd", 1)
+			},
+			code: "unapproved-lock-ref",
+		},
+		{
+			name: "writer credentials are job scoped",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"    runs-on: ubuntu-latest\n    steps:\n      - id: fallback_release",
+					"    runs-on: ubuntu-latest\n    env:\n      APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n    steps:\n      - id: fallback_release",
+					1,
+				)
+			},
+			code: "job-scoped-unity-credential",
+		},
+		{
+			name: "release receives an extra opaque credential",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}",
+					"          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n          LICENSE_TOKEN: ${{ secrets.OPAQUE_TOKEN }}",
+					1,
+				)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "release writer credentials are missing",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"        env:\n          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n",
+					"",
+					1,
+				)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback release suppresses failure",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: fallback_release\n        if: always()", "      - id: fallback_release\n        if: always()\n        continue-on-error: true", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback job timeout is too short",
+			mutate: func(value string) string {
+				return strings.Replace(value, "    runs-on: ubuntu-latest\n    steps:\n      - id: fallback_release", "    runs-on: ubuntu-latest\n    timeout-minutes: 1\n    steps:\n      - id: fallback_release", 1)
+			},
+			code: "invalid-fallback-timeout",
+		},
+		{
+			name: "fallback release timeout is too short",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: fallback_release\n        if: always()", "      - id: fallback_release\n        if: always()\n        timeout-minutes: 1", 1)
+			},
+			code: "invalid-fallback-release",
+		},
+		{
+			name: "fallback can skip after upstream failure",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  cleanup:\n    if: always()", "  cleanup:", 1)
+			},
+			code: "fallback-cleanup-not-always",
+		},
+		{
+			name: "fallback condition excludes upstream failure",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  cleanup:\n    if: always()", "  cleanup:\n    if: ${{ always() && needs.unity.result == 'success' }}", 1)
+			},
+			code: "fallback-cleanup-not-always",
+		},
+		{
+			name: "fallback result is not aggregated",
+			mutate: func(value string) string {
+				return strings.Replace(value, "    needs: [unity, cleanup]", "    needs: unity", 1)
+			},
+			code: "missing-fallback-aggregate",
+		},
+		{
+			name: "source result is not aggregated",
+			mutate: func(value string) string {
+				return strings.Replace(value, "    needs: [unity, cleanup]", "    needs: cleanup", 1)
+			},
+			code: "missing-fallback-aggregate",
+		},
+		{
+			name: "aggregate shell ignores the checks",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - shell: bash\n        run: |\n          test \"${{ needs.unity.result }}\"",
+					"      - shell: sh -c 'exit 0' {0}\n        run: |\n          test \"${{ needs.unity.result }}\"",
+					1,
+				)
+			},
+			code: "missing-fallback-aggregate",
+		},
+		{
+			name: "aggregate depends on a lost self-hosted runner",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  aggregate:\n    if: always()\n    needs: [unity, cleanup]\n    runs-on: ubuntu-latest", "  aggregate:\n    if: always()\n    needs: [unity, cleanup]\n    runs-on: [self-hosted, Windows]", 1)
+			},
+			code: "missing-fallback-aggregate",
+		},
+		{
+			name: "aggregate waits for environment approval",
+			mutate: func(value string) string {
+				return strings.Replace(value, "  aggregate:\n    if: always()\n    needs: [unity, cleanup]\n    runs-on: ubuntu-latest", "  aggregate:\n    if: always()\n    needs: [unity, cleanup]\n    runs-on: ubuntu-latest\n    environment: unity", 1)
+			},
+			code: "missing-fallback-aggregate",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(
+				unityFixture(map[string]string{".github/workflows/unity.yml": testCase.mutate(base)}),
+				unityAuditPolicy(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), testCase.code) {
+				t.Fatalf("missing %s: %#v", testCase.code, result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentDoesNotDowngradeLicensedWorkToFallbackCleanup(t *testing.T) {
+	base := `on:
+  push:
+    branches: [main]
+jobs:
+  unity:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo source
+  cleanup:
+    if: always()
+    needs: unity
+    runs-on: ubuntu-latest
+    steps:
+      - id: fallback_release
+        if: always()
+        uses: ` + releaseActionRef + `
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:qora
+          holder-id-suffix: qora
+          runner-id: ${{ runner.name }}
+          resource-cleanup-status: unknown
+          resource-health: healthy
+          resource-reason: return-terminated
+        env:
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+`
+	tests := []struct {
+		name string
+		step string
+	}{
+		{
+			name: "Unity credential",
+			step: `      - run: echo credential
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+`,
+		},
+		{
+			name: "Unity activation",
+			step: `      - run: unity-editor -batchmode
+`,
+		},
+		{
+			name: "lock acquire",
+			step: `      - id: acquire
+        uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+`,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := base + testCase.step
+			result, err := AnalyzeUnityEnrollment(
+				unityFixture(map[string]string{".github/workflows/unity.yml": workflow}),
+				unityAuditPolicy(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range result.Inventory {
+				if entry.Job == "cleanup" && entry.Classification == "fallback-cleanup" {
+					t.Fatalf("licensed work was downgraded to fallback cleanup: %#v", result.Inventory)
+				}
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-return") {
+				t.Fatalf("full paid lifecycle audit did not run: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentClassifiesReviewedSyntheticFixture(t *testing.T) {
 	policy := unityAuditPolicy()
 	policy.Exceptions = []UnityPolicyException{{
@@ -283,8 +714,8 @@ func TestUnityEnrollmentRejectsMissingSafetySurfaces(t *testing.T) {
 		{"unconditional pull request", func(value string) string {
 			return strings.Replace(value, "    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n", "", 1)
 		}, "ineligible-unity-trigger"},
-		{"false same-repository guard", func(value string) string {
-			return strings.Replace(value, "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository", "false && github.event.pull_request.head.repo.full_name == github.repository", 1)
+		{"unconditional same-repository guard", func(value string) string {
+			return strings.Replace(value, "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository", "github.event_name != 'pull_request' || true", 1)
 		}, "ineligible-unity-trigger"},
 		{"mutable action", func(value string) string {
 			return strings.Replace(value, releaseActionRef, lockActionPrefix+"release-build-lock@main", 1)

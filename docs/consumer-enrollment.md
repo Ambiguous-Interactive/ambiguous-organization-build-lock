@@ -50,7 +50,12 @@ or writer App. The current inventory is recorded in
    proof.
 7. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
-   proven.
+   proven. A separate fallback job is classified as `fallback-cleanup`, not as
+   a second paid lifecycle, only when it cannot acquire or activate Unity, runs
+   on a hosted runner under `always()`, contains only one approved release
+   action with the exact literal source-job holder identity and
+   `unknown/healthy/return-terminated`, propagates release failure, and is
+   covered with its source job by a hosted always-reporting aggregate.
 8. Run `require-confirmed-unity-cleanup` after release with `if: always()` and no
    `continue-on-error`. Exact `acquired=false` makes the gate non-applicable
    because licensed work is guarded by `acquired == 'true'`; missing or invalid

@@ -3,6 +3,7 @@ package enrollment
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,13 +207,19 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				text += strings.ToLower(nodeScalarText(step.node))
 			}
 			paid := licensed || containsUnityCredentialReference(text)
+			fallbackCleanup := !licensed &&
+				!activates &&
+				!containsUnityLicenseCredentialReference(text) &&
+				containsReleaseAction(steps)
 			related := paid || containsUnityMarker(text)
 			if !related {
 				continue
 			}
 
 			classification := "non-licensing-static"
-			if paid {
+			if fallbackCleanup {
+				classification = "fallback-cleanup"
+			} else if paid {
 				classification = "paid-serial"
 				if workflowDispatchOnly(workflow) {
 					classification = "controlled-canary"
@@ -229,7 +236,18 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				Job:            jobName,
 				Classification: classification,
 			})
-			if paid {
+			if fallbackCleanup {
+				a.auditFallbackCleanup(
+					workflow,
+					jobs,
+					workflowPath,
+					jobName,
+					job,
+					steps,
+					protectedBranches,
+					policy.AllowWorkflowDispatch,
+				)
+			} else if paid {
 				a.auditPaidJob(
 					workflow,
 					jobs,
@@ -273,6 +291,174 @@ func (a *unityPolicyAnalyzer) exception(workflowPath string) (UnityPolicyExcepti
 		a.analyzer.add("expired-policy-exception", workflowPath, "")
 	}
 	return exception, true
+}
+
+func (a *unityPolicyAnalyzer) auditFallbackCleanup(
+	workflow, jobs *yaml.Node,
+	workflowPath, jobName string,
+	job *yaml.Node,
+	steps []flattenedUnityStep,
+	protectedBranches map[string]bool,
+	allowWorkflowDispatch bool,
+) {
+	if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
+		a.analyzer.add("unsafe-workflow-cancellation", workflowPath, jobName)
+	}
+	if unsafeConcurrency(mappingValue(job, "concurrency")) {
+		a.analyzer.add("unsafe-job-cancellation", workflowPath, jobName)
+	}
+	if unsafe, err := unsafeMatrixFailFast(job); err != nil || unsafe {
+		a.analyzer.add("unsafe-matrix-fail-fast", workflowPath, jobName)
+	}
+	if mappingValue(job, "environment") != nil {
+		a.analyzer.add("approval-environment", workflowPath, jobName)
+	}
+	if mappingValue(job, "env") != nil {
+		a.analyzer.add("job-scoped-unity-credential", workflowPath, jobName)
+	}
+	if !eligibleUnityTrigger(workflow, job, protectedBranches, allowWorkflowDispatch) {
+		a.analyzer.add("ineligible-unity-trigger", workflowPath, jobName)
+	}
+	if scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" {
+		a.analyzer.add("fallback-cleanup-not-hosted", workflowPath, jobName)
+	}
+	if !optionalTimeoutAtLeast(job, 5) {
+		a.analyzer.add("invalid-fallback-timeout", workflowPath, jobName)
+	}
+
+	releases := make([]int, 0, 1)
+	for index, step := range steps {
+		uses := stepUses(step.node)
+		if lockActionName(uses) != releaseAction {
+			a.analyzer.add("unexpected-fallback-step", workflowPath, jobName)
+		}
+		if isRemoteAction(uses) {
+			ref := actionRef(uses)
+			if !isSHA(ref) {
+				a.analyzer.add("mutable-action-ref", workflowPath, jobName)
+			} else if strings.HasPrefix(uses, lockActionPrefix) &&
+				!a.approved[strings.ToLower(ref)] {
+				a.analyzer.add("unapproved-lock-ref", workflowPath, jobName)
+			}
+		}
+		if lockActionName(uses) == releaseAction {
+			releases = append(releases, index)
+		}
+	}
+	if len(releases) != 1 {
+		a.analyzer.add("invalid-fallback-release", workflowPath, jobName)
+		return
+	}
+	releaseIndex := releases[0]
+	release := steps[releaseIndex]
+	sourceJob, suffix, typedRelease := fallbackReleaseSource(release.node, job)
+	sourcePaid := a.paidSourceJob(workflow, workflowPath, sourceJob)
+	sourceMatched := a.sourceAcquireMatches(workflowPath, sourceJob, suffix)
+	if !fallbackConditionCoversSource(mappingValue(job, "if"), sourceJob) {
+		a.analyzer.add("fallback-cleanup-not-always", workflowPath, jobName)
+	}
+	if !criticalNodeFailurePropagates(job) ||
+		!criticalStepFailurePropagates(release) ||
+		!cleanupStepAlways(release) ||
+		!optionalTimeoutAtLeast(release.node, 5) ||
+		!typedRelease ||
+		!sourcePaid ||
+		!sourceMatched {
+		a.analyzer.add("invalid-fallback-release", workflowPath, jobName)
+	}
+	if !hasFallbackAggregate(jobs, jobName, sourceJob) {
+		a.analyzer.add("missing-fallback-aggregate", workflowPath, jobName)
+	}
+}
+
+func optionalTimeoutAtLeast(node *yaml.Node, minimum int) bool {
+	timeout := mappingValue(node, "timeout-minutes")
+	if timeout == nil {
+		return true
+	}
+	if timeout.Kind != yaml.ScalarNode {
+		return false
+	}
+	value, err := strconv.Atoi(timeout.Value)
+	return err == nil && value >= minimum
+}
+
+func (a *unityPolicyAnalyzer) sourceAcquireMatches(
+	workflowPath, jobName, suffix string,
+) bool {
+	if jobName == "" || suffix == "" {
+		return false
+	}
+	workflow, err := a.analyzer.node(workflowPath)
+	if err != nil {
+		return false
+	}
+	job := mappingValue(mappingValue(workflow, "jobs"), jobName)
+	if job == nil || job.Kind != yaml.MappingNode {
+		return false
+	}
+	steps, err := a.flattenedSteps(
+		sequenceValues(mappingValue(job, "steps")),
+		make(map[string]bool),
+		"job",
+		nil,
+		nil,
+	)
+	if err != nil {
+		return false
+	}
+	matches := 0
+	for _, step := range steps {
+		acquire, _ := acquireReference(stepUses(step.node))
+		if !acquire {
+			continue
+		}
+		if !affirmativeStepRunnable(step) {
+			return false
+		}
+		with := mappingValue(step.node, "with")
+		if with == nil || with.Kind != yaml.MappingNode ||
+			scalarValue(mappingValue(with, "lock-name")) != "wallstop-organization-builds" ||
+			!optionalInputEquals(with, "lock-repository", "Ambiguous-Interactive/ambiguous-organization-build-lock") ||
+			!optionalInputEquals(with, "state-branch", "lock-state") ||
+			scalarValue(mappingValue(with, "holder-id-suffix")) != suffix {
+			return false
+		}
+		matches++
+	}
+	return matches == 1
+}
+
+func (a *unityPolicyAnalyzer) paidSourceJob(
+	workflow *yaml.Node,
+	workflowPath, jobName string,
+) bool {
+	if jobName == "" {
+		return false
+	}
+	licensed, err := a.analyzer.jobLicensed(workflowPath, jobName)
+	if err != nil {
+		return false
+	}
+	job := mappingValue(mappingValue(workflow, "jobs"), jobName)
+	if job == nil || job.Kind != yaml.MappingNode {
+		return false
+	}
+	text := strings.ToLower(nodeScalarText(mappingValue(workflow, "env")) + nodeScalarText(job))
+	steps, err := a.flattenedSteps(
+		sequenceValues(mappingValue(job, "steps")),
+		make(map[string]bool),
+		"job",
+		nil,
+		nil,
+	)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		text += strings.ToLower(nodeScalarText(step.node))
+	}
+	return licensed || containsUnityLicenseCredentialReference(text)
 }
 
 func (a *unityPolicyAnalyzer) auditPaidJob(
@@ -712,10 +898,20 @@ func nodeScalarText(node *yaml.Node) string {
 
 func containsUnityCredentialReference(text string) bool {
 	text = strings.ToLower(strings.Join(strings.Fields(text), ""))
-	sensitiveNames := []string{
+	return containsCredentialName(text, []string{
 		"unity_serial", "unity_email", "unity_password", "unity_license",
 		"build_lock_app_id", "build_lock_app_private_key",
-	}
+	})
+}
+
+func containsUnityLicenseCredentialReference(text string) bool {
+	text = strings.ToLower(strings.Join(strings.Fields(text), ""))
+	return containsCredentialName(text, []string{
+		"unity_serial", "unity_email", "unity_password", "unity_license",
+	})
+}
+
+func containsCredentialName(text string, sensitiveNames []string) bool {
 	for _, name := range sensitiveNames {
 		if strings.Contains(text, "secrets."+name) ||
 			strings.Contains(text, "secrets['"+name+"']") ||
@@ -728,6 +924,17 @@ func containsUnityCredentialReference(text string) bool {
 			if strings.Contains(text, name) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func containsReleaseAction(steps []flattenedUnityStep) bool {
+	for _, step := range steps {
+		uses := strings.ToLower(stepUses(step.node))
+		prefix := strings.ToLower(lockActionPrefix + releaseAction + "@")
+		if strings.HasPrefix(uses, prefix) {
+			return true
 		}
 	}
 	return false
@@ -911,6 +1118,97 @@ func typedReleaseInputs(step *yaml.Node, classifierID string) bool {
 		}
 	}
 	return true
+}
+
+func fallbackReleaseSource(step, job *yaml.Node) (string, string, bool) {
+	with := mappingValue(step, "with")
+	env := mappingValue(step, "env")
+	if with == nil || with.Kind != yaml.MappingNode ||
+		env == nil || env.Kind != yaml.MappingNode ||
+		len(env.Content) != 4 ||
+		!mappingHasOnlyKeys(with, map[string]bool{
+			"lock-name":               true,
+			"holder-id":               true,
+			"holder-id-suffix":        true,
+			"runner-id":               true,
+			"resource-cleanup-status": true,
+			"resource-health":         true,
+			"resource-reason":         true,
+			"lock-repository":         true,
+			"state-branch":            true,
+		}) {
+		return "", "", false
+	}
+	if scalarValue(mappingValue(with, "lock-name")) != "wallstop-organization-builds" ||
+		!optionalInputEquals(with, "lock-repository", "Ambiguous-Interactive/ambiguous-organization-build-lock") ||
+		!optionalInputEquals(with, "state-branch", "lock-state") ||
+		mappingValue(with, "resource-safe") != nil ||
+		scalarValue(mappingValue(with, "runner-id")) != "${{ runner.name }}" ||
+		scalarValue(mappingValue(with, "resource-cleanup-status")) != "unknown" ||
+		scalarValue(mappingValue(with, "resource-health")) != "healthy" ||
+		scalarValue(mappingValue(with, "resource-reason")) != "return-terminated" ||
+		scalarValue(mappingValue(env, "BUILD_LOCK_APP_ID")) != "${{ secrets.BUILD_LOCK_APP_ID }}" ||
+		scalarValue(mappingValue(env, "BUILD_LOCK_APP_PRIVATE_KEY")) != "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}" {
+		return "", "", false
+	}
+
+	holderID := scalarValue(mappingValue(with, "holder-id"))
+	prefix := ""
+	for _, candidate := range []string{
+		"${{ github.repository }}:${{ github.run_id }}:",
+		"${{github.repository}}:${{github.run_id}}:",
+		"${{ github.repository }}:${{github.run_id}}:",
+		"${{github.repository}}:${{ github.run_id }}:",
+	} {
+		if strings.HasPrefix(holderID, candidate) {
+			prefix = candidate
+			break
+		}
+	}
+	if prefix == "" {
+		return "", "", false
+	}
+	identity := strings.TrimPrefix(holderID, prefix)
+	separator := strings.Index(identity, ":")
+	if separator <= 0 || separator == len(identity)-1 {
+		return "", "", false
+	}
+	sourceJob, suffix := identity[:separator], identity[separator+1:]
+	if !needsAny(job, map[string]bool{sourceJob: true}) ||
+		scalarValue(mappingValue(with, "holder-id-suffix")) != suffix ||
+		!literalHolderSuffix(suffix) {
+		return "", "", false
+	}
+	return sourceJob, suffix, true
+}
+
+func optionalInputEquals(with *yaml.Node, input, expected string) bool {
+	value := mappingValue(with, input)
+	return value == nil || scalarValue(value) == expected
+}
+
+func mappingHasOnlyKeys(node *yaml.Node, allowed map[string]bool) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	seen := make(map[string]bool, len(node.Content)/2)
+	for index := 0; index < len(node.Content); index += 2 {
+		key := node.Content[index].Value
+		if node.Content[index].Kind != yaml.ScalarNode ||
+			!allowed[key] ||
+			seen[key] {
+			return false
+		}
+		seen[key] = true
+	}
+	return true
+}
+
+func literalHolderSuffix(value string) bool {
+	return value != "" &&
+		strings.TrimSpace(value) == value &&
+		!strings.ContainsAny(value, "\r\n") &&
+		!strings.Contains(value, "${{")
 }
 
 func typedClassifierInputs(step *yaml.Node, returnID string) bool {
@@ -1171,6 +1469,77 @@ func hasAggregate(
 	return false
 }
 
+func hasFallbackAggregate(jobs *yaml.Node, fallbackJob, sourceJob string) bool {
+	if sourceJob == "" {
+		return false
+	}
+	for index := 0; index < len(jobs.Content); index += 2 {
+		job := jobs.Content[index+1]
+		unsafeFailFast, matrixErr := unsafeMatrixFailFast(job)
+		if !needsAny(job, map[string]bool{fallbackJob: true}) ||
+			!needsAny(job, map[string]bool{sourceJob: true}) ||
+			!conditionIsSafeAlways(mappingValue(job, "if")) ||
+			!criticalNodeFailurePropagates(job) ||
+			scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+			mappingValue(job, "environment") != nil ||
+			unsafeConcurrency(mappingValue(job, "concurrency")) ||
+			matrixErr != nil ||
+			unsafeFailFast {
+			continue
+		}
+		for _, step := range sequenceValues(mappingValue(job, "steps")) {
+			if !affirmativeCondition(mappingValue(step, "if")) ||
+				!criticalNodeFailurePropagates(step) {
+				continue
+			}
+			shell := mappingValue(step, "shell")
+			if shell == nil || shell.Kind != yaml.ScalarNode ||
+				(shell.Value != "bash" && shell.Value != "sh") {
+				continue
+			}
+			run := mappingValue(step, "run")
+			if run == nil || run.Kind != yaml.ScalarNode {
+				continue
+			}
+			lines := make([]string, 0, 1)
+			for _, line := range strings.Split(run.Value, "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					lines = append(lines, line)
+				}
+			}
+			sourceFound, fallbackFound, valid := false, false, true
+			for _, line := range lines {
+				checkedJob := aggregateResultCheckJob(line)
+				if checkedJob == "" ||
+					!needsAny(job, map[string]bool{checkedJob: true}) ||
+					mappingValue(jobs, checkedJob) == nil {
+					valid = false
+					break
+				}
+				sourceFound = sourceFound || checkedJob == sourceJob
+				fallbackFound = fallbackFound || checkedJob == fallbackJob
+			}
+			if valid && sourceFound && fallbackFound {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func aggregateResultCheckJob(line string) string {
+	const prefix = `test "${{ needs.`
+	const suffix = `.result }}" = success`
+	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
+		return ""
+	}
+	job := strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix)
+	if job == "" || strings.ContainsAny(job, " \t\r\n{}$\"'") {
+		return ""
+	}
+	return job
+}
+
 func neededCandidates(job *yaml.Node, candidates map[string]bool) map[string]bool {
 	result := make(map[string]bool)
 	needs := mappingValue(job, "needs")
@@ -1239,12 +1608,54 @@ func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
 	value := strings.ToLower(strings.Join(strings.Fields(condition.Value), ""))
 	value = strings.TrimPrefix(value, "${{")
 	value = strings.TrimSuffix(value, "}}")
-	value = strings.Trim(value, "()")
 	direct := "github.event.pull_request.head.repo.full_name==github.repository"
 	reverse := "github.repository==github.event.pull_request.head.repo.full_name"
-	if value == direct || value == reverse {
+	eventGuard := "github.event_name!='pull_request'||"
+	if value == direct || value == reverse ||
+		value == eventGuard+direct || value == eventGuard+reverse {
 		return true
 	}
-	eventGuard := "github.event_name!='pull_request'||"
-	return value == eventGuard+direct || value == eventGuard+reverse
+	conjuncts, topLevelOr := conditionTerms(value)
+	if topLevelOr {
+		return false
+	}
+	for _, conjunct := range conjuncts {
+		conjunct = trimOuterParentheses(conjunct)
+		if conjunct == direct || conjunct == reverse ||
+			conjunct == eventGuard+direct || conjunct == eventGuard+reverse {
+			return true
+		}
+	}
+	return false
+}
+
+func fallbackConditionCoversSource(condition *yaml.Node, sourceJob string) bool {
+	if condition == nil || condition.Kind != yaml.ScalarNode {
+		return false
+	}
+	value := strings.ToLower(strings.Join(strings.Fields(condition.Value), ""))
+	value = strings.TrimPrefix(value, "${{")
+	value = strings.TrimSuffix(value, "}}")
+	conjuncts, topLevelOr := conditionTerms(value)
+	if topLevelOr || len(conjuncts) == 0 {
+		return false
+	}
+	foundAlways := false
+	for _, conjunct := range conjuncts {
+		conjunct = trimOuterParentheses(conjunct)
+		switch conjunct {
+		case "always()":
+			foundAlways = true
+		case "needs." + strings.ToLower(sourceJob) + ".result!='skipped'",
+			"github.actor!='dependabot[bot]'":
+		default:
+			direct := "github.event.pull_request.head.repo.full_name==github.repository"
+			reverse := "github.repository==github.event.pull_request.head.repo.full_name"
+			eventGuard := "github.event_name!='pull_request'||"
+			if conjunct != eventGuard+direct && conjunct != eventGuard+reverse {
+				return false
+			}
+		}
+	}
+	return foundAlways
 }
