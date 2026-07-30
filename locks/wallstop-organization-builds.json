@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:30584209410:unity-tests:2021.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "30584209410",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30584209410",
+    "queuedAt": "2026-07-30T21:40:18.862Z",
+    "acquiredAt": "2026-07-30T21:40:21.869Z",
+    "expiresAt": "2026-07-31T01:40:21.869Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "104e325c-050c-4f6b-9b0f-09e9f4e9395a",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30573245946:unity-tests:6000.3.16f1-playmode",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30584209410:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
       "job": "unity-tests",
-      "runId": "30573245946",
+      "runId": "30584209410",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30573245946",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-ulf-skipped",
-      "createdAt": "2026-07-30T20:24:56.316Z"
-    },
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30584209410",
+      "queuedAt": "2026-07-30T21:40:18.862Z",
+      "acquiredAt": "2026-07-30T21:40:21.869Z",
+      "expiresAt": "2026-07-31T01:40:21.869Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "762827ba-60a3-4f97-be9f-d1fe5bb91d46",
       "holderId": "Ambiguous-Interactive/DxMessaging:30584209410:unity-tests:2021.3.45f1-editmode",
@@ -36,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-30T21:40:22.031Z"
+  "updatedAt": "2026-07-30T21:40:21.870Z"
 }
