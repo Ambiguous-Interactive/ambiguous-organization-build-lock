@@ -1,0 +1,18 @@
+name: Classify Unity changes
+description: Conservatively require Unity validation unless every changed path is in the central independent-path allowlist.
+inputs:
+  event-name:
+    description: Exact GitHub event name.
+    required: true
+  base-sha:
+    description: Pull request base commit SHA.
+    required: false
+  head-sha:
+    description: Pull request head commit SHA.
+    required: false
+outputs:
+  unity-required:
+    description: True unless a pull request changes only centrally audited Unity-independent paths.
+runs:
+  using: node24
+  main: ../../dist/classify-unity-changes.js

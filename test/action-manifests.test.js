@@ -335,6 +335,29 @@ test("runner availability action requires reader App auth and fail-closed label 
 });
 
 test("central Unity cleanup actions expose exact Node 24 policy contracts", () => {
+  const changeClassifier = readActionManifest("classify-unity-changes");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      changeClassifier,
+      "inputs",
+      "classify-unity-changes/action.yml"
+    ),
+    ["event-name", "base-sha", "head-sha"]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      changeClassifier,
+      "outputs",
+      "classify-unity-changes/action.yml"
+    ),
+    ["unity-required"]
+  );
+  assert.match(changeClassifier, /using:\s*node24/);
+  assert.match(
+    changeClassifier,
+    /main:\s+\.\.\/\.\.\/dist\/classify-unity-changes\.js/
+  );
+
   const classifier = readActionManifest("classify-unity-cleanup-evidence");
   assert.deepEqual(
     yamlRequiredTopLevelMappingKeys(
@@ -393,6 +416,26 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
   );
   assert.match(gate, /using:\s*node24/);
   assert.match(gate, /main:\s+\.\.\/\.\.\/dist\/require-confirmed-unity-cleanup\.js/);
+
+  const validation = readActionManifest("require-unity-validation");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(validation, "inputs", "require-unity-validation/action.yml"),
+    [
+      "classifier-result",
+      "unity-required",
+      "trusted-revision",
+      "preflight-result",
+      "unity-result",
+      "fallback-result",
+      "fallback-cleanup-result"
+    ]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(validation, "outputs", "require-unity-validation/action.yml"),
+    ["validation-safe"]
+  );
+  assert.match(validation, /using:\s*node24/);
+  assert.match(validation, /main:\s+\.\.\/\.\.\/dist\/require-unity-validation\.js/);
 });
 
 test("README documents guarded acquire usage and unconditional release cleanup", () => {

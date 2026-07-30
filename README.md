@@ -97,6 +97,14 @@ The licensed job must depend on this preflight. An always-reporting required
 aggregate job must fail if the preflight or licensed job fails, is cancelled,
 or is unexpectedly skipped. Only explicitly modeled cases such as fork-secret
 safety or a documented no-change path may accept a skipped licensed job.
+Use `classify-unity-changes` in a failure-propagating hosted classifier job; it
+skips licensed work only when every pull-request path is in the central
+Unity-independent allowlist and otherwise defaults to requiring Unity. Use
+`require-unity-validation` for the conditional aggregate and pass exact
+`needs` results, that classifier's boolean output, the trust decision, and the
+hosted fallback release's typed `cleanup-result`. The gate fails closed unless
+the jobs form one of three complete matrices: untrusted skip, classified
+non-Unity skip, or successful licensed validation with fallback `noop`.
 
 Every workflow-level, job-level, and called-workflow concurrency scope capable
 of reaching licensed acquire must literally set `cancel-in-progress: false`.
