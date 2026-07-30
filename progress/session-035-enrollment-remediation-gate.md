@@ -296,3 +296,13 @@ as a whole job condition but not as one conjunct beside classifier and static
 gates. The trigger and fallback parsers now recognize that exact scoped
 conjunct as well. The typed conditional lifecycle fixture uses the compound
 form, so reverting either parser branch makes the canonical fixture red.
+
+PR #158 merged the compound-condition correction as
+`15e0a13bf57f176b844ca0014f5fffa80d3b6100`; its exact-head and post-merge
+Build Lock CI and organization audit passed. Exact-head consumer CI then
+exposed a second Dependabot identity distinction: `github.actor` changes when
+a maintainer reruns a Dependabot-authored pull request. Trusted revision,
+fallback, and trusted-skip decisions must instead bind the immutable pull
+request author at `github.event.pull_request.user.login`. The analyzer now
+accepts only that exact PR-scoped author predicate and rejects actor-based
+substitutions across all four contracts.

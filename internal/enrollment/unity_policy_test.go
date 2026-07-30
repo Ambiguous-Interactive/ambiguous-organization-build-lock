@@ -148,7 +148,7 @@ func trustedSkipAggregate() string {
           RUNNER_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
           UNITY_TESTS_RESULT: ${{ needs.unity.result }}
           FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-          DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}
+          DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}
         run: |
           set -euo pipefail
           if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
@@ -248,8 +248,19 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 			mutate: func(value string) string {
 				return strings.Replace(
 					value,
-					"${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}",
-					"${{ github.actor == 'dependabot[bot]' }}",
+					"${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}",
+					"${{ github.event.pull_request.user.login == 'dependabot[bot]' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "Dependabot decision uses rerun actor",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"github.event.pull_request.user.login == 'dependabot[bot]'",
+					"github.actor == 'dependabot[bot]'",
 					1,
 				)
 			},
@@ -833,7 +844,7 @@ jobs:
     if: >-
       ${{
         github.event_name != 'pull_request' ||
-        (github.actor != 'dependabot[bot]' &&
+        (github.event.pull_request.user.login != 'dependabot[bot]' &&
           github.event.pull_request.head.repo.full_name == github.repository)
       }}
     runs-on: ubuntu-latest
@@ -846,13 +857,13 @@ jobs:
         needs.classify.result == 'success' &&
         needs.classify.outputs.unity-required == 'true' &&
         (github.event_name != 'pull_request' ||
-          (github.actor != 'dependabot[bot]' &&
+          (github.event.pull_request.user.login != 'dependabot[bot]' &&
             github.event.pull_request.head.repo.full_name == github.repository))
       }}
     runs-on: [self-hosted, Windows]
     steps:
 ` + licensedSteps + `  cleanup:
-    if: ${{ always() && needs.unity.result != 'skipped' && (github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    if: ${{ always() && needs.unity.result != 'skipped' && (github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     needs: unity
     runs-on: ubuntu-latest
     outputs:
@@ -881,7 +892,7 @@ jobs:
         with:
           classifier-result: ${{ needs.classify.result }}
           unity-required: ${{ needs.classify.outputs.unity-required }}
-          trusted-revision: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
+          trusted-revision: ${{ github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
           preflight-result: ${{ needs.preflight.result }}
           unity-result: ${{ needs.unity.result }}
           fallback-result: ${{ needs.cleanup.result }}
@@ -1116,9 +1127,19 @@ jobs:
 			mutate: func(value string) string {
 				return strings.Replace(
 					value,
-					"trusted-revision: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}",
+					"trusted-revision: ${{ github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}",
 					"trusted-revision: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}",
 					1,
+				)
+			},
+		},
+		{
+			name: "trust expressions use rerun actor",
+			mutate: func(value string) string {
+				return strings.ReplaceAll(
+					value,
+					"github.event.pull_request.user.login",
+					"github.actor",
 				)
 			},
 		},
@@ -1210,8 +1231,8 @@ runs:
 		mutated := unityFixture(map[string]string{
 			".github/workflows/unity.yml": strings.Replace(
 				workflow,
-				"github.actor != 'dependabot[bot]' &&",
-				"github.actor != 'untrusted-bot' &&",
+				"github.event.pull_request.user.login != 'dependabot[bot]' &&",
+				"github.event.pull_request.user.login != 'untrusted-bot' &&",
 				1,
 			),
 		})
