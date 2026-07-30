@@ -49,11 +49,12 @@ type UnityEnrollmentRepository struct {
 
 // UnityEnrollmentRegistry is the reviewed organization audit contract.
 type UnityEnrollmentRegistry struct {
-	SchemaVersion    int                         `json:"schemaVersion"`
-	Organization     string                      `json:"organization"`
-	ApprovedLockSHAs []string                    `json:"approvedLockShas"`
-	Repositories     []UnityEnrollmentRepository `json:"repositories"`
-	Exceptions       []UnityPolicyException      `json:"exceptions"`
+	SchemaVersion      int                         `json:"schemaVersion"`
+	Organization       string                      `json:"organization"`
+	ApprovedLockSHAs   []string                    `json:"approvedLockShas"`
+	ApprovedReturnSHAs []string                    `json:"approvedReturnShas"`
+	Repositories       []UnityEnrollmentRepository `json:"repositories"`
+	Exceptions         []UnityPolicyException      `json:"exceptions"`
 }
 
 // ParseUnityEnrollmentRegistry strictly validates the required baseline and
@@ -110,9 +111,10 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 		}
 	}
 	policy := UnityEnrollmentPolicy{
-		ApprovedLockSHAs:  registry.ApprovedLockSHAs,
-		Exceptions:        registry.Exceptions,
-		ProtectedBranches: []string{"main"},
+		ApprovedLockSHAs:   registry.ApprovedLockSHAs,
+		ApprovedReturnSHAs: registry.ApprovedReturnSHAs,
+		Exceptions:         registry.Exceptions,
+		ProtectedBranches:  []string{"main"},
 	}
 	// Reuse the snapshot analyzer's strict policy validation without exposing a
 	// second, drifting interpretation of approved SHAs and exceptions.

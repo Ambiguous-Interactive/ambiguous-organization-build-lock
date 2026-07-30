@@ -157,18 +157,25 @@ section, guard every licensed step on the acquire output, and release with
 
 - name: Return Unity license
   id: return-unity-license
-  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
-  uses: ./.github/actions/return-unity-license
+  if: ${{ always() && steps.acquire-build-lock.outputs.acquired == 'true' }}
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@COMPATIBILITY_COMMIT_SHA
+  with:
+    unity-version: 6000.5.2f1
+    tool-cache: ${{ runner.tool_cache }}
+    unity-email: ${{ secrets.UNITY_EMAIL }}
+    unity-password: ${{ secrets.UNITY_PASSWORD }}
+    evidence-suffix: unity-tests
 
 - name: Classify Unity cleanup evidence
   id: classify-unity-cleanup
-  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
+  if: ${{ always() && steps.acquire-build-lock.outputs.acquired == 'true' }}
   uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-cleanup-evidence@COMPATIBILITY_COMMIT_SHA
   with:
     return-log-path: ${{ steps.return-unity-license.outputs.return-log-path }}
     return-command-completed: ${{ steps.return-unity-license.outputs.return-command-completed }}
     return-exit-code: ${{ steps.return-unity-license.outputs.return-exit-code }}
     evidence-capture-complete: ${{ steps.return-unity-license.outputs.evidence-capture-complete }}
+    return-log-digest: ${{ steps.return-unity-license.outputs.return-log-digest }}
 
 - name: Release organization Unity lock
   id: release-build-lock
@@ -203,6 +210,16 @@ section, guard every licensed step on the acquire output, and release with
     reservation-id: ${{ steps.release-build-lock.outputs.reservation-id }}
     incident-id: ${{ steps.release-build-lock.outputs.incident-id }}
 ```
+
+The central return action is Windows-only. It rejects reparse points anywhere
+in the CI-managed editor path and verifies the editor's Authenticode signature,
+code-signing EKU, and centrally allowlisted Unity leaf-certificate thumbprint
+before passing credentials. Consumers cannot supply signer identities or an
+executable path. Certificate rotation therefore requires a reviewed central
+release, and the release SHA must be listed in both `approvedLockShas` and the
+return-action-specific `approvedReturnShas`. Return evidence is
+credential-redacted before it is written, and its
+SHA-256 output must be bound into the classifier as shown.
 
 The two acquire requirements are opt-in for backward compatibility. Lifecycle-aware
 consumers should set both as shown. Acquire validates them against each lock config

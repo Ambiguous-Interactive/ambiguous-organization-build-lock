@@ -370,6 +370,7 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
       "return-command-completed",
       "return-exit-code",
       "evidence-capture-complete",
+      "return-log-digest",
       "supplemental-evidence-paths"
     ]
   );
@@ -390,6 +391,32 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
   );
   assert.match(classifier, /using:\s*node24/);
   assert.match(classifier, /main:\s+\.\.\/\.\.\/dist\/classify-unity-cleanup-evidence\.js/);
+
+  const returnAction = readActionManifest("return-unity-license");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      returnAction,
+      "inputs",
+      "return-unity-license/action.yml"
+    ),
+    ["unity-version", "tool-cache", "unity-email", "unity-password", "evidence-suffix"]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(
+      returnAction,
+      "outputs",
+      "return-unity-license/action.yml"
+    ),
+    [
+      "return-log-path",
+      "return-command-completed",
+      "return-exit-code",
+      "evidence-capture-complete",
+      "return-log-digest"
+    ]
+  );
+  assert.match(returnAction, /using:\s*node24/);
+  assert.match(returnAction, /main:\s+\.\.\/\.\.\/dist\/return-unity-license\.js/);
 
   const gate = readActionManifest("require-confirmed-unity-cleanup");
   assert.deepEqual(

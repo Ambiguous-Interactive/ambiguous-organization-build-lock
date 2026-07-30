@@ -13,6 +13,9 @@ inputs:
   evidence-capture-complete:
     description: Literal true only when the return wrapper completed bounded evidence capture.
     required: true
+  return-log-digest:
+    description: Expected SHA-256 of the exact return log; required by the central return contract.
+    required: false
   supplemental-evidence-paths:
     description: Newline-separated run-scoped log files or directories used only for account-health evidence.
     required: false
