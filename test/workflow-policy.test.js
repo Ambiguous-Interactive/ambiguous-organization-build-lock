@@ -98,7 +98,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
   ],
   [
     "unity-editor-signer-diagnostic.yml",
-    ["$editor = Join-Path $env:TOOL_CACHE 'u6-v3\\_ci-managed-editors\\6000.5.2f1\\Editor\\Unity.exe'; $signature = Get-AuthenticodeSignature -LiteralPath $editor -ErrorAction Stop; if ($signature.Status -ne 'Valid') { throw 'Unity editor signature is not valid.' }; Write-Output \"UNITY_SIGNER_THUMBPRINT=$($signature.SignerCertificate.Thumbprint)\"; Write-Output \"UNITY_SIGNER_SUBJECT=$($signature.SignerCertificate.Subject)\"; Write-Output \"UNITY_SIGNER_ISSUER=$($signature.SignerCertificate.Issuer)\""]
+    ["$candidates = @((Join-Path $env:TOOL_CACHE 'u6-v3\\_ci-managed-editors\\6000.5.2f1\\Editor\\Unity.exe'), 'C:\\Program Files\\Unity Hub\\Unity Hub.exe', 'C:\\Program Files\\Unity Hub\\UnityHub.exe'); $editor = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1; if (-not $editor) { throw 'No Unity-signed executable was found.' }; $signature = Get-AuthenticodeSignature -LiteralPath $editor -ErrorAction Stop; if ($signature.Status -ne 'Valid') { throw 'Unity executable signature is not valid.' }; Write-Output \"UNITY_SIGNER_THUMBPRINT=$($signature.SignerCertificate.Thumbprint)\"; Write-Output \"UNITY_SIGNER_SUBJECT=$($signature.SignerCertificate.Subject)\"; Write-Output \"UNITY_SIGNER_ISSUER=$($signature.SignerCertificate.Issuer)\""]
   ],
   ["recover-build-lock.yml", []],
   [

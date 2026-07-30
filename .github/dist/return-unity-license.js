@@ -10,6 +10,7 @@ const { TextDecoder } = require("node:util");
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 240_000;
 const TERMINATION_GRACE_MS = 30_000;
+const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
 const UNITY_SIGNER_THUMBPRINTS = new Set([
   "B73664F2AF5A8EF4529F03DB4B2CCD8275A6EC91",
   "BFFD800651947878FCD0DC749C16D57B0D5E397D"
@@ -92,14 +93,9 @@ function assertNoReparsePath(target, io = fs, pathImpl = path) {
   }
 }
 
-function systemPowerShell(execPath = process.execPath) {
-  const driveRoot = path.win32.parse(execPath).root;
-  if (!/^[A-Za-z]:\\$/.test(driveRoot)) {
-    throw new Error("The Windows system drive cannot be established.");
-  }
+function systemPowerShell() {
   return path.win32.join(
-    driveRoot,
-    "Windows",
+    WINDOWS_SYSTEM_ROOT,
     "System32",
     "WindowsPowerShell",
     "v1.0",
@@ -114,7 +110,7 @@ async function verifyUnityEditor(executable, options = {}) {
   }
   const spawnImpl = options.spawnImpl || spawn;
   const environment = options.environment || {};
-  const powershell = systemPowerShell(options.execPath);
+  const powershell = systemPowerShell();
   const allowedThumbprints = [...UNITY_SIGNER_THUMBPRINTS].join(",");
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -178,7 +174,7 @@ function terminateProcess(child, platform, spawnImpl, environment) {
   }
   if (platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) {
     const terminator = spawnImpl(
-      "taskkill",
+      path.win32.join(WINDOWS_SYSTEM_ROOT, "System32", "taskkill.exe"),
       ["/PID", String(child.pid), "/T", "/F"],
       { env: environment, windowsHide: true, stdio: "ignore" }
     );
@@ -427,6 +423,7 @@ module.exports = {
   MAX_EVIDENCE_BYTES,
   TERMINATION_GRACE_MS,
   UNITY_SIGNER_THUMBPRINTS,
+  WINDOWS_SYSTEM_ROOT,
   assertNoReparsePath,
   editorEnvironment,
   editorPath,
