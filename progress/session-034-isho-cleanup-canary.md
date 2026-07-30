@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: trusted-main canary complete; owner portal attestation and delivery pending
+Status: selected issue complete; delivery pending
 
 ## Objective and safety boundary
 
@@ -48,7 +48,7 @@ audit.
 | P0 constrained | #83 | Highest active production defect. Independently replicated shared-entitlement returns create false-red `400006` cleanup and benign quarantine. Safe closure requires central lifecycle semantics, consumer repins, both return orders, and portal-reconciled proof; unknown cleanup cannot be reclassified as safe. |
 | P0 broad | #113 | The complete enrollment audit reports 278 findings across 113 active jobs in six repositories. A clean audit requires broad consumer remediation and has the highest Unity churn. |
 | P0 owner-constrained | #51 | Organization secret and App installation scope is a credential boundary, but its acceptance requires owner control-plane changes prohibited by this objective. |
-| P1 selected | #54 | The trusted-main Isho cleanup canary closes the code-visible lifecycle evidence gap with one intentional Unity run and no workflow edit or consumer repin; authorized owner portal attestation remains required for issue closure. |
+| P1 selected | #54 | The trusted-main Isho cleanup canary closes the code-visible lifecycle evidence gap with one intentional Unity run and no workflow edit or consumer repin; the owner subsequently supplied the required value-free portal attestation. |
 | P1 policy | #44 | Truthful required aggregates and rulesets span every consumer and require organization policy work. |
 | P1 architecture | #53 | Pre-runner FIFO starvation requires a new fail-closed queue/claim protocol and live two-runner proof. |
 | P2 throughput | #99, #49 | Consumer retry timing and the 15-leg unity-helpers graph require multi-repository measurements and workflow changes. |
@@ -118,12 +118,17 @@ cancellation:
 The exact positive return annotations explain both licensed activations, and
 the two fallback cleanup jobs independently confirmed that the canary retained
 no lock ownership. A fresh central read also found no active account incident.
-Those GitHub-side facts do not independently inspect the Unity portal. Issue
-#54 therefore remains open until an authorized owner records a value-free
-post-run portal confirmation that no unexplained activation remains.
+Those GitHub-side facts did not independently inspect the Unity portal. The
+owner subsequently confirmed that only recent activations attributable to
+currently active organization-wide CI were visible and that no activation had
+leaked or remained from before that activity. No portal identifiers,
+credential values, or account details were recorded.
+
 Detailed canary evidence was linked to #54 in comment `5124846796` and to the
 #29 monitoring tracker in comment `5124849124`; correction comments
-`5124903805` and `5124914239` preserve the portal-attestation boundary.
+`5124903805` and `5124914239` preserve the original portal-attestation
+boundary. Owner attestation comments `5125094783` on #54 and `5125095583` on
+#29 complete that boundary without publishing portal data.
 
 GitHub retained exactly two artifacts:
 
@@ -182,10 +187,18 @@ and identified ambiguous wording that made a content scan sound like a
 filename-only scan. The remediator cited the exact #29 comment, retained #54 as
 open pending owner portal attestation, removed the hostname, and described the
 two artifact checks precisely. Independent adversarial review round 2 inspected
-the latest record and found no remaining actionable finding.
+that record and found no remaining actionable finding. The owner attestation
+above resolves the last acceptance boundary. Independent finalization review
+round 3 checked the attestation wording, cited issue and tracker comments,
+delivery state, and public-data boundary and found no actionable finding.
 
-PR CI, exact-head Cursor and Copilot review requests, merge evidence, and
-post-merge `main` verification remain pending.
+Draft PR #146 was opened at exact head
+`70d63ef95046fd845bae9947896bdaf6cd2b0a97`. Build lock CI and Cursor Bugbot
+completed successfully at that head with no finding; Copilot review requests
+reached its terminal quota response. This finalization change records the
+subsequent owner attestation. Every later PR head remains subject to fresh CI
+and review, with the PR timeline authoritative for those delivery results.
+Merge evidence and post-merge `main` verification remain pending.
 
 ## Continuous improvement
 
