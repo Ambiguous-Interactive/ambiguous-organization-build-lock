@@ -602,7 +602,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 					acquireID == "" ||
 					!cleanupStepAfterAcquire(step, acquireID) ||
 					!optionalTimeoutAtLeast(node, 5) ||
-					!typedReturnInputs(node) {
+					!typedReturnInputs(node, job, steps, firstAcquire, index) {
 					continue
 				}
 				unityReturn = index
@@ -679,9 +679,14 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			classifierTyped = typedClassifierInputsWithDigest(steps[classifier].node, returnID)
 		}
 	}
-	if release >= 0 && classifier >= 0 && classifierID != "" &&
+	if release >= 0 && classifier >= 0 && classifierID != "" && firstAcquire >= 0 &&
 		steps[release].scope == classifierScope {
-		releaseTyped = typedReleaseInputs(steps[release].node, classifierID)
+		releaseTyped = typedReleaseInputs(
+			steps[release].node,
+			classifierID,
+			steps[firstAcquire].node,
+			returnActionCount > 0,
+		)
 	}
 	if gate >= 0 && acquireID != "" && classifierID != "" && releaseID != "" &&
 		steps[gate].scope == acquireScope && steps[gate].scope == classifierScope &&
@@ -1230,7 +1235,12 @@ func exactStepOutcome(value *yaml.Node, id string) bool {
 	return strings.Join(strings.Fields(value.Value), "") == "${{steps."+id+".outcome}}"
 }
 
-func typedReleaseInputs(step *yaml.Node, classifierID string) bool {
+func typedReleaseInputs(
+	step *yaml.Node,
+	classifierID string,
+	acquire *yaml.Node,
+	requireAcquireIdentity bool,
+) bool {
 	with := mappingValue(step, "with")
 	if with == nil || with.Kind != yaml.MappingNode {
 		return false
@@ -1244,7 +1254,40 @@ func typedReleaseInputs(step *yaml.Node, classifierID string) bool {
 			return false
 		}
 	}
-	return true
+	if !requireAcquireIdentity {
+		return true
+	}
+	acquireWith := mappingValue(acquire, "with")
+	if acquireWith == nil || acquireWith.Kind != yaml.MappingNode {
+		return false
+	}
+	return scalarValue(mappingValue(with, "lock-name")) == "wallstop-organization-builds" &&
+		scalarValue(mappingValue(acquireWith, "lock-name")) == "wallstop-organization-builds" &&
+		scalarValue(mappingValue(with, "holder-id-suffix")) != "" &&
+		scalarValue(mappingValue(with, "holder-id-suffix")) ==
+			scalarValue(mappingValue(acquireWith, "holder-id-suffix")) &&
+		exactExpression(mappingValue(with, "runner-id"), "runner.name") &&
+		exactExpression(mappingValue(acquireWith, "runner-id"), "runner.name") &&
+		matchingOptionalInput(with, acquireWith, "lock-repository",
+			"Ambiguous-Interactive/ambiguous-organization-build-lock") &&
+		matchingOptionalInput(with, acquireWith, "state-branch", "lock-state")
+}
+
+func matchingOptionalInput(first, second *yaml.Node, input, defaultValue string) bool {
+	firstValue := mappingValue(first, input)
+	secondValue := mappingValue(second, input)
+	if firstValue == nil && secondValue == nil {
+		return true
+	}
+	firstText := defaultValue
+	if firstValue != nil {
+		firstText = scalarValue(firstValue)
+	}
+	secondText := defaultValue
+	if secondValue != nil {
+		secondText = scalarValue(secondValue)
+	}
+	return firstText == defaultValue && secondText == defaultValue
 }
 
 func typedClassifierInputsWithDigest(step *yaml.Node, returnID string) bool {
@@ -1365,7 +1408,11 @@ func typedClassifierInputs(step *yaml.Node, returnID string) bool {
 	return true
 }
 
-func typedReturnInputs(step *yaml.Node) bool {
+func typedReturnInputs(
+	step, job *yaml.Node,
+	steps []flattenedUnityStep,
+	acquireIndex, returnIndex int,
+) bool {
 	if stepID(step) == "" ||
 		!trustedLeafExecution(step) {
 		return false
@@ -1384,11 +1431,94 @@ func typedReturnInputs(step *yaml.Node) bool {
 		return false
 	}
 	version := scalarValue(mappingValue(with, "unity-version"))
-	if !validUnityVersion(version) {
+	if !validUnityVersion(version) &&
+		(!exactExpression(mappingValue(with, "unity-version"), "matrix.unity-version") ||
+			!staticUnityVersionMatrix(job, steps, acquireIndex, returnIndex)) {
 		return false
 	}
 	suffix := mappingValue(with, "evidence-suffix")
 	return suffix == nil || literalEvidenceSuffix(scalarValue(suffix))
+}
+
+func staticUnityVersionMatrix(
+	job *yaml.Node,
+	steps []flattenedUnityStep,
+	acquireIndex, returnIndex int,
+) bool {
+	strategy := mappingValue(job, "strategy")
+	matrix := mappingValue(strategy, "matrix")
+	if matrix == nil || matrix.Kind != yaml.MappingNode ||
+		mappingValue(matrix, "include") != nil ||
+		mappingValue(matrix, "exclude") != nil ||
+		acquireIndex < 0 || acquireIndex >= len(steps) ||
+		returnIndex <= acquireIndex || returnIndex > len(steps) {
+		return false
+	}
+	acquireWith := mappingValue(steps[acquireIndex].node, "with")
+	suffix := scalarValue(mappingValue(acquireWith, "holder-id-suffix"))
+	if suffix == "" || strings.ContainsAny(suffix, "\r\n") {
+		return false
+	}
+	foundVersionAxis := false
+	axes := make([][]string, 0, len(matrix.Content)/2)
+	keys := make([]string, 0, len(matrix.Content)/2)
+	cellCount := 1
+	for index := 0; index < len(matrix.Content); index += 2 {
+		key := scalarValue(matrix.Content[index])
+		values := matrix.Content[index+1]
+		if matrix.Content[index].Kind != yaml.ScalarNode || key == "" ||
+			values.Kind != yaml.SequenceNode || len(values.Content) == 0 ||
+			!strings.Contains(suffix, "${{ matrix."+key+" }}") {
+			return false
+		}
+		seen := make(map[string]bool, len(values.Content))
+		axis := make([]string, 0, len(values.Content))
+		for _, valueNode := range values.Content {
+			value := scalarValue(valueNode)
+			identity := strings.ToLower(value)
+			if valueNode.Kind != yaml.ScalarNode || value == "" ||
+				strings.Contains(value, "${{") || strings.ContainsAny(value, "\r\n") ||
+				seen[identity] {
+				return false
+			}
+			if key == "unity-version" && !validUnityVersion(value) {
+				return false
+			}
+			seen[identity] = true
+			axis = append(axis, value)
+		}
+		if cellCount > 256/len(axis) {
+			return false
+		}
+		cellCount *= len(axis)
+		keys = append(keys, key)
+		axes = append(axes, axis)
+		foundVersionAxis = foundVersionAxis || key == "unity-version"
+	}
+	if !foundVersionAxis {
+		return false
+	}
+
+	identities := make(map[string]bool, cellCount)
+	var render func(int, string) bool
+	render = func(axisIndex int, rendered string) bool {
+		if axisIndex == len(axes) {
+			identity := strings.ToLower(rendered)
+			if !literalHolderSuffix(rendered) || identities[identity] {
+				return false
+			}
+			identities[identity] = true
+			return true
+		}
+		token := "${{ matrix." + keys[axisIndex] + " }}"
+		for _, value := range axes[axisIndex] {
+			if !render(axisIndex+1, strings.ReplaceAll(rendered, token, value)) {
+				return false
+			}
+		}
+		return true
+	}
+	return render(0, suffix)
 }
 
 func trustedLeafExecution(step *yaml.Node) bool {

@@ -60,6 +60,10 @@ func safeLicensedSteps() string {
 func centralReturnSteps() string {
 	return `      - id: acquire
         uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id-suffix: qora
+          runner-id: ${{ runner.name }}
       - name: Run Unity
         if: steps.acquire.outputs.acquired == 'true'
         run: unity-editor -batchmode -serial "${UNITY_SERIAL}"
@@ -87,6 +91,9 @@ func centralReturnSteps() string {
         if: always()
         uses: ` + releaseActionRef + `
         with:
+          lock-name: wallstop-organization-builds
+          holder-id-suffix: qora
+          runner-id: ${{ runner.name }}
           resource-cleanup-status: ${{ steps.cleanup_classification.outputs.resource-cleanup-status }}
           resource-health: ${{ steps.cleanup_classification.outputs.resource-health }}
           resource-reason: ${{ steps.cleanup_classification.outputs.resource-reason }}
@@ -186,6 +193,139 @@ func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
 	}
 	if len(result.Findings) != 0 {
 		t.Fatalf("central acquired-scoped return produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T) {
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"        mode: [EditMode]\n",
+		"        mode: [EditMode]\n        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+		1,
+	)
+	workflow = strings.Replace(
+		workflow,
+		"          unity-version: 6000.5.2f1\n",
+		"          unity-version: ${{ matrix.unity-version }}\n",
+		1,
+	)
+	workflow = strings.ReplaceAll(
+		workflow,
+		"          holder-id-suffix: qora\n",
+		"          holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.mode }}\n",
+	)
+	workflow = strings.Replace(
+		workflow,
+		"unity-editor -batchmode -serial",
+		"unity-editor -batchmode -UnityVersion '${{ matrix.unity-version }}' -serial",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("static matrix central return produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRejectsUnboundedCentralReturnVersionMatrix(t *testing.T) {
+	base := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"          unity-version: 6000.5.2f1\n",
+		"          unity-version: ${{ matrix.unity-version }}\n",
+		1,
+	)
+	base = strings.ReplaceAll(
+		base,
+		"          holder-id-suffix: qora\n",
+		"          holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.mode }}\n",
+	)
+	base = strings.Replace(
+		base,
+		"unity-editor -batchmode -serial",
+		"unity-editor -batchmode -UnityVersion '${{ matrix.unity-version }}' -serial",
+		1,
+	)
+	tests := []struct {
+		name   string
+		matrix string
+	}{
+		{name: "missing version axis", matrix: "        mode: [EditMode]\n"},
+		{name: "dynamic version axis", matrix: "        mode: [EditMode]\n        unity-version: ${{ fromJSON(needs.config.outputs.versions) }}\n"},
+		{name: "empty version axis", matrix: "        mode: [EditMode]\n        unity-version: []\n"},
+		{name: "invalid version", matrix: "        mode: [EditMode]\n        unity-version: [latest]\n"},
+		{name: "duplicate version", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1, 6000.5.2f1]\n"},
+		{name: "case duplicate version", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1, 6000.5.2F1]\n"},
+		{name: "expression-valued axis", matrix: "        mode: ['${{ matrix.unity-version }}']\n        unity-version: [6000.5.2f1]\n"},
+		{name: "include override", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1]\n        include:\n          - unity-version: latest\n"},
+		{name: "exclude rewrite surface", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1]\n        exclude:\n          - unity-version: 6000.5.2f1\n"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := strings.Replace(base, "        mode: [EditMode]\n", testCase.matrix, 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-return") {
+				t.Fatalf("unbounded matrix return was accepted: %#v", result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRejectsCollidingCentralReturnVersionMatrix(t *testing.T) {
+	base := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"        mode: [EditMode]\n",
+		"        a: [x, xy]\n        b: [yz, z]\n        unity-version: [2022.3.45f1]\n",
+		1,
+	)
+	base = strings.Replace(
+		base,
+		"          unity-version: 6000.5.2f1\n",
+		"          unity-version: ${{ matrix.unity-version }}\n",
+		1,
+	)
+	tests := []struct {
+		name   string
+		suffix string
+	}{
+		{
+			name:   "literal holder collides",
+			suffix: "qora",
+		},
+		{
+			name:   "holder omits an axis",
+			suffix: "${{ matrix.unity-version }}-${{ matrix.a }}",
+		},
+		{
+			name:   "cross-axis concatenation collides",
+			suffix: "${{ matrix.unity-version }}-${{ matrix.a }}${{ matrix.b }}",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := strings.ReplaceAll(
+				base,
+				"          holder-id-suffix: qora\n",
+				"          holder-id-suffix: "+testCase.suffix+"\n",
+			)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-return") {
+				t.Fatalf("colliding matrix return was accepted: %#v", result.Findings)
+			}
+		})
 	}
 }
 

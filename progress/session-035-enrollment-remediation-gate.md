@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: central prerequisite merged; immutable policy approval in progress
+Status: central prerequisites merged; consumer rollout in progress
 
 ## Selection
 
@@ -215,3 +215,46 @@ monthly quota.
 This separate policy change adds that reachable SHA to both
 `approvedLockShas` and the return-action-specific `approvedReturnShas` before
 any consumer can use the credential-bearing action.
+
+PR #150 approved the trusted return revision and merged as
+`d1dc52f66b91c6e5414ebfe9c80272e658a3c9ad`. A live Qora canary then proved
+that the action's first editor root did not match the repository's established
+CI-managed installation. PR #151 corrected the action to the established
+`u6-v3/<version>/Editor/Unity.exe` root and merged as
+`08fc83e83fa4cae89c0177005b388585ffdb1d9a`; PR #152 approved that exact
+replacement as `f18b986ff8d2777bb37a93a8d1a53dfb8e287b7f`.
+
+Qora PR #184 pinned the approved central contracts and merged as
+`c1b38a3a55d1d6576b511d74c1c764dbc3f94d39`. Its exact-head paid Unity
+matrix and post-merge default-branch matrix both passed, including 128
+EditMode and 107 PlayMode tests. A fresh central audit reported zero Qora
+findings.
+
+The unity-builder fork cannot use the Windows host return action to attest
+Unity activated inside a Docker container, and its Darwin job cannot use a
+Windows-only action. PR #14 therefore retired those unsupported
+organization-credentialed fork jobs while retaining the repository's native
+cleanup implementation and private fixture contracts. It merged as
+`70c59fd0ae716983c67374070fe21cb68b475e97`; its post-merge Windows and
+macOS fixture workflows and complete integration workflow passed. A fresh
+central audit reported zero unity-builder findings. Issue #153 tracks a future
+trusted container/Darwin return contract.
+
+DxMessaging uses statically bounded multi-version Windows host-editor
+matrices. The analyzer previously accepted only a literal return-action
+version, forcing either duplicated licensed jobs or a dynamic,
+caller-controlled exception. The narrow matrix extension accepts
+`${{ matrix.unity-version }}` only when that exact job declares a fully static,
+non-empty matrix and binds every axis into an acquire/release holder suffix
+whose full Cartesian expansion is collision-free.
+Dynamic axes, invalid or case-duplicate versions, colliding holder identities,
+oversized matrices, and `include`/`exclude` rewrite surfaces remain rejected.
+The central return path also proves that release uses the acquire step's exact
+lock, suffix, runner, repository, and state branch. This preserves the central
+editor resolver while avoiding duplicated nine-leg paid CI topology.
+The version selects the centrally resolved and Authenticode-verified executable;
+it is not an activation identity. Unity documents `-returnlicense` as returning
+the currently active serial-based license on the machine.
+Focused Go tests and the complete verifier passed 655 Node tests, all Go
+packages, module verification and tidy checks, actionlint, the generated
+knowledge harness, and the credential audit.
