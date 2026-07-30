@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: central prerequisite in progress
+Status: central prerequisite merged; immutable policy approval in progress
 
 ## Selection
 
@@ -145,4 +145,12 @@ After this prerequisite merges, add that exact main SHA to the reviewed policy,
 then update qora-redux and require zero scoped findings. No Unity execution is
 added by this central change.
 
-Hosted review, merge, and post-merge main evidence remain pending.
+PR #147 merged the central prerequisite as
+`1ec035504397eeff3f5c27059081d56ff7987802`. Build lock CI run
+`30513504991` and organization enrollment audit run `30513504990` both passed
+on that exact `main` commit. Cursor Bugbot found no issues on the PR head;
+Copilot responded that the requesting account had reached its review quota.
+
+The next bounded step is adding the reachable merge SHA to
+`approvedLockShas`; consumer pins remain forbidden until that policy change
+merges.
