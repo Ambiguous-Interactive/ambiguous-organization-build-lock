@@ -306,3 +306,13 @@ fallback, and trusted-skip decisions must instead bind the immutable pull
 request author at `github.event.pull_request.user.login`. The analyzer now
 accepts only that exact PR-scoped author predicate and rejects actor-based
 substitutions across all four contracts.
+
+The final Isho adversarial pass found a credential boundary the consumer could
+not safely repair: Unity may echo the paid `SC-...` serial during return, while
+the central action previously redacted only its email and password inputs.
+Because the analyzer requires return, classification, release, and gate to be
+the terminal contiguous suffix, inserting repository shell deletion would
+invalidate the evidence chain. The central return executor now redacts the
+serial shape before writing bounded evidence. Its regression test supplies no
+serial input and proves the echoed serial is absent, matching the real failure
+mode; the complete verifier passes with 656 Node tests and all Go packages.
