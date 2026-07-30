@@ -2397,7 +2397,7 @@ func trustedSkipAggregateEnforces(
 		) ||
 		!exactExpression(
 			mappingValue(env, "DEPENDABOT_PR"),
-			"github.actor=='dependabot[bot]'",
+			"github.event_name=='pull_request'&&github.actor=='dependabot[bot]'",
 		) {
 		return false
 	}
@@ -2442,8 +2442,11 @@ func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
 	direct := "github.event.pull_request.head.repo.full_name==github.repository"
 	reverse := "github.repository==github.event.pull_request.head.repo.full_name"
 	eventGuard := "github.event_name!='pull_request'||"
+	actor := "github.actor!='dependabot[bot]'"
 	if value == direct || value == reverse ||
-		value == eventGuard+direct || value == eventGuard+reverse {
+		value == eventGuard+direct || value == eventGuard+reverse ||
+		value == eventGuard+"("+actor+"&&"+direct+")" ||
+		value == eventGuard+"("+actor+"&&"+reverse+")" {
 		return true
 	}
 	conjuncts, topLevelOr := conditionTerms(value)
@@ -2474,6 +2477,13 @@ func trustedRevisionExpression(value *yaml.Node) bool {
 	const actor = "github.actor!='dependabot[bot]'"
 	direct := "(github.event_name!='pull_request'||github.event.pull_request.head.repo.full_name==github.repository)"
 	reverse := "(github.event_name!='pull_request'||github.repository==github.event.pull_request.head.repo.full_name)"
+	scopedDirect := "github.event_name!='pull_request'||(" + actor +
+		"&&github.event.pull_request.head.repo.full_name==github.repository)"
+	scopedReverse := "github.event_name!='pull_request'||(" + actor +
+		"&&github.repository==github.event.pull_request.head.repo.full_name)"
+	if expression == scopedDirect || expression == scopedReverse {
+		return true
+	}
 	for _, repositoryGuard := range []string{direct, reverse} {
 		if expression == actor+"&&"+repositoryGuard ||
 			expression == repositoryGuard+"&&"+actor {

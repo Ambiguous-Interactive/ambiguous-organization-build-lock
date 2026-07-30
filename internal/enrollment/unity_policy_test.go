@@ -148,7 +148,7 @@ func trustedSkipAggregate() string {
           RUNNER_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
           UNITY_TESTS_RESULT: ${{ needs.unity.result }}
           FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-          DEPENDABOT_PR: ${{ github.actor == 'dependabot[bot]' }}
+          DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}
         run: |
           set -euo pipefail
           if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
@@ -239,6 +239,17 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 					value,
 					"${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}",
 					"true",
+					1,
+				)
+			},
+		},
+		{
+			name: "Dependabot decision is not PR scoped",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}",
+					"${{ github.actor == 'dependabot[bot]' }}",
 					1,
 				)
 			},

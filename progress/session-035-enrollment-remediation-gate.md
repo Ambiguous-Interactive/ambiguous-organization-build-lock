@@ -277,3 +277,13 @@ otherwise. Any failure, cancellation, partial execution, altered expression,
 additional step, inherited execution environment, or alternate shell remains
 unrecognized and red. Against the Dx candidate, the complete source-free
 audit reports zero Dx findings.
+
+PR #156 merged that trusted-skip contract as
+`9c6f0ae5b733fa4fad06abab496392d9683f568b`; its exact-head and post-merge
+Build Lock CI and organization audit passed. Review of the first Dx pull
+request head then found that an actor-only Dependabot predicate could also
+classify a Dependabot-authored default-branch push as intentionally skipped.
+The corrected aggregate binds Dependabot only when the event is a pull request,
+so every push must still produce successful preflight and licensed results.
+The mutation suite now rejects the actor-only predicate, and the trigger parser
+recognizes the corresponding PR-scoped licensed-job guard.
