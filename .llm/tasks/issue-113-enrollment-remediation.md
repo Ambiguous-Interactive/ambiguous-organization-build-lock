@@ -105,8 +105,10 @@ or aggregate state handling.
 
 ## Rollout sequence
 
-1. Merge and publish the central gate and analyzer support.
-2. Add the exact reachable main commit to `approvedLockShas`.
+1. Merge and publish the central gate and analyzer support. Completed by #147
+   at main commit `1ec035504397eeff3f5c27059081d56ff7987802`;
+   both post-merge CI and the organization audit passed.
+2. Add that exact reachable main commit to `approvedLockShas`.
 3. Update qora-redux at that immutable revision and require zero scoped audit
    findings.
 4. Repeat the static-first pattern for the remaining 13 workflow files.
@@ -130,4 +132,5 @@ passed
 635 Node tests passed; all Go, module, actionlint, harness, and credential checks passed
 ```
 
-Hosted review, delivery, and downstream consumer evidence remain pending.
+The central prerequisite is merged and post-merge main is green. Policy
+approval, downstream delivery, and consumer evidence remain pending.
