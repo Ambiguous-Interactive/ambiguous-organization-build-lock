@@ -19,6 +19,7 @@ const (
 func unityAuditPolicy() UnityEnrollmentPolicy {
 	return UnityEnrollmentPolicy{
 		ApprovedLockSHAs:      []string{testSHA},
+		ApprovedReturnSHAs:    []string{testSHA},
 		ProtectedBranches:     []string{"main"},
 		AllowWorkflowDispatch: true,
 		Now:                   time.Date(2026, time.July, 27, 0, 0, 0, 0, time.UTC),
@@ -43,7 +44,7 @@ jobs:
   unity:
     needs: preflight
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, Windows]
     strategy:
       fail-fast: false
       matrix:
@@ -188,6 +189,27 @@ func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentRejectsGloballyApprovedButUnapprovedReturnSHA(t *testing.T) {
+	const historicalSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	policy := unityAuditPolicy()
+	policy.ApprovedLockSHAs = append(policy.ApprovedLockSHAs, historicalSHA)
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		returnActionRef,
+		lockActionPrefix+"return-unity-license@"+historicalSHA,
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-unity-return") {
+		t.Fatalf("historical globally approved SHA authorized return: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 	base := unityWorkflow(centralReturnSteps(), safeAggregate())
 	tests := []struct {
@@ -326,6 +348,30 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 			code: "missing-unity-return",
 		},
 		{
+			name: "opaque executable step after return",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n",
+					"      - name: Opaque late command\n        if: ${{ always() && steps.acquire.outputs.acquired == 'true' }}\n        shell: pwsh\n        run: '& ($env:EDITOR_STEM + ''.exe'') -serial $env:UNITY_SERIAL'\n        env:\n          EDITOR_STEM: Unity\n          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}\n  aggregate:\n",
+					1,
+				)
+			},
+			code: "unsafe-central-return-suffix",
+		},
+		{
+			name: "opaque executable step interleaved after return",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - id: cleanup_classification\n",
+					"      - name: Opaque late command\n        run: echo execute\n      - id: cleanup_classification\n",
+					1,
+				)
+			},
+			code: "unsafe-central-return-suffix",
+		},
+		{
 			name: "workflow execution environment",
 			mutate: func(value string) string {
 				return strings.Replace(
@@ -346,6 +392,37 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 					"  unity:\n    env:\n      NODE_OPTIONS: --require=./consumer.js\n    needs:",
 					1,
 				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "job container",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"    runs-on: [self-hosted, Windows]\n",
+					"    runs-on: [self-hosted, Windows]\n    container:\n      image: windows\n      env:\n        NODE_OPTIONS: --require=./consumer.js\n",
+					1,
+				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "job services",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"    runs-on: [self-hosted, Windows]\n",
+					"    runs-on: [self-hosted, Windows]\n    services:\n      spoof:\n        image: consumer\n",
+					1,
+				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "non-Windows runner",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, Windows]", "[self-hosted, linux]", 1)
 			},
 			code: "unsafe-return-execution-environment",
 		},
@@ -1385,7 +1462,7 @@ func TestUnityEnrollmentRejectsMissingSafetySurfaces(t *testing.T) {
 			return strings.Replace(value, "      - id: release\n        if: always()", "      - id: release", 1)
 		}, "release-not-always"},
 		{"environment gate", func(value string) string {
-			return strings.Replace(value, "    runs-on: [self-hosted, linux]", "    runs-on: [self-hosted, linux]\n    environment: unity", 1)
+			return strings.Replace(value, "    runs-on: [self-hosted, Windows]", "    runs-on: [self-hosted, Windows]\n    environment: unity", 1)
 		}, "approval-environment"},
 		{"job credential", func(value string) string {
 			return strings.Replace(value, "    strategy:", "    env:\n      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}\n    strategy:", 1)

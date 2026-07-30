@@ -59,6 +59,7 @@ type UnityPolicyException struct {
 // exceptions accepted by an organization enrollment audit.
 type UnityEnrollmentPolicy struct {
 	ApprovedLockSHAs      []string               `json:"approvedLockShas"`
+	ApprovedReturnSHAs    []string               `json:"approvedReturnShas"`
 	Exceptions            []UnityPolicyException `json:"exceptions"`
 	ProtectedBranches     []string               `json:"-"`
 	AllowWorkflowDispatch bool                   `json:"-"`
@@ -82,11 +83,12 @@ type UnityEnrollmentResult struct {
 }
 
 type unityPolicyAnalyzer struct {
-	analyzer       *analyzer
-	approved       map[string]bool
-	exceptions     map[string]UnityPolicyException
-	usedExceptions map[string]bool
-	now            time.Time
+	analyzer        *analyzer
+	approved        map[string]bool
+	approvedReturns map[string]bool
+	exceptions      map[string]UnityPolicyException
+	usedExceptions  map[string]bool
+	now             time.Time
 }
 
 type flattenedUnityStep struct {
@@ -119,6 +121,20 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 	}
 	if len(approved) == 0 {
 		return UnityEnrollmentResult{}, fmt.Errorf("at least one approved lock SHA is required")
+	}
+	approvedReturns := make(map[string]bool, len(policy.ApprovedReturnSHAs))
+	for _, sha := range policy.ApprovedReturnSHAs {
+		sha = strings.ToLower(strings.TrimSpace(sha))
+		if !isSHA(sha) {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved return SHA must be a full immutable commit SHA")
+		}
+		if approvedReturns[sha] {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved return SHA list contains a duplicate")
+		}
+		if !approved[sha] {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved return SHA must also be an approved lock SHA")
+		}
+		approvedReturns[sha] = true
 	}
 	protectedBranches := make(map[string]bool, len(policy.ProtectedBranches))
 	for _, branch := range policy.ProtectedBranches {
@@ -175,11 +191,12 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		requiredAcquireSHA: "",
 	}
 	a := &unityPolicyAnalyzer{
-		analyzer:       base,
-		approved:       approved,
-		exceptions:     exceptions,
-		usedExceptions: make(map[string]bool),
-		now:            now,
+		analyzer:        base,
+		approved:        approved,
+		approvedReturns: approvedReturns,
+		exceptions:      exceptions,
+		usedExceptions:  make(map[string]bool),
+		now:             now,
 	}
 	result := UnityEnrollmentResult{
 		Inventory: make([]UnityInventoryEntry, 0),
@@ -580,7 +597,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			case returnAction:
 				returnActionCount++
 				if !exactLockActionReference(uses, returnAction) ||
-					!a.approved[strings.ToLower(actionRef(uses))] ||
+					!a.approvedReturns[strings.ToLower(actionRef(uses))] ||
 					!jobFailurePropagates ||
 					acquireID == "" ||
 					!cleanupStepAfterAcquire(step, acquireID) ||
@@ -636,8 +653,8 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		}
 	}
 	if returnActionCount > 0 &&
-		(mappingValue(workflow, "env") != nil ||
-			mappingValue(job, "env") != nil ||
+		(!centralReturnExecutionIsolated(workflow, job) ||
+			!windowsSelfHostedJob(job) ||
 			!optionalTimeoutAtLeast(job, 5)) {
 		a.analyzer.add("unsafe-return-execution-environment", workflowPath, jobName)
 	}
@@ -670,6 +687,14 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		steps[gate].scope == acquireScope && steps[gate].scope == classifierScope &&
 		steps[gate].scope == steps[release].scope {
 		gateTyped = typedGateInputs(steps[gate].node, acquireID, classifierID, releaseID)
+	}
+	if returnActionCount > 0 &&
+		(unityReturn < 0 ||
+			classifier != unityReturn+1 ||
+			release != classifier+1 ||
+			gate != release+1 ||
+			gate != len(steps)-1) {
+		a.analyzer.add("unsafe-central-return-suffix", workflowPath, jobName)
 	}
 	if firstAcquire < 0 {
 		a.analyzer.add("missing-lock-acquire", workflowPath, jobName)
@@ -1967,6 +1992,43 @@ func validationJobIsolationSafe(workflow, job *yaml.Node) bool {
 		return false
 	}
 	return true
+}
+
+func centralReturnExecutionIsolated(workflow, job *yaml.Node) bool {
+	if workflow == nil || job == nil {
+		return false
+	}
+	for _, key := range []string{"env", "defaults"} {
+		if mappingValue(workflow, key) != nil {
+			return false
+		}
+	}
+	for _, key := range []string{"env", "defaults", "container", "services"} {
+		if mappingValue(job, key) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func windowsSelfHostedJob(job *yaml.Node) bool {
+	runsOn := mappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Kind != yaml.SequenceNode {
+		return false
+	}
+	selfHosted, windows := false, false
+	for _, label := range runsOn.Content {
+		if label.Kind != yaml.ScalarNode {
+			return false
+		}
+		switch strings.ToLower(label.Value) {
+		case "self-hosted":
+			selfHosted = true
+		case "windows":
+			windows = true
+		}
+	}
+	return selfHosted && windows
 }
 
 func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Node) bool {

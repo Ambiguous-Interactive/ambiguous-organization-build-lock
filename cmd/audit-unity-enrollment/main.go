@@ -78,6 +78,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		})
 		result, analyzeErr := enrollment.AnalyzeUnityEnrollment(snapshot, enrollment.UnityEnrollmentPolicy{
 			ApprovedLockSHAs:      registry.ApprovedLockSHAs,
+			ApprovedReturnSHAs:    registry.ApprovedReturnSHAs,
 			Exceptions:            registry.Exceptions,
 			ProtectedBranches:     []string{repository.DefaultBranch},
 			AllowWorkflowDispatch: repository.AllowWorkflowDispatch,

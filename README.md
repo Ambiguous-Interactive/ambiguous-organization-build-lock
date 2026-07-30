@@ -211,6 +211,16 @@ section, guard every licensed step on the acquire output, and release with
     incident-id: ${{ steps.release-build-lock.outputs.incident-id }}
 ```
 
+The central return action is Windows-only. It rejects reparse points anywhere
+in the CI-managed editor path and verifies the editor's Authenticode signature,
+code-signing EKU, and centrally allowlisted Unity leaf-certificate thumbprint
+before passing credentials. Consumers cannot supply signer identities or an
+executable path. Certificate rotation therefore requires a reviewed central
+release, and the release SHA must be listed in both `approvedLockShas` and the
+return-action-specific `approvedReturnShas`. Return evidence is
+credential-redacted before it is written, and its
+SHA-256 output must be bound into the classifier as shown.
+
 The two acquire requirements are opt-in for backward compatibility. Lifecycle-aware
 consumers should set both as shown. Acquire validates them against each lock config
 snapshot it actually uses, including periodic refreshes while queued, and fails

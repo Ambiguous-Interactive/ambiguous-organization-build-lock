@@ -9,10 +9,11 @@ const { TextDecoder } = require("node:util");
 
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 240_000;
+const DEFAULT_VERIFY_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 30_000;
 const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
 const UNITY_SIGNER_THUMBPRINTS = new Set([
-  "B73664F2AF5A8EF4529F03DB4B2CCD8275A6EC91",
+  "228FB6411B0A144478C86AAA3CD9473C43A8ABA7",
   "BFFD800651947878FCD0DC749C16D57B0D5E397D"
 ]);
 
@@ -110,12 +111,22 @@ async function verifyUnityEditor(executable, options = {}) {
   }
   const spawnImpl = options.spawnImpl || spawn;
   const environment = options.environment || {};
+  const timeoutMs = options.timeoutMs === undefined
+    ? DEFAULT_VERIFY_TIMEOUT_MS
+    : options.timeoutMs;
   const powershell = systemPowerShell();
+  const verifierEnvironment = {
+    ...environment,
+    CENTRAL_UNITY_EDITOR_PATH: executable,
+    SystemDrive: "C:",
+    SystemRoot: WINDOWS_SYSTEM_ROOT,
+    windir: WINDOWS_SYSTEM_ROOT
+  };
   const allowedThumbprints = [...UNITY_SIGNER_THUMBPRINTS].join(",");
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$allowed = '${allowedThumbprints}'.Split(',')`,
-    "$signature = Get-AuthenticodeSignature -LiteralPath $args[0] -ErrorAction Stop",
+    "$signature = Get-AuthenticodeSignature -LiteralPath $env:CENTRAL_UNITY_EDITOR_PATH -ErrorAction Stop",
     "if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { exit 41 }",
     "$certificate = $signature.SignerCertificate",
     "if ($null -eq $certificate -or $allowed -notcontains $certificate.Thumbprint.ToUpperInvariant()) { exit 42 }",
@@ -130,18 +141,40 @@ async function verifyUnityEditor(executable, options = {}) {
   ].join("; ");
 
   await new Promise((resolve, reject) => {
+    let settled = false;
     const verifier = spawnImpl(
       powershell,
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script, executable],
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
       {
-        env: environment,
+        cwd: path.win32.join(WINDOWS_SYSTEM_ROOT, "System32"),
+        env: verifierEnvironment,
         shell: false,
         windowsHide: true,
         stdio: "ignore"
       }
     );
-    verifier.once("error", () => reject(new Error("Unity editor signature verification could not start.")));
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      terminateProcess(verifier, platform, spawnImpl, verifierEnvironment);
+      reject(new Error("Unity editor signature verification timed out."));
+    }, timeoutMs);
+    timeout.unref?.();
+    verifier.once("error", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("Unity editor signature verification could not start."));
+      }
+    });
     verifier.once("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       if (code === 0) {
         resolve();
       } else {
@@ -237,6 +270,9 @@ function editorEnvironment(env, runnerTemp) {
       result[name] = env[name];
     }
   }
+  result.SystemDrive = "C:";
+  result.SystemRoot = WINDOWS_SYSTEM_ROOT;
+  result.windir = WINDOWS_SYSTEM_ROOT;
   result.TEMP = runnerTemp;
   result.TMP = runnerTemp;
   return result;
@@ -245,7 +281,9 @@ function editorEnvironment(env, runnerTemp) {
 function redactedEvidence(chunks, credentials) {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let text = decoder.decode(Buffer.concat(chunks));
-  for (const credential of credentials) {
+  const orderedCredentials = [...new Set(credentials.filter((value) => value !== ""))]
+    .sort((left, right) => right.length - left.length);
+  for (const credential of orderedCredentials) {
     text = text.split(credential).join("[REDACTED]");
   }
   const result = Buffer.from(text, "utf8");
@@ -314,6 +352,7 @@ async function executeReturn(options) {
 
   const result = await new Promise((resolve, reject) => {
     let settled = false;
+    let terminationStarted = false;
     let terminationGrace;
     let timeout;
     const settle = (value) => {
@@ -324,6 +363,18 @@ async function executeReturn(options) {
       clearTimeout(timeout);
       clearTimeout(terminationGrace);
       resolve(value);
+    };
+    const requestTermination = () => {
+      if (terminationStarted) {
+        return;
+      }
+      terminationStarted = true;
+      terminateProcess(child, platform, spawnImpl, childEnvironment);
+      terminationGrace = setTimeout(
+        () => settle({ code: null, signal: "termination-grace-expired" }),
+        terminationGraceMs
+      );
+      terminationGrace.unref?.();
     };
     child = spawnImpl(executable, argumentsList, {
       cwd: identity.runnerTemp,
@@ -337,7 +388,7 @@ async function executeReturn(options) {
       const data = Buffer.from(chunk);
       if (evidenceBytes + data.length > MAX_EVIDENCE_BYTES) {
         evidenceOverflow = true;
-        terminateProcess(child, platform, spawnImpl, childEnvironment);
+        requestTermination();
         return;
       }
       evidenceBytes += data.length;
@@ -357,12 +408,7 @@ async function executeReturn(options) {
 
     timeout = setTimeout(() => {
       timedOut = true;
-      terminateProcess(child, platform, spawnImpl, childEnvironment);
-      terminationGrace = setTimeout(
-        () => settle({ code: null, signal: "termination-grace-expired" }),
-        terminationGraceMs
-      );
-      terminationGrace.unref?.();
+      requestTermination();
     }, timeoutMs);
     timeout.unref?.();
   });
@@ -387,8 +433,8 @@ async function executeReturn(options) {
     writeOutput(env, "return-exit-code", String(exitCode ?? 1), options.appendFile);
   }
   if (captureComplete) {
-    writeOutput(env, "evidence-capture-complete", "true", options.appendFile);
     writeOutput(env, "return-log-digest", returnLogDigest, options.appendFile);
+    writeOutput(env, "evidence-capture-complete", "true", options.appendFile);
   }
 
   return {
@@ -407,7 +453,7 @@ async function run(options = {}) {
   if (!result.commandCompleted || !result.captureComplete || result.exitCode !== 0) {
     throw new Error("Unity return did not complete with bounded successful evidence.");
   }
-  console.log("::notice::Unity return command completed; raw evidence remains local to the runner.");
+  console.log("::notice::Unity return command completed; redacted evidence remains local to the runner.");
   return result;
 }
 
@@ -420,6 +466,7 @@ if (require.main === module) {
 
 module.exports = {
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_VERIFY_TIMEOUT_MS,
   MAX_EVIDENCE_BYTES,
   TERMINATION_GRACE_MS,
   UNITY_SIGNER_THUMBPRINTS,
@@ -433,6 +480,7 @@ module.exports = {
   run,
   runIdentity,
   systemPowerShell,
+  terminateProcess,
   verifyUnityEditor,
   workflowCommandData
 };

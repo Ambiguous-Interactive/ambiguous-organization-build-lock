@@ -21,11 +21,12 @@ func validUnityRegistry() UnityEnrollmentRegistry {
 		})
 	}
 	return UnityEnrollmentRegistry{
-		SchemaVersion:    1,
-		Organization:     UnityEnrollmentOrganization,
-		ApprovedLockSHAs: []string{testSHA},
-		Repositories:     repositories,
-		Exceptions:       []UnityPolicyException{},
+		SchemaVersion:      1,
+		Organization:       UnityEnrollmentOrganization,
+		ApprovedLockSHAs:   []string{testSHA},
+		ApprovedReturnSHAs: []string{},
+		Repositories:       repositories,
+		Exceptions:         []UnityPolicyException{},
 	}
 }
 
@@ -84,6 +85,12 @@ func TestUnityEnrollmentRegistryRequiresBaselineRepositorySet(t *testing.T) {
 			}
 		}},
 		{"mutable lock", func(value *UnityEnrollmentRegistry) { value.ApprovedLockSHAs = []string{"main"} }},
+		{"mutable return", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedReturnSHAs = []string{"main"}
+		}},
+		{"return not approved globally", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedReturnSHAs = []string{strings.Repeat("b", 40)}
+		}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

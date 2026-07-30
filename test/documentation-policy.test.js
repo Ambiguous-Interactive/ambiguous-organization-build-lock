@@ -126,6 +126,10 @@ test("steady-state runbook reports the registered release and consumer inventory
   assert.match(operations, /`unity-enrollment-policy\.json` is the authoritative reviewed/);
   assert.equal(enrollmentPolicy.repositories.find((entry) => entry.repository.endsWith("/unity-builder")).fork, true);
   assert.ok(enrollmentPolicy.approvedLockShas.includes(facts.publishedRelease.commit));
+  assert.ok(Array.isArray(enrollmentPolicy.approvedReturnShas));
+  assert.ok(enrollmentPolicy.approvedReturnShas.every(
+    (sha) => enrollmentPolicy.approvedLockShas.includes(sha)
+  ));
 });
 
 test("continuous enrollment audit facts and guidance stay synchronized", () => {

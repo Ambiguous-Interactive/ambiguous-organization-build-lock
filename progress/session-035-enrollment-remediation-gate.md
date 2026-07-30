@@ -169,12 +169,43 @@ The replacement prerequisite is a pinned central `return-unity-license`
 Node 24 action. It accepts no consumer script or caller-selected executable,
 constructs the CI-managed editor path from a literal Unity version and the
 immutable `runner.tool_cache` context, invokes Unity without a shell, bounds
-captured stdout and stderr, and emits the four typed return-evidence outputs.
-The enrollment analyzer accepts that action only at an approved lock SHA, with
-exact credential and tool-cache inputs, no step execution environment, one
-unambiguous acquire, and the exact acquired-scoped predicate on both return
-and classifier. Release and the cleanup gate remain literal `always()`.
+captured stdout and stderr, and emits five typed return-evidence outputs.
+The enrollment analyzer accepts that action only at a SHA in the dedicated
+`approvedReturnShas` subset, with exact credential and tool-cache inputs, no
+workflow/job execution environment, defaults, container, or services, one
+unambiguous acquire, an explicit self-hosted Windows runner, and the exact
+acquired-scoped predicate on both return and classifier. Return, classifier,
+release, and gate form the terminal consecutive job suffix. Release and the
+cleanup gate remain literal `always()`.
+
+Adversarial implementation review then found four P1 bypasses in the first
+central draft: a later step could replace path-only return evidence; licensed
+work could run again after accepted cleanup; workflow/job `NODE_OPTIONS` could
+preload the Node actions when a legacy aggregate was present; and a mutable or
+reparse-directed tool-cache executable could impersonate Unity. The permanent
+contract now binds a return-log SHA-256 into the classifier, structurally
+forbids any interleaved or later executable step, rejects inherited workflow/job
+execution wrappers for the central path, rejects reparse points throughout the
+editor path, and requires a centrally allowlisted Unity Authenticode leaf
+thumbprint plus code-signing EKU immediately before process start.
+
+A temporary no-checkout, no-secret diagnostic did not launch Unity or acquire a
+seat. Run `30515221048` confirmed the installed standalone Unity CLI's current
+Unity Technologies SF leaf and DigiCert G4 code-signing issuer on the exact
+Windows runner. The diagnostic workflow was then deleted. The allowlist retains
+the observed current leaf and one immediately prior Unity leaf for reviewed
+rotation overlap; consumers cannot provide either value. Captured return evidence is
+credential-redacted before persistence, Windows termination falls back to
+direct process kill when bounded tree termination fails, and analyzer mutations
+reject short step timeouts.
+
+The permanent diagnostic-free tree passed the full verifier with 654 Node
+tests, every Go package, module integrity and tidy checks, actionlint, the
+generated knowledge harness, and the credential audit. A final independent
+adversarial review returned PASS with no actionable correctness or security
+finding.
 
 This new action cannot safely be pinned until its merge commit is reachable.
 After this prerequisite merges, its exact main SHA must be added to
-`approvedLockShas` in a separate policy change before Qora can consume it.
+both `approvedLockShas` and the return-action-specific `approvedReturnShas` in
+a separate policy change before Qora can consume it.

@@ -433,6 +433,30 @@ test("action run emits only typed outputs and never prints evidence", () => {
   }
 });
 
+test("legacy return evidence remains classifiable without the central digest", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-legacy-"));
+  const outputPath = path.join(root, "output.txt");
+  const returnLog = path.join(root, "return.log");
+  try {
+    fs.writeFileSync(returnLog, PROOF);
+    const result = run({
+      inputs: {
+        "return-log-path": returnLog,
+        "return-command-completed": "true",
+        "return-exit-code": "0",
+        "evidence-capture-complete": "true",
+        "supplemental-evidence-paths": ""
+      },
+      outputPath,
+      log: () => {}
+    });
+    assert.equal(result.reason, "cleanup-confirmed");
+    assert.equal(result.resourceSafe, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("classifier rejects return-log replacement against the linked digest", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-digest-"));
   const outputPath = path.join(root, "output.txt");

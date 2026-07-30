@@ -6,13 +6,19 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { EventEmitter } = require("node:events");
 
 const {
   editorEnvironment,
   editorPath,
   executeReturn,
+  MAX_EVIDENCE_BYTES,
+  redactedEvidence,
   requiredInputs,
   run,
+  systemPowerShell,
+  terminateProcess,
+  verifyUnityEditor,
   workflowCommandData
 } = require("../.github/dist/return-unity-license.js");
 
@@ -75,8 +81,8 @@ test("central return invokes only the CI-managed editor and emits bounded eviden
       "evidence-capture-complete=false",
       "return-command-completed=true",
       "return-exit-code=0",
-      "evidence-capture-complete=true",
       `return-log-digest=${digest}`,
+      "evidence-capture-complete=true",
       ""
     ].join("\n")
   );
@@ -98,6 +104,37 @@ test("nonzero Unity exit preserves typed evidence and fails the action", async (
     verifyEditor: async () => {}
   }), /did not complete/);
 });
+
+test("digest output is committed before capture completion", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nprintf 'return complete\\n'\nexit 0\n");
+  const writes = [];
+  await assert.rejects(executeReturn({
+    appendFile(_file, value) {
+      if (value.startsWith("return-log-digest=")) {
+        throw new Error("injected output failure");
+      }
+      writes.push(value);
+    },
+    env: item.env,
+    platform: "linux",
+    verifyEditor: async () => {}
+  }), /injected output failure/);
+  assert.ok(writes.includes("evidence-capture-complete=false\n"));
+  assert.ok(!writes.includes("evidence-capture-complete=true\n"));
+});
+
+for (const [name, email, password] of [
+  ["email is a password prefix", "abc", "abcSECRET"],
+  ["password is an email prefix", "abcSECRET", "abc"]
+]) {
+  test(`credential redaction is complete when ${name}`, () => {
+    const evidence = redactedEvidence(
+      [Buffer.from(`${email}|${password}\n`)],
+      [email, password]
+    );
+    assert.equal(evidence.toString("utf8"), "[REDACTED]|[REDACTED]\n");
+  });
+}
 
 test("invalid caller-controlled resolution inputs fail closed", () => {
   const base = {
@@ -128,14 +165,119 @@ test("Unity child environment excludes action inputs and workflow execution cont
   }, "C:\\runner-temp");
   assert.deepEqual(result, {
     APPDATA: "appdata",
+    SystemDrive: "C:",
     SystemRoot: "C:\\Windows",
     TEMP: "C:\\runner-temp",
-    TMP: "C:\\runner-temp"
+    TMP: "C:\\runner-temp",
+    windir: "C:\\Windows"
   });
 });
 
 test("top-level action diagnostics escape workflow commands", () => {
   assert.equal(workflowCommandData("bad%\r\n::warning::value"), "bad%25%0D%0A::warning::value");
+});
+
+test("Authenticode verification uses absolute system PowerShell and the central signer allowlist", async () => {
+  const calls = [];
+  const spawnImpl = (command, argumentsList, options) => {
+    calls.push({ command, argumentsList, options });
+    const child = new EventEmitter();
+    process.nextTick(() => child.emit("close", 0));
+    return child;
+  };
+  await verifyUnityEditor("E:\\tool-cache\\Unity.exe", {
+    environment: { SystemRoot: "attacker-controlled", TEMP: "E:\\temp" },
+    platform: "win32",
+    spawnImpl
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].command,
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  );
+  assert.deepEqual(calls[0].options.env, {
+    CENTRAL_UNITY_EDITOR_PATH: "E:\\tool-cache\\Unity.exe",
+    SystemDrive: "C:",
+    SystemRoot: "C:\\Windows",
+    TEMP: "E:\\temp",
+    windir: "C:\\Windows"
+  });
+  assert.equal(calls[0].options.cwd, "C:\\Windows\\System32");
+  assert.ok(!calls[0].argumentsList.includes("E:\\tool-cache\\Unity.exe"));
+  assert.match(calls[0].argumentsList.join(" "), /CENTRAL_UNITY_EDITOR_PATH/);
+  assert.match(calls[0].argumentsList.join(" "), /228FB6411B0A144478C86AAA3CD9473C43A8ABA7/);
+  assert.match(calls[0].argumentsList.join(" "), /BFFD800651947878FCD0DC749C16D57B0D5E397D/);
+  assert.match(calls[0].argumentsList.join(" "), /1\.3\.6\.1\.5\.5\.7\.3\.3/);
+  assert.equal(systemPowerShell(), calls[0].command);
+});
+
+test("Authenticode verification is bounded and terminates a hung verifier", async () => {
+  let killed = 0;
+  const verifier = new EventEmitter();
+  verifier.exitCode = null;
+  verifier.kill = () => {
+    killed++;
+  };
+  await assert.rejects(verifyUnityEditor("E:\\tool cache\\Unity.exe", {
+    environment: {},
+    platform: "win32",
+    spawnImpl: () => verifier,
+    timeoutMs: 1
+  }), /timed out/);
+  assert.equal(killed, 1);
+});
+
+test("nonzero Windows tree termination falls back to the direct child kill", async () => {
+  let killed = 0;
+  const child = {
+    exitCode: null,
+    pid: 42,
+    kill() {
+      killed++;
+    }
+  };
+  const terminator = new EventEmitter();
+  terminator.unref = () => {};
+  const calls = [];
+  terminateProcess(child, "win32", (command, argumentsList, options) => {
+    calls.push({ command, argumentsList, options });
+    return terminator;
+  }, { TEMP: "E:\\temp" });
+  terminator.emit("close", 1);
+  assert.equal(killed, 1);
+  assert.equal(calls[0].command, "C:\\Windows\\System32\\taskkill.exe");
+  assert.deepEqual(calls[0].options.env, { TEMP: "E:\\temp" });
+});
+
+test("evidence overflow requests process termination only once", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nexit 0\n");
+  let killed = 0;
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {
+      killed++;
+    };
+    process.nextTick(() => {
+      const oversized = Buffer.alloc(MAX_EVIDENCE_BYTES + 1);
+      child.stdout.emit("data", oversized);
+      child.stderr.emit("data", oversized);
+      child.exitCode = 1;
+      child.emit("close", 1, null);
+    });
+    return child;
+  };
+  const result = await executeReturn({
+    env: item.env,
+    platform: "linux",
+    spawnImpl,
+    verifyEditor: async () => {}
+  });
+  assert.equal(result.captureComplete, false);
+  assert.equal(result.evidenceOverflow, true);
+  assert.equal(killed, 1);
 });
 
 test("symlinked editor is rejected without exposing credentials", async (t) => {
