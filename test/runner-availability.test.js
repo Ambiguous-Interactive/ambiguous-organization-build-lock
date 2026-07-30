@@ -9,7 +9,6 @@ const {
   RUNNER_INVENTORY_TIMEOUT_MS,
   classifyRunnerInventoryError,
   execute,
-  matchingOnlineRunners,
   matchingRegisteredRunners,
   parseRequiredLabelSets,
   parseRepository,
@@ -48,7 +47,7 @@ test("required runner label sets are strict non-empty JSON arrays", () => {
   }
 });
 
-test("runner matching requires every label and an online status", () => {
+test("runner matching requires every label and ignores connection status", () => {
   const runners = [
     {
       id: 1,
@@ -72,13 +71,6 @@ test("runner matching requires every label and an online status", () => {
       labels: [{ name: "self-hosted" }, { name: "Linux" }]
     }
   ];
-
-  assert.deepEqual(
-    matchingOnlineRunners(runners, ["self-hosted", "windows", "unity"]).map((runner) => runner.id),
-    [1],
-    "an online busy runner is available infrastructure and may queue work"
-  );
-  assert.deepEqual(matchingOnlineRunners(runners, ["self-hosted", "linux", "unity"]), []);
 
   assert.deepEqual(
     matchingRegisteredRunners(runners, ["self-hosted", "linux", "unity"]).map((runner) => runner.id),
@@ -317,8 +309,11 @@ test("runtime requests only organization runner read permission and rejects an e
 
   const result = await execute();
   assert.deepEqual(tokenRequest, { permissions: { organization_self_hosted_runners: "read" } });
-  assert.equal(result.onlineRunnerCount, 1);
-  assert.match(fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"), /^online-runner-count=1$/m);
+  assert.equal(result.registeredRunnerCount, 1);
+  assert.match(
+    fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"),
+    /^registered-runner-count=1$/m
+  );
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
   await assert.rejects(
@@ -391,7 +386,7 @@ test("runner retry policy also covers GitHub App installation discovery", async 
   });
 
   assert.equal(installationCalls, 4);
-  assert.equal(result.onlineRunnerCount, 1);
+  assert.equal(result.registeredRunnerCount, 1);
 });
 
 test("terminal runner preflight preserves classified API diagnostics safely", async (t) => {
@@ -476,7 +471,7 @@ test("runtime validates repository identity before parsing credentials or making
   await assert.rejects(() => execute(), /repository owner is not authorized/i);
 });
 
-test("a registered label set whose runners are all offline queues instead of failing", async (t) => {
+test("a registered label set passes without inspecting connection status", async (t) => {
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
   const originalLog = console.log;
@@ -530,19 +525,22 @@ test("a registered label set whose runners are all offline queues instead of fai
 
   const result = await execute();
 
-  assert.equal(result.onlineRunnerCount, 0);
+  assert.equal(result.registeredRunnerCount, 1);
   assert.deepEqual(result.matches, [
-    { labels: ["self-hosted", "linux"], runners: [], registered: ["box-linux"] }
+    { labels: ["self-hosted", "linux"], runners: ["box-linux"] }
   ]);
 
   const warnings = logged.filter((line) => line.startsWith("::warning::"));
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /box-linux/);
-  assert.match(warnings[0], /queueing, not a preflight failure/);
-  assert.doesNotMatch(warnings[0], /\n/);
+  assert.equal(warnings.length, 0);
 
   const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
-  assert.match(summary, /currently offline/);
-  assert.match(summary, /^Unity runner preflight passed for Ambiguous-Interactive\/unity-helpers/m);
-  assert.match(fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"), /^online-runner-count=0$/m);
+  assert.doesNotMatch(summary, /offline|online/);
+  assert.match(
+    summary,
+    /^Unity runner registration preflight passed for Ambiguous-Interactive\/unity-helpers/m
+  );
+  assert.match(
+    fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"),
+    /^registered-runner-count=1$/m
+  );
 });

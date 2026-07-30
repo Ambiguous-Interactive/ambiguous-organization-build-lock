@@ -1,4 +1,4 @@
-name: Check Unity runner availability
+name: Check Unity runner registration
 description: Fail closed unless every required label set has a registered runner accessible to the calling repository.
 inputs:
   reader-app-id:
@@ -15,10 +15,10 @@ inputs:
     description: JSON array of label arrays; every label array must match at least one registered accessible runner.
     required: true
 outputs:
-  online-runner-count:
-    description: Number of online runners in groups visible to the calling repository.
+  registered-runner-count:
+    description: Number of registered runners in groups visible to the calling repository.
   matched-runners:
-    description: JSON array of per-label-set entries carrying the matching online runner names and the matching registered runner names.
+    description: JSON array of per-label-set entries carrying the matching registered runner names.
 runs:
   using: node24
   main: ../../dist/check-unity-runners.js

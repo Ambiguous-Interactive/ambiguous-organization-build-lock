@@ -296,3 +296,23 @@ as a whole job condition but not as one conjunct beside classifier and static
 gates. The trigger and fallback parsers now recognize that exact scoped
 conjunct as well. The typed conditional lifecycle fixture uses the compound
 form, so reverting either parser branch makes the canonical fixture red.
+
+PR #158 merged the compound-condition correction as
+`15e0a13bf57f176b844ca0014f5fffa80d3b6100`; its exact-head and post-merge
+Build Lock CI and organization audit passed. Exact-head consumer CI then
+exposed a second Dependabot identity distinction: `github.actor` changes when
+a maintainer reruns a Dependabot-authored pull request. Trusted revision,
+fallback, and trusted-skip decisions must instead bind the immutable pull
+request author at `github.event.pull_request.user.login`. The analyzer now
+accepts only that exact PR-scoped author predicate and rejects actor-based
+substitutions across all four contracts.
+
+The final Isho adversarial pass found a credential boundary the consumer could
+not safely repair: Unity may echo the paid `SC-...` serial during return, while
+the central action previously redacted only its email and password inputs.
+Because the analyzer requires return, classification, release, and gate to be
+the terminal contiguous suffix, inserting repository shell deletion would
+invalidate the evidence chain. The central return executor now redacts the
+serial shape before writing bounded evidence. Its regression test supplies no
+serial input and proves the echoed serial is absent, matching the real failure
+mode; the complete verifier passes with 656 Node tests and all Go packages.

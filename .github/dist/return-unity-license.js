@@ -285,6 +285,10 @@ function redactedEvidence(chunks, credentials) {
   for (const credential of orderedCredentials) {
     text = text.split(credential).join("[REDACTED]");
   }
+  // Unity can echo the activation serial while returning a license even though
+  // this action never receives UNITY_SERIAL as an input. Redact the stable
+  // serial shape before the bounded evidence is persisted.
+  text = text.replace(/\bSC-[A-Za-z0-9-]{8,}\b/gi, "[REDACTED]");
   const result = Buffer.from(text, "utf8");
   if (result.length > MAX_EVIDENCE_BYTES) {
     throw new Error("Redacted Unity return evidence exceeds its bound.");

@@ -135,7 +135,7 @@ for (const [name, email, password] of [
   ["email is a password prefix", "abc", "abcSECRET"],
   ["password is an email prefix", "abcSECRET", "abc"]
 ]) {
-  test(`credential redaction is complete when ${name}`, () => {
+test(`credential redaction is complete when ${name}`, () => {
     const evidence = redactedEvidence(
       [Buffer.from(`${email}|${password}\n`)],
       [email, password]
@@ -143,6 +143,15 @@ for (const [name, email, password] of [
     assert.equal(evidence.toString("utf8"), "[REDACTED]|[REDACTED]\n");
   });
 }
+
+test("return evidence redacts Unity serials that were not action inputs", () => {
+  const evidence = redactedEvidence(
+    [Buffer.from("Returned serial SC-ABCD-EFGH-IJKL-MNOP-QRST\n")],
+    ["account@example.invalid", "private-password"]
+  );
+  assert.equal(evidence.toString("utf8"), "Returned serial [REDACTED]\n");
+  assert.ok(!evidence.includes(Buffer.from("SC-")));
+});
 
 test("invalid caller-controlled resolution inputs fail closed", () => {
   const base = {
