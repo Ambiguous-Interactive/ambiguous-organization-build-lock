@@ -54,14 +54,11 @@ The check has produced a false failure five times and a true failure zero times.
 
 ## The change
 
-`matchingRegisteredRunners` matches on labels alone; `matchingOnlineRunners` is
-now that filter plus `status == "online"`, so the online semantics used by the
-existing tests and by `online-runner-count` are unchanged. `execute` fails when a
-label set has no REGISTERED match, and passes with a `::warning::` naming the
-runners it is waiting on when a label set is registered but entirely offline. The
-`matched-runners` output gains a `registered` field per entry, so a consumer can
-tell "waiting on a reboot" from "matched and connected" rather than inferring it
-from an empty `runners` list on a passing step.
+`matchingRegisteredRunners` matches on labels alone. `execute` fails when a
+label set has no REGISTERED match and does not inspect connection or busy state.
+The public output is `registered-runner-count`; `matched-runners` carries only
+the registered names for each label set. Connection state is GitHub's queueing
+concern, not an enrollment preflight result.
 
 Every fail-closed path is intact. An unreadable inventory, a repository with no
 visible runner group, a malformed inventory page, and an unparsable label set all
@@ -75,15 +72,14 @@ enrolled consumer can acquire a new failure from this release.
 Against the shipped `.github/dist/check-unity-runners.js` restored under the new
 tests, exactly the three intended tests fail (9 pass / 3 fail):
 
-- `runner matching requires every label and an online status` — the added
-  `matchingRegisteredRunners` assertions, including that an offline runner is
-  still registered infrastructure.
+- `runner matching requires every label and ignores connection status` —
+  assertions cover both connected and disconnected registered infrastructure.
 - `runtime requests only organization runner read permission and rejects an
   empty match` — the terminal message now names registration.
-- `a registered label set whose runners are all offline queues instead of
-  failing` — the new end-to-end case: one offline `box-linux`, `execute()`
-  resolves, `online-runner-count=0` is written, one single-line `::warning::`
-  names the runner, and the summary records both the wait and the pass.
+- `a registered label set passes without inspecting connection status` — the
+  end-to-end case supplies one offline `box-linux`, `execute()` resolves,
+  `registered-runner-count=1` is written, and no availability warning is
+  emitted.
 
 `node --test test/*.test.js` is 448 tests / 433 pass / 9 fail; `main` at
 `ea8b1147e` is 447 / 432 / **the same 9**. All nine are `go`-dependent

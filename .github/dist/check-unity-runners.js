@@ -234,12 +234,6 @@ function matchingRegisteredRunners(runners, requiredLabels) {
   });
 }
 
-function matchingOnlineRunners(runners, requiredLabels) {
-  return matchingRegisteredRunners(runners, requiredLabels).filter(
-    (runner) => runner.status === "online"
-  );
-}
-
 async function execute(options = {}) {
   const owner = input("owner") || AUTHORIZED_OWNER;
   if (owner !== AUTHORIZED_OWNER) {
@@ -271,11 +265,10 @@ async function execute(options = {}) {
   } catch (error) {
     throw classifyRunnerInventoryError(error);
   }
-  const onlineRunnerCount = runners.filter((runner) => runner && runner.status === "online").length;
+  const registeredRunnerCount = runners.length;
   const matches = requiredLabelSets.map((labels) => ({
     labels,
-    runners: matchingOnlineRunners(runners, labels).map((runner) => runner.name),
-    registered: matchingRegisteredRunners(runners, labels).map((runner) => runner.name)
+    runners: matchingRegisteredRunners(runners, labels).map((runner) => runner.name)
   }));
 
   // The preflight exists to catch a job that NOTHING will ever pick up, so the
@@ -287,7 +280,7 @@ async function execute(options = {}) {
   // GitHub holds the job until it reconnects. Failing on that state converts a
   // machine reboot, a sleep window, or a runner-service restart into a red
   // required check on work the fleet would have run minutes later.
-  const unregistered = matches.filter((match) => match.registered.length === 0);
+  const unregistered = matches.filter((match) => match.runners.length === 0);
   if (unregistered.length > 0) {
     throw new Error(
       `No accessible organization runner is registered for required label set(s): ${unregistered
@@ -296,23 +289,17 @@ async function execute(options = {}) {
     );
   }
 
-  const offline = matches.filter((match) => match.runners.length === 0);
-  for (const match of offline) {
-    const notice =
-      `Every runner registered for [${match.labels.join(", ")}] is currently offline ` +
-      `(${match.registered.join(", ")}). The licensed job will stay queued until one ` +
-      "reconnects; this is queueing, not a preflight failure.";
-    console.log(`::warning::${workflowCommandData(notice)}`);
-    appendSummary(`Unity runner preflight: ${notice}`);
-  }
-
-  writeOutput("online-runner-count", onlineRunnerCount);
+  writeOutput("registered-runner-count", registeredRunnerCount);
   writeOutput("matched-runners", JSON.stringify(matches));
   appendSummary(
-    `Unity runner preflight passed for ${repository}: ${requiredLabelSets.length} required label set(s), ${onlineRunnerCount} accessible online runner(s).`
+    `Unity runner registration preflight passed for ${repository}: ` +
+      `${requiredLabelSets.length} required label set(s), ` +
+      `${registeredRunnerCount} accessible registered runner(s).`
   );
-  console.log(`Unity runner preflight passed for ${requiredLabelSets.length} required label set(s).`);
-  return { onlineRunnerCount, matches };
+  console.log(
+    `Unity runner registration preflight passed for ${requiredLabelSets.length} required label set(s).`
+  );
+  return { registeredRunnerCount, matches };
 }
 
 async function run(options = {}) {
@@ -337,7 +324,6 @@ module.exports = {
   RUNNER_INVENTORY_TIMEOUT_MS,
   classifyRunnerInventoryError,
   execute,
-  matchingOnlineRunners,
   matchingRegisteredRunners,
   parseRequiredLabelSets,
   parseRepository,

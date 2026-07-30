@@ -316,7 +316,7 @@ test("reaper exposes exact confirmed reservation and incident recovery inputs", 
   assert.match(reaper, /resource-safe:[\s\S]*?default:\s*"false"/);
 });
 
-test("runner availability action requires reader App auth and fail-closed label sets", () => {
+test("runner registration action requires reader App auth and fail-closed label sets", () => {
   const manifest = readActionManifest("check-unity-runner-availability");
   const inputs = yamlRequiredTopLevelMappingKeys(
     manifest,
@@ -330,7 +330,7 @@ test("runner availability action requires reader App auth and fail-closed label 
   );
 
   assert.deepEqual(inputs, ["reader-app-id", "reader-app-private-key", "owner", "required-label-sets"]);
-  assert.deepEqual(outputs, ["online-runner-count", "matched-runners"]);
+  assert.deepEqual(outputs, ["registered-runner-count", "matched-runners"]);
   assert.match(manifest, /main:\s+\.\.\/\.\.\/dist\/check-unity-runners\.js/);
 });
 

@@ -32,8 +32,11 @@ or writer App. The current inventory is recorded in
 
 1. Pin every remote action, including transitive local-composite leaves, to a
    reviewed 40-character commit SHA.
-2. Run `check-unity-runner-availability` in a hosted preflight before every
-   licensed self-hosted job. Make the licensed job depend on the preflight.
+2. Run `check-unity-runner-availability` in a hosted registration preflight
+   before every licensed self-hosted job. It verifies only that every required
+   label set has a registered runner visible to the repository; it does not
+   require the runner to be online or idle. Make the licensed job depend on the
+   preflight so an impossible label set fails instead of queueing forever.
 3. Validate local Unity secret shape, then check that a PR run is still the
    current head immediately before expensive setup and again before acquire.
 4. Acquire immediately before the activation-capable section. Pass a stable,
