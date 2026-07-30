@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -357,7 +358,8 @@ test("input parsing rejects contradictions and malformed typed values", () => {
     commandCompleted: false,
     exitCode: null,
     captureAttested: true,
-    supplementalPaths: ["/tmp/a.log", "/tmp/b.log"]
+    supplementalPaths: ["/tmp/a.log", "/tmp/b.log"],
+    returnLogDigest: ""
   });
   assert.throws(() => parseInputs({
     "return-log-path": "/tmp/return.log",
@@ -385,12 +387,14 @@ test("GitHub action input environment preserves hyphenated input names", () => {
     "INPUT_RETURN-COMMAND-COMPLETED": "true",
     "INPUT_RETURN-EXIT-CODE": "0",
     "INPUT_EVIDENCE-CAPTURE-COMPLETE": "true",
+    "INPUT_RETURN-LOG-DIGEST": "a".repeat(64),
     "INPUT_SUPPLEMENTAL-EVIDENCE-PATHS": "/tmp/evidence.log"
   }), {
     "return-log-path": "/tmp/return.log",
     "return-command-completed": "true",
     "return-exit-code": "0",
     "evidence-capture-complete": "true",
+    "return-log-digest": "a".repeat(64),
     "supplemental-evidence-paths": "/tmp/evidence.log"
   });
 });
@@ -409,6 +413,10 @@ test("action run emits only typed outputs and never prints evidence", () => {
         "return-command-completed": "true",
         "return-exit-code": "0",
         "evidence-capture-complete": "true",
+        "return-log-digest": crypto
+          .createHash("sha256")
+          .update(fs.readFileSync(returnLog))
+          .digest("hex"),
         "supplemental-evidence-paths": ""
       },
       outputPath,
@@ -420,6 +428,32 @@ test("action run emits only typed outputs and never prints evidence", () => {
     assert.match(outputs, /^classification-complete=true$/m);
     assert.doesNotMatch(outputs, new RegExp(secretMarker));
     assert.doesNotMatch(messages.join("\n"), new RegExp(secretMarker));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("classifier rejects return-log replacement against the linked digest", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-digest-"));
+  const outputPath = path.join(root, "output.txt");
+  const returnLog = path.join(root, "return.log");
+  try {
+    fs.writeFileSync(returnLog, PROOF);
+    const digest = crypto.createHash("sha256").update(PROOF).digest("hex");
+    fs.writeFileSync(returnLog, `${PROOF}replacement\n`);
+    assert.throws(() => run({
+      inputs: {
+        "return-log-path": returnLog,
+        "return-command-completed": "true",
+        "return-exit-code": "0",
+        "evidence-capture-complete": "true",
+        "return-log-digest": digest,
+        "supplemental-evidence-paths": ""
+      },
+      outputPath,
+      log: () => {}
+    }), /digest does not match/);
+    assert.match(fs.readFileSync(outputPath, "utf8"), /classification-complete=false/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

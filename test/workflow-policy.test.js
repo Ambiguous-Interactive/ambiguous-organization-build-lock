@@ -20,6 +20,7 @@ const expectedWorkflowJobs = new Map([
   ["onboard-unity-repository.yml", ["onboard"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
   ["request-unity-repository-onboarding.yml", ["request"]],
+  ["unity-editor-signer-diagnostic.yml", ["signer"]],
   ["unity-enrollment-audit.yml", ["audit"]],
   ["recover-build-lock.yml", ["recover"]],
   ["reaper-delivery-audit.yml", ["audit"]],
@@ -94,6 +95,10 @@ const expectedWorkflowRunScriptSignatures = new Map([
       'go run ./cmd/sync-unity-enrollment-issue --audit "${RUNNER_TEMP}/unity-enrollment-audit.json"',
       "bash tools/workflows/unity-enrollment-audit.sh record-counts"
     ]
+  ],
+  [
+    "unity-editor-signer-diagnostic.yml",
+    ["$editor = Join-Path $env:TOOL_CACHE 'u6-v3\\_ci-managed-editors\\6000.5.2f1\\Editor\\Unity.exe'; $signature = Get-AuthenticodeSignature -LiteralPath $editor -ErrorAction Stop; if ($signature.Status -ne 'Valid') { throw 'Unity editor signature is not valid.' }; Write-Output \"UNITY_SIGNER_THUMBPRINT=$($signature.SignerCertificate.Thumbprint)\"; Write-Output \"UNITY_SIGNER_SUBJECT=$($signature.SignerCertificate.Subject)\"; Write-Output \"UNITY_SIGNER_ISSUER=$($signature.SignerCertificate.Issuer)\""]
   ],
   ["recover-build-lock.yml", []],
   [

@@ -12,6 +12,7 @@ const (
 	classifierAction   = lockActionPrefix + "classify-unity-cleanup-evidence@" + testSHA
 	gateAction         = lockActionPrefix + "require-confirmed-unity-cleanup@" + testSHA
 	preflightActionRef = lockActionPrefix + "check-unity-runner-availability@" + testSHA
+	returnActionRef    = lockActionPrefix + "return-unity-license@" + testSHA
 	validationAction   = lockActionPrefix + "require-unity-validation@" + testSHA
 )
 
@@ -53,6 +54,56 @@ jobs:
 
 func safeLicensedSteps() string {
 	return wrappedCleanupSteps("always()")
+}
+
+func centralReturnSteps() string {
+	return `      - id: acquire
+        uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+      - name: Run Unity
+        if: steps.acquire.outputs.acquired == 'true'
+        run: unity-editor -batchmode -serial "${UNITY_SERIAL}"
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+      - id: return_command
+        if: ${{ always() && steps.acquire.outputs.acquired == 'true' }}
+        uses: ` + returnActionRef + `
+        with:
+          unity-version: 6000.5.2f1
+          tool-cache: ${{ runner.tool_cache }}
+          unity-email: ${{ secrets.UNITY_EMAIL }}
+          unity-password: ${{ secrets.UNITY_PASSWORD }}
+          evidence-suffix: qora
+      - id: cleanup_classification
+        if: ${{ always() && steps.acquire.outputs.acquired == 'true' }}
+        uses: ` + classifierAction + `
+        with:
+          return-log-path: ${{ steps.return_command.outputs.return-log-path }}
+          return-command-completed: ${{ steps.return_command.outputs.return-command-completed }}
+          return-exit-code: ${{ steps.return_command.outputs.return-exit-code }}
+          evidence-capture-complete: ${{ steps.return_command.outputs.evidence-capture-complete }}
+          return-log-digest: ${{ steps.return_command.outputs.return-log-digest }}
+      - id: release
+        if: always()
+        uses: ` + releaseActionRef + `
+        with:
+          resource-cleanup-status: ${{ steps.cleanup_classification.outputs.resource-cleanup-status }}
+          resource-health: ${{ steps.cleanup_classification.outputs.resource-health }}
+          resource-reason: ${{ steps.cleanup_classification.outputs.resource-reason }}
+      - name: Require confirmed cleanup
+        if: always()
+        uses: ` + gateAction + `
+        with:
+          acquired: ${{ steps.acquire.outputs.acquired }}
+          classification-complete: ${{ steps.cleanup_classification.outputs.classification-complete }}
+          cleanup-status: ${{ steps.cleanup_classification.outputs.resource-cleanup-status }}
+          cleanup-health: ${{ steps.cleanup_classification.outputs.resource-health }}
+          cleanup-reason: ${{ steps.cleanup_classification.outputs.resource-reason }}
+          release-outcome: ${{ steps.release.outcome }}
+          cleanup-result: ${{ steps.release.outputs.cleanup-result }}
+          released: ${{ steps.release.outputs.released }}
+          release-health: ${{ steps.release.outputs.resource-health }}
+          release-reason: ${{ steps.release.outputs.resource-reason }}
+`
 }
 
 func unityFixture(files map[string]string) Snapshot {
@@ -122,6 +173,207 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 	if paid != 1 {
 		t.Fatalf("expected one paid job in inventory: %#v", result.Inventory)
+	}
+}
+
+func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": unityWorkflow(centralReturnSteps(), safeAggregate()),
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("central acquired-scoped return produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	tests := []struct {
+		name   string
+		mutate func(string) string
+		code   string
+	}{
+		{
+			name: "mutable return",
+			mutate: func(value string) string {
+				return strings.Replace(value, returnActionRef, lockActionPrefix+"return-unity-license@main", 1)
+			},
+			code: "mutable-action-ref",
+		},
+		{
+			name: "noncanonical return path",
+			mutate: func(value string) string {
+				return strings.Replace(value, returnActionRef, strings.Replace(returnActionRef, "@", "/@", 1), 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "wrong acquire identity",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ always() && steps.acquire.outputs.acquired == 'true' }}",
+					"${{ always() && steps.other.outputs.acquired == 'true' }}",
+					1,
+				)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "missing always",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ always() && steps.acquire.outputs.acquired == 'true' }}",
+					"${{ steps.acquire.outputs.acquired == 'true' }}",
+					1,
+				)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "return continue on error",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: return_command\n", "      - id: return_command\n        continue-on-error: true\n", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "short return timeout",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: return_command\n", "      - id: return_command\n        timeout-minutes: 1\n", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "return environment",
+			mutate: func(value string) string {
+				return strings.Replace(value, "        uses: "+returnActionRef+"\n", "        uses: "+returnActionRef+"\n        env:\n          EXTRA: value\n", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "caller executable input",
+			mutate: func(value string) string {
+				return strings.Replace(value, "          evidence-suffix: qora\n", "          evidence-suffix: qora\n          editor-path: Unity.exe\n", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "tool cache from environment",
+			mutate: func(value string) string {
+				return strings.Replace(value, "${{ runner.tool_cache }}", "${{ env.RUNNER_TOOL_CACHE }}", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "classifier missing acquired guard",
+			mutate: func(value string) string {
+				first := strings.Index(value, "${{ always() && steps.acquire.outputs.acquired == 'true' }}")
+				second := strings.Index(value[first+1:], "${{ always() && steps.acquire.outputs.acquired == 'true' }}")
+				if first < 0 || second < 0 {
+					return value
+				}
+				index := first + 1 + second
+				target := "${{ always() && steps.acquire.outputs.acquired == 'true' }}"
+				return value[:index] + "always()" + value[index+len(target):]
+			},
+			code: "classifier-not-always",
+		},
+		{
+			name: "classifier environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"        uses: "+classifierAction+"\n",
+					"        uses: "+classifierAction+"\n        env:\n          NODE_OPTIONS: --require=./consumer.js\n",
+					1,
+				)
+			},
+			code: "classifier-not-always",
+		},
+		{
+			name: "short classifier timeout",
+			mutate: func(value string) string {
+				return strings.Replace(value, "      - id: cleanup_classification\n", "      - id: cleanup_classification\n        timeout-minutes: 1\n", 1)
+			},
+			code: "classifier-not-always",
+		},
+		{
+			name: "classifier digest not linked",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ steps.return_command.outputs.return-log-digest }}",
+					strings.Repeat("0", 64),
+					1,
+				)
+			},
+			code: "classifier-inputs-not-typed",
+		},
+		{
+			name: "later licensed invocation",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - id: release\n",
+					"      - name: Late Unity\n        run: unity-editor -batchmode -serial \"${UNITY_SERIAL}\"\n      - id: release\n",
+					1,
+				)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "workflow execution environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"concurrency:\n",
+					"env:\n  NODE_OPTIONS: --require=./consumer.js\nconcurrency:\n",
+					1,
+				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "job execution environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  unity:\n    needs:",
+					"  unity:\n    env:\n      NODE_OPTIONS: --require=./consumer.js\n    needs:",
+					1,
+				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "duplicate acquire",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - name: Run Unity\n",
+					"      - id: acquire_again\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+"\n      - name: Run Unity\n",
+					1,
+				)
+			},
+			code: "ambiguous-lock-acquire",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": testCase.mutate(base),
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), testCase.code) {
+				t.Fatalf("missing %s: %#v", testCase.code, result.Findings)
+			}
+		})
 	}
 }
 

@@ -151,6 +151,30 @@ PR #147 merged the central prerequisite as
 on that exact `main` commit. Cursor Bugbot found no issues on the PR head;
 Copilot responded that the requesting account had reached its review quota.
 
-The next bounded step is adding the reachable merge SHA to
-`approvedLockShas`; consumer pins remain forbidden until that policy change
-merges.
+PR #148 added the reachable typed-gate SHA to `approvedLockShas` and merged as
+`cfc45d4b28ce7405eaa3e821f280472f6b638277`. Build lock CI run
+`30513726346` and organization enrollment audit run `30513726347` both passed
+on that exact `main` commit. Cursor Bugbot found no issues on the PR head;
+Copilot again reported that the requesting account had reached its review
+quota.
+
+The first proposed Qora remediation would have authorized its checked-in
+PowerShell return wrapper by repository, path, and audited blob digest.
+Adversarial review found a P1 runtime-substitution bypass: an earlier build or
+checkout step can replace that workspace path after the commit audit, causing
+the exact cleanup invocation to execute different bytes with Unity
+credentials. The digest-registry prototype was removed before commit.
+
+The replacement prerequisite is a pinned central `return-unity-license`
+Node 24 action. It accepts no consumer script or caller-selected executable,
+constructs the CI-managed editor path from a literal Unity version and the
+immutable `runner.tool_cache` context, invokes Unity without a shell, bounds
+captured stdout and stderr, and emits the four typed return-evidence outputs.
+The enrollment analyzer accepts that action only at an approved lock SHA, with
+exact credential and tool-cache inputs, no step execution environment, one
+unambiguous acquire, and the exact acquired-scoped predicate on both return
+and classifier. Release and the cleanup gate remain literal `always()`.
+
+This new action cannot safely be pinned until its merge commit is reachable.
+After this prerequisite merges, its exact main SHA must be added to
+`approvedLockShas` in a separate policy change before Qora can consume it.

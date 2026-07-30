@@ -1,0 +1,24 @@
+name: Unity editor signer diagnostic
+
+on:
+  push:
+    branches:
+      - agent/issue-113-trusted-return-contract
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unity-editor-signer-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  signer:
+    runs-on: ${{ fromJSON('["self-hosted","Windows","RAM-64GB"]') }}
+    timeout-minutes: 5
+    steps:
+      - name: Report the installed Unity editor signer
+        shell: powershell
+        env:
+          TOOL_CACHE: ${{ runner.tool_cache }}
+        run: $editor = Join-Path $env:TOOL_CACHE 'u6-v3\_ci-managed-editors\6000.5.2f1\Editor\Unity.exe'; $signature = Get-AuthenticodeSignature -LiteralPath $editor -ErrorAction Stop; if ($signature.Status -ne 'Valid') { throw 'Unity editor signature is not valid.' }; Write-Output "UNITY_SIGNER_THUMBPRINT=$($signature.SignerCertificate.Thumbprint)"; Write-Output "UNITY_SIGNER_SUBJECT=$($signature.SignerCertificate.Subject)"; Write-Output "UNITY_SIGNER_ISSUER=$($signature.SignerCertificate.Issuer)"

@@ -42,12 +42,20 @@ or writer App. The current inventory is recorded in
 5. Keep activation, tests/build, return, central evidence classification, release,
    and the final cleanup gate in one job on one physical runner identity. Use
    bounded activation retry for transient seat handoff.
-6. Run return, `classify-unity-cleanup-evidence`, and typed release under
-   `always()`. The return wrapper reports its dedicated run-scoped log path,
-   command-completed state, signed exit code, and capture-complete attestation.
-   Only exact entitlement and ULF success lines in that dedicated log are
-   `confirmed/healthy`; exit zero, supplemental proof, or a missing serial is not
-   proof.
+6. Run the pinned central `return-unity-license` action and
+   `classify-unity-cleanup-evidence` with exactly
+   `always() && steps.<acquire-id>.outputs.acquired == 'true'`. Bind both to
+   the one approved acquire step used by the cleanup gate. The return action
+   constructs the editor path from a literal Unity version and the immutable
+   `${{ runner.tool_cache }}` context; consumer scripts and caller-selected
+   executable paths are not cleanup authority. It reports a dedicated
+   run-scoped log path, command-completed state, signed exit code,
+   capture-complete attestation, and SHA-256 of the exact redacted log bytes.
+   Bind that digest directly into the classifier so later workflow steps
+   cannot replace evidence. Run typed release and the final cleanup gate with
+   literal `always()`. Only exact entitlement and ULF success lines in the
+   dedicated return log are `confirmed/healthy`; exit zero, supplemental proof,
+   or a missing serial is not proof.
 7. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
    proven. A separate fallback job is classified as `fallback-cleanup`, not as

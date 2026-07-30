@@ -157,18 +157,25 @@ section, guard every licensed step on the acquire output, and release with
 
 - name: Return Unity license
   id: return-unity-license
-  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
-  uses: ./.github/actions/return-unity-license
+  if: ${{ always() && steps.acquire-build-lock.outputs.acquired == 'true' }}
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@COMPATIBILITY_COMMIT_SHA
+  with:
+    unity-version: 6000.5.2f1
+    tool-cache: ${{ runner.tool_cache }}
+    unity-email: ${{ secrets.UNITY_EMAIL }}
+    unity-password: ${{ secrets.UNITY_PASSWORD }}
+    evidence-suffix: unity-tests
 
 - name: Classify Unity cleanup evidence
   id: classify-unity-cleanup
-  if: always() && steps.acquire-build-lock.outputs.acquired == 'true'
+  if: ${{ always() && steps.acquire-build-lock.outputs.acquired == 'true' }}
   uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-cleanup-evidence@COMPATIBILITY_COMMIT_SHA
   with:
     return-log-path: ${{ steps.return-unity-license.outputs.return-log-path }}
     return-command-completed: ${{ steps.return-unity-license.outputs.return-command-completed }}
     return-exit-code: ${{ steps.return-unity-license.outputs.return-exit-code }}
     evidence-capture-complete: ${{ steps.return-unity-license.outputs.evidence-capture-complete }}
+    return-log-digest: ${{ steps.return-unity-license.outputs.return-log-digest }}
 
 - name: Release organization Unity lock
   id: release-build-lock

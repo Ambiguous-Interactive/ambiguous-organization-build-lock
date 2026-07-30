@@ -62,12 +62,17 @@ function parseInputs(inputs) {
     .split(/\r?\n/)
     .map((value) => value.trim())
     .filter(Boolean);
+  const returnLogDigest = String(inputs["return-log-digest"] || "").trim();
+  if (returnLogDigest && !/^[a-f0-9]{64}$/.test(returnLogDigest)) {
+    throw new Error("return-log-digest must be a lowercase SHA-256 digest.");
+  }
   return {
     returnLogPath,
     commandCompleted,
     exitCode,
     captureAttested,
-    supplementalPaths
+    supplementalPaths,
+    returnLogDigest
   };
 }
 
@@ -454,6 +459,12 @@ function run({ inputs, outputPath, log = console.log }) {
   appendOutputs(outputPath, defaults);
   const parsed = parseInputs(inputs);
   const evidence = collectEvidence(parsed);
+  if (
+    parsed.returnLogDigest &&
+    crypto.createHash("sha256").update(evidence.returnLog).digest("hex") !== parsed.returnLogDigest
+  ) {
+    throw new Error("Return log digest does not match the central return output.");
+  }
   const result = classifyEvidence({
     exitCode: parsed.exitCode,
     returnLog: evidence.returnLog,
@@ -477,6 +488,7 @@ function environmentInputs(environment = process.env) {
     "return-command-completed",
     "return-exit-code",
     "evidence-capture-complete",
+    "return-log-digest",
     "supplemental-evidence-paths"
   ];
   return Object.fromEntries(names.map((name) => [

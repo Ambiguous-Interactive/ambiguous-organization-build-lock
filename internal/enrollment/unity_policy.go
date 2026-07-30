@@ -17,6 +17,7 @@ const (
 	cleanupGateAction       = "require-confirmed-unity-cleanup"
 	preflightAction         = "check-unity-runner-availability"
 	releaseAction           = "release-build-lock"
+	returnAction            = "return-unity-license"
 	validationGateAction    = "require-unity-validation"
 
 	UnityInventoryPaidSerial         = "paid-serial"
@@ -524,7 +525,8 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		a.analyzer.add("missing-licensed-steps", workflowPath, jobName)
 		return
 	}
-	firstAcquire, firstActivation, unityReturn := -1, -1, -1
+	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
+	acquireCount, returnActionCount := 0, 0
 	acquireID, returnID, classifierID, releaseID := "", "", "", ""
 	acquireScope, returnScope, classifierScope := "", "", ""
 	returnAlways := false
@@ -562,7 +564,8 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 				}
 			}
 			if acquire, ref := acquireReference(uses); acquire {
-				if firstAcquire < 0 && jobFailurePropagates && affirmativeStepRunnable(step) {
+				acquireCount++
+				if acquireCount == 1 && jobFailurePropagates && affirmativeStepRunnable(step) {
 					firstAcquire = index
 					acquireID = stepID(node)
 					acquireScope = step.scope
@@ -574,15 +577,39 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 				}
 			}
 			switch lockActionName(uses) {
+			case returnAction:
+				returnActionCount++
+				if !exactLockActionReference(uses, returnAction) ||
+					!a.approved[strings.ToLower(actionRef(uses))] ||
+					!jobFailurePropagates ||
+					acquireID == "" ||
+					!cleanupStepAfterAcquire(step, acquireID) ||
+					!optionalTimeoutAtLeast(node, 5) ||
+					!typedReturnInputs(node) {
+					continue
+				}
+				unityReturn = index
+				returnID = stepID(node)
+				returnScope = step.scope
+				returnAlways = true
 			case cleanupClassifierAction:
-				if !jobFailurePropagates || !cleanupStepAlways(step) {
+				classifierCondition := cleanupStepAlways(step)
+				if returnActionCount > 0 {
+					classifierCondition = exactLockActionReference(uses, cleanupClassifierAction) &&
+						a.approved[strings.ToLower(actionRef(uses))] &&
+						acquireID != "" &&
+						cleanupStepAfterAcquire(step, acquireID) &&
+						optionalTimeoutAtLeast(node, 2) &&
+						trustedLeafExecution(node)
+				}
+				if !jobFailurePropagates || !classifierCondition {
 					a.analyzer.add("classifier-not-always", workflowPath, jobName)
 					continue
 				}
 				classifier = index
 				classifierID = stepID(node)
 				classifierScope = step.scope
-				classifierAlways = cleanupStepAlways(step)
+				classifierAlways = classifierCondition
 				classifierIsWrapper = false
 			case releaseAction:
 				if !jobFailurePropagates || !cleanupStepAlways(step) {
@@ -604,10 +631,36 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		if firstActivation < 0 && stepActivatesUnity(node) {
 			firstActivation = index
 		}
+		if stepActivatesUnity(node) {
+			lastActivation = index
+		}
+	}
+	if returnActionCount > 0 &&
+		(mappingValue(workflow, "env") != nil ||
+			mappingValue(job, "env") != nil ||
+			!optionalTimeoutAtLeast(job, 5)) {
+		a.analyzer.add("unsafe-return-execution-environment", workflowPath, jobName)
+	}
+	if acquireCount != 1 {
+		firstAcquire = -1
+		acquireID = ""
+		acquireScope = ""
+		if acquireCount > 1 {
+			a.analyzer.add("ambiguous-lock-acquire", workflowPath, jobName)
+		}
+	}
+	if returnActionCount > 1 {
+		unityReturn = -1
+		returnID = ""
+		returnScope = ""
+		returnAlways = false
 	}
 	if !classifierIsWrapper && classifier >= 0 && unityReturn >= 0 &&
 		returnID != "" && classifierScope == returnScope {
 		classifierTyped = typedClassifierInputs(steps[classifier].node, returnID)
+		if returnActionCount > 0 {
+			classifierTyped = typedClassifierInputsWithDigest(steps[classifier].node, returnID)
+		}
 	}
 	if release >= 0 && classifier >= 0 && classifierID != "" &&
 		steps[release].scope == classifierScope {
@@ -624,7 +677,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
 		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
 	}
-	if unityReturn < 0 || returnID == "" || unityReturn <= firstActivation {
+	if unityReturn < 0 || returnID == "" || unityReturn <= lastActivation {
 		a.analyzer.add("missing-unity-return", workflowPath, jobName)
 	} else if !returnAlways {
 		a.analyzer.add("unity-return-not-always", workflowPath, jobName)
@@ -1034,6 +1087,11 @@ func lockActionName(uses string) string {
 	return strings.TrimSuffix(uses[len(lockActionPrefix):at], "/")
 }
 
+func exactLockActionReference(uses, action string) bool {
+	ref := actionRef(uses)
+	return ref != "" && uses == lockActionPrefix+action+"@"+ref
+}
+
 func conditionIsSafeAlways(node *yaml.Node) bool {
 	if node == nil || node.Kind != yaml.ScalarNode {
 		return false
@@ -1055,6 +1113,22 @@ func cleanupStepAlways(step flattenedUnityStep) bool {
 		}
 	}
 	return true
+}
+
+func cleanupStepAfterAcquire(step flattenedUnityStep, acquireID string) bool {
+	if acquireID == "" ||
+		step.scope != "job" ||
+		len(step.enclosingConditions) != 0 ||
+		len(step.enclosingSteps) != 0 ||
+		!criticalStepFailurePropagates(step) {
+		return false
+	}
+	condition := mappingValue(step.node, "if")
+	if condition == nil || condition.Kind != yaml.ScalarNode {
+		return false
+	}
+	value := strings.Join(strings.Fields(condition.Value), "")
+	return value == "${{always()&&steps."+acquireID+".outputs.acquired=='true'}}"
 }
 
 func affirmativeStepRunnable(step flattenedUnityStep) bool {
@@ -1146,6 +1220,15 @@ func typedReleaseInputs(step *yaml.Node, classifierID string) bool {
 		}
 	}
 	return true
+}
+
+func typedClassifierInputsWithDigest(step *yaml.Node, returnID string) bool {
+	return typedClassifierInputs(step, returnID) &&
+		exactStepOutput(
+			mappingValue(mappingValue(step, "with"), "return-log-digest"),
+			returnID,
+			"return-log-digest",
+		)
 }
 
 func fallbackReleaseSource(step, job *yaml.Node) (string, string, bool) {
@@ -1253,6 +1336,78 @@ func typedClassifierInputs(step *yaml.Node, returnID string) bool {
 		if !exactStepOutput(mappingValue(with, input), returnID, output) {
 			return false
 		}
+	}
+	return true
+}
+
+func typedReturnInputs(step *yaml.Node) bool {
+	if stepID(step) == "" ||
+		!trustedLeafExecution(step) {
+		return false
+	}
+	with := mappingValue(step, "with")
+	if !mappingHasOnlyKeys(with, map[string]bool{
+		"unity-version":   true,
+		"tool-cache":      true,
+		"unity-email":     true,
+		"unity-password":  true,
+		"evidence-suffix": true,
+	}) ||
+		!exactExpression(mappingValue(with, "tool-cache"), "runner.tool_cache") ||
+		!exactExpression(mappingValue(with, "unity-email"), "secrets.UNITY_EMAIL") ||
+		!exactExpression(mappingValue(with, "unity-password"), "secrets.UNITY_PASSWORD") {
+		return false
+	}
+	version := scalarValue(mappingValue(with, "unity-version"))
+	if !validUnityVersion(version) {
+		return false
+	}
+	suffix := mappingValue(with, "evidence-suffix")
+	return suffix == nil || literalEvidenceSuffix(scalarValue(suffix))
+}
+
+func trustedLeafExecution(step *yaml.Node) bool {
+	return mappingValue(step, "env") == nil &&
+		mappingValue(step, "run") == nil &&
+		mappingValue(step, "shell") == nil &&
+		mappingValue(step, "working-directory") == nil
+}
+
+func validUnityVersion(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 || len(parts[0]) != 4 {
+		return false
+	}
+	for _, character := range parts[0] + parts[1] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	patch := parts[2]
+	marker := strings.IndexAny(strings.ToLower(patch), "abfp")
+	if marker <= 0 || marker == len(patch)-1 {
+		return false
+	}
+	for _, character := range patch[:marker] + patch[marker+1:] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func literalEvidenceSuffix(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for index, character := range value {
+		if (character >= 'A' && character <= 'Z') ||
+			(character >= 'a' && character <= 'z') ||
+			(character >= '0' && character <= '9') ||
+			(index > 0 && (character == '.' || character == '_' || character == '-')) {
+			continue
+		}
+		return false
 	}
 	return true
 }

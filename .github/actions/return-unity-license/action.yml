@@ -1,0 +1,33 @@
+name: Return Unity license
+description: Return a paid Unity license through a central bounded executor and emit typed evidence.
+inputs:
+  unity-version:
+    description: Exact Unity editor version installed in the CI-managed tool cache.
+    required: true
+  tool-cache:
+    description: Immutable runner.tool_cache context used to resolve the CI-managed Unity editor.
+    required: true
+  unity-email:
+    description: Unity account email passed only to the Unity editor process.
+    required: true
+  unity-password:
+    description: Unity account password passed only to the Unity editor process.
+    required: true
+  evidence-suffix:
+    description: Short literal used to isolate evidence from other jobs in the same run.
+    required: false
+    default: default
+outputs:
+  return-log-path:
+    description: Dedicated run-scoped log for this Unity return command.
+  return-command-completed:
+    description: Literal true only when the return process reached a recorded exit.
+  return-exit-code:
+    description: Signed decimal return-process exit code when the command completed.
+  evidence-capture-complete:
+    description: Literal true only when bounded stdout and stderr capture completed.
+  return-log-digest:
+    description: SHA-256 of the exact redacted return-log bytes written by this action.
+runs:
+  using: node24
+  main: ../../dist/return-unity-license.js
