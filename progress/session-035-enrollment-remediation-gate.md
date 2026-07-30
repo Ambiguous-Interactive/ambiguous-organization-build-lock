@@ -258,3 +258,22 @@ the currently active serial-based license on the machine.
 Focused Go tests and the complete verifier passed 655 Node tests, all Go
 packages, module verification and tidy checks, actionlint, the generated
 knowledge harness, and the credential audit.
+
+PR #154 merged the static-matrix analyzer contract as
+`6495d228d4b889794104cb3dc76595abab539a3f`. Its exact-head and post-merge
+central CI passed; independent adversarial review drove closure of
+matrix-holder collisions, case and expression-value substitution, release
+identity drift, and unbounded Cartesian expansion. Cursor reviewed the final
+head with no findings; Copilot returned only its quota-limit response.
+
+DxMessaging's required `Unity CI Success` context must report on fork and
+Dependabot pull requests even though those revisions cannot receive the
+organization credentials. A narrow aggregate form recognizes that state
+without trusting arbitrary consumer logic. The aggregate must be one isolated
+`ubuntu-latest` job with one Bash step, exact preflight/licensed result
+bindings, exact fork and Dependabot predicates, and an exact two-state script:
+both jobs skipped for an untrusted revision, or both jobs successful
+otherwise. Any failure, cancellation, partial execution, altered expression,
+additional step, inherited execution environment, or alternate shell remains
+unrecognized and red. Against the Dx candidate, the complete source-free
+audit reports zero Dx findings.

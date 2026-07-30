@@ -1801,6 +1801,13 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 			for preflight := range requiredPreflights {
 				if needsAny(job, map[string]bool{preflight: true}) &&
 					(aggregateStepEnforces(step, licensedJob, preflight) ||
+						trustedSkipAggregateEnforces(
+							workflow,
+							job,
+							step,
+							licensedJob,
+							preflight,
+						) ||
 						a.typedValidationGateEnforces(
 							workflow,
 							jobs,
@@ -2347,6 +2354,78 @@ func aggregateStepEnforces(step *yaml.Node, licensedJob, preflightJob string) bo
 	}
 	for _, found := range expected {
 		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func trustedSkipAggregateEnforces(
+	workflow, job, step *yaml.Node,
+	licensedJob, preflightJob string,
+) bool {
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if len(steps) != 1 || steps[0] != step ||
+		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		mappingValue(job, "environment") != nil ||
+		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		!affirmativeCondition(mappingValue(step, "if")) ||
+		!criticalNodeFailurePropagates(step) ||
+		scalarValue(mappingValue(step, "shell")) != "bash" {
+		return false
+	}
+	env := mappingValue(step, "env")
+	if !mappingHasOnlyKeys(env, map[string]bool{
+		"RUNNER_PREFLIGHT_RESULT": true,
+		"UNITY_TESTS_RESULT":      true,
+		"FORK_PR":                 true,
+		"DEPENDABOT_PR":           true,
+	}) ||
+		!exactExpression(
+			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
+			"needs."+preflightJob+".result",
+		) ||
+		!exactExpression(
+			mappingValue(env, "UNITY_TESTS_RESULT"),
+			"needs."+licensedJob+".result",
+		) ||
+		!exactExpression(
+			mappingValue(env, "FORK_PR"),
+			"github.event_name=='pull_request'&&"+
+				"github.event.pull_request.head.repo.full_name!=github.repository",
+		) ||
+		!exactExpression(
+			mappingValue(env, "DEPENDABOT_PR"),
+			"github.actor=='dependabot[bot]'",
+		) {
+		return false
+	}
+	run := mappingValue(step, "run")
+	if run == nil || run.Kind != yaml.ScalarNode {
+		return false
+	}
+	lines := make([]string, 0, 8)
+	for _, line := range strings.Split(run.Value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	expected := []string{
+		"set -euo pipefail",
+		`if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = skipped`,
+		`test "${UNITY_TESTS_RESULT}" = skipped`,
+		"else",
+		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		`test "${UNITY_TESTS_RESULT}" = success`,
+		"fi",
+	}
+	if len(lines) != len(expected) {
+		return false
+	}
+	for index := range expected {
+		if lines[index] != expected[index] {
 			return false
 		}
 	}

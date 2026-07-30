@@ -137,6 +137,30 @@ func safeAggregate() string {
 `
 }
 
+func trustedSkipAggregate() string {
+	return `  aggregate:
+    if: always()
+    needs: [preflight, unity]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          RUNNER_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          UNITY_TESTS_RESULT: ${{ needs.unity.result }}
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          DEPENDABOT_PR: ${{ github.actor == 'dependabot[bot]' }}
+        run: |
+          set -euo pipefail
+          if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
+            test "${RUNNER_PREFLIGHT_RESULT}" = skipped
+            test "${UNITY_TESTS_RESULT}" = skipped
+          else
+            test "${RUNNER_PREFLIGHT_RESULT}" = success
+            test "${UNITY_TESTS_RESULT}" = success
+          fi
+`
+}
+
 func TestUnityEnrollmentRejectsUnprotectedPaidSerialJob(t *testing.T) {
 	snapshot := unityFixture(map[string]string{
 		".github/workflows/unity.yml": `on: [pull_request]
@@ -181,6 +205,112 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 	if paid != 1 {
 		t.Fatalf("expected one paid job in inventory: %#v", result.Inventory)
+	}
+}
+
+func TestUnityEnrollmentAcceptsIsolatedTrustedSkipAggregate(t *testing.T) {
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": unityWorkflow(safeLicensedSteps(), trustedSkipAggregate()),
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("trusted skip aggregate produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
+	base := unityWorkflow(safeLicensedSteps(), trustedSkipAggregate())
+	tests := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{
+			name: "preflight result spoofed",
+			mutate: func(value string) string {
+				return strings.Replace(value, "${{ needs.preflight.result }}", "success", 1)
+			},
+		},
+		{
+			name: "fork decision spoofed",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}",
+					"true",
+					1,
+				)
+			},
+		},
+		{
+			name: "licensed failure accepted",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					`test "${UNITY_TESTS_RESULT}" = success`,
+					`test "${UNITY_TESTS_RESULT}" != cancelled`,
+					1,
+				)
+			},
+		},
+		{
+			name: "extra executable step",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - shell: bash\n",
+					"      - run: echo prepare\n      - shell: bash\n",
+					1,
+				)
+			},
+		},
+		{
+			name: "job execution environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if:",
+					"  aggregate:\n    env:\n      BASH_ENV: ./consumer.sh\n    if:",
+					1,
+				)
+			},
+		},
+		{
+			name: "approval environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()\n",
+					"  aggregate:\n    environment: production\n    if: always()\n",
+					1,
+				)
+			},
+		},
+		{
+			name: "cancelable job concurrency",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()\n",
+					"  aggregate:\n    concurrency:\n      group: aggregate\n      cancel-in-progress: true\n    if: always()\n",
+					1,
+				)
+			},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": testCase.mutate(base),
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate") {
+				t.Fatalf("mutated trusted skip aggregate was accepted: %#v", result.Findings)
+			}
+		})
 	}
 }
 
