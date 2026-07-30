@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:30518055120:unity-tests:2022.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "30518055120",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30518055120",
+    "queuedAt": "2026-07-30T06:02:01.726Z",
+    "acquiredAt": "2026-07-30T06:02:04.318Z",
+    "expiresAt": "2026-07-30T10:02:04.318Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/DxMessaging:30518055120:unity-tests:2022.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "30518055120",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30518055120",
+      "queuedAt": "2026-07-30T06:02:01.726Z",
+      "acquiredAt": "2026-07-30T06:02:04.318Z",
+      "expiresAt": "2026-07-30T10:02:04.318Z",
+      "runnerId": "DAD-MACHINE"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "7f789ba3-365a-4a57-bf4e-10a5b5ba5460",
-      "holderId": "Ambiguous-Interactive/qora-redux:30517877054:unity:qora",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "30517877054",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30517877054",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-log-truncated",
-      "createdAt": "2026-07-30T06:00:39.114Z"
-    },
     {
       "reservationId": "2863baa3-e2af-4af1-8de7-f37fafdcd4da",
       "holderId": "Ambiguous-Interactive/DxMessaging:30518055120:unity-tests:2022.3.45f1-editmode",
@@ -36,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-07-30T06:02:07.374Z"
+  "updatedAt": "2026-07-30T06:02:04.319Z"
 }
