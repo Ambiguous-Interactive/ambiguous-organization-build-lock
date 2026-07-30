@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-30T16:36:30.169Z",
       "expiresAt": "2026-07-30T20:36:30.169Z",
       "runnerId": "ELI-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "7680927a-adf5-4169-b103-456609bd6732",
       "holderId": "Ambiguous-Interactive/DoxReloaded:30562032521:unity-tests:unity-tests-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -36,14 +40,13 @@
       "runId": "30562032521",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30562032521",
-      "queuedAt": "2026-07-30T16:37:09.273Z",
-      "acquiredAt": "2026-07-30T16:37:11.955Z",
-      "expiresAt": "2026-07-30T20:37:11.955Z",
-      "runnerId": "tiny-box-linux"
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-30T16:43:04.360Z",
+      "availableAt": "2026-07-30T16:43:05.360Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-30T16:37:11.955Z"
+  "updatedAt": "2026-07-30T16:43:04.361Z"
 }
