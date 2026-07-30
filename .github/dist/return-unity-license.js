@@ -74,7 +74,6 @@ function editorPath(toolCache, unityVersion) {
   return path.join(
     toolCache,
     "u6-v3",
-    "_ci-managed-editors",
     unityVersion,
     "Editor",
     "Unity.exe"

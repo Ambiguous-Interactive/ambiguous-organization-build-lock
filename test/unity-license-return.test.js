@@ -49,6 +49,14 @@ function fixture(t, script) {
   };
 }
 
+test("editor path matches the established CI-managed u6-v3 install root", () => {
+  const toolCache = path.join(path.parse(process.cwd()).root, "actions-runner", "_tool");
+  assert.equal(
+    editorPath(toolCache, "6000.5.2f1"),
+    path.join(toolCache, "u6-v3", "6000.5.2f1", "Editor", "Unity.exe")
+  );
+});
+
 test("central return invokes only the CI-managed editor and emits bounded evidence", async (t) => {
   const item = fixture(t, "#!/bin/sh\nprintf 'returned:%s:%s\\n' \"$7\" \"$9\"\nexit 0\n");
   const result = await run({
