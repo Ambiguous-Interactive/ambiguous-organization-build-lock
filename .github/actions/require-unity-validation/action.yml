@@ -1,0 +1,30 @@
+name: Require Unity validation
+description: Pass only an explicit untrusted skip, audited non-Unity skip, or complete licensed Unity validation.
+inputs:
+  classifier-result:
+    description: GitHub result of the trusted Unity change-classifier job.
+    required: true
+  unity-required:
+    description: Exact boolean output from the trusted Unity change classifier.
+    required: true
+  trusted-revision:
+    description: Exact boolean stating whether licensed secrets are available to this revision.
+    required: true
+  preflight-result:
+    description: GitHub result of the hosted Unity runner preflight job.
+    required: true
+  unity-result:
+    description: GitHub result of the licensed Unity job.
+    required: true
+  fallback-result:
+    description: GitHub result of the hosted fallback cleanup job.
+    required: true
+  fallback-cleanup-result:
+    description: Typed cleanup-result output from the fallback release step, or empty when fallback cleanup was skipped.
+    required: false
+outputs:
+  validation-safe:
+    description: True only when the observed jobs form one complete allowed validation matrix.
+runs:
+  using: node24
+  main: ../../dist/require-unity-validation.js

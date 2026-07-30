@@ -8,9 +8,11 @@ import (
 
 const (
 	releaseActionRef   = lockActionPrefix + "release-build-lock@" + testSHA
+	changeAction       = lockActionPrefix + "classify-unity-changes@" + testSHA
 	classifierAction   = lockActionPrefix + "classify-unity-cleanup-evidence@" + testSHA
 	gateAction         = lockActionPrefix + "require-confirmed-unity-cleanup@" + testSHA
 	preflightActionRef = lockActionPrefix + "check-unity-runner-availability@" + testSHA
+	validationAction   = lockActionPrefix + "require-unity-validation@" + testSHA
 )
 
 func unityAuditPolicy() UnityEnrollmentPolicy {
@@ -182,6 +184,437 @@ func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
 	if len(fallbacks) != 1 || fallbacks[0].Job != "cleanup" {
 		t.Fatalf("unexpected fallback inventory: %#v", result.Inventory)
 	}
+}
+
+func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
+	licensedSteps := strings.Replace(
+		safeLicensedSteps(),
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
+		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+
+			"\n        with:\n          lock-name: wallstop-organization-builds\n          holder-id-suffix: qora",
+		1,
+	)
+	workflow := `name: Unity
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: unity-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      unity-required: ${{ steps.classify.outputs.unity-required }}
+    steps:
+      - uses: ` + classifierCheckoutRef + `
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        uses: ` + changeAction + `
+        with:
+          event-name: ${{ github.event_name }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+  preflight:
+    if: >-
+      ${{
+        github.actor != 'dependabot[bot]' &&
+        (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + preflightActionRef + `
+  unity:
+    needs: [classify, preflight]
+    if: >-
+      ${{
+        needs.classify.result == 'success' &&
+        needs.classify.outputs.unity-required == 'true' &&
+        github.actor != 'dependabot[bot]' &&
+        (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+      }}
+    runs-on: [self-hosted, Windows]
+    steps:
+` + licensedSteps + `  cleanup:
+    if: ${{ always() && needs.unity.result != 'skipped' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: unity
+    runs-on: ubuntu-latest
+    outputs:
+      cleanup-result: ${{ steps.fallback_release.outputs.cleanup-result }}
+    steps:
+      - id: fallback_release
+        if: always()
+        uses: ` + releaseActionRef + `
+        with:
+          lock-name: wallstop-organization-builds
+          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:qora
+          holder-id-suffix: qora
+          runner-id: ${{ runner.name }}
+          resource-cleanup-status: unknown
+          resource-health: healthy
+          resource-reason: return-terminated
+        env:
+          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
+          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+  aggregate:
+    if: always()
+    needs: [classify, preflight, unity, cleanup]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + validationAction + `
+        with:
+          classifier-result: ${{ needs.classify.result }}
+          unity-required: ${{ needs.classify.outputs.unity-required }}
+          trusted-revision: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+          preflight-result: ${{ needs.preflight.result }}
+          unity-result: ${{ needs.unity.result }}
+          fallback-result: ${{ needs.cleanup.result }}
+          fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}
+`
+	snapshot := unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	})
+	result, err := AnalyzeUnityEnrollment(snapshot, unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("typed conditional validation gate produced findings: %#v", result.Findings)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{
+			name: "unapproved validation action",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					validationAction,
+					lockActionPrefix+"require-unity-validation@abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+					1,
+				)
+			},
+		},
+		{
+			name: "validation action suppresses failure",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - uses: "+validationAction,
+					"      - uses: "+validationAction+"\n        continue-on-error: true",
+					1,
+				)
+			},
+		},
+		{
+			name: "aggregate runs consumer code before validation",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"    steps:\n      - uses: "+validationAction,
+					"    steps:\n      - run: node spoof-validation.js\n      - uses: "+validationAction,
+					1,
+				)
+			},
+		},
+		{
+			name: "aggregate runs consumer code after validation",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}",
+					"          fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}\n      - run: node spoof-validation.js",
+					1,
+				)
+			},
+		},
+		{
+			name: "aggregate omits classifier dependency",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"    needs: [classify, preflight, unity, cleanup]",
+					"    needs: [preflight, unity, cleanup]",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier output comes from another job",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"unity-required: ${{ needs.classify.outputs.unity-required }}",
+					"unity-required: ${{ needs.preflight.outputs.unity-required }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier job suppresses failure",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  classify:\n    runs-on: ubuntu-latest",
+					"  classify:\n    continue-on-error: true\n    runs-on: ubuntu-latest",
+					1,
+				)
+			},
+		},
+		{
+			name: "workflow preloads pull request code",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"concurrency:\n  group:",
+					"env:\n  NODE_OPTIONS: --require=${{ github.workspace }}/spoof.js\nconcurrency:\n  group:",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier uses a container",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  classify:\n    runs-on: ubuntu-latest",
+					"  classify:\n    runs-on: ubuntu-latest\n    container: node:24",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier uses a non-fail-fast matrix",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  classify:\n    runs-on: ubuntu-latest",
+					"  classify:\n    strategy:\n      fail-fast: false\n      matrix:\n        shard: [one]\n    runs-on: ubuntu-latest",
+					1,
+				)
+			},
+		},
+		{
+			name: "licensed job inherits node preload",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  unity:\n    needs:",
+					"  unity:\n    env:\n      NODE_OPTIONS: --require=spoof.js\n    needs:",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier step suppresses failure",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - id: classify\n        uses: "+changeAction,
+					"      - id: classify\n        continue-on-error: true\n        uses: "+changeAction,
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier output is literal false",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"unity-required: ${{ steps.classify.outputs.unity-required }}",
+					"unity-required: false",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier uses consumer shell",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"        uses: "+changeAction,
+					"        run: echo \"unity-required=false\" >> \"$GITHUB_OUTPUT\"",
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier aliases preflight role",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"preflight-result: ${{ needs.preflight.result }}",
+					"preflight-result: ${{ needs.classify.result }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "preflight has an extra executable step",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - uses: "+preflightActionRef,
+					"      - uses: "+preflightActionRef+"\n      - run: echo unsafe",
+					1,
+				)
+			},
+		},
+		{
+			name: "fallback output comes from licensed job",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}",
+					"fallback-cleanup-result: ${{ needs.unity.outputs.cleanup-result }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "fallback job spoofs noop output",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"cleanup-result: ${{ steps.fallback_release.outputs.cleanup-result }}",
+					"cleanup-result: noop",
+					1,
+				)
+			},
+		},
+		{
+			name: "fallback targets another source job",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"${{ github.repository }}:${{ github.run_id }}:unity:qora",
+					"${{ github.repository }}:${{ github.run_id }}:other:qora",
+					1,
+				)
+			},
+		},
+		{
+			name: "trust expression drops Dependabot guard",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"trusted-revision: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}",
+					"trusted-revision: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}",
+					1,
+				)
+			},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			mutated := unityFixture(map[string]string{
+				".github/workflows/unity.yml": testCase.mutate(workflow),
+			})
+			result, err := AnalyzeUnityEnrollment(mutated, unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			codes := findingCodes(result.Findings)
+			if !strings.Contains(codes, "missing-unity-aggregate") ||
+				!strings.Contains(codes, "missing-fallback-aggregate") {
+				t.Fatalf("unsafe typed validation gate was accepted: %#v", result.Findings)
+			}
+		})
+	}
+
+	t.Run("direct composite caller preloads central lock action", func(t *testing.T) {
+		mutatedWorkflow := strings.Replace(
+			workflow,
+			"    runs-on: [self-hosted, Windows]\n    steps:\n",
+			"    runs-on: [self-hosted, Windows]\n    steps:\n"+
+				"      - uses: ./.github/actions/preload-direct\n"+
+				"        env:\n"+
+				"          NODE_OPTIONS: --require=${{ github.workspace }}/spoof.js\n",
+			1,
+		)
+		mutated := unityFixture(map[string]string{
+			".github/workflows/unity.yml": mutatedWorkflow,
+			".github/actions/preload-direct/action.yml": `name: Preload direct
+runs:
+  using: composite
+  steps:
+    - uses: ` + lockActionPrefix + `require-current-pr-head@` + testSHA + `
+`,
+		})
+		result, err := AnalyzeUnityEnrollment(mutated, unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate") ||
+			!strings.Contains(codes, "missing-fallback-aggregate") {
+			t.Fatalf("direct composite caller environment was accepted: %#v", result.Findings)
+		}
+	})
+
+	t.Run("nested composite caller preloads central lock action", func(t *testing.T) {
+		mutatedWorkflow := strings.Replace(
+			workflow,
+			"    runs-on: [self-hosted, Windows]\n    steps:\n",
+			"    runs-on: [self-hosted, Windows]\n    steps:\n"+
+				"      - uses: ./.github/actions/preload-wrapper\n"+
+				"        env:\n"+
+				"          NODE_OPTIONS: --require=${{ github.workspace }}/spoof.js\n",
+			1,
+		)
+		mutated := unityFixture(map[string]string{
+			".github/workflows/unity.yml": mutatedWorkflow,
+			".github/actions/preload-wrapper/action.yml": `name: Preload wrapper
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/preload-inner
+`,
+			".github/actions/preload-inner/action.yml": `name: Preload inner
+runs:
+  using: composite
+  steps:
+    - uses: ` + lockActionPrefix + `require-current-pr-head@` + testSHA + `
+`,
+		})
+		result, err := AnalyzeUnityEnrollment(mutated, unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate") ||
+			!strings.Contains(codes, "missing-fallback-aggregate") {
+			t.Fatalf("composite caller environment was accepted: %#v", result.Findings)
+		}
+	})
+
+	t.Run("preflight guard admits another actor", func(t *testing.T) {
+		mutated := unityFixture(map[string]string{
+			".github/workflows/unity.yml": strings.Replace(
+				workflow,
+				"github.actor != 'dependabot[bot]' &&",
+				"github.actor != 'untrusted-bot' &&",
+				1,
+			),
+		})
+		result, err := AnalyzeUnityEnrollment(mutated, unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-runner-preflight") ||
+			!strings.Contains(codes, "missing-unity-aggregate") {
+			t.Fatalf("unsafe preflight guard was accepted: %#v", result.Findings)
+		}
+	})
 }
 
 func TestUnityEnrollmentRejectsMalformedFallbackCleanup(t *testing.T) {

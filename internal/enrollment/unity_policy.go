@@ -11,10 +11,13 @@ import (
 )
 
 const (
+	changeClassifierAction  = "classify-unity-changes"
+	classifierCheckoutRef   = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 	cleanupClassifierAction = "classify-unity-cleanup-evidence"
 	cleanupGateAction       = "require-confirmed-unity-cleanup"
 	preflightAction         = "check-unity-runner-availability"
 	releaseAction           = "release-build-lock"
+	validationGateAction    = "require-unity-validation"
 
 	UnityInventoryPaidSerial         = "paid-serial"
 	UnityInventoryFallbackCleanup    = "fallback-cleanup"
@@ -390,7 +393,7 @@ func (a *unityPolicyAnalyzer) auditFallbackCleanup(
 		!sourceMatched {
 		a.analyzer.add("invalid-fallback-release", workflowPath, jobName)
 	}
-	if !hasFallbackAggregate(jobs, jobName, sourceJob) {
+	if !a.hasFallbackAggregate(workflow, workflowPath, jobs, jobName, sourceJob) {
 		a.analyzer.add("missing-fallback-aggregate", workflowPath, jobName)
 	}
 }
@@ -669,7 +672,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if selfHostedJob(job) && !needsAny(job, preflightJobs) {
 		a.analyzer.add("missing-runner-preflight", workflowPath, jobName)
 	}
-	if !hasAggregate(jobs, jobName, job, preflightJobs) {
+	if !a.hasAggregate(workflow, workflowPath, jobs, jobName, job, preflightJobs) {
 		a.analyzer.add("missing-unity-aggregate", workflowPath, jobName)
 	}
 }
@@ -865,7 +868,8 @@ func (a *unityPolicyAnalyzer) preflightJobs(jobs *yaml.Node) map[string]bool {
 	result := make(map[string]bool)
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName, job := jobs.Content[index].Value, jobs.Content[index+1]
-		if !affirmativeCondition(mappingValue(job, "if")) ||
+		if (!affirmativeCondition(mappingValue(job, "if")) &&
+			!trustedRevisionGuard(mappingValue(job, "if"))) ||
 			!criticalNodeFailurePropagates(job) {
 			continue
 		}
@@ -1464,7 +1468,9 @@ func needsAny(job *yaml.Node, candidates map[string]bool) bool {
 	return false
 }
 
-func hasAggregate(
+func (a *unityPolicyAnalyzer) hasAggregate(
+	workflow *yaml.Node,
+	workflowPath string,
 	jobs *yaml.Node,
 	licensedJob string,
 	licensedJobNode *yaml.Node,
@@ -1484,7 +1490,17 @@ func hasAggregate(
 		for _, step := range sequenceValues(mappingValue(job, "steps")) {
 			for preflight := range requiredPreflights {
 				if needsAny(job, map[string]bool{preflight: true}) &&
-					aggregateStepEnforces(step, licensedJob, preflight) {
+					(aggregateStepEnforces(step, licensedJob, preflight) ||
+						a.typedValidationGateEnforces(
+							workflow,
+							jobs,
+							job,
+							step,
+							licensedJob,
+							preflight,
+							"",
+							workflowPath,
+						)) {
 					return true
 				}
 			}
@@ -1493,7 +1509,12 @@ func hasAggregate(
 	return false
 }
 
-func hasFallbackAggregate(jobs *yaml.Node, fallbackJob, sourceJob string) bool {
+func (a *unityPolicyAnalyzer) hasFallbackAggregate(
+	workflow *yaml.Node,
+	workflowPath string,
+	jobs *yaml.Node,
+	fallbackJob, sourceJob string,
+) bool {
 	if sourceJob == "" {
 		return false
 	}
@@ -1512,6 +1533,18 @@ func hasFallbackAggregate(jobs *yaml.Node, fallbackJob, sourceJob string) bool {
 			continue
 		}
 		for _, step := range sequenceValues(mappingValue(job, "steps")) {
+			if a.typedValidationGateEnforces(
+				workflow,
+				jobs,
+				job,
+				step,
+				sourceJob,
+				"",
+				fallbackJob,
+				workflowPath,
+			) {
+				return true
+			}
 			if !affirmativeCondition(mappingValue(step, "if")) ||
 				!criticalNodeFailurePropagates(step) {
 				continue
@@ -1549,6 +1582,354 @@ func hasFallbackAggregate(jobs *yaml.Node, fallbackJob, sourceJob string) bool {
 		}
 	}
 	return false
+}
+
+type validationGateReferences struct {
+	classifier string
+	preflight  string
+	unity      string
+	fallback   string
+}
+
+func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
+	workflow *yaml.Node,
+	jobs, aggregateJob, step *yaml.Node,
+	licensedJob, preflightJob, fallbackJob string,
+	workflowPath string,
+) bool {
+	unsafeFailFast, matrixErr := unsafeMatrixFailFast(aggregateJob)
+	steps := sequenceValues(mappingValue(aggregateJob, "steps"))
+	uses := stepUses(step)
+	if len(steps) != 1 ||
+		steps[0] != step ||
+		lockActionName(uses) != validationGateAction ||
+		!a.approved[strings.ToLower(actionRef(uses))] ||
+		!affirmativeCondition(mappingValue(step, "if")) ||
+		!criticalStepFailurePropagates(flattenedUnityStep{node: step}) ||
+		scalarValue(mappingValue(aggregateJob, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, aggregateJob) ||
+		mappingValue(aggregateJob, "environment") != nil ||
+		mappingValue(step, "env") != nil ||
+		unsafeConcurrency(mappingValue(aggregateJob, "concurrency")) ||
+		matrixErr != nil ||
+		unsafeFailFast {
+		return false
+	}
+	with := mappingValue(step, "with")
+	if with == nil || with.Kind != yaml.MappingNode ||
+		!mappingHasOnlyKeys(with, map[string]bool{
+			"classifier-result":       true,
+			"unity-required":          true,
+			"trusted-revision":        true,
+			"preflight-result":        true,
+			"unity-result":            true,
+			"fallback-result":         true,
+			"fallback-cleanup-result": true,
+		}) ||
+		!trustedRevisionExpression(mappingValue(with, "trusted-revision")) {
+		return false
+	}
+	references := validationGateReferences{
+		classifier: needsResultReference(mappingValue(with, "classifier-result")),
+		preflight:  needsResultReference(mappingValue(with, "preflight-result")),
+		unity:      needsResultReference(mappingValue(with, "unity-result")),
+		fallback:   needsResultReference(mappingValue(with, "fallback-result")),
+	}
+	if references.classifier == "" ||
+		references.preflight == "" ||
+		references.unity != licensedJob ||
+		references.fallback == "" ||
+		(preflightJob != "" && references.preflight != preflightJob) ||
+		(fallbackJob != "" && references.fallback != fallbackJob) ||
+		needsOutputReference(mappingValue(with, "unity-required"), "unity-required") != references.classifier ||
+		needsOutputReference(
+			mappingValue(with, "fallback-cleanup-result"),
+			"cleanup-result",
+		) != references.fallback {
+		return false
+	}
+	distinctReferences := map[string]bool{
+		references.classifier: true,
+		references.preflight:  true,
+		references.unity:      true,
+		references.fallback:   true,
+	}
+	if len(distinctReferences) != 4 ||
+		!a.validationClassifierMatches(workflow, jobs, references.classifier) ||
+		!a.validationPreflightMatches(workflow, jobs, references.preflight) ||
+		!validationJobIsolationSafe(workflow, mappingValue(jobs, references.unity)) ||
+		!a.validationLockActionEnvironmentsSafe(mappingValue(jobs, references.unity)) {
+		return false
+	}
+	for _, reference := range []string{
+		references.classifier,
+		references.preflight,
+		references.unity,
+		references.fallback,
+	} {
+		if mappingValue(jobs, reference) == nil ||
+			!needsAny(aggregateJob, map[string]bool{reference: true}) {
+			return false
+		}
+	}
+	if !a.validationFallbackMatches(
+		workflow,
+		workflowPath,
+		jobs,
+		references.fallback,
+		licensedJob,
+	) {
+		return false
+	}
+	return true
+}
+
+func (a *unityPolicyAnalyzer) validationClassifierMatches(
+	workflow *yaml.Node,
+	jobs *yaml.Node,
+	classifierJob string,
+) bool {
+	job := mappingValue(jobs, classifierJob)
+	if job == nil {
+		return false
+	}
+	unsafeFailFast, matrixErr := unsafeMatrixFailFast(job)
+	if scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		mappingValue(job, "if") != nil ||
+		mappingValue(job, "needs") != nil ||
+		mappingValue(job, "environment") != nil ||
+		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		!criticalNodeFailurePropagates(job) ||
+		matrixErr != nil ||
+		unsafeFailFast {
+		return false
+	}
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if len(steps) != 2 {
+		return false
+	}
+	checkout, classify := steps[0], steps[1]
+	checkoutUses := stepUses(checkout)
+	checkoutWith := mappingValue(checkout, "with")
+	if checkoutUses != classifierCheckoutRef ||
+		mappingValue(checkout, "if") != nil ||
+		mappingValue(checkout, "env") != nil ||
+		!criticalNodeFailurePropagates(checkout) ||
+		checkoutWith == nil ||
+		!mappingHasOnlyKeys(checkoutWith, map[string]bool{
+			"fetch-depth":         true,
+			"persist-credentials": true,
+		}) ||
+		scalarValue(mappingValue(checkoutWith, "fetch-depth")) != "0" ||
+		scalarValue(mappingValue(checkoutWith, "persist-credentials")) != "false" {
+		return false
+	}
+	classifyUses := stepUses(classify)
+	classifyWith := mappingValue(classify, "with")
+	classifyID := stepID(classify)
+	if classifyID == "" ||
+		lockActionName(classifyUses) != changeClassifierAction ||
+		!a.approved[strings.ToLower(actionRef(classifyUses))] ||
+		mappingValue(classify, "if") != nil ||
+		mappingValue(classify, "env") != nil ||
+		!criticalNodeFailurePropagates(classify) ||
+		classifyWith == nil ||
+		!mappingHasOnlyKeys(classifyWith, map[string]bool{
+			"event-name": true,
+			"base-sha":   true,
+			"head-sha":   true,
+		}) ||
+		!exactExpression(mappingValue(classifyWith, "event-name"), "github.event_name") ||
+		!exactExpression(
+			mappingValue(classifyWith, "base-sha"),
+			"github.event.pull_request.base.sha",
+		) ||
+		!exactExpression(
+			mappingValue(classifyWith, "head-sha"),
+			"github.event.pull_request.head.sha",
+		) {
+		return false
+	}
+	outputs := mappingValue(job, "outputs")
+	return outputs != nil &&
+		mappingHasOnlyKeys(outputs, map[string]bool{"unity-required": true}) &&
+		exactStepOutput(
+			mappingValue(outputs, "unity-required"),
+			classifyID,
+			"unity-required",
+		)
+}
+
+func (a *unityPolicyAnalyzer) validationPreflightMatches(
+	workflow, jobs *yaml.Node,
+	preflightJob string,
+) bool {
+	job := mappingValue(jobs, preflightJob)
+	if job == nil {
+		return false
+	}
+	unsafeFailFast, matrixErr := unsafeMatrixFailFast(job)
+	if scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		!trustedRevisionGuard(mappingValue(job, "if")) ||
+		mappingValue(job, "needs") != nil ||
+		mappingValue(job, "environment") != nil ||
+		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		!criticalNodeFailurePropagates(job) ||
+		matrixErr != nil ||
+		unsafeFailFast {
+		return false
+	}
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if len(steps) != 1 {
+		return false
+	}
+	step := steps[0]
+	uses := stepUses(step)
+	return lockActionName(uses) == preflightAction &&
+		a.approved[strings.ToLower(actionRef(uses))] &&
+		mappingValue(step, "if") == nil &&
+		mappingValue(step, "env") == nil &&
+		criticalNodeFailurePropagates(step)
+}
+
+func validationJobIsolationSafe(workflow, job *yaml.Node) bool {
+	if workflow == nil || job == nil {
+		return false
+	}
+	for _, key := range []string{"env", "defaults"} {
+		if mappingValue(workflow, key) != nil {
+			return false
+		}
+	}
+	for _, key := range []string{"env", "defaults", "container", "services"} {
+		if mappingValue(job, key) != nil {
+			return false
+		}
+	}
+	if mappingValue(mappingValue(job, "strategy"), "matrix") != nil {
+		return false
+	}
+	return true
+}
+
+func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Node) bool {
+	if job == nil {
+		return false
+	}
+	steps, err := a.flattenedSteps(
+		sequenceValues(mappingValue(job, "steps")),
+		make(map[string]bool),
+		"validation",
+		nil,
+		nil,
+	)
+	if err != nil {
+		return false
+	}
+	for _, step := range steps {
+		if lockActionName(stepUses(step.node)) == "" {
+			continue
+		}
+		for _, enclosing := range step.enclosingSteps {
+			if mappingValue(enclosing, "env") != nil {
+				return false
+			}
+		}
+		env := mappingValue(step.node, "env")
+		if env == nil {
+			continue
+		}
+		if env.Kind != yaml.MappingNode ||
+			len(env.Content) != 4 ||
+			!mappingHasOnlyKeys(env, map[string]bool{
+				"BUILD_LOCK_APP_ID":          true,
+				"BUILD_LOCK_APP_PRIVATE_KEY": true,
+			}) ||
+			!exactExpression(
+				mappingValue(env, "BUILD_LOCK_APP_ID"),
+				"secrets.BUILD_LOCK_APP_ID",
+			) ||
+			!exactExpression(
+				mappingValue(env, "BUILD_LOCK_APP_PRIVATE_KEY"),
+				"secrets.BUILD_LOCK_APP_PRIVATE_KEY",
+			) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *unityPolicyAnalyzer) validationFallbackMatches(
+	workflow *yaml.Node,
+	workflowPath string,
+	jobs *yaml.Node,
+	fallbackJob, sourceJob string,
+) bool {
+	job := mappingValue(jobs, fallbackJob)
+	if job == nil ||
+		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		!needsAny(job, map[string]bool{sourceJob: true}) ||
+		!fallbackConditionCoversSource(mappingValue(job, "if"), sourceJob) ||
+		!criticalNodeFailurePropagates(job) {
+		return false
+	}
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if len(steps) != 1 ||
+		lockActionName(stepUses(steps[0])) != releaseAction ||
+		stepID(steps[0]) == "" ||
+		!a.approved[strings.ToLower(actionRef(stepUses(steps[0])))] ||
+		!conditionIsSafeAlways(mappingValue(steps[0], "if")) ||
+		!criticalNodeFailurePropagates(steps[0]) {
+		return false
+	}
+	outputs := mappingValue(job, "outputs")
+	if outputs == nil || outputs.Kind != yaml.MappingNode ||
+		!exactStepOutput(
+			mappingValue(outputs, "cleanup-result"),
+			stepID(steps[0]),
+			"cleanup-result",
+		) {
+		return false
+	}
+	referencedSource, suffix, typed := fallbackReleaseSource(steps[0], job)
+	return typed &&
+		referencedSource == sourceJob &&
+		a.sourceAcquireMatches(workflowPath, sourceJob, suffix)
+}
+
+func needsResultReference(value *yaml.Node) string {
+	return needsReference(value, ".result")
+}
+
+func needsOutputReference(value *yaml.Node, output string) string {
+	return needsReference(value, ".outputs."+output)
+}
+
+func needsReference(value *yaml.Node, suffix string) string {
+	if value == nil || value.Kind != yaml.ScalarNode {
+		return ""
+	}
+	expression := strings.Join(strings.Fields(value.Value), "")
+	expression = strings.TrimPrefix(expression, "${{")
+	expression = strings.TrimSuffix(expression, "}}")
+	const prefix = "needs."
+	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
+		return ""
+	}
+	job := strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)
+	if job == "" || strings.ContainsAny(job, " \t\r\n{}$\"'") {
+		return ""
+	}
+	return job
+}
+
+func exactExpression(value *yaml.Node, expression string) bool {
+	return value != nil &&
+		value.Kind == yaml.ScalarNode &&
+		strings.Join(strings.Fields(value.Value), "") == "${{"+expression+"}}"
 }
 
 func aggregateResultCheckJob(line string) string {
@@ -1647,6 +2028,29 @@ func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
 		conjunct = trimOuterParentheses(conjunct)
 		if conjunct == direct || conjunct == reverse ||
 			conjunct == eventGuard+direct || conjunct == eventGuard+reverse {
+			return true
+		}
+	}
+	return false
+}
+
+func trustedRevisionGuard(condition *yaml.Node) bool {
+	return trustedRevisionExpression(condition)
+}
+
+func trustedRevisionExpression(value *yaml.Node) bool {
+	if value == nil || value.Kind != yaml.ScalarNode {
+		return false
+	}
+	expression := strings.ToLower(strings.Join(strings.Fields(value.Value), ""))
+	expression = strings.TrimPrefix(expression, "${{")
+	expression = strings.TrimSuffix(expression, "}}")
+	const actor = "github.actor!='dependabot[bot]'"
+	direct := "(github.event_name!='pull_request'||github.event.pull_request.head.repo.full_name==github.repository)"
+	reverse := "(github.event_name!='pull_request'||github.repository==github.event.pull_request.head.repo.full_name)"
+	for _, repositoryGuard := range []string{direct, reverse} {
+		if expression == actor+"&&"+repositoryGuard ||
+			expression == repositoryGuard+"&&"+actor {
 			return true
 		}
 	}

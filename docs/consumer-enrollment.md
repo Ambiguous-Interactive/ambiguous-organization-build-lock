@@ -67,11 +67,61 @@ or writer App. The current inventory is recorded in
    removal, and a coherent cooldown or direct release; the incident still blocks
    all new admission. Delete raw evidence afterward under `if: always()` and never
    upload it.
-9. Emit one stable, always-reporting aggregate. It fails on preflight failure,
-   cancellation, unexpected skip, missing matrix output, partial execution,
-   missing cleanup evidence, release failure, or final-gate failure.
+9. Emit one stable, always-reporting aggregate. Use the central
+   `classify-unity-changes` action in a hosted, failure-propagating classifier
+   job; it defaults to requiring Unity and skips only the central
+   Unity-independent path allowlist. Use `require-unity-validation` for the
+   aggregate when the workflow has a change-classifier or untrusted-revision
+   branch. Bind its inputs directly to that classifier, preflight, licensed,
+   and hosted fallback job results plus the fallback release's typed
+   `cleanup-result`. It accepts only an exact untrusted skip, an exact
+   classified non-Unity skip, or fully successful licensed work whose fallback
+   reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
+   residue-bearing execution fails.
 10. Disable automatic cancellation for every scope that can terminate a job
-   after acquire. Superseded runs exit before acquire; holders finish cleanup.
+    after acquire. Superseded runs exit before acquire; holders finish cleanup.
+
+The conditional classifier and aggregate have an exact static shape. All five
+referenced jobs must be distinct and must not define workflow/job `env`,
+`defaults`, containers, services, or a matrix. The classifier has exactly the
+two steps below; preflight has exactly one approved preflight action; fallback
+has exactly one approved release action; and the aggregate has exactly one
+validation action. Replace `APPROVED_LOCK_SHA` only with a reviewed SHA listed
+in `approvedLockShas`.
+
+```yaml
+jobs:
+  change-classifier:
+    runs-on: ubuntu-latest
+    outputs:
+      unity-required: ${{ steps.classify.outputs.unity-required }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: classify
+        uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@APPROVED_LOCK_SHA
+        with:
+          event-name: ${{ github.event_name }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+
+  unity-ci:
+    if: always()
+    needs: [change-classifier, runner-preflight, unity, unity-cleanup]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/require-unity-validation@APPROVED_LOCK_SHA
+        with:
+          classifier-result: ${{ needs.change-classifier.result }}
+          unity-required: ${{ needs.change-classifier.outputs.unity-required }}
+          trusted-revision: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+          preflight-result: ${{ needs.runner-preflight.result }}
+          unity-result: ${{ needs.unity.result }}
+          fallback-result: ${{ needs.unity-cleanup.result }}
+          fallback-cleanup-result: ${{ needs.unity-cleanup.outputs.cleanup-result }}
+```
 
 ## Canary
 
