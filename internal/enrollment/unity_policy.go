@@ -2443,10 +2443,11 @@ func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
 	reverse := "github.repository==github.event.pull_request.head.repo.full_name"
 	eventGuard := "github.event_name!='pull_request'||"
 	actor := "github.actor!='dependabot[bot]'"
+	scopedDirect := eventGuard + "(" + actor + "&&" + direct + ")"
+	scopedReverse := eventGuard + "(" + actor + "&&" + reverse + ")"
 	if value == direct || value == reverse ||
 		value == eventGuard+direct || value == eventGuard+reverse ||
-		value == eventGuard+"("+actor+"&&"+direct+")" ||
-		value == eventGuard+"("+actor+"&&"+reverse+")" {
+		value == scopedDirect || value == scopedReverse {
 		return true
 	}
 	conjuncts, topLevelOr := conditionTerms(value)
@@ -2456,7 +2457,8 @@ func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
 	for _, conjunct := range conjuncts {
 		conjunct = trimOuterParentheses(conjunct)
 		if conjunct == direct || conjunct == reverse ||
-			conjunct == eventGuard+direct || conjunct == eventGuard+reverse {
+			conjunct == eventGuard+direct || conjunct == eventGuard+reverse ||
+			conjunct == scopedDirect || conjunct == scopedReverse {
 			return true
 		}
 	}
@@ -2516,7 +2518,11 @@ func fallbackConditionCoversSource(condition *yaml.Node, sourceJob string) bool 
 			direct := "github.event.pull_request.head.repo.full_name==github.repository"
 			reverse := "github.repository==github.event.pull_request.head.repo.full_name"
 			eventGuard := "github.event_name!='pull_request'||"
-			if conjunct != eventGuard+direct && conjunct != eventGuard+reverse {
+			actor := "github.actor!='dependabot[bot]'"
+			scopedDirect := eventGuard + "(" + actor + "&&" + direct + ")"
+			scopedReverse := eventGuard + "(" + actor + "&&" + reverse + ")"
+			if conjunct != eventGuard+direct && conjunct != eventGuard+reverse &&
+				conjunct != scopedDirect && conjunct != scopedReverse {
 				return false
 			}
 		}

@@ -287,3 +287,12 @@ The corrected aggregate binds Dependabot only when the event is a pull request,
 so every push must still produce successful preflight and licensed results.
 The mutation suite now rejects the actor-only predicate, and the trigger parser
 recognizes the corresponding PR-scoped licensed-job guard.
+
+PR #157 merged the PR-scoped correction as
+`51a7cc7f5fc724805d38db1039425a0e481392f2`; its exact-head and post-merge
+Build Lock CI and organization audit passed. DoxReloaded then supplied the
+missing counterexample from Cursor's first review: the same guard was accepted
+as a whole job condition but not as one conjunct beside classifier and static
+gates. The trigger and fallback parsers now recognize that exact scoped
+conjunct as well. The typed conditional lifecycle fixture uses the compound
+form, so reverting either parser branch makes the canonical fixture red.

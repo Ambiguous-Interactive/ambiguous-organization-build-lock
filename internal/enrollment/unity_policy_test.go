@@ -832,8 +832,8 @@ jobs:
   preflight:
     if: >-
       ${{
-        github.actor != 'dependabot[bot]' &&
-        (github.event_name != 'pull_request' ||
+        github.event_name != 'pull_request' ||
+        (github.actor != 'dependabot[bot]' &&
           github.event.pull_request.head.repo.full_name == github.repository)
       }}
     runs-on: ubuntu-latest
@@ -845,14 +845,14 @@ jobs:
       ${{
         needs.classify.result == 'success' &&
         needs.classify.outputs.unity-required == 'true' &&
-        github.actor != 'dependabot[bot]' &&
         (github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository)
+          (github.actor != 'dependabot[bot]' &&
+            github.event.pull_request.head.repo.full_name == github.repository))
       }}
     runs-on: [self-hosted, Windows]
     steps:
 ` + licensedSteps + `  cleanup:
-    if: ${{ always() && needs.unity.result != 'skipped' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.unity.result != 'skipped' && (github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     needs: unity
     runs-on: ubuntu-latest
     outputs:
@@ -881,7 +881,7 @@ jobs:
         with:
           classifier-result: ${{ needs.classify.result }}
           unity-required: ${{ needs.classify.outputs.unity-required }}
-          trusted-revision: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+          trusted-revision: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
           preflight-result: ${{ needs.preflight.result }}
           unity-result: ${{ needs.unity.result }}
           fallback-result: ${{ needs.cleanup.result }}
@@ -1116,7 +1116,7 @@ jobs:
 			mutate: func(value string) string {
 				return strings.Replace(
 					value,
-					"trusted-revision: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}",
+					"trusted-revision: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}",
 					"trusted-revision: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}",
 					1,
 				)
