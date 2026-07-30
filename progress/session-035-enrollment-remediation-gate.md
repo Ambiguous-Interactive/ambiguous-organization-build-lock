@@ -194,10 +194,10 @@ seat. Run `30515221048` confirmed the installed standalone Unity CLI's current
 Unity Technologies SF leaf and DigiCert G4 code-signing issuer on the exact
 Windows runner. The diagnostic workflow was then deleted. The allowlist retains
 the observed current leaf and one immediately prior Unity leaf for reviewed
-rotation overlap; consumers cannot provide either value. Captured return evidence is
-credential-redacted before persistence, Windows termination falls back to
-direct process kill when bounded tree termination fails, and analyzer mutations
-reject short step timeouts.
+rotation overlap; consumers cannot provide either value. Captured return
+evidence is credential-redacted before persistence, Windows termination falls
+back to direct process kill when bounded tree termination fails, and analyzer
+mutations reject short step timeouts.
 
 The permanent diagnostic-free tree passed the full verifier with 654 Node
 tests, every Go package, module integrity and tidy checks, actionlint, the
@@ -205,7 +205,13 @@ generated knowledge harness, and the credential audit. A final independent
 adversarial review returned PASS with no actionable correctness or security
 finding.
 
-This new action cannot safely be pinned until its merge commit is reachable.
-After this prerequisite merges, its exact main SHA must be added to
-both `approvedLockShas` and the return-action-specific `approvedReturnShas` in
-a separate policy change before Qora can consume it.
+PR #149 merged the trusted return prerequisite as
+`27c1e6322b673c2d0ffab8d7ca57531f17aca6b8`. Build lock CI run
+`30516240447` and organization enrollment audit run `30516240439` both passed
+on that exact `main` commit. Cursor Bugbot passed on the exact PR head; the
+required Copilot attempt failed only because the account had exceeded its
+monthly quota.
+
+This separate policy change adds that reachable SHA to both
+`approvedLockShas` and the return-action-specific `approvedReturnShas` before
+any consumer can use the credential-bearing action.
