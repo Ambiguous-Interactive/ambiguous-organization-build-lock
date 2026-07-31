@@ -72,3 +72,5 @@ jobs:
       - name: Run cleanup evidence tests
         shell: pwsh
         run: node --test test/unity-cleanup-evidence.test.js
+        env:
+          UNITY_DELETE_TEST_DIAGNOSTICS: "true"

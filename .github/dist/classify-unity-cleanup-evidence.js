@@ -271,7 +271,8 @@ function identityBoundDeleteWindows(
   {
     platform = process.platform,
     spawnSync = childProcess.spawnSync,
-    systemRoot = WINDOWS_SYSTEM_ROOT
+    systemRoot = WINDOWS_SYSTEM_ROOT,
+    diagnostics = process.env.UNITY_DELETE_TEST_DIAGNOSTICS === "true"
   } = {}
 ) {
   if (platform !== "win32") {
@@ -308,7 +309,7 @@ function identityBoundDeleteWindows(
         ),
         ...statEnvironment("UNITY_DELETE_FILE", claimedIdentity.returnLogStat)
       },
-      stdio: "ignore",
+      stdio: diagnostics ? ["ignore", "ignore", "inherit"] : "ignore",
       timeout: 120000,
       windowsHide: true
     }

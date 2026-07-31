@@ -297,38 +297,91 @@ public static class UnityReturnEvidenceDeletion
         string fileCtime,
         string expectedDigest)
     {
-        using (SafeFileHandle directory = Open(directoryPath, true))
+        SafeFileHandle directory;
+        try
         {
-            Validate(
-                Information(directory),
-                directoryDevice,
-                directoryFileIndex,
-                directorySize,
-                directoryLinks,
-                directoryBirthtime,
-                directoryMtime,
-                true);
-            ValidateChangeTime(directory, directoryCtime);
-            using (SafeFileHandle file = Open(filePath, false))
+            directory = Open(directoryPath, true);
+        }
+        catch
+        {
+            throw new InvalidOperationException("open-directory");
+        }
+        using (directory)
+        {
+            try
             {
                 Validate(
-                    Information(file),
-                    fileDevice,
-                    fileFileIndex,
-                    fileSize,
-                    fileLinks,
-                    fileBirthtime,
-                    fileMtime,
-                    false);
-                ValidateChangeTime(file, fileCtime);
-                ValidateDigest(file, expectedDigest, fileSize);
-                if (Information(file).NumberOfLinks != 1)
-                {
-                    throw new InvalidOperationException("Return evidence gained another link.");
-                }
-                MarkForDeletion(file);
+                    Information(directory),
+                    directoryDevice,
+                    directoryFileIndex,
+                    directorySize,
+                    directoryLinks,
+                    directoryBirthtime,
+                    directoryMtime,
+                    true);
+                ValidateChangeTime(directory, directoryCtime);
             }
-            MarkForDeletion(directory);
+            catch
+            {
+                throw new InvalidOperationException("validate-directory");
+            }
+            SafeFileHandle file;
+            try
+            {
+                file = Open(filePath, false);
+            }
+            catch
+            {
+                throw new InvalidOperationException("open-file");
+            }
+            using (file)
+            {
+                try
+                {
+                    Validate(
+                        Information(file),
+                        fileDevice,
+                        fileFileIndex,
+                        fileSize,
+                        fileLinks,
+                        fileBirthtime,
+                        fileMtime,
+                        false);
+                    ValidateChangeTime(file, fileCtime);
+                }
+                catch
+                {
+                    throw new InvalidOperationException("validate-file");
+                }
+                try
+                {
+                    ValidateDigest(file, expectedDigest, fileSize);
+                }
+                catch
+                {
+                    throw new InvalidOperationException("hash-file");
+                }
+                try
+                {
+                    if (Information(file).NumberOfLinks != 1)
+                    {
+                        throw new InvalidOperationException();
+                    }
+                    MarkForDeletion(file);
+                }
+                catch
+                {
+                    throw new InvalidOperationException("delete-file");
+                }
+            }
+            try
+            {
+                MarkForDeletion(directory);
+            }
+            catch
+            {
+                throw new InvalidOperationException("delete-directory");
+            }
         }
     }
 }
@@ -356,5 +409,8 @@ try {
         $env:UNITY_DELETE_EXPECTED_DIGEST
     )
 } catch {
+    if ($env:UNITY_DELETE_TEST_DIAGNOSTICS -eq "true") {
+        [Console]::Error.WriteLine("native-stage: " + $_.Exception.InnerException.Message)
+    }
     exit 1
 }
