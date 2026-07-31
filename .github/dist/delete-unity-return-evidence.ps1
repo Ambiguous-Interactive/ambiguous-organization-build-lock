@@ -15,6 +15,7 @@ public static class UnityReturnEvidenceDeletion
     private const uint FileReadData = 0x00000001;
     private const uint FileReadAttributes = 0x00000080;
     private const uint ShareRead = 0x00000001;
+    private const uint ShareReadDelete = 0x00000005;
     private const uint OpenExisting = 3;
     private const uint FileAttributeDirectory = 0x00000010;
     private const uint FileAttributeReparsePoint = 0x00000400;
@@ -129,7 +130,7 @@ public static class UnityReturnEvidenceDeletion
         SafeFileHandle handle = CreateFile(
             path,
             Delete | FileReadAttributes | (directory ? 0u : FileReadData),
-            ShareRead,
+            directory ? ShareReadDelete : ShareRead,
             IntPtr.Zero,
             OpenExisting,
             flags,

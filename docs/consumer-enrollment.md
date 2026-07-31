@@ -64,8 +64,8 @@ or writer App. The current inventory is recorded in
    name. The authoritative bounded read, digest check, and classification occur
    only after that claim. On the central action's required Windows runner, the
    classifier opens the exact file and empty directory through
-   identity-verified native handles that exclude write/delete sharing, rechecks
-   the digest through the opened file handle, deletes those objects with no
+   identity-verified native handles. The file handle excludes write/delete
+   sharing while it rechecks the digest and deletes those objects with no
    pathname fallback, and verifies absence before it reports
    `classification-complete=true`. Run typed release and the final cleanup gate
    with literal `always()`. Only exact entitlement and ULF success lines in the

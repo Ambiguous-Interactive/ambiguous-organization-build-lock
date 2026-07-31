@@ -215,9 +215,9 @@ The cleanup classifier requires the central return action's digest-bound,
 current-run evidence path. It rejects path escape, link/reparse ancestry,
 unexpected directory contents, hard links, or identity changes; atomically
 claims the action-owned directory under a private random name, performs the
-authoritative bounded read and classification there, and uses exclusive
-Windows-native handles to reverify the digest and delete the classified file
-and empty directory by identity before reporting
+authoritative bounded read and classification there, and uses Windows-native
+handles with a mutation-exclusive file handle to reverify the digest and delete
+the classified file and empty directory by identity before reporting
 `classification-complete=true`. There is no pathname-delete fallback on
 unsupported platforms. Supplemental evidence paths are read-only inputs and
 are not deleted by the classifier.

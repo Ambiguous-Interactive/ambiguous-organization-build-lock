@@ -78,7 +78,10 @@
   narrow hosted-Windows job.
 - First hosted-Windows run: failed because cold Windows PowerShell `Add-Type`
   compilation reached the original 30-second subprocess bound; the bound was
-  raised to 120 seconds and requires the next CI run for confirmation.
+  raised to 120 seconds. The next run completed compilation and exposed that
+  denying delete sharing on the directory blocked disposition of its child;
+  the directory now permits delete sharing while the file still excludes both
+  write and delete sharing. The revised native path requires CI confirmation.
 
 ## Adversarial review
 - Unsafe success paths considered: unreadable/empty-digest evidence, mutation

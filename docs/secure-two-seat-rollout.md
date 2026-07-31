@@ -78,8 +78,8 @@ current-run path below `RUNNER_TEMP`. It atomically claims the singly linked
 action-owned evidence directory under a private random name before the
 authoritative bounded UTF-8 read and digest check. After classification it
 opens the exact `return-license.log` and its empty claimed directory through
-identity-verified Windows-native handles that exclude mutation sharing,
-reverifies the digest through the file handle, deletes those objects, verifies
+identity-verified Windows-native handles. The file handle excludes mutation
+sharing while it reverifies the digest, deletes those objects, verifies
 both are absent, and only then emits completed outputs. There is no
 pathname-delete fallback. Supplemental evidence contributes account-health
 signals but remains outside this deletion authority.

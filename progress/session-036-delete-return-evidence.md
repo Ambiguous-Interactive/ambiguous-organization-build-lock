@@ -83,6 +83,13 @@ timeout during cold PowerShell `Add-Type` compilation. The helper remains
 bounded, with a 120-second allowance for the hosted cold start; CI must confirm
 the revised bound before merge.
 
+That rerun completed compilation and exposed a native sharing conflict: denying
+delete sharing on the parent directory also blocks disposition of its child
+file. The directory handle now permits delete sharing while retaining exact
+handle identity; the file handle continues to deny write/delete sharing across
+digest verification and disposition. Path replacement remains fail-closed at
+the post-disposition absence checks.
+
 ## Adversarial review
 
 The first independent review found three unsafe paths: authoritative read
