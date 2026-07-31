@@ -389,6 +389,14 @@ public static class UnityReturnEvidenceDeletion
 
 try {
     Add-Type -TypeDefinition $nativeSource -Language CSharp
+} catch {
+    if ($env:UNITY_DELETE_TEST_DIAGNOSTICS -eq "true") {
+        [Console]::Error.WriteLine("native-stage: compile")
+    }
+    exit 1
+}
+
+try {
     [UnityReturnEvidenceDeletion]::Delete(
         $env:UNITY_DELETE_DIRECTORY_PATH,
         $env:UNITY_DELETE_FILE_PATH,
@@ -422,8 +430,13 @@ try {
         $stage = "unknown"
         $current = $_.Exception
         while ($null -ne $current) {
-            if ($allowedStages -contains $current.Message) {
-                $stage = $current.Message
+            foreach ($candidate in $allowedStages) {
+                if ($current.Message.Contains($candidate)) {
+                    $stage = $candidate
+                    break
+                }
+            }
+            if ($stage -ne "unknown") {
                 break
             }
             $current = $current.InnerException
