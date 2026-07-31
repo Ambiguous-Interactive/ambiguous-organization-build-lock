@@ -751,6 +751,7 @@ test("Windows identity deletion invokes the private handle-based helper with exa
     "a".repeat(64),
     {
       platform: "win32",
+      diagnostics: false,
       systemRoot: "C:\\Windows",
       spawnSync(command, args, options) {
         invocation = { command, args, options };
@@ -776,6 +777,7 @@ test("Windows identity deletion invokes the private handle-based helper with exa
   assert.equal(invocation.options.env.UNITY_DELETE_FILE_INO, "101");
   assert.equal(invocation.options.env.UNITY_DELETE_FILE_SIZE, "123");
   assert.equal(invocation.options.env.UNITY_DELETE_EXPECTED_DIGEST, "a".repeat(64));
+  assert.equal(invocation.options.env.UNITY_DELETE_TEST_DIAGNOSTICS, "false");
   assert.equal(
     invocation.options.env.UNITY_DELETE_FILE_CTIME_NS,
     "1700000000500000000"

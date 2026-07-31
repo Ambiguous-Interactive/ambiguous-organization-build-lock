@@ -300,6 +300,7 @@ function identityBoundDeleteWindows(
     {
       env: {
         SystemRoot: systemRoot,
+        UNITY_DELETE_TEST_DIAGNOSTICS: diagnostics ? "true" : "false",
         UNITY_DELETE_DIRECTORY_PATH: claimedTarget.evidenceDirectory,
         UNITY_DELETE_EXPECTED_DIGEST: expectedDigest,
         UNITY_DELETE_FILE_PATH: claimedTarget.returnLogPath,
