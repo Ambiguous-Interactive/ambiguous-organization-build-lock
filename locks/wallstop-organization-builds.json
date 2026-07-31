@@ -1,41 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30641291394:platform-build-linux:platform-build-linux-0",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-linux",
+    "runId": "30641291394",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30641291394",
+    "queuedAt": "2026-07-31T15:19:00.528Z",
+    "acquiredAt": "2026-07-31T15:19:01.852Z",
+    "expiresAt": "2026-07-31T19:19:01.852Z",
+    "runnerId": "tiny-box-linux"
+  },
+  "holders": [
     {
-      "reservationId": "59c54017-74f9-4253-89a2-2c9b497e6870",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30641291394:unity-tests:unity-tests-1",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30641291394:platform-build-linux:platform-build-linux-0",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
-      "job": "unity-tests",
+      "job": "platform-build-linux",
       "runId": "30641291394",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30641291394",
-      "runnerId": "box-linux",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-31T15:18:01.246Z",
-      "availableAt": "2026-07-31T15:18:02.246Z"
-    },
-    {
-      "reservationId": "b93aca5c-63ba-4c15-b2fb-1b4cf2001935",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30642224168:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30642224168",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30642224168",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-31T15:17:58.499Z",
-      "availableAt": "2026-07-31T15:17:59.499Z"
+      "queuedAt": "2026-07-31T15:19:00.528Z",
+      "acquiredAt": "2026-07-31T15:19:01.852Z",
+      "expiresAt": "2026-07-31T19:19:01.852Z",
+      "runnerId": "tiny-box-linux"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T15:17:58.500Z"
+  "updatedAt": "2026-07-31T15:19:01.852Z"
 }
