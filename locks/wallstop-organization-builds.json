@@ -1,21 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:30645211053:unity-tests:2021.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "30645211053",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30645211053",
-    "queuedAt": "2026-07-31T16:00:55.276Z",
-    "acquiredAt": "2026-07-31T16:00:58.333Z",
-    "expiresAt": "2026-07-31T20:00:58.333Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "c68781a9-ac9c-4509-a60d-be9f7ed354bb",
       "holderId": "Ambiguous-Interactive/DxMessaging:30645211053:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
@@ -23,14 +14,12 @@
       "runId": "30645211053",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30645211053",
-      "queuedAt": "2026-07-31T16:00:55.276Z",
-      "acquiredAt": "2026-07-31T16:00:58.333Z",
-      "expiresAt": "2026-07-31T20:00:58.333Z",
-      "runnerId": "DAD-MACHINE"
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder job 91204876077 is completed",
+      "createdAt": "2026-07-31T16:01:44.267Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T16:00:58.334Z"
+  "updatedAt": "2026-07-31T16:01:44.268Z"
 }
