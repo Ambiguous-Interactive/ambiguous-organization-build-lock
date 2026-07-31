@@ -131,13 +131,43 @@ The unity-helpers PR #324 worktree has a separately validated
 maintainer-ready patch with two full pre-push passes and a zero-finding second
 adversarial review. Repository instructions prohibit this session from
 staging, committing, or pushing that patch. DoxReloaded PR #305 is
-runner-blocked until Unity 6000.5.2f1 WebGL and Windows IL2CPP modules are
-installed manually on the trusted runners.
+now blocked by its static package-version contract: the reviewed workflow has
+two intentionally scoped `6000.5.2f1` literals, while the old check requires
+exactly one. DxMessaging PR #326 completed all nine real Unity matrix jobs and
+the Unity aggregate successfully; its remaining failures are five yamllint
+line-length findings and a JavaScript line budget exceeded by five lines.
+
+Qora PR #191 merged as `d9ba9c1c7c6cbfc73acbc538fcc89725c530f939`
+after Ubuntu, Windows, engine-free, Cursor, real EditMode/PlayMode, fallback
+cleanup, and aggregate checks passed. IshoBoy PR #322 merged as
+`ffb8329cb10bd14974614ed88f8b0500d0a328ed` after 720 Python tests, 23 Node
+tests, adversarial review, and its full licensed runner lifecycle passed. A
+neutral Cursor check contained one valid inline finding: unchanged fallback
+and aggregate assertions had been indented into the cleanup mutation test.
+Follow-up PR #323 restored them to the clean typed-shape contract, passed
+Cursor with no inline findings plus a second real Unity lifecycle, and merged
+as `04aa6531ed8e69b2d486e625f8a3fb49cdaebcf8`.
+
+The exact default-branch audit now reads those Qora and IshoBoy merge commits
+and reports zero findings for both. The complete six-repository result remains
+red only because the unmerged DxMessaging, DoxReloaded, and unity-helpers
+consumer snapshots still contribute the expected rollout findings.
+
+Merged-main Windows execution also exposed a non-bypassing checkout defect.
+The trusted helper checkout passed, but `actions/checkout` attempted its
+default global `safe.directory` write while `GIT_CONFIG_GLOBAL=/dev/null`
+intentionally disabled runner-global configuration, producing a caught
+`could not lock config file /dev/null` annotation. Independent source review
+classified this P2, not a provenance bypass: Git ownership protection remains
+enabled and the exact helper checkout and gate passed. The safe transition is
+to retain all five Git-isolation environment entries while centrally allowing,
+then requiring, literal `set-safe-directory: false`; consumers must move under
+the transitional policy before it is tightened.
 
 Central enforcement must not merge while it would make an enrolled default
-branch red. Publication and merge therefore wait for the qora-redux direct
-gate, DoxReloaded, DxMessaging, and unity-helpers to merge green and for a fresh
-exact-default audit to return zero findings.
+branch red. Publication and merge therefore wait for DoxReloaded, DxMessaging,
+and unity-helpers to merge green, the Windows-safe checkout transition to land,
+and a fresh exact-default audit to return zero findings.
 
 ## Independent review disposition
 
