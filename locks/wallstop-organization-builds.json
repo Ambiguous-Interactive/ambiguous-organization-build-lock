@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30670893998:platform-build-linux:platform-build-linux-0",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30670893998:platform-build-windows:platform-build-windows",
     "repository": "Ambiguous-Interactive/DoxReloaded",
     "workflow": "Build and Deploy",
-    "job": "platform-build-linux",
+    "job": "platform-build-windows",
     "runId": "30670893998",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30670893998",
-    "queuedAt": "2026-07-31T23:03:39.294Z",
-    "acquiredAt": "2026-07-31T23:03:40.556Z",
-    "expiresAt": "2026-08-01T03:03:40.556Z",
-    "runnerId": "tiny-box-linux"
+    "queuedAt": "2026-07-31T23:03:48.270Z",
+    "acquiredAt": "2026-07-31T23:05:37.808Z",
+    "expiresAt": "2026-08-01T03:05:37.808Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30670893998:platform-build-linux:platform-build-linux-0",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-linux",
-      "runId": "30670893998",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30670893998",
-      "queuedAt": "2026-07-31T23:03:39.294Z",
-      "acquiredAt": "2026-07-31T23:03:40.556Z",
-      "expiresAt": "2026-08-01T03:03:40.556Z",
-      "runnerId": "tiny-box-linux"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30670893998:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -55,7 +42,23 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "6cfc2dee-648b-4fc5-8c65-60f41eb689eb",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30670893998:platform-build-linux:platform-build-linux-0",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-linux",
+      "runId": "30670893998",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30670893998",
+      "runnerId": "tiny-box-linux",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-31T23:09:37.365Z",
+      "availableAt": "2026-07-31T23:09:38.365Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T23:05:53.932Z"
+  "updatedAt": "2026-07-31T23:09:37.366Z"
 }
