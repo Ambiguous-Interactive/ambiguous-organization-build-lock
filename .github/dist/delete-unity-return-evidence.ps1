@@ -410,7 +410,25 @@ try {
     )
 } catch {
     if ($env:UNITY_DELETE_TEST_DIAGNOSTICS -eq "true") {
-        [Console]::Error.WriteLine("native-stage: " + $_.Exception.InnerException.Message)
+        $allowedStages = @(
+            "open-directory",
+            "validate-directory",
+            "open-file",
+            "validate-file",
+            "hash-file",
+            "delete-file",
+            "delete-directory"
+        )
+        $stage = "unknown"
+        $current = $_.Exception
+        while ($null -ne $current) {
+            if ($allowedStages -contains $current.Message) {
+                $stage = $current.Message
+                break
+            }
+            $current = $current.InnerException
+        }
+        [Console]::Error.WriteLine("native-stage: " + $stage)
     }
     exit 1
 }
