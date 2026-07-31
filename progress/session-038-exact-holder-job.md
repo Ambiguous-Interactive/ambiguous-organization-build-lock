@@ -2,7 +2,7 @@
 
 Date: 2026-07-31
 
-Status: locally complete; publication in progress
+Status: implementation and first hosted review green; final evidence pending
 
 ## Objective and invariants
 
@@ -143,3 +143,19 @@ the same distinct remediator fixed it, after which that reviewer reported
 `ZERO ACTIONABLE FINDINGS`. Residual uncertainty is limited to live GitHub API
 timing and mixed-client behavior; both retain state fail closed when exact proof
 is absent.
+
+## Hosted exact-head review
+
+Commit `16297f249e2b8c340f923c7bb9eaca13840b239c` was pushed and opened as
+PR #170. Build lock CI run `30667260533` passed both `Validate lock action
+files` and the hosted-Windows `Validate Windows evidence deletion` job. Cursor
+Bugbot reviewed that exact commit and reported no new issues; the thread-level
+audit returned no review threads. The PR became clean and mergeable after its
+draft gate was removed.
+
+Copilot was requested after the push through the formal reviewer API and an
+exact-head tagged comment, then again by tag after the PR became ready. GitHub
+rejected the service account from the reviewer API because it is not a
+repository collaborator, and the tagged requests produced no review or code
+feedback during the completed CI/Bugbot window. No dependent-repository Unity
+workflow or licensed Unity job was triggered by this central PR.
