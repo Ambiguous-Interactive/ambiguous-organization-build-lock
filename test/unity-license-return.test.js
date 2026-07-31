@@ -57,6 +57,44 @@ test("editor path matches the established CI-managed u6-v3 install root", () => 
   );
 });
 
+test("editor path selects only the reviewed CI-managed alternate layout", () => {
+  const toolCache = path.join(path.parse(process.cwd()).root, "actions-runner", "_tool");
+  assert.equal(
+    editorPath(toolCache, "6000.5.2f1", "ci-managed-alternate"),
+    path.join(
+      toolCache,
+      "u6-v3",
+      "_ci-managed-editors",
+      "6000.5.2f1",
+      "Editor",
+      "Unity.exe"
+    )
+  );
+});
+
+test("central return executes the selected CI-managed alternate editor", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nexit 0\n");
+  const canonical = editorPath(
+    item.env["INPUT_TOOL-CACHE"],
+    item.env["INPUT_UNITY-VERSION"]
+  );
+  const alternate = editorPath(
+    item.env["INPUT_TOOL-CACHE"],
+    item.env["INPUT_UNITY-VERSION"],
+    "ci-managed-alternate"
+  );
+  fs.mkdirSync(path.dirname(alternate), { recursive: true });
+  fs.renameSync(canonical, alternate);
+  item.env["INPUT_EDITOR-LAYOUT"] = "ci-managed-alternate";
+
+  const result = await run({
+    env: item.env,
+    platform: "linux",
+    verifyEditor: async (executable) => assert.equal(executable, alternate)
+  });
+  assert.equal(result.exitCode, 0);
+});
+
 test("central return invokes only the CI-managed editor and emits bounded evidence", async (t) => {
   const item = fixture(t, "#!/bin/sh\nprintf 'returned:%s:%s\\n' \"$7\" \"$9\"\nexit 0\n");
   const result = await run({
@@ -161,9 +199,12 @@ test("invalid caller-controlled resolution inputs fail closed", () => {
     "INPUT_UNITY-PASSWORD": "private",
     "INPUT_UNITY-VERSION": "6000.5.2f1"
   };
+  assert.equal(requiredInputs(base).editorLayout, "canonical");
   for (const mutation of [
     { "INPUT_TOOL-CACHE": "relative" },
     { "INPUT_UNITY-VERSION": "../Unity.exe" },
+    { "INPUT_EDITOR-LAYOUT": "consumer/path" },
+    { "INPUT_EDITOR-LAYOUT": "${{ env.EDITOR_LAYOUT }}" },
     { "INPUT_EVIDENCE-SUFFIX": "../escape" },
     { "INPUT_UNITY-EMAIL": "" },
     { "INPUT_UNITY-PASSWORD": "" }

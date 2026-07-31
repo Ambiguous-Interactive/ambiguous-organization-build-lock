@@ -407,7 +407,18 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
       "inputs",
       "return-unity-license/action.yml"
     ),
-    ["unity-version", "tool-cache", "unity-email", "unity-password", "evidence-suffix"]
+    [
+      "unity-version",
+      "tool-cache",
+      "unity-email",
+      "unity-password",
+      "evidence-suffix",
+      "editor-layout"
+    ]
+  );
+  assert.match(
+    returnAction,
+    /  editor-layout:\n    description: Closed reviewed editor layout; canonical or ci-managed-alternate\.\n    required: false\n    default: canonical\n/
   );
   assert.deepEqual(
     yamlRequiredTopLevelMappingKeys(

@@ -50,11 +50,16 @@ or writer App. The current inventory is recorded in
    `always() && steps.<acquire-id>.outputs.acquired == 'true'`. Bind both to
    the one approved acquire step used by the cleanup gate. The return action
    constructs the editor path from a literal Unity version and the immutable
-   `${{ runner.tool_cache }}` context, rejects reparse-point ancestry, and
-   requires an exact centrally allowlisted Unity Authenticode signer with the
-   code-signing EKU; consumer scripts, caller-selected executable paths, and
-   caller-selected signer identities are not cleanup authority. It reports a dedicated
-   run-scoped log path, command-completed state, signed exit code,
+   `${{ runner.tool_cache }}` context. Its optional `editor-layout` is a closed
+   literal selector: omitted or `canonical` resolves
+   `u6-v3/<version>/Editor/Unity.exe`, while `ci-managed-alternate` resolves
+   `u6-v3/_ci-managed-editors/<version>/Editor/Unity.exe`. Arbitrary roots and
+   executable paths are never cleanup authority. The action rejects
+   reparse-point ancestry and requires an exact centrally allowlisted Unity
+   Authenticode signer with the code-signing EKU; consumer scripts,
+   caller-selected executable paths, and caller-selected signer identities are
+   not cleanup authority. It reports a dedicated run-scoped log path,
+   command-completed state, signed exit code,
    capture-complete attestation, and SHA-256 of the exact redacted log bytes.
    Bind that digest directly into the classifier so later workflow steps
    cannot replace evidence. The classifier accepts only the exact current-run

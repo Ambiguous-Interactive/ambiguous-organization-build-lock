@@ -348,6 +348,24 @@ func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentAcceptsReviewedAlternateEditorLayout(t *testing.T) {
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"          evidence-suffix: qora\n",
+		"          evidence-suffix: qora\n          editor-layout: ci-managed-alternate\n",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("reviewed alternate editor layout produced findings: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
@@ -579,6 +597,20 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 			name: "tool cache from environment",
 			mutate: func(value string) string {
 				return strings.Replace(value, "${{ runner.tool_cache }}", "${{ env.RUNNER_TOOL_CACHE }}", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "unknown editor layout",
+			mutate: func(value string) string {
+				return strings.Replace(value, "          evidence-suffix: qora\n", "          evidence-suffix: qora\n          editor-layout: consumer-path\n", 1)
+			},
+			code: "missing-unity-return",
+		},
+		{
+			name: "editor layout expression",
+			mutate: func(value string) string {
+				return strings.Replace(value, "          evidence-suffix: qora\n", "          evidence-suffix: qora\n          editor-layout: ${{ env.EDITOR_LAYOUT }}\n", 1)
 			},
 			code: "missing-unity-return",
 		},
