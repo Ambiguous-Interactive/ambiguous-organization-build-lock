@@ -153,6 +153,16 @@ and reports zero findings for both. The complete six-repository result remains
 red only because the unmerged DxMessaging, DoxReloaded, and unity-helpers
 consumer snapshots still contribute the expected rollout findings.
 
+A separate candidate-head audit avoids conflating those stale defaults with
+the actual rollout PRs. It reads DoxReloaded `6d79f4e9`, DxMessaging
+`4113477a`, IshoBoy `04aa6531`, qora-redux `d9ba9c1c`, unity-builder
+`70c59fd0`, and unity-helpers PR #324 head `7d07ffa7`. The audit is complete
+over 89 active jobs with only three findings, all in unity-helpers
+`unity-validation`: one missing trusted editor check, one provisioning control,
+and one unsafe provisioning call. DoxReloaded and DxMessaging are already
+enrollment-policy clean; their remaining CI failures are independent of the
+central audit.
+
 Merged-main Windows execution also exposed a non-bypassing checkout defect.
 The trusted helper checkout passed, but `actions/checkout` attempted its
 default global `safe.directory` write while `GIT_CONFIG_GLOBAL=/dev/null`
