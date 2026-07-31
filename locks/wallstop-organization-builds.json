@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:30658003559:perf-benchmarks:perf-6000.3.16f1-playmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Performance Numbers",
-    "job": "perf-benchmarks",
-    "runId": "30658003559",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30658207208:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "30658207208",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003559",
-    "queuedAt": "2026-07-31T19:30:17.198Z",
-    "acquiredAt": "2026-07-31T19:30:18.316Z",
-    "expiresAt": "2026-07-31T23:30:18.316Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30658207208",
+    "queuedAt": "2026-07-31T19:35:41.810Z",
+    "acquiredAt": "2026-07-31T19:39:48.814Z",
+    "expiresAt": "2026-07-31T23:39:48.814Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30658003559:perf-benchmarks:perf-6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "30658003559",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003559",
-      "queuedAt": "2026-07-31T19:30:17.198Z",
-      "acquiredAt": "2026-07-31T19:30:18.316Z",
-      "expiresAt": "2026-07-31T23:30:18.316Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30658207208:platform-build-windows:platform-build-windows",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "9b6b36c0-a592-4dd8-8f77-b8fc5db757b9",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30658003559:perf-benchmarks:perf-6000.3.16f1-playmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "30658003559",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003559",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-31T19:42:09.691Z",
+      "availableAt": "2026-07-31T19:42:10.691Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T19:39:48.815Z"
+  "updatedAt": "2026-07-31T19:42:09.691Z"
 }
