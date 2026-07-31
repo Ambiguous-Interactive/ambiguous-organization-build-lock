@@ -81,7 +81,10 @@
   raised to 120 seconds. The next run completed compilation and exposed that
   denying delete sharing on the directory blocked disposition of its child;
   the directory now permits delete sharing while the file still excludes both
-  write and delete sharing. The revised native path requires CI confirmation.
+  write and delete sharing. A later diagnostic run identified a C# member-name
+  collision between the delete-access constant and public deletion method.
+  Exact head `fb5f84ef2` fixes that collision and passed both hosted-Windows
+  native tests plus the Linux validation job in run `30594124851`.
 
 ## Adversarial review
 - Unsafe success paths considered: unreadable/empty-digest evidence, mutation
@@ -93,8 +96,8 @@
   remain a post-merge rollout boundary.
 - Unverifiable items and open questions: live consumer repins require the merged
   immutable commit.
-- Remaining uncertainty: hosted-Windows execution and remote review remain CI
-  gates after publication.
+- Remaining uncertainty: immutable authorization and consumer migration remain
+  post-merge rollout gates.
 - Implementer: primary agent.
 - Reviewer and evidence: independent `adversarial_review` agent, source/test
   inspection, and direct race reproductions.

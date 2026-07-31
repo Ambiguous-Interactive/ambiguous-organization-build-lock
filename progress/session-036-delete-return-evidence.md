@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: implementation and independent review complete; publication pending
+Status: implementation and hosted validation complete; exact-head review pending
 
 ## Selection
 
@@ -49,9 +49,10 @@ The implementation derives the only permitted target from `RUNNER_TEMP`,
 binding; validates exact path, name, non-link ancestry, and stable identities;
 rejects unexpected siblings; atomically claims the directory under a random
 private name; and performs the authoritative read, digest verification, and
-classification there. A Windows-native helper opens the classified file and
-owned directory without write/delete sharing, verifies their volume/file IDs
-and stable metadata, re-hashes the exact opened file, then deletes those exact
+classification there. A Windows-native helper opens the classified file
+without write/delete sharing and the owned directory with the minimum delete
+sharing needed for child disposition, verifies their volume/file IDs and
+stable metadata, re-hashes the exact opened file, then deletes those exact
 handles. There is no pathname-delete fallback. Absence is verified before
 completed outputs. Supplemental evidence remains outside deletion ownership.
 
@@ -78,17 +79,15 @@ release, and cleanup-gate terminal suffix. CI includes a narrow
 `windows-latest` job that executes the real native deletion helper without
 Unity.
 
-The first hosted-Windows run reached the helper's original 30-second process
-timeout during cold PowerShell `Add-Type` compilation. The helper remains
-bounded, with a 120-second allowance for the hosted cold start; CI must confirm
-the revised bound before merge.
-
-That rerun completed compilation and exposed a native sharing conflict: denying
-delete sharing on the parent directory also blocks disposition of its child
-file. The directory handle now permits delete sharing while retaining exact
-handle identity; the file handle continues to deny write/delete sharing across
-digest verification and disposition. Path replacement remains fail-closed at
-the post-disposition absence checks.
+The hosted-Windows remediation progressed through three concrete failures: the
+original 30-second cold `Add-Type` timeout, a parent-directory sharing conflict
+that blocked child disposition, and a C# member-name collision between the
+delete-access constant and public deletion method. The helper now has a bounded
+120-second allowance, supplies only the validated runner-temp root as compiler
+scratch, permits delete sharing only on the identity-bound directory handle,
+and names the access constant distinctly. Exact head `fb5f84ef2` passed both
+native success and metadata-forgery tests on `windows-latest`; Linux validation
+also passed in workflow run `30594124851`.
 
 ## Adversarial review
 
