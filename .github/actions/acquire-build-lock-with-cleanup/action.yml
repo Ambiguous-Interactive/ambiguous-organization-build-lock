@@ -12,7 +12,10 @@ inputs:
     description: Stable physical runner identity. Required when runner serialization is activated.
     required: false
   github-token:
-    description: GitHub token with pull request read access. Required for pull request runs so queued admission remains bound to the event head.
+    description: >-
+      GitHub token with Actions read access, plus pull request read access for PR
+      runs. Records the exact numeric job ID for safe stale reaping and binds
+      queued PR admission to the event head.
     required: false
   pull-request-number:
     description: Pull request number to revalidate throughout the FIFO wait. Required for pull request runs.
