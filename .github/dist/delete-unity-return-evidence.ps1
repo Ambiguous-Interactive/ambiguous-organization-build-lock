@@ -11,7 +11,7 @@ using Microsoft.Win32.SafeHandles;
 
 public static class UnityReturnEvidenceDeletion
 {
-    private const uint Delete = 0x00010000;
+    private const uint DeleteAccess = 0x00010000;
     private const uint FileReadData = 0x00000001;
     private const uint FileReadAttributes = 0x00000080;
     private const uint ShareRead = 0x00000001;
@@ -129,7 +129,7 @@ public static class UnityReturnEvidenceDeletion
         }
         SafeFileHandle handle = CreateFile(
             path,
-            Delete | FileReadAttributes | (directory ? 0u : FileReadData),
+            DeleteAccess | FileReadAttributes | (directory ? 0u : FileReadData),
             directory ? ShareReadDelete : ShareRead,
             IntPtr.Zero,
             OpenExisting,
@@ -392,31 +392,6 @@ try {
 } catch {
     if ($env:UNITY_DELETE_TEST_DIAGNOSTICS -eq "true") {
         [Console]::Error.WriteLine("native-stage: compile")
-        $compilerDiagnostics = (@($_) + @($Error | Select-Object -First 20) | Out-String)
-        $safeDiagnostics = [regex]::Matches(
-            $compilerDiagnostics,
-            'CS[0-9]{4}:[^\r\n]*'
-        ) | ForEach-Object { $_.Value } | Select-Object -Unique
-        foreach ($diagnostic in $safeDiagnostics) {
-            [Console]::Error.WriteLine("native-compiler: " + $diagnostic)
-        }
-        foreach ($record in @($_) + @($Error | Select-Object -First 20)) {
-            $diagnosticType = $record.Exception.GetType().FullName
-            $diagnosticID = [string]$record.FullyQualifiedErrorId
-            $diagnosticMessage = [regex]::Replace(
-                [string]$record.Exception.Message,
-                '[^A-Za-z0-9 .,()''_-]',
-                '?'
-            )
-            if ($diagnosticMessage.Length -gt 500) {
-                $diagnosticMessage = $diagnosticMessage.Substring(0, 500)
-            }
-            [Console]::Error.WriteLine(
-                "native-compile-record: type=" + $diagnosticType +
-                " id=" + $diagnosticID +
-                " message=" + $diagnosticMessage
-            )
-        }
     }
     exit 1
 }
