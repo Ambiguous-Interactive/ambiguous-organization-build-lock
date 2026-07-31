@@ -12,6 +12,7 @@ const DEFAULT_TIMEOUT_MS = 240_000;
 const DEFAULT_VERIFY_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 30_000;
 const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
+const EDITOR_LAYOUTS = new Set(["canonical", "ci-managed-alternate"]);
 const UNITY_SIGNER_THUMBPRINTS = new Set([
   "228FB6411B0A144478C86AAA3CD9473C43A8ABA7",
   "BFFD800651947878FCD0DC749C16D57B0D5E397D"
@@ -41,6 +42,7 @@ function requiredInputs(env) {
   const email = input(env, "UNITY-EMAIL");
   const password = input(env, "UNITY-PASSWORD");
   const evidenceSuffix = input(env, "EVIDENCE-SUFFIX") || "default";
+  const editorLayout = input(env, "EDITOR-LAYOUT") || "canonical";
 
   if (!/^[0-9]{4}\.[0-9]+\.[0-9]+[abfp][0-9]+$/i.test(unityVersion)) {
     throw new Error("unity-version is invalid.");
@@ -54,7 +56,10 @@ function requiredInputs(env) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(evidenceSuffix)) {
     throw new Error("evidence-suffix is invalid.");
   }
-  return { unityVersion, toolCache, email, password, evidenceSuffix };
+  if (!EDITOR_LAYOUTS.has(editorLayout)) {
+    throw new Error("editor-layout is invalid.");
+  }
+  return { unityVersion, toolCache, email, password, evidenceSuffix, editorLayout };
 }
 
 function runIdentity(env) {
@@ -70,10 +75,16 @@ function runIdentity(env) {
   return { runID, runAttempt, runnerTemp };
 }
 
-function editorPath(toolCache, unityVersion) {
+function editorPath(toolCache, unityVersion, editorLayout = "canonical") {
+  if (!EDITOR_LAYOUTS.has(editorLayout)) {
+    throw new Error("editor-layout is invalid.");
+  }
+  const layoutComponents = editorLayout === "ci-managed-alternate"
+    ? ["u6-v3", "_ci-managed-editors"]
+    : ["u6-v3"];
   return path.join(
     toolCache,
-    "u6-v3",
+    ...layoutComponents,
     unityVersion,
     "Editor",
     "Unity.exe"
@@ -307,7 +318,11 @@ async function executeReturn(options) {
     : options.terminationGraceMs;
   const values = requiredInputs(env);
   const identity = runIdentity(env);
-  const executable = editorPath(values.toolCache, values.unityVersion);
+  const executable = editorPath(
+    values.toolCache,
+    values.unityVersion,
+    values.editorLayout
+  );
   const evidenceDirectory = path.join(
     identity.runnerTemp,
     `unity-return-${identity.runID}-${identity.runAttempt}-${values.evidenceSuffix}`

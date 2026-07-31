@@ -17,6 +17,10 @@ inputs:
     description: Short literal used to isolate evidence from other jobs in the same run.
     required: false
     default: default
+  editor-layout:
+    description: Closed reviewed editor layout; canonical or ci-managed-alternate.
+    required: false
+    default: canonical
 outputs:
   return-log-path:
     description: Dedicated run-scoped log for this Unity return command.

@@ -1305,10 +1305,18 @@ func typedReturnInputs(
 		"unity-email":     true,
 		"unity-password":  true,
 		"evidence-suffix": true,
+		"editor-layout":   true,
 	}) ||
 		!exactExpression(mappingValue(with, "tool-cache"), "runner.tool_cache") ||
 		!exactExpression(mappingValue(with, "unity-email"), "secrets.UNITY_EMAIL") ||
 		!exactExpression(mappingValue(with, "unity-password"), "secrets.UNITY_PASSWORD") {
+		return false
+	}
+	layout := mappingValue(with, "editor-layout")
+	if layout != nil &&
+		(layout.Kind != yaml.ScalarNode ||
+			(scalarValue(layout) != "canonical" &&
+				scalarValue(layout) != "ci-managed-alternate")) {
 		return false
 	}
 	version := scalarValue(mappingValue(with, "unity-version"))
