@@ -1038,6 +1038,35 @@ if ($Operation -eq 'RequireEditor') {
 		t.Fatalf("delegated control flow counted as a required gate: %#v", result.Findings)
 	}
 
+	t.Run("unrelated complex PowerShell driver is not an editor wrapper", func(t *testing.T) {
+		steps := strings.Replace(
+			centralReturnSteps(),
+			"      - id: acquire",
+			`      - name: Run checked-in test driver
+        shell: pwsh
+        run: ./scripts/ci/run-tests.ps1 -Mode EditMode
+      - id: acquire`,
+			1,
+		)
+		workflow := unityWorkflow(steps, safeAggregate())
+		driver := `[CmdletBinding()]
+param([ValidateSet('EditMode', 'PlayMode')][string]$Mode)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+if ($Mode -eq 'EditMode') { Write-Host $Mode }
+`
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/run-tests.ps1":    driver,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
+			t.Fatalf("unrelated test driver was treated as an editor wrapper: %#v", result.Findings)
+		}
+	})
+
 	t.Run("unproved delegated control flow is not a gate", func(t *testing.T) {
 		skippedWorkflow := strings.Replace(
 			workflow,
@@ -1354,10 +1383,12 @@ if ($Operation -eq 'RequireEditor') {
 
 	t.Run("unresolved delegated script expression fails closed", func(t *testing.T) {
 		expressionWrapper := `& (Join-Path $PSScriptRoot ('unity.' + 'ps1')) -Operation RequireEditor
+& "$PSScriptRoot/relevant.ps1" -Operation RequireEditor
 `
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1":      expressionWrapper,
+			"scripts/ci/relevant.ps1":     safeScript,
 			"scripts/ci/unity.ps1":        safeScript,
 		}), unityAuditPolicy())
 		if err != nil {
@@ -1417,6 +1448,15 @@ if ($Operation -eq 'RequireEditor') {
 				"'unity.ps1')\n",
 		} {
 			t.Run(name, func(t *testing.T) {
+				references := invokedPowerShellReferences(joinPathWrapper)
+				if len(references) != 1 || references[0].path != "unity.ps1" ||
+					!references[0].scriptRelative {
+					t.Fatalf("wrapper-relative child extraction mismatch: %#v", references)
+				}
+				if strings.Contains(strings.ToLower(joinPathWrapper), "join") &&
+					!references[0].hazardous {
+					t.Fatalf("Join-Path edge was not marked hazardous: %#v", references)
+				}
 				for childName, child := range map[string]string{
 					"safe child":   safeScript,
 					"unsafe child": unsafeChild,
@@ -1459,6 +1499,68 @@ if ($Operation -eq 'RequireEditor') {
 		}
 	})
 
+	t.Run("unrelated Join-Path script graph remains outside editor policy", func(t *testing.T) {
+		steps := strings.Replace(
+			centralReturnSteps(),
+			"      - id: acquire",
+			`      - name: Run unrelated wrapper
+        shell: pwsh
+        run: ./scripts/ci/unrelated.ps1
+      - id: acquire`,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": unityWorkflow(steps, safeAggregate()),
+			"scripts/ci/unrelated.ps1":    "& (Join-Path $PSScriptRoot 'child.ps1')\n",
+			"scripts/ci/child.ps1":        "Write-Host 'ordinary test driver'\n",
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
+			t.Fatalf("unrelated script graph entered editor policy: %#v", result.Findings)
+		}
+	})
+
+	t.Run("shared and cyclic script graph terminates deterministically", func(t *testing.T) {
+		steps := strings.Replace(
+			centralReturnSteps(),
+			"      - id: acquire",
+			`      - name: First shared root
+        shell: pwsh
+        run: ./scripts/ci/a.ps1
+      - name: Second shared root
+        shell: pwsh
+        run: ./scripts/ci/b.ps1
+      - id: acquire`,
+			1,
+		)
+		files := map[string]string{
+			".github/workflows/unity.yml":     unityWorkflow(steps, safeAggregate()),
+			"scripts/ci/a.ps1":                "& \"$PSScriptRoot/shared.ps1\"\n",
+			"scripts/ci/b.ps1":                "& \"$PSScriptRoot/shared.ps1\"\n",
+			"scripts/ci/shared.ps1":           safeScript,
+			"scripts/unity/ensure-editor.ps1": "",
+		}
+		result, err := AnalyzeUnityEnrollment(unityFixture(files), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
+			t.Fatalf("shared safe descendant changed result: %#v", result.Findings)
+		}
+
+		files["scripts/ci/shared.ps1"] = "& \"$PSScriptRoot/cycle.ps1\"\n"
+		files["scripts/ci/cycle.ps1"] = "& \"$PSScriptRoot/shared.ps1\"\n"
+		result, err = AnalyzeUnityEnrollment(unityFixture(files), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
+			t.Fatalf("unrelated cycle changed result: %#v", result.Findings)
+		}
+	})
+
 	for name, wrapper := range map[string]string{
 		"single quoted Join-Path root": "& (Join-Path '$PSScriptRoot' " +
 			"'unity.ps1')\n",
@@ -1468,9 +1570,11 @@ if ($Operation -eq 'RequireEditor') {
 		"escaped double quoted direct root": "& \"`$PSScriptRoot/unity.ps1\"\n",
 	} {
 		t.Run(name+" fails closed", func(t *testing.T) {
+			wrapper += "& \"$PSScriptRoot/relevant.ps1\" -Operation RequireEditor\n"
 			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 				".github/workflows/unity.yml":     workflow,
 				"scripts/ci/wrapper.ps1":          wrapper,
+				"scripts/ci/relevant.ps1":         safeScript,
 				"scripts/ci/unity.ps1":            safeScript,
 				"scripts/unity/ensure-editor.ps1": "",
 			}), unityAuditPolicy())
@@ -1635,10 +1739,12 @@ if ($Operation -eq 'RequireEditor') {
 	})
 
 	t.Run("runtime-loaded delegated target fails closed", func(t *testing.T) {
-		wrapper := "$x = Get-Content \"$PSScriptRoot/target.txt\"\n& $x\n"
+		wrapper := "$x = Get-Content \"$PSScriptRoot/target.txt\"\n& $x\n" +
+			"& \"$PSScriptRoot/relevant.ps1\" -Operation RequireEditor\n"
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1":      wrapper,
+			"scripts/ci/relevant.ps1":     safeScript,
 		}), unityAuditPolicy())
 		if err != nil {
 			t.Fatal(err)
@@ -1668,6 +1774,29 @@ if ($Operation -eq 'RequireEditor') {
 			"unsafe-unity-editor-provisioning",
 		) {
 			t.Fatalf("runtime child replacement passed: %#v", result.Findings)
+		}
+	})
+
+	t.Run("same-basename intermediate is not a trusted terminal", func(t *testing.T) {
+		wrapper := "Copy-Item -LiteralPath \"$PSScriptRoot/payload.template\" " +
+			"-Destination \"$PSScriptRoot/child.ps1\" -Force\n" +
+			"& \"$PSScriptRoot/../unity/ensure-editor.ps1\" " +
+			"-CiManagedOnly -RequireHealthyExisting\n"
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml":     workflow,
+			"scripts/ci/wrapper.ps1":          "& \"$PSScriptRoot/ensure-editor.ps1\"\n",
+			"scripts/ci/ensure-editor.ps1":    wrapper,
+			"scripts/ci/payload.template":     "Write-Host replacement\n",
+			"scripts/unity/ensure-editor.ps1": "",
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("same-basename intermediate inherited terminal trust: %#v", result.Findings)
 		}
 	})
 
@@ -1743,9 +1872,11 @@ if ($Operation -eq 'RequireEditor') {
 			"& (Join-Path $PSScriptRoot 'unsafe.ps1')\n",
 	} {
 		t.Run(name+" cannot redirect a trusted path", func(t *testing.T) {
+			wrapper += "& \"$PSScriptRoot/relevant.ps1\" -Operation RequireEditor\n"
 			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 				".github/workflows/unity.yml": workflow,
 				"scripts/ci/wrapper.ps1":      wrapper,
+				"scripts/ci/relevant.ps1":     safeScript,
 				"unsafe.ps1":                  safeScript,
 			}), unityAuditPolicy())
 			if err != nil {
@@ -1824,7 +1955,8 @@ if ($Operation -eq 'RequireEditor') {
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1": "& (Join-Path $PSScriptRoot`` " +
-				"'unity.ps1')\n",
+				"'unity.ps1')\n& \"$PSScriptRoot/relevant.ps1\" -Operation RequireEditor\n",
+			"scripts/ci/relevant.ps1":         safeScript,
 			"scripts/ci/unity.ps1":            safeScript,
 			"scripts/unity/ensure-editor.ps1": "",
 		}), unityAuditPolicy())
@@ -1932,10 +2064,12 @@ if ($Operation -eq 'RequireEditor') {
 	t.Run("delegated invoke-expression fails closed", func(t *testing.T) {
 		evalWrapper := `$command = './scripts/unity/ensure-' + 'editor.ps1'
 iex $command
+& "$PSScriptRoot/relevant.ps1" -Operation RequireEditor
 `
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1":      evalWrapper,
+			"scripts/ci/relevant.ps1":     safeScript,
 		}), unityAuditPolicy())
 		if err != nil {
 			t.Fatal(err)
@@ -1948,10 +2082,12 @@ iex $command
 	t.Run("delegated child PowerShell command fails closed", func(t *testing.T) {
 		childShellWrapper := `$command = './scripts/unity/ensure-' + 'editor.ps1'
 powershell.exe -NoProfile -c $command
+& "$PSScriptRoot/relevant.ps1" -Operation RequireEditor
 `
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1":      childShellWrapper,
+			"scripts/ci/relevant.ps1":     safeScript,
 		}), unityAuditPolicy())
 		if err != nil {
 			t.Fatal(err)
@@ -1965,10 +2101,12 @@ powershell.exe -NoProfile -c $command
 		quotedChildShellWrapper := `$shell = 'pwsh'
 $command = './scripts/unity/ensure-' + 'editor.ps1'
 & "$shell" -NoProfile -c $command
+& "$PSScriptRoot/relevant.ps1" -Operation RequireEditor
 `
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			"scripts/ci/wrapper.ps1":      quotedChildShellWrapper,
+			"scripts/ci/relevant.ps1":     safeScript,
 		}), unityAuditPolicy())
 		if err != nil {
 			t.Fatal(err)

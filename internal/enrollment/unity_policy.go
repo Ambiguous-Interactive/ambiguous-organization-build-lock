@@ -1157,6 +1157,7 @@ type powerShellPathReference struct {
 	end                int
 	repositoryRelative bool
 	scriptRelative     bool
+	hazardous          bool
 }
 
 func auditEnsureEditorSource(text string) editorSourceAudit {
@@ -1561,48 +1562,102 @@ func splitPowerShellCommands(line string) []string {
 }
 
 func (a *unityPolicyAnalyzer) delegatedEditorAudit(run string) editorSourceAudit {
-	result := editorSourceAudit{}
-	visited := make(map[string]bool)
-	for _, reference := range invokedPowerShellReferences(run) {
-		candidate := reference.path
-		candidateResult := a.auditDelegatedEditorScript(candidate, visited)
-		result.merge(candidateResult)
+	type scriptNode struct {
+		path       string
+		source     string
+		terminal   bool
+		missing    bool
+		local      editorSourceAudit
+		references []powerShellPathReference
 	}
-	return result
-}
 
-func (a *unityPolicyAnalyzer) auditDelegatedEditorScript(
-	scriptPath string,
-	visited map[string]bool,
-) editorSourceAudit {
-	if visited[scriptPath] {
-		return editorSourceAudit{}
-	}
-	visited[scriptPath] = true
-	content, ok := a.analyzer.snapshot.Files[scriptPath]
-	if !ok {
-		return editorSourceAudit{unsafe: true}
-	}
-	source := string(content)
-	result := auditEnsureEditorSource(source)
-	if !strings.EqualFold(path.Base(scriptPath), "ensure-editor.ps1") &&
-		unsupportedDelegatedPowerShellProgram(source) {
-		result.unsafe = true
-	}
-	if hasUnresolvedPowerShellScriptInvocation(source) {
-		result.unsafe = true
-	}
-	if strings.EqualFold(path.Base(scriptPath), "ensure-editor.ps1") {
-		// The terminal helper can retain manual-mode controls. Only controls in
-		// its CI caller and reachable wrappers are CI policy.
-		result.provisioningControl = false
-	}
-	for _, reference := range invokedPowerShellReferences(source) {
-		candidate := reference.path
-		if reference.scriptRelative {
-			candidate = path.Clean(path.Join(path.Dir(scriptPath), candidate))
+	nodes := make(map[string]*scriptNode)
+	roots := make(map[string]bool)
+	var collect func(string)
+	collect = func(scriptPath string) {
+		if _, seen := nodes[scriptPath]; seen {
+			return
 		}
-		result.merge(a.auditDelegatedEditorScript(candidate, visited))
+		node := &scriptNode{path: scriptPath}
+		nodes[scriptPath] = node
+		content, ok := a.analyzer.snapshot.Files[scriptPath]
+		if !ok {
+			node.missing = true
+			return
+		}
+		node.source = string(content)
+		node.terminal = strings.EqualFold(
+			path.Clean(scriptPath),
+			"scripts/unity/ensure-editor.ps1",
+		)
+		node.local = auditEnsureEditorSource(node.source)
+		if node.terminal {
+			// The terminal helper can retain manual-mode controls. Only controls in
+			// its CI caller and reachable wrappers are CI policy.
+			node.local.provisioningControl = false
+		}
+		for _, reference := range invokedPowerShellReferences(node.source) {
+			candidate := reference.path
+			if reference.scriptRelative {
+				candidate = path.Clean(path.Join(path.Dir(scriptPath), candidate))
+			}
+			reference.path = candidate
+			node.references = append(node.references, reference)
+			collect(candidate)
+		}
+	}
+
+	for _, reference := range invokedPowerShellReferences(run) {
+		roots[reference.path] = true
+		collect(reference.path)
+	}
+
+	// Relevance is a graph property, not a DFS return value: shared descendants
+	// and cycles must produce the same answer regardless of traversal order.
+	relevant := make(map[string]bool)
+	for scriptPath, node := range nodes {
+		if node.local.found || node.local.provisioningControl {
+			relevant[scriptPath] = true
+		}
+	}
+	changed := true
+	for changed {
+		changed = false
+		for scriptPath, node := range nodes {
+			if relevant[scriptPath] {
+				continue
+			}
+			for _, reference := range node.references {
+				if relevant[reference.path] {
+					relevant[scriptPath] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	result := editorSourceAudit{}
+	for scriptPath, node := range nodes {
+		result.merge(node.local)
+		if node.missing {
+			if roots[scriptPath] {
+				result.unsafe = true
+			}
+			continue
+		}
+		if !relevant[scriptPath] || node.terminal {
+			continue
+		}
+		if unsupportedDelegatedPowerShellProgram(node.source) ||
+			hasUnresolvedPowerShellScriptInvocation(node.source) {
+			result.unsafe = true
+		}
+		for _, reference := range node.references {
+			if reference.hazardous || nodes[reference.path].missing {
+				result.unsafe = true
+			}
+		}
 	}
 	return result
 }
@@ -2800,15 +2855,15 @@ func invokedPowerShellReferences(text string) []powerShellPathReference {
 			if !powerShellCommandInvokesReference(command, reference) {
 				continue
 			}
-			if !reference.scriptRelative {
-				scriptRelative, joinPathCall := powerShellJoinPathCall(
-					command[:reference.start],
-				)
-				if joinPathCall {
-					reference.scriptRelative = scriptRelative
-				}
+			scriptRelative, joinPathCall := powerShellJoinPathCall(
+				command[:reference.start],
+			)
+			if joinPathCall {
+				reference.scriptRelative = scriptRelative
+				reference.hazardous = true
 			}
-			key := reference.path + "\x00" + strconv.FormatBool(reference.scriptRelative)
+			key := reference.path + "\x00" + strconv.FormatBool(reference.scriptRelative) +
+				"\x00" + strconv.FormatBool(reference.hazardous)
 			if seen[key] {
 				continue
 			}
@@ -3150,8 +3205,20 @@ func powerShellDotOperator(command string, index int) bool {
 }
 
 func powerShellJoinPathCommandEnd(text string, start int) (int, bool) {
-	index := skipPowerShellTrivia(text, start)
-	const command = `microsoft.powershell.management\join-path`
+	start = skipPowerShellTrivia(text, start)
+	for _, command := range []string{
+		`microsoft.powershell.management\join-path`,
+		"join-path",
+	} {
+		if end, ok := powerShellCommandNameEnd(text, start, command); ok {
+			return end, true
+		}
+	}
+	return 0, false
+}
+
+func powerShellCommandNameEnd(text string, start int, command string) (int, bool) {
+	index := start
 	for expected := 0; expected < len(command); expected++ {
 		for index < len(text) && text[index] == '`' {
 			if index+1 >= len(text) {

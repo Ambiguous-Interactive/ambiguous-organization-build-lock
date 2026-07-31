@@ -364,15 +364,24 @@ subexpression behavior, while Microsoft's
 [parsing documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_parsing#line-continuation)
 confirms that an opening parenthesis is a natural line-break point.
 
-The final boundary is intentionally smaller than the experimental recognizer:
-checked-in nonterminal wrappers permit only one balanced, ordered program made
-from the exact optional `param([string]$Operation)` declaration, the exact
-optional `RequireEditor` equality guard, and one simple direct script token
-with inert arguments. Parenthesized path construction, dynamic targets,
-arbitrary wrapper commands, path-context mutation, here-strings, executable
-argument expressions, and workflow working-directory overrides fail closed.
+The final boundary is intentionally smaller than a general PowerShell program
+proof. The analyzer first builds a graph of statically identifiable checked-in
+script calls, seeds it from editor-helper references and provisioning controls,
+and reverse-propagates relevance to a fixed point. Relevant nonterminal
+wrappers permit only one balanced, ordered program made from the exact optional
+`param([string]$Operation)` declaration, the exact optional `RequireEditor`
+equality guard, and one simple direct script token with inert arguments.
+Dynamic targets, arbitrary commands, path-context mutation, here-strings, and
+executable argument expressions fail closed on that relevant graph.
+Parenthesized literal `Join-Path` calls are resolved only for recursive lookup
+and are always hazardous when relevant; unrelated complex build/test drivers
+remain outside the editor-provisioning rule. This explicitly enforces every
+statically identifiable transitive editor-helper chain rather than claiming a
+lexical scanner can prove arbitrary dynamically loaded PowerShell.
+
 Direct path tokens are interpreted with PowerShell quote/escape and Unicode
-semantics before recursive lookup. Exact Git snapshots now preserve tree
-mode/type evidence and reject symlink, gitlink, and other non-regular policy
-entries. Fifteen independent adversarial rounds ended in PASS; the full
-enrollment package and repository verifier remain green.
+semantics before recursive lookup. Exact Git snapshots preserve tree mode/type
+evidence and reject symlink, gitlink, and other non-regular policy entries. The
+post-review candidate audit again covers 89 active jobs with only the three
+expected unity-helpers findings; the full 678-test repository verifier remains
+green.
