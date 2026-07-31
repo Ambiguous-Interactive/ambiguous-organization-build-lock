@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: central implementation merged and verified; immutable rollout in progress
+Status: central implementation and immutable authorization merged; consumer rollout in progress
 
 ## Selection
 
@@ -112,9 +112,22 @@ PR #161 squash-merged as
 `30594478305` passed both Linux and hosted-Windows jobs, and organization
 enrollment audit run `30594478303` passed on that exact `main` commit.
 
-The separate authorization change adds this now-reachable commit to both
-`approvedLockShas` and the narrower credential-bearing `approvedReturnShas`.
-Only after that review merges may consumer workflows pin the new immutable
-revision. Consumer migration must then preserve the audited workflow shapes
+Authorization PR #162 squash-merged as
+`9ea6d7d122c478b069ce7753999ac8addee6479d`, adding the reachable
+implementation to both `approvedLockShas` and the narrower credential-bearing
+`approvedReturnShas`. Build lock CI run `30594763371` and organization
+enrollment audit run `30594763401` passed on the exact authorized `main` head.
+
+Consumer canary work then exposed a real path-contract dependency rather than
+an evidence-deletion defect: repositories provisioned with `ensure-editor
+-CiManagedOnly` place the executable below `_ci-managed-editors`, while the
+return action had only the canonical layout. Issue #163 recorded that separate
+dependency. PR #164 implemented a closed `editor-layout` enum and PR #165
+authorized its immutable merge `d72d1072accbc8090874b5aa257be3e56774de5d`.
+The default remains canonical; the only alternate is the reviewed CI-managed
+layout. Both exact post-merge `main` workflows passed.
+
+Consumer migration must preserve the audited workflow shapes, use the smallest
+authorized immutable revision compatible with each provisioned editor layout,
 and prove the organization enrollment audit green. No organization credential,
 App, secret, runner, or ruleset policy changes are part of this rollout.

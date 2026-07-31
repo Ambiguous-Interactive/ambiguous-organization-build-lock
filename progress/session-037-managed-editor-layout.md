@@ -2,7 +2,7 @@
 
 Date: 2026-07-31
 
-Status: central implementation merged and verified; authorization pending
+Status: central implementation and immutable authorization merged and verified
 
 ## Trigger
 
@@ -65,7 +65,15 @@ PR #164 squash-merged as
 `30596311160` passed both Linux and hosted-Windows jobs, and organization
 enrollment audit run `30596311153` passed on that exact `main` commit.
 
-This separate authorization change adds that now-reachable implementation to
-both `approvedLockShas` and the narrower credential-bearing
-`approvedReturnShas`. Consumers may pin it only after this authorization merges
-and main remains green. Exact-head consumer canary evidence remains pending.
+Authorization PR #165 squash-merged as
+`40cec55f57ec13eb30803f049fc412f909d4f2c1`, adding the reachable
+implementation to both `approvedLockShas` and the narrower credential-bearing
+`approvedReturnShas`. On that exact `main` head, Build lock CI run `30596721684`
+and organization enrollment audit run `30596721634` passed. The separate
+Copilot workflow reported its repository quota exhaustion and is not a required
+code check.
+
+Authorized consumers that use `ensure-editor -CiManagedOnly` may now pin
+`d72d1072accbc8090874b5aa257be3e56774de5d` and declare the exact
+`ci-managed-alternate` literal. Exact-head consumer canary evidence remains the
+final rollout boundary.
