@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30647017440:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "30647017440",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30647017440",
+    "queuedAt": "2026-07-31T16:25:36.216Z",
+    "acquiredAt": "2026-07-31T16:25:38.919Z",
+    "expiresAt": "2026-07-31T20:25:38.919Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "168da5ff-5a6f-4ed8-a98e-9040a9dd143b",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30645211053:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30645211053",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30645211053",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-31T16:24:15.042Z",
-      "availableAt": "2026-07-31T16:24:16.042Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:30647017440:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "30647017440",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30647017440",
+      "queuedAt": "2026-07-31T16:25:36.216Z",
+      "acquiredAt": "2026-07-31T16:25:38.919Z",
+      "expiresAt": "2026-07-31T20:25:38.919Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T16:24:15.043Z"
+  "updatedAt": "2026-07-31T16:25:38.919Z"
 }
