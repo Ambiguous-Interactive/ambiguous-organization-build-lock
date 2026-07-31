@@ -113,6 +113,35 @@ func TestGitSnapshotRejectsOversizedPolicyBlob(t *testing.T) {
 	}
 }
 
+func TestGitSnapshotRejectsSymlinkedPolicyFile(t *testing.T) {
+	repositoryRoot := initializeSnapshotRepository(t)
+	linkTarget := filepath.Join(repositoryRoot, "link-target.txt")
+	if err := os.WriteFile(linkTarget, []byte("actual.ps1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blob := runGit(t, repositoryRoot, "hash-object", "-w", linkTarget)
+	runGit(
+		t,
+		repositoryRoot,
+		"update-index",
+		"--add",
+		"--cacheinfo",
+		"120000,"+blob+",scripts/link.ps1",
+	)
+	runGit(t, repositoryRoot, "commit", "-q", "-m", "symlinked policy file")
+	sha := runGit(t, repositoryRoot, "rev-parse", "HEAD")
+
+	_, err := LoadGitSnapshot(
+		context.Background(),
+		repositoryRoot,
+		"Ambiguous-Interactive/fixture",
+		sha,
+	)
+	if err == nil || !strings.Contains(err.Error(), "is not a regular blob") {
+		t.Fatalf("symlinked policy file error = %v", err)
+	}
+}
+
 func TestGitSnapshotRejectsExcessivePolicyFileCount(t *testing.T) {
 	repositoryRoot := initializeSnapshotRepository(t)
 	scriptsRoot := filepath.Join(repositoryRoot, "scripts")

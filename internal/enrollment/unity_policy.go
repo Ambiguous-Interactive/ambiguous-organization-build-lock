@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -804,6 +805,8 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		nodeScalarText(mappingValue(workflow, "env")) +
 			nodeScalarText(mappingValue(job, "env")),
 	)
+	workflowRunDefaults := mappingValue(mappingValue(workflow, "defaults"), "run")
+	jobRunDefaults := mappingValue(mappingValue(job, "defaults"), "run")
 	for _, control := range unityEditorProvisioningControls {
 		if strings.Contains(jobText, control) {
 			a.analyzer.add("unity-editor-provisioning-control", workflowPath, jobName)
@@ -834,6 +837,9 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		if run == "" {
 			continue
 		}
+		workingDirectory := mappingValue(step.node, "working-directory") != nil ||
+			mappingValue(workflowRunDefaults, "working-directory") != nil ||
+			mappingValue(jobRunDefaults, "working-directory") != nil
 		direct := auditEnsureEditorSource(run)
 		// A checked-in wrapper can hide the actual invocation behind arbitrary
 		// PowerShell control flow. Audit every statically reachable wrapper for
@@ -852,7 +858,7 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		if step.scope == "job" {
 			unresolved = hasUnresolvedPowerShellWorkflowInvocation(run)
 		}
-		if direct.unsafe || delegated.unsafe || unresolved {
+		if direct.unsafe || delegated.unsafe || unresolved || workingDirectory {
 			a.analyzer.add("unsafe-unity-editor-provisioning", workflowPath, jobName)
 		}
 		if direct.provisioningControl || delegated.provisioningControl {
@@ -1254,7 +1260,12 @@ func simplePowerShellInvocation(
 	reference powerShellPathReference,
 ) bool {
 	prefix := strings.TrimSpace(command[:reference.start])
+	quotedReference := reference.start > 0 &&
+		(command[reference.start-1] == '\'' || command[reference.start-1] == '"')
 	prefix = strings.TrimSpace(strings.TrimRight(prefix, `"'`))
+	if quotedReference && (prefix == "" || strings.HasSuffix(prefix, "(")) {
+		return false
+	}
 	if prefix == "" || prefix == "&" {
 		return true
 	}
@@ -1394,12 +1405,13 @@ func powerShellCommands(text string) []string {
 			continue
 		}
 		if strings.HasSuffix(trimmed, "`") {
-			continued.WriteString(strings.TrimSpace(strings.TrimSuffix(trimmed, "`")))
-			continued.WriteByte(' ')
+			continued.WriteString(trimmed)
+			continued.WriteByte('\n')
 			continue
 		}
 		continued.WriteString(trimmed)
-		if !balancedPowerShellQuotes(continued.String()) {
+		if !balancedPowerShellQuotes(continued.String()) ||
+			!balancedPowerShellParentheses(continued.String()) {
 			continued.WriteByte('\n')
 			continue
 		}
@@ -1439,11 +1451,50 @@ func balancedPowerShellQuotes(text string) bool {
 	return !inSingleQuote && !inDoubleQuote
 }
 
+func balancedPowerShellParentheses(text string) bool {
+	depth := 0
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return false
+			}
+			depth--
+		}
+	}
+	return depth == 0
+}
+
 func splitPowerShellCommands(line string) []string {
 	result := make([]string, 0)
 	start := 0
 	inSingleQuote := false
 	inDoubleQuote := false
+	bracedVariableDepth := 0
 	for index := 0; index < len(line); index++ {
 		char := line[index]
 		if !inSingleQuote && !inDoubleQuote &&
@@ -1470,6 +1521,14 @@ func splitPowerShellCommands(line string) []string {
 			continue
 		}
 		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		if char == '{' && index > 0 && line[index-1] == '$' {
+			bracedVariableDepth++
+			continue
+		}
+		if char == '}' && bracedVariableDepth > 0 {
+			bracedVariableDepth--
 			continue
 		}
 		separatorLength := 0
@@ -1526,6 +1585,10 @@ func (a *unityPolicyAnalyzer) auditDelegatedEditorScript(
 	}
 	source := string(content)
 	result := auditEnsureEditorSource(source)
+	if !strings.EqualFold(path.Base(scriptPath), "ensure-editor.ps1") &&
+		unsupportedDelegatedPowerShellProgram(source) {
+		result.unsafe = true
+	}
 	if hasUnresolvedPowerShellScriptInvocation(source) {
 		result.unsafe = true
 	}
@@ -1544,12 +1607,164 @@ func (a *unityPolicyAnalyzer) auditDelegatedEditorScript(
 	return result
 }
 
+func unsupportedDelegatedPowerShellProgram(text string) bool {
+	clean := stripPowerShellComments(text)
+	if !balancedPowerShellQuotes(clean) || !balancedPowerShellParentheses(clean) ||
+		!balancedPowerShellBraces(clean) {
+		return true
+	}
+	stage := 0
+	invocations := 0
+	for _, command := range powerShellCommands(clean) {
+		command = strings.TrimSpace(command)
+		lower := strings.ToLower(command)
+		if strings.HasPrefix(lower, "param(") {
+			if stage != 0 {
+				return true
+			}
+			if strings.ToLower(normalizePowerShellPathExpression(command)) !=
+				"param[string]$operation" {
+				return true
+			}
+			stage = 1
+			continue
+		}
+		if strings.ToLower(normalizePowerShellPathExpression(command)) ==
+			"if$operation-eqrequireeditor" {
+			if stage > 1 {
+				return true
+			}
+			stage = 2
+			continue
+		}
+		if stage >= 3 {
+			return true
+		}
+		references := invokedPowerShellReferences(command)
+		if len(references) != 1 ||
+			!simplePowerShellInvocation(command, references[0]) ||
+			!safeDelegatedPowerShellArguments(command[references[0].end:]) {
+			return true
+		}
+		stage = 3
+		invocations++
+	}
+	return invocations != 1
+}
+
+func balancedPowerShellBraces(text string) bool {
+	depth := 0
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		switch char {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}
+
+func safeDelegatedPowerShellArguments(arguments string) bool {
+	subexpressions, malformed := powerShellExpandableSubexpressions(arguments)
+	if malformed || len(subexpressions) != 0 {
+		return false
+	}
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(arguments); index++ {
+		char := arguments[index]
+		if char == '`' && !inSingleQuote && index+1 < len(arguments) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(arguments) && arguments[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		if strings.ContainsRune(";|&<>{}()", rune(char)) ||
+			((char == '$' || char == '@') &&
+				index+1 < len(arguments) && arguments[index+1] == '(') {
+			return false
+		}
+	}
+	return !inSingleQuote && !inDoubleQuote
+}
+
 func hasUnresolvedPowerShellScriptInvocation(text string) bool {
+	if powerShellMutatesDelegatedScriptTarget(text) {
+		return true
+	}
 	return hasUnresolvedPowerShellInvocation(
 		text,
-		powerShellVariableMayReferenceScript,
+		func(_ string, variable string) bool {
+			return strings.TrimSpace(variable) != ""
+		},
 		true,
 	)
+}
+
+func powerShellMutatesDelegatedScriptTarget(text string) bool {
+	mutators := map[string]bool{
+		"add-content": true, "clear-content": true, "copy": true, "copy-item": true,
+		"cp": true, "cpi": true, "curl": true, "expand-archive": true,
+		"invoke-webrequest": true, "iwr": true, "move-item": true, "mi": true,
+		"mv": true, "new-item": true, "ni": true, "out-file": true,
+		"rename-item": true, "ren": true, "rni": true, "set-content": true,
+		"sp": true, "wget": true,
+	}
+	for _, command := range powerShellCommands(text) {
+		tokens := powerShellCommandTokens(command)
+		for _, token := range tokens {
+			if mutators[powerShellCommandBase(powerShellSemanticToken(token))] {
+				return true
+			}
+		}
+		lower := strings.ToLower(powerShellUnquotedText(command))
+		if strings.Contains(lower, "[io.file]") ||
+			strings.Contains(lower, "[system.io.file]") ||
+			strings.Contains(lower, "[io.directory]") ||
+			strings.Contains(lower, "[system.io.directory]") {
+			return true
+		}
+	}
+	return false
 }
 
 func hasUnresolvedPowerShellWorkflowInvocation(text string) bool {
@@ -1575,9 +1790,47 @@ func hasUnresolvedPowerShellInvocation(
 	mayReference func(string, string) bool,
 	rejectExpression bool,
 ) bool {
+	clean := stripPowerShellComments(text)
+	if powerShellMutatesTrustedPathContext(clean) {
+		return true
+	}
+	if powerShellContainsHereString(clean) {
+		return true
+	}
+	subexpressions, malformed := powerShellExpandableSubexpressions(
+		clean,
+	)
+	if malformed {
+		return true
+	}
+	for _, subexpression := range subexpressions {
+		if hasUnresolvedPowerShellInvocation(
+			subexpression,
+			mayReference,
+			rejectExpression,
+		) {
+			return true
+		}
+	}
 	for _, command := range powerShellCommands(text) {
 		if dynamicPowerShellEvaluation(command) {
 			return true
+		}
+		executionTokens := powerShellCommandTokens(command)
+		for index, token := range executionTokens {
+			name := powerShellCommandBase(powerShellSemanticToken(token))
+			if name != "start-job" && name != "invoke-command" {
+				continue
+			}
+			for _, option := range executionTokens[index+1:] {
+				option = strings.TrimLeft(
+					strings.ToLower(powerShellSemanticToken(option)),
+					"-",
+				)
+				if option == "filepath" || option == "literalpath" || option == "pspath" {
+					return true
+				}
+			}
 		}
 		inSingleQuote := false
 		inDoubleQuote := false
@@ -1605,35 +1858,31 @@ func hasUnresolvedPowerShellInvocation(
 			}
 			operator := (char == '&' &&
 				powerShellCallOperator(command, index)) ||
-				(char == '.' &&
-					(strings.TrimSpace(command[:index]) == "" ||
-						strings.HasSuffix(
-							strings.TrimSpace(command[:index]),
-							"{",
-						)))
+				(char == '.' && powerShellDotOperator(command, index))
 			if !operator {
 				continue
 			}
-			next := index + 1
-			for next < len(command) &&
-				unicode.IsSpace(rune(command[next])) {
-				next++
-			}
+			next := skipPowerShellTrivia(command, index+1)
 			if next < len(command) &&
 				(command[next] == '\'' || command[next] == '"') &&
 				quotedDynamicPowerShellTarget(command, next) {
 				return true
 			}
-			targetTokens := powerShellCommandTokens(command[next:])
-			if len(targetTokens) > 0 &&
+			targetText := command[next:]
+			target := powerShellDirectTargetToken(targetText)
+			if len(target) < len(targetText) && strings.HasSuffix(target, "$") &&
+				targetText[len(target)] == '(' {
+				return true
+			}
+			if target != "" &&
 				dynamicPowerShellCommandTarget(
 					text,
-					targetTokens[0],
+					target,
 					mayReference,
 				) {
 				return true
 			}
-			if next < len(command) && command[next] == '$' {
+			if target == "" && next < len(command) && command[next] == '$' {
 				end := next + 1
 				for end < len(command) &&
 					(unicode.IsLetter(rune(command[end])) ||
@@ -1715,6 +1964,200 @@ func hasUnresolvedPowerShellInvocation(
 	return false
 }
 
+func powerShellMutatesTrustedPathContext(text string) bool {
+	if strings.Contains(strings.ToLower(powerShellUnquotedText(text)), "$executioncontext") {
+		return true
+	}
+	assignments := powerShellVariableAssignments(text)
+	if _, ok := assignments["psscriptroot"]; ok {
+		return true
+	}
+	if _, ok := assignments["env:github_workspace"]; ok {
+		return true
+	}
+	locationCommands := map[string]bool{
+		"cd": true, "chdir": true, "pop-location": true, "popd": true,
+		"push-location": true, "pushd": true, "set-location": true, "sl": true,
+	}
+	variableCommands := map[string]bool{
+		"clear-variable": true, "cv": true, "new-variable": true, "nv": true,
+		"remove-variable": true, "rv": true, "set-variable": true, "sv": true,
+	}
+	providerCommands := map[string]bool{
+		"clear-item": true, "new-item": true, "ni": true, "remove-item": true,
+		"rename-item": true, "ri": true, "set-item": true, "si": true,
+	}
+	for _, command := range powerShellCommands(text) {
+		if assignment := strings.Index(command, "="); assignment >= 0 {
+			left := strings.TrimSpace(command[:assignment])
+			left = strings.TrimRight(left, "+-*/%")
+			left = strings.ToLower(strings.Trim(left, " ${}"))
+			if strings.HasSuffix(left, "psscriptroot") ||
+				strings.HasSuffix(left, "env:github_workspace") {
+				return true
+			}
+		}
+		tokens := powerShellCommandTokens(command)
+		if len(tokens) == 0 {
+			continue
+		}
+		name := powerShellCommandBase(powerShellSemanticToken(tokens[0]))
+		if name == "&" && len(tokens) > 1 {
+			name = powerShellCommandBase(powerShellSemanticToken(tokens[1]))
+			tokens = tokens[1:]
+		}
+		if (name == "function" || name == "filter") && len(tokens) > 1 {
+			definition := strings.ToLower(powerShellSemanticToken(tokens[1]))
+			if separator := strings.LastIndex(definition, ":"); separator >= 0 {
+				definition = definition[separator+1:]
+			}
+			if definition == "join-path" {
+				return true
+			}
+		}
+		if name == "set-alias" || name == "new-alias" || name == "sal" {
+			return true
+		}
+		if locationCommands[name] {
+			return true
+		}
+		if strings.HasPrefix(name, "[environment]::setenvironmentvariable") &&
+			strings.Contains(strings.ToLower(command), "github_workspace") {
+			return true
+		}
+		if variableCommands[name] {
+			return true
+		}
+		if providerCommands[name] {
+			for _, token := range tokens[1:] {
+				target := strings.ToLower(strings.ReplaceAll(
+					powerShellSemanticToken(token),
+					"\\",
+					"/",
+				))
+				if (strings.Contains(target, "variable:") &&
+					strings.Contains(target, "psscriptroot")) ||
+					(strings.Contains(target, "env:") &&
+						strings.Contains(target, "github_workspace")) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func powerShellCommandBase(command string) string {
+	command = strings.ToLower(strings.ReplaceAll(command, "/", "\\"))
+	if separator := strings.LastIndex(command, "\\"); separator >= 0 {
+		command = command[separator+1:]
+	}
+	return command
+}
+
+func powerShellContainsHereString(text string) bool {
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if !inSingleQuote && !inDoubleQuote && char == '@' &&
+			index+1 < len(text) &&
+			(text[index+1] == '\'' || text[index+1] == '"') {
+			return true
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		}
+	}
+	return false
+}
+
+func powerShellExpandableSubexpressions(text string) ([]string, bool) {
+	result := make([]string, 0)
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if !inDoubleQuote || char != '$' ||
+			index+1 >= len(text) || text[index+1] != '(' {
+			continue
+		}
+		end, ok := powerShellParenthesizedExpressionEnd(text, index+1)
+		if !ok {
+			return nil, true
+		}
+		result = append(result, text[index+2:end])
+		index = end
+	}
+	return result, false
+}
+
+func powerShellParenthesizedExpressionEnd(text string, open int) (int, bool) {
+	depth := 1
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := open + 1; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return index, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func powerShellCallOperator(command string, index int) bool {
 	prefix := strings.TrimSpace(command[:index])
 	if prefix == "" {
@@ -1767,9 +2210,13 @@ func powerShellCommandTokens(command string) []string {
 			token.WriteByte(char)
 			continue
 		}
-		if unicode.IsSpace(rune(char)) && !inSingleQuote && !inDoubleQuote {
-			flush()
-			continue
+		if !inSingleQuote && !inDoubleQuote {
+			space, size := utf8.DecodeRuneInString(command[index:])
+			if unicode.IsSpace(space) {
+				flush()
+				index += size - 1
+				continue
+			}
 		}
 		if char == '=' && !inSingleQuote && !inDoubleQuote {
 			current := token.String()
@@ -1959,10 +2406,12 @@ func powerShellTokenSemantics(token string) (string, bool) {
 
 func powerShellVariableStartsAt(text string, index int) bool {
 	next := index + 1
-	return next < len(text) &&
-		(unicode.IsLetter(rune(text[next])) ||
-			unicode.IsDigit(rune(text[next])) ||
-			strings.ContainsRune("_:{(?^$", rune(text[next])))
+	if next >= len(text) {
+		return false
+	}
+	char, _ := utf8.DecodeRuneInString(text[next:])
+	return unicode.IsLetter(char) || unicode.IsDigit(char) ||
+		strings.ContainsRune("_:{(?^$", char)
 }
 
 func powerShellDynamicReferences(token string) ([]string, bool) {
@@ -2008,11 +2457,13 @@ func powerShellDynamicReferences(token string) ([]string, bool) {
 			}
 			end += closing + 2
 		} else {
-			for end < len(token) &&
-				(unicode.IsLetter(rune(token[end])) ||
-					unicode.IsDigit(rune(token[end])) ||
-					strings.ContainsRune("_:-", rune(token[end]))) {
-				end++
+			for end < len(token) {
+				char, size := utf8.DecodeRuneInString(token[end:])
+				if !unicode.IsLetter(char) && !unicode.IsDigit(char) &&
+					!strings.ContainsRune("_:-", char) {
+					break
+				}
+				end += size
 			}
 		}
 		if end > index+1 {
@@ -2098,29 +2549,7 @@ func singleQuotedPowerShellToken(token string) bool {
 }
 
 func safeLiteralPowerShellJoinPathInvocation(expression string) bool {
-	references := powerShellPathReferences(expression)
-	if len(references) != 1 || !references[0].repositoryRelative {
-		return false
-	}
-	reference := references[0]
-	prefix := normalizePowerShellPathExpression(expression[:reference.start])
-	switch prefix {
-	case "join-path$psscriptroot",
-		"join-path${psscriptroot}",
-		"join-path$env:github_workspace",
-		"join-path${env:github_workspace}":
-	default:
-		return false
-	}
-	tail := strings.TrimLeft(
-		expression[reference.end:],
-		" \t\r\n'\"",
-	)
-	if !strings.HasPrefix(tail, ")") {
-		return false
-	}
-	arguments := strings.TrimSpace(tail[1:])
-	return arguments == "" || strings.HasPrefix(arguments, "-")
+	return false
 }
 
 func quotedDynamicPowerShellTarget(command string, start int) bool {
@@ -2260,44 +2689,6 @@ func powerShellVariableMayReferenceEditorScript(text, variable string) bool {
 	return false
 }
 
-func powerShellVariableMayReferenceScript(text, variable string) bool {
-	variable = strings.ToLower(strings.TrimSpace(variable))
-	variable = strings.TrimSuffix(strings.TrimPrefix(variable, "${"), "}")
-	variable = strings.TrimPrefix(variable, "$")
-	if variable == "" {
-		return false
-	}
-	if strings.Contains(variable, "script") ||
-		variable == "child" ||
-		variable == "tool" {
-		return true
-	}
-	assignments := powerShellVariableAssignments(text)
-	expression, assigned := assignments[variable]
-	if assigned {
-		expression = expandPowerShellVariables(expression, assignments, map[string]bool{
-			variable: true,
-		})
-		if strings.Contains(normalizePowerShellPathExpression(expression), ".ps1") {
-			return true
-		}
-	}
-	needle := "$" + variable
-	for _, command := range powerShellCommands(text) {
-		lower := strings.ToLower(command)
-		variableIndex := strings.Index(lower, needle)
-		assignmentIndex := strings.Index(lower, "=")
-		if variableIndex < 0 || assignmentIndex <= variableIndex {
-			continue
-		}
-		expression := normalizePowerShellPathExpression(lower[assignmentIndex+1:])
-		if strings.Contains(expression, ".ps1") {
-			return true
-		}
-	}
-	return false
-}
-
 func powerShellVariableAssignments(text string) map[string]string {
 	result := make(map[string]string)
 	for _, command := range powerShellCommands(text) {
@@ -2391,9 +2782,31 @@ func invokedPowerShellReferences(text string) []powerShellPathReference {
 	seen := make(map[string]bool)
 	result := make([]powerShellPathReference, 0)
 	for _, command := range powerShellCommands(text) {
+		directReferences := directInvokedPowerShellReferences(command)
+		references := append([]powerShellPathReference{}, directReferences...)
 		for _, reference := range powerShellPathReferences(command) {
+			overlapped := false
+			for _, direct := range directReferences {
+				if reference.start < direct.end && direct.start < reference.end {
+					overlapped = true
+					break
+				}
+			}
+			if !overlapped {
+				references = append(references, reference)
+			}
+		}
+		for _, reference := range references {
 			if !powerShellCommandInvokesReference(command, reference) {
 				continue
+			}
+			if !reference.scriptRelative {
+				scriptRelative, joinPathCall := powerShellJoinPathCall(
+					command[:reference.start],
+				)
+				if joinPathCall {
+					reference.scriptRelative = scriptRelative
+				}
 			}
 			key := reference.path + "\x00" + strconv.FormatBool(reference.scriptRelative)
 			if seen[key] {
@@ -2404,6 +2817,132 @@ func invokedPowerShellReferences(text string) []powerShellPathReference {
 		}
 	}
 	return result
+}
+
+func directInvokedPowerShellReferences(command string) []powerShellPathReference {
+	result := make([]powerShellPathReference, 0)
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(command); index++ {
+		char := command[index]
+		if char == '`' && !inSingleQuote && index+1 < len(command) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(command) && command[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		operator := (char == '&' && powerShellCallOperator(command, index)) ||
+			(char == '.' && powerShellDotOperator(command, index))
+		if !operator {
+			continue
+		}
+		next := skipPowerShellTrivia(command, index+1)
+		if char == '.' && next == index+1 &&
+			(next >= len(command) || command[next] != '(') {
+			continue
+		}
+		target := powerShellDirectTargetToken(command[next:])
+		if target == "" || strings.HasPrefix(target, "(") {
+			continue
+		}
+		if reference, ok := powerShellScriptTokenReference(target); ok {
+			reference.start = next
+			reference.end = next + len(target)
+			result = append(result, reference)
+		}
+	}
+	return result
+}
+
+func powerShellDirectTargetToken(text string) string {
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if !inSingleQuote && !inDoubleQuote && char == '$' &&
+			index+1 < len(text) && text[index+1] == '{' {
+			if closing := strings.IndexByte(text[index+2:], '}'); closing >= 0 {
+				index += closing + 2
+				continue
+			}
+		}
+		if !inSingleQuote && !inDoubleQuote {
+			space, _ := utf8.DecodeRuneInString(text[index:])
+			if unicode.IsSpace(space) || strings.ContainsRune(",;(){}|&<>", rune(char)) {
+				return text[:index]
+			}
+		}
+	}
+	return text
+}
+
+func powerShellScriptTokenReference(token string) (powerShellPathReference, bool) {
+	candidate, dynamic := powerShellTokenSemantics(token)
+	candidate = strings.ReplaceAll(candidate, "\\", "/")
+	candidateLower := strings.ToLower(candidate)
+	scriptRelative := false
+	for _, prefix := range []string{
+		"$env:github_workspace/",
+		"${env:github_workspace}/",
+		"${{github.workspace}}/",
+		"./",
+	} {
+		if strings.HasPrefix(candidateLower, prefix) &&
+			(prefix == "./" || dynamic) {
+			candidate = candidate[len(prefix):]
+			candidateLower = candidateLower[len(prefix):]
+			break
+		}
+	}
+	for _, prefix := range []string{"$psscriptroot/", "${psscriptroot}/"} {
+		if dynamic && strings.HasPrefix(candidateLower, prefix) {
+			candidate = candidate[len(prefix):]
+			candidateLower = candidateLower[len(prefix):]
+			scriptRelative = true
+			break
+		}
+	}
+	candidate = path.Clean(candidate)
+	if !strings.EqualFold(path.Ext(candidate), ".ps1") {
+		return powerShellPathReference{}, false
+	}
+	clean, err := cleanRepositoryPath(candidate)
+	repositoryRelative := err == nil && clean == candidate &&
+		!strings.Contains(candidate, ":") && !strings.Contains(candidate, "$")
+	return powerShellPathReference{
+		path:               candidate,
+		repositoryRelative: repositoryRelative,
+		scriptRelative:     scriptRelative && repositoryRelative,
+	}, true
 }
 
 func powerShellPathReferences(text string) []powerShellPathReference {
@@ -2421,21 +2960,25 @@ func powerShellPathReferences(text string) []powerShellPathReference {
 			start--
 		}
 		candidate := strings.TrimSpace(normalized[start:end])
+		quote := byte(0)
+		if start > 0 && (normalized[start-1] == '\'' || normalized[start-1] == '"') {
+			quote = normalized[start-1]
+		}
+		token := candidate
+		if quote != 0 {
+			token = string(quote) + candidate + string(quote)
+		}
+		candidate, dynamic := powerShellTokenSemantics(token)
 		candidateLower := strings.ToLower(candidate)
 		scriptRelative := false
-		commandPrefix := strings.ToLower(normalized[:start])
-		if join := strings.LastIndex(commandPrefix, "join-path"); join >= 0 {
-			joinExpression := commandPrefix[join:]
-			scriptRelative = strings.Contains(joinExpression, "$psscriptroot") ||
-				strings.Contains(joinExpression, "${psscriptroot}")
-		}
 		for _, prefix := range []string{
 			"$env:github_workspace/",
 			"${env:github_workspace}/",
 			"${{github.workspace}}/",
 			"./",
 		} {
-			if strings.HasPrefix(candidateLower, prefix) {
+			if strings.HasPrefix(candidateLower, prefix) &&
+				(prefix == "./" || dynamic) {
 				candidate = candidate[len(prefix):]
 				candidateLower = candidateLower[len(prefix):]
 				break
@@ -2445,7 +2988,7 @@ func powerShellPathReferences(text string) []powerShellPathReference {
 			"$psscriptroot/",
 			"${psscriptroot}/",
 		} {
-			if strings.HasPrefix(candidateLower, prefix) {
+			if dynamic && strings.HasPrefix(candidateLower, prefix) {
 				candidate = candidate[len(prefix):]
 				candidateLower = candidateLower[len(prefix):]
 				scriptRelative = true
@@ -2480,13 +3023,17 @@ func powerShellCommandInvokesReference(
 		return false
 	}
 	prefix := strings.TrimSpace(command[:reference.start])
+	quotedReference := reference.start > 0 &&
+		(command[reference.start-1] == '\'' || command[reference.start-1] == '"')
 	prefix = strings.TrimSpace(strings.TrimRight(prefix, `"'`))
+	if quotedReference && (prefix == "" || strings.HasSuffix(prefix, "(")) {
+		return false
+	}
 	if prefix == "" {
 		return true
 	}
 	lowerPrefix := strings.ToLower(prefix)
-	if strings.Contains(lowerPrefix, "& (join-path") ||
-		strings.Contains(lowerPrefix, ". (join-path") {
+	if powerShellJoinPathCallPrefix(lowerPrefix) {
 		return true
 	}
 	last := prefix[len(prefix)-1]
@@ -2495,6 +3042,163 @@ func powerShellCommandInvokesReference(
 	}
 	fields := strings.Fields(strings.ToLower(prefix))
 	return len(fields) > 0 && fields[len(fields)-1] == "-file"
+}
+
+func powerShellJoinPathCallPrefix(prefix string) bool {
+	_, found := powerShellJoinPathCall(prefix)
+	return found
+}
+
+func powerShellJoinPathCall(prefix string) (bool, bool) {
+	inSingleQuote := false
+	inDoubleQuote := false
+	expandableDepth := 0
+	for index := 0; index < len(prefix); index++ {
+		char := prefix[index]
+		if char == '`' && !inSingleQuote && index+1 < len(prefix) {
+			index++
+			continue
+		}
+		if inDoubleQuote && expandableDepth == 0 {
+			if char == '$' && index+1 < len(prefix) && prefix[index+1] == '(' {
+				expandableDepth = 1
+				index++
+				continue
+			}
+			if char == '"' {
+				inDoubleQuote = false
+			}
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(prefix) && prefix[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || (inDoubleQuote && expandableDepth == 0) {
+			continue
+		}
+		if expandableDepth > 0 {
+			switch char {
+			case '(':
+				expandableDepth++
+			case ')':
+				expandableDepth--
+			}
+		}
+		operator := (char == '&' && powerShellCallOperator(prefix, index)) ||
+			(char == '.' && powerShellDotOperator(prefix, index))
+		if !operator {
+			continue
+		}
+		next := skipPowerShellTrivia(prefix, index+1)
+		if next >= len(prefix) || prefix[next] != '(' {
+			continue
+		}
+		commandEnd, ok := powerShellJoinPathCommandEnd(prefix, next+1)
+		if !ok {
+			continue
+		}
+		if !balancedPowerShellParentheses(prefix[index+1:]) {
+			scriptRelative, _ := powerShellJoinPathRoot(prefix[commandEnd:])
+			return scriptRelative, true
+		}
+	}
+	return false, false
+}
+
+func powerShellJoinPathRoot(text string) (bool, bool) {
+	text = strings.TrimRight(strings.TrimSpace(text), "'\"")
+	for {
+		trimmed := strings.TrimRightFunc(text, unicode.IsSpace)
+		trivia := text[len(trimmed):]
+		if strings.Contains(trivia, "\n") && strings.HasSuffix(trimmed, "`") {
+			text = strings.TrimSuffix(trimmed, "`")
+			continue
+		}
+		text = trimmed
+		break
+	}
+	start := skipPowerShellTrivia(text, 0)
+	text = text[start:]
+	tokens := powerShellCommandTokens(text)
+	if len(tokens) != 1 {
+		return false, false
+	}
+	switch strings.ToLower(tokens[0]) {
+	case "$psscriptroot", "${psscriptroot}",
+		"\"$psscriptroot\"", "\"${psscriptroot}\"":
+		return true, true
+	case "$env:github_workspace", "${env:github_workspace}",
+		"\"$env:github_workspace\"", "\"${env:github_workspace}\"":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func powerShellDotOperator(command string, index int) bool {
+	prefix := strings.TrimSpace(command[:index])
+	return prefix == "" || strings.ContainsRune("{(", rune(prefix[len(prefix)-1]))
+}
+
+func powerShellJoinPathCommandEnd(text string, start int) (int, bool) {
+	index := skipPowerShellTrivia(text, start)
+	const command = `microsoft.powershell.management\join-path`
+	for expected := 0; expected < len(command); expected++ {
+		for index < len(text) && text[index] == '`' {
+			if index+1 >= len(text) {
+				return 0, false
+			}
+			if text[index+1] == '\n' {
+				return 0, false
+			}
+			index++
+			break
+		}
+		if index >= len(text) ||
+			!strings.EqualFold(text[index:index+1], command[expected:expected+1]) {
+			return 0, false
+		}
+		index++
+	}
+	if index >= len(text) {
+		return index, true
+	}
+	char, _ := utf8.DecodeRuneInString(text[index:])
+	if !unicode.IsSpace(char) && !(text[index] == '`' &&
+		index+1 < len(text) && text[index+1] == '\n') {
+		return 0, false
+	}
+	return index, true
+}
+
+func skipPowerShellTrivia(text string, index int) int {
+	for {
+		index = skipPowerShellWhitespace(text, index)
+		if index+1 >= len(text) || text[index] != '`' || text[index+1] != '\n' {
+			return index
+		}
+		index += 2
+	}
+}
+
+func skipPowerShellWhitespace(text string, index int) int {
+	for index < len(text) {
+		char, size := utf8.DecodeRuneInString(text[index:])
+		if !unicode.IsSpace(char) {
+			break
+		}
+		index += size
+	}
+	return index
 }
 
 func inertPowerShellReference(command string) bool {

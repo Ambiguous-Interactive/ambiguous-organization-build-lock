@@ -33,19 +33,35 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 	if _, err := git(ctx, repositoryRoot, "cat-file", "-e", sha+"^{commit}"); err != nil {
 		return Snapshot{}, fmt.Errorf("resolve commit %s: %w", sha, err)
 	}
-	tree, err := git(ctx, repositoryRoot, "ls-tree", "-r", "--name-only", "-z", sha)
+	tree, err := git(ctx, repositoryRoot, "ls-tree", "-r", "-z", sha)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("list commit %s: %w", sha, err)
 	}
 
 	policyFiles := make([]string, 0)
-	for _, file := range bytes.Split(tree, []byte{0}) {
-		if len(file) == 0 {
+	for _, entry := range bytes.Split(tree, []byte{0}) {
+		if len(entry) == 0 {
 			continue
 		}
-		name := string(file)
+		parts := bytes.SplitN(entry, []byte{'\t'}, 2)
+		if len(parts) != 2 {
+			return Snapshot{}, fmt.Errorf("invalid tree entry at %s", sha)
+		}
+		metadata := strings.Fields(string(parts[0]))
+		if len(metadata) != 3 {
+			return Snapshot{}, fmt.Errorf("invalid tree metadata at %s", sha)
+		}
+		name := string(parts[1])
 		if !policyFile(name) {
 			continue
+		}
+		if metadata[1] != "blob" ||
+			(metadata[0] != "100644" && metadata[0] != "100755") {
+			return Snapshot{}, fmt.Errorf(
+				"policy file %s at %s is not a regular blob",
+				name,
+				sha,
+			)
 		}
 		policyFiles = append(policyFiles, name)
 		if len(policyFiles) > maxPolicySnapshotFiles {

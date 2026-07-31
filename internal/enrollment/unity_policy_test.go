@@ -1164,6 +1164,17 @@ if ($Operation -eq 'RequireEditor') {
 		"attributed assignment":      "[ValidatePattern(']')][string]$output = pwsh -File $env:PAYLOAD\n",
 		"returned call target":       "function Invoke-Payload { return & $env:PAYLOAD }\n",
 		"returned direct host":       "function Invoke-Payload { return pwsh -File $env:PAYLOAD }\n",
+		"expandable subexpression":   "\"$(& $env:PAYLOAD)\"\n",
+		"expandable after line comment": "# \"\n          " +
+			"\"$(& $env:PAYLOAD)\"\n",
+		"expandable after block comment": "<# \" #>\n          " +
+			"\"$(& $env:PAYLOAD)\"\n",
+		"parenthesized dot source":    "$(. $env:PAYLOAD)\n",
+		"NBSP call whitespace":        "&\u00a0$env:PAYLOAD\n",
+		"em-space call whitespace":    "&\u2003$env:PAYLOAD\n",
+		"continued call whitespace":   "& `\n          $env:PAYLOAD\n",
+		"Unicode variable call":       "& $脚本\n",
+		"Unicode variable dot source": ". $脚本\n",
 	} {
 		t.Run("unresolved workflow "+name+" fails closed", func(t *testing.T) {
 			if !hasUnresolvedPowerShellWorkflowInvocation(variableWrapper) {
@@ -1198,6 +1209,12 @@ if ($Operation -eq 'RequireEditor') {
 			"pwsh -File \"C:\\payloads\\\n$installer.ps1\"",
 		) {
 			t.Fatal("multiline expandable target was not recognized")
+		}
+	})
+
+	t.Run("comment quote cannot create a malformed expandable expression", func(t *testing.T) {
+		if hasUnresolvedPowerShellWorkflowInvocation("# \"$(\nWrite-Output ok\n") {
+			t.Fatal("comment-only expandable syntax caused a rejection")
 		}
 	})
 
@@ -1329,9 +1346,9 @@ if ($Operation -eq 'RequireEditor') {
 
 	t.Run("delegated File target preserves single-quote semantics", func(t *testing.T) {
 		if hasUnresolvedPowerShellScriptInvocation(
-			"$name = '.txt'\npwsh -File 'cost$script'$name",
+			"pwsh -File 'cost$script.ps1'",
 		) {
-			t.Fatal("literal single-quoted variable name was classified as dynamic")
+			t.Fatal("literal single-quoted dollar was classified as dynamic")
 		}
 	})
 
@@ -1352,19 +1369,507 @@ if ($Operation -eq 'RequireEditor') {
 	})
 
 	t.Run("literal Join-Path delegated call is recursively audited", func(t *testing.T) {
-		joinPathWrapper := `& (Join-Path $PSScriptRoot 'unity.ps1') -Operation RequireEditor
-`
+		unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+		for name, joinPathWrapper := range map[string]string{
+			"module-qualified call": "& (Microsoft.PowerShell.Management\\Join-Path " +
+				"$PSScriptRoot 'unity.ps1') -Operation RequireEditor\n",
+			"spaced call":  "& (Join-Path $PSScriptRoot 'unity.ps1') -Operation RequireEditor\n",
+			"compact call": "&(Join-Path $PSScriptRoot 'unity.ps1') -Operation RequireEditor\n",
+			"tabs": "&\t(\tJoin-Path $PSScriptRoot " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"Unicode whitespace": "&\u00a0(\u2003Join-Path $PSScriptRoot " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"dot sourced": ".(Join-Path $PSScriptRoot 'unity.ps1') " +
+				"-Operation RequireEditor\n",
+			"multiline parentheses": "& (\n  Join-Path $PSScriptRoot " +
+				"'unity.ps1'\n) -Operation RequireEditor\n",
+			"explicit continuation": "& `\n  (Join-Path $PSScriptRoot " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"continuation before root": "& (Join-Path `\n  $PSScriptRoot " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"continuation before child": "& (Join-Path $PSScriptRoot `\n  " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"escaped command name": "& (Join`-Path $PSScriptRoot " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"escaped command with braced root": "& (Join`-Path ${PSScriptRoot} " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"double quoted script root": "& (Join-Path \"$PSScriptRoot\" " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"escaped child path": "& (Join-Path $PSScriptRoot " +
+				"\"uni`ty.ps1\") -Operation RequireEditor\n",
+			"expandable subexpression": "\"$(& (Join-Path $PSScriptRoot " +
+				"'unity.ps1'))\"\n",
+			"nested dot source": "$(. (Join-Path $PSScriptRoot " +
+				"'unity.ps1'))\n",
+			"segmented quoted direct path": "& \"$PSScriptRoot/\"'unity.ps1' " +
+				"-Operation RequireEditor\n",
+			"segmented braced direct path": "& ${PSScriptRoot}/'unity.ps1' " +
+				"-Operation RequireEditor\n",
+			"segmented path with NBSP boundary": "& \"$PSScriptRoot/\"'unity.ps1'\u00a0" +
+				"-Operation RequireEditor\n",
+			"segmented path with em-space boundary": "& \"$PSScriptRoot/\"'unity.ps1'\u2003" +
+				"-Operation RequireEditor\n",
+			"segmented path with redirection boundary": "& \"$PSScriptRoot/\"" +
+				"'unity.ps1'>$null\n",
+			"segmented subexpression path": "$result = $(& ${PSScriptRoot}/" +
+				"'unity.ps1')\n",
+			"segmented array expression path": "$result = @(& \"$PSScriptRoot/\"" +
+				"'unity.ps1')\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				for childName, child := range map[string]string{
+					"safe child":   safeScript,
+					"unsafe child": unsafeChild,
+				} {
+					t.Run(childName, func(t *testing.T) {
+						result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+							".github/workflows/unity.yml":     workflow,
+							"scripts/ci/wrapper.ps1":          joinPathWrapper,
+							"scripts/ci/unity.ps1":            child,
+							"scripts/unity/ensure-editor.ps1": "",
+						}), unityAuditPolicy())
+						if err != nil {
+							t.Fatal(err)
+						}
+						unsafe := strings.Contains(
+							findingCodes(result.Findings),
+							"unsafe-unity-editor-provisioning",
+						)
+						unsupportedJoinPath := strings.Contains(
+							strings.ToLower(normalizePowerShellPathExpression(joinPathWrapper)),
+							"join-path",
+						)
+						unsupportedProgram := unsupportedDelegatedPowerShellProgram(
+							joinPathWrapper,
+						)
+						if unsafe != (childName == "unsafe child" ||
+							unsupportedJoinPath || unsupportedProgram) {
+							t.Fatalf(
+								"Join-Path recursion mismatch: findings=%#v audit=%#v unresolved=%v references=%#v commands=%#v",
+								result.Findings,
+								auditEnsureEditorSource(joinPathWrapper),
+								hasUnresolvedPowerShellScriptInvocation(joinPathWrapper),
+								invokedPowerShellReferences(joinPathWrapper),
+								powerShellCommands(joinPathWrapper),
+							)
+						}
+					})
+				}
+			})
+		}
+	})
+
+	for name, wrapper := range map[string]string{
+		"single quoted Join-Path root": "& (Join-Path '$PSScriptRoot' " +
+			"'unity.ps1')\n",
+		"escaped double quoted Join-Path root": "& (Join-Path \"`$PSScriptRoot\" " +
+			"'unity.ps1')\n",
+		"single quoted direct root":         "& '$PSScriptRoot/unity.ps1'\n",
+		"escaped double quoted direct root": "& \"`$PSScriptRoot/unity.ps1\"\n",
+	} {
+		t.Run(name+" fails closed", func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml":     workflow,
+				"scripts/ci/wrapper.ps1":          wrapper,
+				"scripts/ci/unity.ps1":            safeScript,
+				"scripts/unity/ensure-editor.ps1": "",
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("literal root was treated as executable scope: %#v", result.Findings)
+			}
+		})
+	}
+
+	t.Run("comment delimiters do not affect delegated grammar balance", func(t *testing.T) {
+		wrapper := "# unmatched comment delimiters ({\"\n" +
+			"param([string]$Operation)\n& \"$PSScriptRoot/child.ps1\"\n"
+		if unsupportedDelegatedPowerShellProgram(wrapper) {
+			t.Fatal("comment-only delimiters rejected a valid delegated wrapper")
+		}
+		malformed := "param([string]$Operation # comment supplies )\n" +
+			"& \"$PSScriptRoot/child.ps1\"\n"
+		if !unsupportedDelegatedPowerShellProgram(malformed) {
+			t.Fatal("comment text balanced malformed delegated code")
+		}
+	})
+
+	t.Run("escaped direct child cannot redirect recursion to a decoy", func(t *testing.T) {
 		unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
-			"scripts/ci/wrapper.ps1":      joinPathWrapper,
-			"scripts/ci/unity.ps1":        unsafeChild,
+			"scripts/ci/wrapper.ps1": "& \"$PSScriptRoot/uni`ty.ps1\" " +
+				"-Operation RequireEditor\n",
+			"scripts/ci/unity.ps1":            unsafeChild,
+			"scripts/ci/uni`ty.ps1":           safeScript,
+			"scripts/unity/ensure-editor.ps1": "",
 		}), unityAuditPolicy())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
-			t.Fatalf("literal Join-Path child escaped recursion: %#v", result.Findings)
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("escaped child audited a raw-name decoy: %#v", result.Findings)
+		}
+	})
+
+	t.Run("segmented direct child cannot redirect recursion to a root decoy", func(t *testing.T) {
+		unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/wrapper.ps1": "& \"$PSScriptRoot/\"'unity.ps1' " +
+				"-Operation RequireEditor\n",
+			"scripts/ci/unity.ps1":            unsafeChild,
+			"unity.ps1":                       safeScript,
+			"scripts/unity/ensure-editor.ps1": "",
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("segmented child audited a root decoy: %#v", result.Findings)
+		}
+	})
+
+	for name, wrapper := range map[string]string{
+		"direct then Join-Path": "$results = $(& \"$PSScriptRoot/safe.ps1\") + " +
+			"$(& (Join-Path $PSScriptRoot 'unsafe.ps1'))\n",
+		"Join-Path then direct": "$results = $(& (Join-Path $PSScriptRoot " +
+			"'unsafe.ps1')) + $(& \"$PSScriptRoot/safe.ps1\")\n",
+	} {
+		t.Run(name+" audits both targets", func(t *testing.T) {
+			unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml":     workflow,
+				"scripts/ci/wrapper.ps1":          wrapper,
+				"scripts/ci/safe.ps1":             safeScript,
+				"scripts/ci/unsafe.ps1":           unsafeChild,
+				"scripts/unity/ensure-editor.ps1": "",
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("mixed command skipped unsafe target: %#v", result.Findings)
+			}
+		})
+	}
+
+	for name, test := range map[string]struct {
+		target string
+		actual string
+		decoy  string
+	}{
+		"space": {
+			target: "\"$PSScriptRoot/my unity.ps1\"",
+			actual: "scripts/ci/my unity.ps1",
+			decoy:  "scripts/ci/unity.ps1",
+		},
+		"ampersand": {
+			target: "\"$PSScriptRoot/foo&bar.ps1\"",
+			actual: "scripts/ci/foo&bar.ps1",
+			decoy:  "scripts/ci/bar.ps1",
+		},
+	} {
+		t.Run("quoted "+name+" child cannot redirect recursion", func(t *testing.T) {
+			unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+			safeResult, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml":     workflow,
+				"scripts/ci/wrapper.ps1":          "& " + test.target + "\n",
+				"scripts/unity/ensure-editor.ps1": "",
+				test.actual:                       safeScript,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(
+				findingCodes(safeResult.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("quoted safe child produced a phantom reference: %#v", safeResult.Findings)
+			}
+			files := map[string]string{
+				".github/workflows/unity.yml":     workflow,
+				"scripts/ci/wrapper.ps1":          "& " + test.target + "\n",
+				"scripts/unity/ensure-editor.ps1": "",
+				test.actual:                       unsafeChild,
+				test.decoy:                        safeScript,
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(files), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("quoted child audited a delimiter decoy: %#v", result.Findings)
+			}
+		})
+	}
+
+	t.Run("here-string syntax fails closed before later execution", func(t *testing.T) {
+		for name, wrapper := range map[string]string{
+			"expandable": "$text = @\"\n\"\n\"@\n& $env:PAYLOAD\n",
+			"literal":    "$text = @'\n'\n'@\n& $env:PAYLOAD\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				if !hasUnresolvedPowerShellWorkflowInvocation(wrapper) {
+					t.Fatal("unsupported here-string syntax did not fail closed")
+				}
+			})
+		}
+	})
+
+	t.Run("runtime-loaded delegated target fails closed", func(t *testing.T) {
+		wrapper := "$x = Get-Content \"$PSScriptRoot/target.txt\"\n& $x\n"
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/wrapper.ps1":      wrapper,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("runtime-loaded target passed delegated audit: %#v", result.Findings)
+		}
+	})
+
+	t.Run("delegated child replacement fails closed", func(t *testing.T) {
+		wrapper := "Copy-Item -LiteralPath \"$PSScriptRoot/payload.template\" " +
+			"-Destination \"$PSScriptRoot/child.ps1\" -Force\n" +
+			"& \"$PSScriptRoot/child.ps1\"\n"
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/wrapper.ps1":      wrapper,
+			"scripts/ci/child.ps1":        safeScript,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("runtime child replacement passed: %#v", result.Findings)
+		}
+	})
+
+	for name, wrapper := range map[string]string{
+		"parameter attribute script": "param([ValidateScript({ Copy-Item a b })]" +
+			"[string]$Operation)\n& \"$PSScriptRoot/child.ps1\"\n",
+		"expandable argument script": "param([string]$Operation)\n" +
+			"& \"$PSScriptRoot/child.ps1\" -Value \"$(Copy-Item a b)\"\n",
+		"parenthesized argument expression": "param([string]$Operation)\n" +
+			"& \"$PSScriptRoot/child.ps1\" -Value (Get-Date)\n",
+		"empty program": "",
+		"repeated declaration": "param([string]$Operation)\n" +
+			"param([string]$Operation)\n& \"$PSScriptRoot/child.ps1\"\n",
+		"repeated invocation": "& \"$PSScriptRoot/child.ps1\"\n" +
+			"& \"$PSScriptRoot/child.ps1\"\n",
+		"unterminated declaration": "param([string]$Operation\n" +
+			"& \"$PSScriptRoot/child.ps1\"\n",
+	} {
+		t.Run(name+" is outside delegated grammar", func(t *testing.T) {
+			if !unsupportedDelegatedPowerShellProgram(wrapper) {
+				t.Fatal("executable wrapper syntax passed the allowlist")
+			}
+		})
+	}
+
+	for name, wrapper := range map[string]string{
+		"Start-Job":      "Start-Job -FilePath \"$PSScriptRoot/unsafe.ps1\"\n",
+		"Invoke-Command": "Invoke-Command -FilePath \"$PSScriptRoot/unsafe.ps1\"\n",
+	} {
+		t.Run(name+" file execution fails closed", func(t *testing.T) {
+			if !hasUnresolvedPowerShellScriptInvocation(wrapper) {
+				t.Fatal("file-executing cmdlet passed unresolved audit")
+			}
+		})
+	}
+
+	for name, wrapper := range map[string]string{
+		"workspace assignment": "$env:GITHUB_WORKSPACE = $env:RUNNER_TEMP\n" +
+			"& \"$env:GITHUB_WORKSPACE/unsafe.ps1\"\n",
+		"script root assignment": "$PSScriptRoot = $env:RUNNER_TEMP\n" +
+			"& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"scoped script root assignment": "$script:PSScriptRoot = $env:RUNNER_TEMP\n" +
+			"& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"compound script root assignment": "$PSScriptRoot += 'redirect'\n" +
+			"& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"Set-Variable alias": "sv PSScriptRoot $env:RUNNER_TEMP\n" +
+			"& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"variable provider mutation": "Set-Item Variable:PSScriptRoot $env:RUNNER_TEMP\n" +
+			"& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"scoped variable provider mutation": "Set-Item 'Variable:\\script:PSScriptRoot' " +
+			"$env:RUNNER_TEMP\n& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"environment provider mutation": "Set-Item 'Env:\\GITHUB_WORKSPACE' " +
+			"$env:RUNNER_TEMP\n& \"$env:GITHUB_WORKSPACE/unsafe.ps1\"\n",
+		"SessionState path mutation": "$ExecutionContext.SessionState.Path." +
+			"SetLocation($env:RUNNER_TEMP)\n& ./unsafe.ps1\n",
+		"SessionState variable mutation": "$ExecutionContext.SessionState.PSVariable." +
+			"Set('PSScriptRoot',$env:RUNNER_TEMP)\n& \"$PSScriptRoot/unsafe.ps1\"\n",
+		"Set-Location": "Set-Location $env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"module qualified Set-Location": "Microsoft.PowerShell.Management\\Set-Location " +
+			"$env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"Push-Location": "Push-Location $env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"cd alias":      "cd $env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"sl alias":      "sl $env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"chdir alias":   "chdir $env:RUNNER_TEMP\n& ./unsafe.ps1\n",
+		"function shadows Join-Path": "function Join-Path { param($Path, $ChildPath) " +
+			"\"$env:RUNNER_TEMP/$ChildPath\" }\n" +
+			"& (Join-Path $PSScriptRoot 'unsafe.ps1')\n",
+		"alias shadows Join-Path": "Set-Alias Join-Path Invoke-External\n" +
+			"& (Join-Path $PSScriptRoot 'unsafe.ps1')\n",
+		"alias indirection": "Set-Alias go Set-Location\ngo $env:RUNNER_TEMP\n" +
+			"& ./unsafe.ps1\n",
+		"filter definition": "filter Join-Path { $_ }\n" +
+			"& (Join-Path $PSScriptRoot 'unsafe.ps1')\n",
+	} {
+		t.Run(name+" cannot redirect a trusted path", func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+				"scripts/ci/wrapper.ps1":      wrapper,
+				"unsafe.ps1":                  safeScript,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("path-context mutation passed: %#v", result.Findings)
+			}
+		})
+	}
+
+	for name, mutatedWorkflow := range map[string]string{
+		"step working directory": strings.Replace(
+			workflow,
+			"run: ./scripts/ci/wrapper.ps1 -Operation RequireEditor",
+			"working-directory: scripts/alt\n        run: ./wrapper.ps1",
+			1,
+		),
+		"job default working directory": strings.Replace(
+			strings.Replace(
+				workflow,
+				"runs-on: [self-hosted, Windows]",
+				"runs-on: [self-hosted, Windows]\n    defaults:\n      run:\n        working-directory: scripts/alt",
+				1,
+			),
+			"run: ./scripts/ci/wrapper.ps1 -Operation RequireEditor",
+			"run: ./wrapper.ps1",
+			1,
+		),
+	} {
+		t.Run(name+" fails closed", func(t *testing.T) {
+			unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml":     mutatedWorkflow,
+				"wrapper.ps1":                     safeScript,
+				"scripts/alt/wrapper.ps1":         unsafeChild,
+				"scripts/unity/ensure-editor.ps1": "",
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"unsafe-unity-editor-provisioning",
+			) {
+				t.Fatalf("working-directory path redirection passed: %#v", result.Findings)
+			}
+		})
+	}
+
+	t.Run("escaped braced script root cannot redirect recursion to a decoy", func(t *testing.T) {
+		unsafeChild := strings.Replace(safeScript, " -RequireHealthyExisting", "", 1)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/wrapper.ps1": "& (Join`-Path ${PSScriptRoot} " +
+				"'unity.ps1') -Operation RequireEditor\n",
+			"scripts/ci/unity.ps1":            unsafeChild,
+			"unity.ps1":                       safeScript,
+			"scripts/unity/ensure-editor.ps1": "",
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("wrapper-relative unsafe child escaped via root decoy: %#v", result.Findings)
+		}
+	})
+
+	t.Run("literal backtick root cannot redirect recursion to a decoy", func(t *testing.T) {
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			"scripts/ci/wrapper.ps1": "& (Join-Path $PSScriptRoot`` " +
+				"'unity.ps1')\n",
+			"scripts/ci/unity.ps1":            safeScript,
+			"scripts/unity/ensure-editor.ps1": "",
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(
+			findingCodes(result.Findings),
+			"unsafe-unity-editor-provisioning",
+		) {
+			t.Fatalf("literal-backtick root audited normal-root decoy: %#v", result.Findings)
+		}
+	})
+
+	t.Run("invalid Join-Path forms fail closed", func(t *testing.T) {
+		for name, wrapper := range map[string]string{
+			"metachar argument": "&(Join-Path($PSScriptRoot) 'unity.ps1')\n",
+			"continued name":    "& (Join-`\nPath $PSScriptRoot 'unity.ps1')\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				if !hasUnresolvedPowerShellScriptInvocation(wrapper) {
+					t.Fatal("invalid form was accepted as a safe literal expression")
+				}
+			})
+		}
+	})
+
+	t.Run("inert Join-Path-looking output is not invoked", func(t *testing.T) {
+		const inert = "Write-Output '& (Join-Path $PSScriptRoot ''decoy.ps1'''\n"
+		references := invokedPowerShellReferences(inert)
+		if len(references) != 0 {
+			t.Fatalf("inert output produced invoked references: %#v", references)
+		}
+	})
+
+	t.Run("bare path strings are inert", func(t *testing.T) {
+		for name, source := range map[string]string{
+			"bare":          "\"$PSScriptRoot/unsafe.ps1\"\n",
+			"parenthesized": "(\"$PSScriptRoot/unsafe.ps1\")\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				if references := invokedPowerShellReferences(source); len(references) != 0 {
+					t.Fatalf("inert string produced invoked references: %#v", references)
+				}
+			})
 		}
 	})
 

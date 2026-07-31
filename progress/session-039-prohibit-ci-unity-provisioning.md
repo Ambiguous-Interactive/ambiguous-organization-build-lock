@@ -353,3 +353,26 @@ Continuous-improvement disposition: revise this task record and promote the
 bounded rule through executable analyzer regressions. The observed failure was
 an over-broad analysis model, not a missing general agent instruction; adding
 another prose-only source of truth would not strengthen enforcement.
+
+A later Cursor pass found that compact and irregularly spaced parenthesized
+PowerShell calls escaped recursive auditing. Red/green work then expanded the
+mutation set through quoting, escaping, Unicode whitespace and variable names,
+segmented and delimiter-bearing paths, nested subexpressions, comments,
+working-directory changes, mutable path roots, and mixed direct/expression
+calls. PowerShell 7.5 execution probes confirmed the supported whitespace and
+subexpression behavior, while Microsoft's
+[parsing documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_parsing#line-continuation)
+confirms that an opening parenthesis is a natural line-break point.
+
+The final boundary is intentionally smaller than the experimental recognizer:
+checked-in nonterminal wrappers permit only one balanced, ordered program made
+from the exact optional `param([string]$Operation)` declaration, the exact
+optional `RequireEditor` equality guard, and one simple direct script token
+with inert arguments. Parenthesized path construction, dynamic targets,
+arbitrary wrapper commands, path-context mutation, here-strings, executable
+argument expressions, and workflow working-directory overrides fail closed.
+Direct path tokens are interpreted with PowerShell quote/escape and Unicode
+semantics before recursive lookup. Exact Git snapshots now preserve tree
+mode/type evidence and reject symlink, gitlink, and other non-regular policy
+entries. Fifteen independent adversarial rounds ended in PASS; the full
+enrollment package and repository verifier remain green.
