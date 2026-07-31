@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30669402261:platform-build-windows:platform-build-windows",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "platform-build-windows",
+    "runId": "30669402261",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30669402261",
+    "queuedAt": "2026-07-31T22:32:55.035Z",
+    "acquiredAt": "2026-07-31T22:32:57.358Z",
+    "expiresAt": "2026-08-01T02:32:57.358Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "3671752e-95e1-4f0e-8ccd-1f033d0d9a1b",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30669141848:unity-tests:6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30669141848",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30669402261:platform-build-windows:platform-build-windows",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "platform-build-windows",
+      "runId": "30669402261",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30669141848",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-07-31T22:32:14.533Z",
-      "availableAt": "2026-07-31T22:32:15.533Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30669402261",
+      "queuedAt": "2026-07-31T22:32:55.035Z",
+      "acquiredAt": "2026-07-31T22:32:57.358Z",
+      "expiresAt": "2026-08-01T02:32:57.358Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T22:32:14.534Z"
+  "updatedAt": "2026-07-31T22:32:57.358Z"
 }
