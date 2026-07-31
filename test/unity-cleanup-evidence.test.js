@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -18,10 +19,15 @@ const {
   MAX_EVIDENCE_FILES,
   MAX_EVIDENCE_TOTAL_BYTES,
   MAX_VISITED_ENTRIES,
+  claimConsumedReturnEvidence,
   classifyEvidence,
   collectEvidence,
+  deleteClaimedReturnEvidence,
   environmentInputs,
+  identityBoundDeleteWindows,
+  inspectReturnEvidenceTarget,
   parseInputs,
+  resolveReturnEvidenceTarget,
   run
 } = require(runtimePath);
 
@@ -29,6 +35,132 @@ const ENTITLEMENT = "[Licensing::Module] Successfully returned the entitlement l
 const ULF = "[Licensing::Client] Successfully returned ULF license with serial number : SC-REDACTED";
 const PROOF = `${ENTITLEMENT}\n${ULF}\n`;
 const SKIP = "[Licensing::Module] Error: Serial number unavailable for ULF return; skipping operation";
+
+function centralEvidenceFixture(t, prefix = "unity-cleanup-action-") {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const runnerTemp = path.join(root, "runner-temp");
+  const evidenceDirectory = path.join(runnerTemp, "unity-return-12345-2-qora");
+  const returnLog = path.join(evidenceDirectory, "return-license.log");
+  const outputPath = path.join(root, "output.txt");
+  const environment = {
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_RUN_ID: "12345",
+    RUNNER_TEMP: runnerTemp
+  };
+  fs.mkdirSync(evidenceDirectory, { recursive: true });
+  fs.writeFileSync(returnLog, PROOF);
+  return { environment, evidenceDirectory, outputPath, returnLog, root, runnerTemp };
+}
+
+function centralInputs(item) {
+  return {
+    "return-log-path": item.returnLog,
+    "return-command-completed": "true",
+    "return-exit-code": "0",
+    "evidence-capture-complete": "true",
+    "return-log-digest": crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(item.returnLog))
+      .digest("hex"),
+    "supplemental-evidence-paths": ""
+  };
+}
+
+function centralEvidenceRemains(item) {
+  if (fs.existsSync(item.returnLog)) {
+    return true;
+  }
+  return fs.readdirSync(item.runnerTemp).some((name) =>
+    name.startsWith(`${path.basename(item.evidenceDirectory)}.consuming-`)
+    && fs.existsSync(path.join(item.runnerTemp, name, "return-license.log"))
+  );
+}
+
+function modelIdentityDelete(claimedTarget, claimedIdentity, io = fs, pathImpl = path) {
+  const observed = inspectReturnEvidenceTarget(claimedTarget, io, pathImpl);
+  for (const name of ["evidenceDirectoryStat", "returnLogStat"]) {
+    assert.equal(observed[name].dev, claimedIdentity[name].dev);
+    assert.equal(observed[name].ino, claimedIdentity[name].ino);
+    assert.equal(observed[name].birthtimeNs, claimedIdentity[name].birthtimeNs);
+  }
+  io.unlinkSync(claimedTarget.returnLogPath);
+  io.rmdirSync(claimedTarget.evidenceDirectory);
+}
+
+function runClassifier(options) {
+  const io = options.io || fs;
+  const pathImpl = options.pathImpl || path;
+  return run({
+    ...options,
+    deleteByIdentity: options.deleteByIdentity || (
+      (claimedTarget, claimedIdentity) =>
+        modelIdentityDelete(claimedTarget, claimedIdentity, io, pathImpl)
+    )
+  });
+}
+
+function restoreWindowsFileTimes(filePath, stat) {
+  const toFileTime = (nanoseconds) =>
+    (nanoseconds / 100n + 116444736000000000n).toString();
+  const source = [
+    "using System;",
+    "using System.ComponentModel;",
+    "using System.Runtime.InteropServices;",
+    "using Microsoft.Win32.SafeHandles;",
+    "public static class RestoreBasicFileInformation {",
+    "  [StructLayout(LayoutKind.Sequential)]",
+    "  private struct Basic {",
+    "    public long CreationTime;",
+    "    public long LastAccessTime;",
+    "    public long LastWriteTime;",
+    "    public long ChangeTime;",
+    "    public uint Attributes;",
+    "  }",
+    "  [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode, SetLastError=true)]",
+    "  private static extern SafeFileHandle CreateFile(string p, uint a, uint s, IntPtr x, uint d, uint f, IntPtr t);",
+    "  [DllImport(\"kernel32.dll\", SetLastError=true)]",
+    "  [return: MarshalAs(UnmanagedType.Bool)]",
+    "  private static extern bool SetFileInformationByHandle(SafeFileHandle h, int c, ref Basic i, uint n);",
+    "  public static void Restore(string path, long creation, long access, long write, long change) {",
+    "    using (SafeFileHandle h = CreateFile(path, 0x100, 7, IntPtr.Zero, 3, 0x200000, IntPtr.Zero)) {",
+    "      if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());",
+    "      Basic i = new Basic { CreationTime=creation, LastAccessTime=access, LastWriteTime=write, ChangeTime=change, Attributes=0 };",
+    "      if (!SetFileInformationByHandle(h, 0, ref i, (uint)Marshal.SizeOf(typeof(Basic))))",
+    "        throw new Win32Exception(Marshal.GetLastWin32Error());",
+    "    }",
+    "  }",
+    "}"
+  ].join("\n");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -TypeDefinition $env:RESTORE_SOURCE -Language CSharp",
+    "[RestoreBasicFileInformation]::Restore(",
+    "  $env:TARGET_PATH,",
+    "  [long]$env:TARGET_BIRTHTIME,",
+    "  [long]$env:TARGET_ATIME,",
+    "  [long]$env:TARGET_MTIME,",
+    "  [long]$env:TARGET_CTIME",
+    ")"
+  ].join("\n");
+  childProcess.execFileSync(
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+    {
+      env: {
+        RESTORE_SOURCE: source,
+        SystemRoot: "C:\\Windows",
+        TARGET_ATIME: toFileTime(stat.atimeNs),
+        TARGET_BIRTHTIME: toFileTime(stat.birthtimeNs),
+        TARGET_CTIME: toFileTime(stat.ctimeNs),
+        TARGET_MTIME: toFileTime(stat.mtimeNs),
+        TARGET_PATH: filePath
+      },
+      stdio: "ignore",
+      windowsHide: true
+    }
+  );
+}
 
 function expected(status, health, reason) {
   return {
@@ -352,6 +484,7 @@ test("input parsing rejects contradictions and malformed typed values", () => {
     "return-command-completed": "false",
     "return-exit-code": "",
     "evidence-capture-complete": "true",
+    "return-log-digest": "a".repeat(64),
     "supplemental-evidence-paths": " /tmp/a.log \n\n/tmp/b.log\n"
   }), {
     returnLogPath: "/tmp/return.log",
@@ -359,7 +492,7 @@ test("input parsing rejects contradictions and malformed typed values", () => {
     exitCode: null,
     captureAttested: true,
     supplementalPaths: ["/tmp/a.log", "/tmp/b.log"],
-    returnLogDigest: ""
+    returnLogDigest: "a".repeat(64)
   });
   assert.throws(() => parseInputs({
     "return-log-path": "/tmp/return.log",
@@ -399,86 +532,648 @@ test("GitHub action input environment preserves hyphenated input names", () => {
   });
 });
 
-test("action run emits only typed outputs and never prints evidence", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-run-"));
-  const outputPath = path.join(root, "output.txt");
-  const returnLog = path.join(root, "return.log");
+test("run-scoped return path resolution is exact on POSIX and Windows models", () => {
+  const posixEnvironment = {
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_RUN_ID: "12345",
+    RUNNER_TEMP: "/runner/_temp"
+  };
+  assert.deepEqual(
+    resolveReturnEvidenceTarget(
+      posixEnvironment,
+      "/runner/_temp/unity-return-12345-2-qora/return-license.log",
+      path.posix
+    ),
+    {
+      evidenceDirectory: "/runner/_temp/unity-return-12345-2-qora",
+      returnLogPath: "/runner/_temp/unity-return-12345-2-qora/return-license.log",
+      runAttempt: "2",
+      runID: "12345",
+      runnerTemp: "/runner/_temp"
+    }
+  );
+  const windowsEnvironment = {
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_RUN_ID: "12345",
+    RUNNER_TEMP: "D:\\actions\\_temp"
+  };
+  assert.equal(
+    resolveReturnEvidenceTarget(
+      windowsEnvironment,
+      "D:\\actions\\_temp\\unity-return-12345-2-qora\\return-license.log",
+      path.win32
+    ).evidenceDirectory,
+    "D:\\actions\\_temp\\unity-return-12345-2-qora"
+  );
+
+  for (const candidate of [
+    "/runner/_temp/return-license.log",
+    "/runner/_temp/unity-return-999-2-qora/return-license.log",
+    "/runner/_temp/unity-return-12345-2-../return-license.log",
+    "/runner/_temp/unity-return-12345-2-qora/other.log",
+    "/runner/_temp/unity-return-12345-2-qora/nested/return-license.log",
+    "/outside/unity-return-12345-2-qora/return-license.log"
+  ]) {
+    assert.throws(
+      () => resolveReturnEvidenceTarget(posixEnvironment, candidate, path.posix),
+      /exact run-scoped central return path/
+    );
+  }
+});
+
+test("Windows path model deletes only the exact owned return file and directory", () => {
+  const environment = {
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_RUN_ID: "12345",
+    RUNNER_TEMP: "D:\\actions\\_temp"
+  };
+  const returnLog = "D:\\actions\\_temp\\unity-return-12345-2-qora\\return-license.log";
+  const target = resolveReturnEvidenceTarget(environment, returnLog, path.win32);
+  const directories = new Set([
+    "D:\\",
+    "D:\\actions",
+    "D:\\actions\\_temp",
+    target.evidenceDirectory
+  ]);
+  const files = new Set([target.returnLogPath]);
+  let nextInode = 1n;
+  const identities = new Map(
+    [...directories, ...files].map((candidate) => [candidate.toLowerCase(), nextInode++])
+  );
+  const missing = () => Object.assign(new Error("missing"), { code: "ENOENT" });
+  const io = {
+    lstatSync(candidate) {
+      const normalized = path.win32.resolve(candidate);
+      const key = normalized.toLowerCase();
+      if (!directories.has(normalized) && !files.has(normalized)) {
+        throw missing();
+      }
+      const isDirectory = directories.has(normalized);
+      return {
+        birthtimeNs: 1n,
+        ctimeNs: 1n,
+        dev: 1n,
+        ino: identities.get(key),
+        mode: isDirectory ? 16877n : 33188n,
+        mtimeNs: 1n,
+        nlink: 1n,
+        size: isDirectory ? 0n : BigInt(PROOF.length),
+        isDirectory: () => isDirectory,
+        isFile: () => !isDirectory,
+        isSymbolicLink: () => false
+      };
+    },
+    openSync(candidate) {
+      const normalized = path.win32.resolve(candidate);
+      if (!files.has(normalized)) {
+        throw missing();
+      }
+      return { candidate: normalized };
+    },
+    fstatSync(descriptor) {
+      return {
+        birthtimeNs: 1n,
+        ctimeNs: 1n,
+        dev: 1n,
+        ino: identities.get(descriptor.candidate.toLowerCase()),
+        mode: 33188n,
+        mtimeNs: 1n,
+        nlink: files.has(descriptor.candidate) ? 1n : 0n,
+        size: BigInt(PROOF.length),
+        isDirectory: () => false,
+        isFile: () => true,
+        isSymbolicLink: () => false
+      };
+    },
+    closeSync() {},
+    readdirSync(candidate, options) {
+      if (!directories.has(candidate)) {
+        throw missing();
+      }
+      const candidateFile = path.win32.join(candidate, "return-license.log");
+      if (!files.has(candidateFile)) {
+        return [];
+      }
+      if (options && options.withFileTypes) {
+        return [{
+          name: "return-license.log",
+          isFile: () => true,
+          isSymbolicLink: () => false
+        }];
+      }
+      return ["return-license.log"];
+    },
+    rmdirSync(candidate) {
+      if (!directories.delete(candidate)) {
+        throw missing();
+      }
+    },
+    renameSync(source, destination) {
+      if (!directories.delete(source)) {
+        throw missing();
+      }
+      directories.add(destination);
+      identities.set(
+        destination.toLowerCase(),
+        identities.get(source.toLowerCase())
+      );
+      const sourceFile = path.win32.join(source, "return-license.log");
+      const destinationFile = path.win32.join(destination, "return-license.log");
+      if (files.delete(sourceFile)) {
+        files.add(destinationFile);
+        identities.set(
+          destinationFile.toLowerCase(),
+          identities.get(sourceFile.toLowerCase())
+        );
+      }
+    },
+    unlinkSync(candidate) {
+      if (!files.delete(candidate)) {
+        throw missing();
+      }
+    }
+  };
+  const identity = inspectReturnEvidenceTarget(target, io, path.win32);
+  const { claimedIdentity, claimedTarget } = claimConsumedReturnEvidence(
+    target,
+    identity,
+    io,
+    path.win32,
+    () => Buffer.alloc(16, 0xab)
+  );
+  deleteClaimedReturnEvidence(
+    claimedTarget,
+    claimedIdentity,
+    target,
+    io,
+    path.win32,
+    (candidate) => {
+      files.delete(candidate.returnLogPath);
+      directories.delete(candidate.evidenceDirectory);
+    }
+  );
+  assert.equal(files.size, 0);
+  assert.equal(directories.has(target.evidenceDirectory), false);
+  assert.equal(directories.has(target.runnerTemp), true);
+});
+
+test("Windows identity deletion invokes the private handle-based helper with exact identities", () => {
+  const helperSource = fs.readFileSync(
+    path.join(path.dirname(runtimePath), "delete-unity-return-evidence.ps1"),
+    "utf8"
+  );
+  assert.match(helperSource, /CreateFile/);
+  assert.match(helperSource, /ReadFile/);
+  assert.match(helperSource, /SHA256/);
+  assert.match(helperSource, /SetFileInformationByHandle/);
+  assert.doesNotMatch(helperSource, /\b(?:Remove-Item|unlink|rmdir)\b/i);
+  const stat = (ino, size) => ({
+    birthtimeNs: 1700000000000000000n,
+    ctimeNs: 1700000000500000000n,
+    dev: 42n,
+    ino,
+    mtimeNs: 1700000001000000000n,
+    nlink: 1n,
+    size
+  });
+  const claimedTarget = {
+    evidenceDirectory: "D:\\actions\\_temp\\unity-return-123-1-qora.consuming-abcd",
+    returnLogPath:
+      "D:\\actions\\_temp\\unity-return-123-1-qora.consuming-abcd\\return-license.log"
+  };
+  let invocation;
+  identityBoundDeleteWindows(
+    claimedTarget,
+    {
+      evidenceDirectoryStat: stat(100n, 0n),
+      returnLogStat: stat(101n, 123n)
+    },
+    "a".repeat(64),
+    {
+      platform: "win32",
+      systemRoot: "C:\\Windows",
+      spawnSync(command, args, options) {
+        invocation = { command, args, options };
+        return { status: 0, signal: null };
+      }
+    }
+  );
+  assert.equal(
+    invocation.command,
+    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  );
+  assert.deepEqual(invocation.args.slice(0, 6), [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File"
+  ]);
+  assert.match(invocation.args[6], /delete-unity-return-evidence\.ps1$/);
+  assert.equal(invocation.options.env.UNITY_DELETE_DIRECTORY_PATH, claimedTarget.evidenceDirectory);
+  assert.equal(invocation.options.env.UNITY_DELETE_FILE_PATH, claimedTarget.returnLogPath);
+  assert.equal(invocation.options.env.UNITY_DELETE_FILE_INO, "101");
+  assert.equal(invocation.options.env.UNITY_DELETE_FILE_SIZE, "123");
+  assert.equal(invocation.options.env.UNITY_DELETE_EXPECTED_DIGEST, "a".repeat(64));
+  assert.equal(
+    invocation.options.env.UNITY_DELETE_FILE_CTIME_NS,
+    "1700000000500000000"
+  );
+  assert.equal(invocation.options.stdio, "ignore");
+  assert.equal(invocation.options.timeout, 30000);
+  assert.equal(
+    invocation.args.some((argument) => argument.includes(claimedTarget.evidenceDirectory)),
+    false
+  );
+  assert.throws(
+    () => identityBoundDeleteWindows(
+      claimedTarget,
+      {
+        evidenceDirectoryStat: stat(100n, 0n),
+        returnLogStat: stat(101n, 123n)
+      },
+      "a".repeat(64),
+      { platform: "linux" }
+    ),
+    /requires Windows/
+  );
+});
+
+test(
+  "Windows helper deletes real claimed central evidence by native handle",
+  { skip: process.platform !== "win32" },
+  (t) => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-windows-native-");
+    const result = run({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      log: () => {}
+    });
+    assert.equal(result.classificationComplete, true);
+    assert.equal(fs.existsSync(item.returnLog), false);
+    assert.equal(fs.existsSync(item.evidenceDirectory), false);
+  }
+);
+
+test(
+  "Windows helper rejects a same-size rewrite with all metadata restored",
+  { skip: process.platform !== "win32" },
+  (t) => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-windows-change-time-");
+    const inputs = centralInputs(item);
+    let mutatedPath;
+    assert.throws(() => run({
+      inputs,
+      outputPath: item.outputPath,
+      environment: item.environment,
+      deleteByIdentity(claimedTarget, claimedIdentity) {
+        mutatedPath = claimedTarget.returnLogPath;
+        const expected = claimedIdentity.returnLogStat;
+        fs.writeFileSync(mutatedPath, Buffer.alloc(Number(expected.size), 88));
+        restoreWindowsFileTimes(mutatedPath, expected);
+        const restored = fs.lstatSync(mutatedPath, { bigint: true });
+        assert.equal(restored.dev, expected.dev);
+        assert.equal(restored.ino, expected.ino);
+        assert.equal(restored.size, expected.size);
+        assert.equal(restored.birthtimeNs, expected.birthtimeNs);
+        assert.equal(restored.mtimeNs, expected.mtimeNs);
+        assert.equal(restored.ctimeNs, expected.ctimeNs);
+        identityBoundDeleteWindows(
+          claimedTarget,
+          claimedIdentity,
+          inputs["return-log-digest"]
+        );
+      },
+      log: () => {}
+    }), /Identity-bound return evidence deletion failed/);
+    assert.equal(fs.existsSync(mutatedPath), true);
+    const outputs = fs.readFileSync(item.outputPath, "utf8");
+    assert.match(outputs, /^classification-complete=false$/m);
+    assert.doesNotMatch(outputs, /^classification-complete=true$/m);
+  }
+);
+
+test("unsafe deletion shapes fail closed before completed outputs", async (t) => {
+  await t.test("symbolic-link ancestry", { skip: process.platform === "win32" }, () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-link-");
+    const linkedRunnerTemp = path.join(item.root, "linked-runner-temp");
+    fs.symlinkSync(item.runnerTemp, linkedRunnerTemp, "dir");
+    const linkedReturnLog = path.join(
+      linkedRunnerTemp,
+      path.basename(item.evidenceDirectory),
+      "return-license.log"
+    );
+    assert.throws(() => runClassifier({
+      inputs: { ...centralInputs(item), "return-log-path": linkedReturnLog },
+      outputPath: item.outputPath,
+      environment: { ...item.environment, RUNNER_TEMP: linkedRunnerTemp },
+      log: () => {}
+    }), /symbolic link or reparse point/);
+    assert.equal(fs.existsSync(item.returnLog), true);
+  });
+
+  await t.test("multiply linked return file", { skip: process.platform === "win32" }, () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-hardlink-");
+    fs.linkSync(item.returnLog, path.join(item.root, "other-name.log"));
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      log: () => {}
+    }), /singly linked regular file/);
+    assert.equal(fs.existsSync(item.returnLog), true);
+  });
+
+  await t.test("unexpected sibling", () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-sibling-");
+    fs.writeFileSync(path.join(item.evidenceDirectory, "unowned.log"), "leave me\n");
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      log: () => {}
+    }), /unexpected entry/);
+    assert.equal(centralEvidenceRemains(item), true);
+  });
+
+  await t.test("same-inode mutation during atomic claim", () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-identity-");
+    const io = {
+      ...fs,
+      renameSync(source, destination) {
+        fs.renameSync(source, destination);
+        fs.appendFileSync(path.join(destination, "return-license.log"), "mutation\n");
+      }
+    };
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      io,
+      log: () => {}
+    }), /identity changed/);
+    assert.equal(centralEvidenceRemains(item), true);
+  });
+
+  await t.test("different-inode swap immediately before atomic directory claim", () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-claim-swap-");
+    const originalDirectory = `${item.evidenceDirectory}.original`;
+    let unlinkCalled = false;
+    const io = {
+      ...fs,
+      renameSync(source, destination) {
+        fs.renameSync(source, originalDirectory);
+        fs.mkdirSync(source);
+        fs.writeFileSync(path.join(source, "return-license.log"), "substitution\n");
+        fs.renameSync(source, destination);
+      },
+      unlinkSync(candidate) {
+        unlinkCalled = true;
+        fs.unlinkSync(candidate);
+      }
+    };
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      io,
+      log: () => {}
+    }), /identity changed during deletion/);
+    assert.equal(unlinkCalled, false);
+    assert.equal(fs.existsSync(path.join(originalDirectory, "return-license.log")), true);
+    assert.equal(centralEvidenceRemains(item), true);
+  });
+
+  await t.test("identity-bound file deletion preserves a pathname substitute", () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-unlink-swap-");
+    const savedEvidence = path.join(item.root, "saved-return-license.log");
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      deleteByIdentity(claimedTarget) {
+        fs.renameSync(claimedTarget.returnLogPath, savedEvidence);
+        fs.writeFileSync(claimedTarget.returnLogPath, "substitution\n");
+        fs.unlinkSync(savedEvidence);
+        fs.rmdirSync(claimedTarget.evidenceDirectory);
+      },
+      log: () => {}
+    }), /directory not empty|ENOTEMPTY/);
+    const consumingDirectory = fs.readdirSync(item.runnerTemp)
+      .find((name) => name.includes(".consuming-"));
+    assert.equal(
+      fs.readFileSync(
+        path.join(item.runnerTemp, consumingDirectory, "return-license.log"),
+        "utf8"
+      ),
+      "substitution\n"
+    );
+    assert.equal(fs.existsSync(savedEvidence), false);
+    const outputs = fs.readFileSync(item.outputPath, "utf8");
+    assert.match(outputs, /^classification-complete=false$/m);
+    assert.doesNotMatch(outputs, /^classification-complete=true$/m);
+  });
+
+  await t.test("identity-bound directory deletion preserves a pathname substitute", () => {
+    const item = centralEvidenceFixture(t, "unity-cleanup-directory-swap-");
+    let savedDirectory;
+    assert.throws(() => runClassifier({
+      inputs: centralInputs(item),
+      outputPath: item.outputPath,
+      environment: item.environment,
+      deleteByIdentity(claimedTarget) {
+        savedDirectory = `${claimedTarget.evidenceDirectory}.saved`;
+        fs.renameSync(claimedTarget.evidenceDirectory, savedDirectory);
+        fs.mkdirSync(claimedTarget.evidenceDirectory);
+        fs.writeFileSync(
+          path.join(claimedTarget.evidenceDirectory, "substitute.txt"),
+          "substitution\n"
+        );
+        fs.unlinkSync(path.join(savedDirectory, "return-license.log"));
+        fs.rmdirSync(savedDirectory);
+      },
+      log: () => {}
+    }), /remains after deletion/);
+    assert.equal(fs.existsSync(savedDirectory), false);
+    const consumingDirectory = fs.readdirSync(item.runnerTemp)
+      .find((name) => name.includes(".consuming-"));
+    assert.equal(
+      fs.readFileSync(path.join(item.runnerTemp, consumingDirectory, "substitute.txt"), "utf8"),
+      "substitution\n"
+    );
+    const outputs = fs.readFileSync(item.outputPath, "utf8");
+    assert.match(outputs, /^classification-complete=false$/m);
+    assert.doesNotMatch(outputs, /^classification-complete=true$/m);
+  });
+
+  for (const [name, deleteByIdentity, message] of [
+    [
+      "deletion failure",
+      () => { throw new Error("simulated identity deletion failure"); },
+      /identity deletion failure/
+    ],
+    ["post-delete presence", () => {}, /remains after deletion/]
+  ]) {
+    await t.test(name, () => {
+      const item = centralEvidenceFixture(t, `unity-cleanup-${name.replaceAll(" ", "-")}-`);
+      assert.throws(() => runClassifier({
+        inputs: centralInputs(item),
+        outputPath: item.outputPath,
+        environment: item.environment,
+        deleteByIdentity,
+        log: () => {}
+      }), message);
+      assert.equal(centralEvidenceRemains(item), true);
+      const outputs = fs.readFileSync(item.outputPath, "utf8");
+      assert.match(outputs, /^classification-complete=false$/m);
+      assert.doesNotMatch(outputs, /^classification-complete=true$/m);
+    });
+  }
+});
+
+test("failed authoritative return-log reads never delete or complete", async (t) => {
+  const emptyDigest = crypto.createHash("sha256").update("").digest("hex");
+  const cases = [
+    {
+      name: "invalid UTF-8",
+      prepare(item) {
+        fs.writeFileSync(item.returnLog, Buffer.from([0xc3, 0x28]));
+        return fs;
+      }
+    },
+    {
+      name: "oversized",
+      prepare(item) {
+        fs.writeFileSync(item.returnLog, Buffer.alloc(MAX_EVIDENCE_TOTAL_BYTES + 1, 65));
+        return fs;
+      }
+    },
+    {
+      name: "read failure",
+      prepare() {
+        return {
+          ...fs,
+          openSync(candidate, flags) {
+            if (candidate.includes(".consuming-")) {
+              throw new Error("simulated read failure");
+            }
+            return fs.openSync(candidate, flags);
+          }
+        };
+      }
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, () => {
+      const item = centralEvidenceFixture(t, `unity-cleanup-read-${fixture.name.replaceAll(" ", "-")}-`);
+      const io = fixture.prepare(item);
+      assert.throws(() => runClassifier({
+        inputs: {
+          ...centralInputs(item),
+          "return-log-digest": emptyDigest
+        },
+        outputPath: item.outputPath,
+        environment: item.environment,
+        io,
+        log: () => {}
+      }), /could not be read and validated/);
+      assert.equal(centralEvidenceRemains(item), true);
+      const outputs = fs.readFileSync(item.outputPath, "utf8");
+      assert.match(outputs, /^classification-complete=false$/m);
+      assert.doesNotMatch(outputs, /^classification-complete=true$/m);
+    });
+  }
+});
+
+test("action run emits only typed outputs and never prints evidence", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-run-");
+  const {
+    environment,
+    evidenceDirectory,
+    outputPath,
+    returnLog
+  } = item;
   const secretMarker = "SC-DO-NOT-PRINT";
   fs.writeFileSync(returnLog, `${ENTITLEMENT}\n[Licensing::Client] Successfully returned ULF license with serial number : ${secretMarker}\n`);
   const messages = [];
-  try {
-    const result = run({
-      inputs: {
-        "return-log-path": returnLog,
-        "return-command-completed": "true",
-        "return-exit-code": "0",
-        "evidence-capture-complete": "true",
-        "return-log-digest": crypto
-          .createHash("sha256")
-          .update(fs.readFileSync(returnLog))
-          .digest("hex"),
-        "supplemental-evidence-paths": ""
-      },
-      outputPath,
-      log: (message) => messages.push(message)
-    });
-    assert.equal(result.reason, "cleanup-confirmed");
-    const outputs = fs.readFileSync(outputPath, "utf8");
-    assert.match(outputs, /^resource-safe=true$/m);
-    assert.match(outputs, /^classification-complete=true$/m);
-    assert.doesNotMatch(outputs, new RegExp(secretMarker));
-    assert.doesNotMatch(messages.join("\n"), new RegExp(secretMarker));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  const result = runClassifier({
+    inputs: {
+      "return-log-path": returnLog,
+      "return-command-completed": "true",
+      "return-exit-code": "0",
+      "evidence-capture-complete": "true",
+      "return-log-digest": centralInputs(item)["return-log-digest"],
+      "supplemental-evidence-paths": ""
+    },
+    outputPath,
+    environment,
+    log: (message) => messages.push(message)
+  });
+  assert.equal(result.reason, "cleanup-confirmed");
+  assert.equal(fs.existsSync(evidenceDirectory), false);
+  const outputs = fs.readFileSync(outputPath, "utf8");
+  assert.match(outputs, /^resource-safe=true$/m);
+  assert.match(outputs, /^classification-complete=true$/m);
+  assert.doesNotMatch(outputs, new RegExp(secretMarker));
+  assert.doesNotMatch(messages.join("\n"), new RegExp(secretMarker));
 });
 
-test("legacy return evidence remains classifiable without the central digest", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-legacy-"));
-  const outputPath = path.join(root, "output.txt");
-  const returnLog = path.join(root, "return.log");
-  try {
-    fs.writeFileSync(returnLog, PROOF);
-    const result = run({
+test("successful classification leaves supplemental evidence untouched", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-supplemental-");
+  const supplemental = path.join(item.root, "supplemental.log");
+  fs.writeFileSync(supplemental, "account-health observation\n");
+  const result = runClassifier({
+    inputs: {
+      ...centralInputs(item),
+      "supplemental-evidence-paths": supplemental
+    },
+    outputPath: item.outputPath,
+    environment: item.environment,
+    log: () => {}
+  });
+  assert.equal(result.classificationComplete, true);
+  assert.equal(fs.existsSync(item.evidenceDirectory), false);
+  assert.equal(fs.readFileSync(supplemental, "utf8"), "account-health observation\n");
+});
+
+test("missing central digest fails closed and preserves return evidence", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-missing-digest-");
+  assert.throws(() => runClassifier({
       inputs: {
-        "return-log-path": returnLog,
+        "return-log-path": item.returnLog,
         "return-command-completed": "true",
         "return-exit-code": "0",
         "evidence-capture-complete": "true",
         "supplemental-evidence-paths": ""
       },
-      outputPath,
+      outputPath: item.outputPath,
+      environment: item.environment,
       log: () => {}
-    });
-    assert.equal(result.reason, "cleanup-confirmed");
-    assert.equal(result.resourceSafe, true);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+    }), /return-log-digest is required/);
+  assert.equal(centralEvidenceRemains(item), true);
+  assert.match(fs.readFileSync(item.outputPath, "utf8"), /classification-complete=false/);
+  assert.doesNotMatch(fs.readFileSync(item.outputPath, "utf8"), /classification-complete=true/);
 });
 
-test("classifier rejects return-log replacement against the linked digest", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-cleanup-digest-"));
-  const outputPath = path.join(root, "output.txt");
-  const returnLog = path.join(root, "return.log");
-  try {
-    fs.writeFileSync(returnLog, PROOF);
-    const digest = crypto.createHash("sha256").update(PROOF).digest("hex");
-    fs.writeFileSync(returnLog, `${PROOF}replacement\n`);
-    assert.throws(() => run({
+test("classifier rejects return-log replacement against the linked digest", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-digest-");
+  const digest = crypto.createHash("sha256").update(PROOF).digest("hex");
+  fs.writeFileSync(item.returnLog, `${PROOF}replacement\n`);
+  assert.throws(() => runClassifier({
       inputs: {
-        "return-log-path": returnLog,
+        "return-log-path": item.returnLog,
         "return-command-completed": "true",
         "return-exit-code": "0",
         "evidence-capture-complete": "true",
         "return-log-digest": digest,
         "supplemental-evidence-paths": ""
       },
-      outputPath,
+      outputPath: item.outputPath,
+      environment: item.environment,
       log: () => {}
-    }), /digest does not match/);
-    assert.match(fs.readFileSync(outputPath, "utf8"), /classification-complete=false/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  }), /digest does not match/);
+  assert.equal(centralEvidenceRemains(item), true);
+  assert.match(fs.readFileSync(item.outputPath, "utf8"), /classification-complete=false/);
 });

@@ -52,6 +52,7 @@ Read only the files relevant to the current task.
 | [.llm/tasks/issue-113-enrollment-remediation.md](./tasks/issue-113-enrollment-remediation.md) | Remediate organization enrollment drift one consumer at a time with typed central policy. |
 | [.llm/tasks/issue-132-incident-recovery-visibility.md](./tasks/issue-132-incident-recovery-visibility.md) | Task record for publishing active build-lock incident recovery evidence without weakening exact-ID proof. |
 | [.llm/tasks/issue-140-shared-github-issue-client.md](./tasks/issue-140-shared-github-issue-client.md) | Task record for centralizing bounded fail-closed GitHub issue synchronization across three monitors. |
+| [.llm/tasks/issue-160-delete-return-evidence.md](./tasks/issue-160-delete-return-evidence.md) | Delete consumed central Unity return evidence before cleanup classification can complete. |
 | [.llm/tasks/issue-42-unity-enrollment-audit.md](./tasks/issue-42-unity-enrollment-audit.md) | Build and validate the fail-closed extensible Unity enrollment audit. |
 | [.llm/tasks/issue-77-reaper-delivery-monitoring.md](./tasks/issue-77-reaper-delivery-monitoring.md) | Task record for independent scheduled-reaper delivery monitoring and uncancellable proof-bearing recovery. |
 | [.llm/tasks/issue-85-central-unity-cleanup-policy.md](./tasks/issue-85-central-unity-cleanup-policy.md) | Task record for central bounded Unity cleanup classification and post-release safety gating. |

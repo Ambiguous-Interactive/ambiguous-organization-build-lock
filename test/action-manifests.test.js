@@ -391,6 +391,14 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
   );
   assert.match(classifier, /using:\s*node24/);
   assert.match(classifier, /main:\s+\.\.\/\.\.\/dist\/classify-unity-cleanup-evidence\.js/);
+  assert.match(
+    classifier,
+    /return-log-digest:\s*\n(?: {4}.+\n)*? {4}required:\s*true/
+  );
+  assert.match(
+    classifier,
+    /classification-complete:\s*\n {4}description:.*verified central return evidence deletion/
+  );
 
   const returnAction = readActionManifest("return-unity-license");
   assert.deepEqual(

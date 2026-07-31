@@ -188,7 +188,7 @@ jobs:
 
 func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	snapshot := unityFixture(map[string]string{
-		".github/workflows/unity.yml": unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		".github/workflows/unity.yml": unityWorkflow(centralReturnSteps(), safeAggregate()),
 	})
 	result, err := AnalyzeUnityEnrollment(snapshot, unityAuditPolicy())
 	if err != nil {
@@ -210,7 +210,7 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 
 func TestUnityEnrollmentAcceptsIsolatedTrustedSkipAggregate(t *testing.T) {
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
-		".github/workflows/unity.yml": unityWorkflow(safeLicensedSteps(), trustedSkipAggregate()),
+		".github/workflows/unity.yml": unityWorkflow(centralReturnSteps(), trustedSkipAggregate()),
 	}), unityAuditPolicy())
 	if err != nil {
 		t.Fatal(err)
@@ -747,13 +747,7 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 }
 
 func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
-	licensedSteps := strings.Replace(
-		safeLicensedSteps(),
-		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
-		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+
-			"\n        with:\n          lock-name: wallstop-organization-builds\n          holder-id-suffix: default",
-		1,
-	)
+	licensedSteps := centralReturnSteps()
 	snapshot := unityFixture(map[string]string{
 		".github/workflows/unity.yml": unityWorkflow(licensedSteps, `  cleanup:
     if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
@@ -765,8 +759,8 @@ func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
         uses: `+releaseActionRef+`
         with:
           lock-name: wallstop-organization-builds
-          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:default
-          holder-id-suffix: default
+          holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:qora
+          holder-id-suffix: qora
           runner-id: ${{ runner.name }}
           resource-cleanup-status: unknown
           resource-health: healthy
@@ -808,13 +802,7 @@ func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
 }
 
 func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
-	licensedSteps := strings.Replace(
-		safeLicensedSteps(),
-		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA,
-		"      - id: acquire\n        uses: "+lockActionPrefix+"acquire-build-lock@"+testSHA+
-			"\n        with:\n          lock-name: wallstop-organization-builds\n          holder-id-suffix: qora",
-		1,
-	)
+	licensedSteps := centralReturnSteps()
 	workflow := `name: Unity
 on:
   pull_request:
@@ -2003,7 +1991,7 @@ runs:
 }
 
 func TestUnityEnrollmentAcceptsLiteralFalseContinueOnError(t *testing.T) {
-	workflow := unityWorkflow(safeLicensedSteps(), safeAggregate())
+	workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
 	workflow = strings.Replace(
 		workflow,
 		"      - id: release\n        if:",
@@ -2453,7 +2441,7 @@ runs:
 `
 }
 
-func TestUnityEnrollmentAcceptsValidatedCleanupCompositeWrapper(t *testing.T) {
+func TestUnityEnrollmentRejectsLegacyCleanupCompositeWrapper(t *testing.T) {
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/unity.yml": unityWorkflow(
 			wrappedCleanupSteps("always()"),
@@ -2464,8 +2452,16 @@ func TestUnityEnrollmentAcceptsValidatedCleanupCompositeWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Findings) != 0 {
-		t.Fatalf("validated cleanup wrapper produced findings: %#v", result.Findings)
+	codes := findingCodes(result.Findings)
+	for _, code := range []string{
+		"classifier-inputs-not-typed",
+		"missing-unity-return",
+		"release-inputs-not-typed",
+		"cleanup-gate-inputs-not-typed",
+	} {
+		if !strings.Contains(codes, code) {
+			t.Fatalf("legacy cleanup wrapper omitted %q: %#v", code, result.Findings)
+		}
 	}
 }
 
