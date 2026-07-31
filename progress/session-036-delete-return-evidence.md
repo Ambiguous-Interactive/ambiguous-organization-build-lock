@@ -6,7 +6,9 @@ Status: central implementation and immutable authorization merged; consumer roll
 
 ## Selection
 
-GitHub reported 14 open issues and no open or draft pull requests. Local `main`
+GitHub initially reported 14 open issues and no open or draft pull requests. The
+manual-only follow-up discovered during rollout is now tracked as #166, bringing
+the current open total to 15. Local `main`
 matched `origin/main` at `c60c7e5c1`; sampled scheduled workflows on that exact
 head were green.
 
@@ -19,17 +21,22 @@ Priority order by impact and safe Unity churn:
 2. #160 is the highest safely completable security issue. It removes consumed
    credential-adjacent evidence centrally and its implementation needs no
    licensed Unity execution.
-3. #113 reports broad cross-repository enrollment drift and requires sequenced
+3. #166 is the least-churn safely related follow-up: prohibit CI editor
+   provisioning and require a healthy manually installed editor before
+   credentials or lock acquisition.
+4. #113 reports broad cross-repository enrollment drift and requires sequenced
    consumer remediation rather than one central low-churn change.
-4. #51 requires prohibited organization policy and secret/App scope mutations.
-5. #153, #53, #49, and #44 require broader architecture, consumer rollout, or
+5. #51 requires prohibited organization policy and secret/App scope mutations.
+6. #153, #53, #49, and #44 require broader architecture, consumer rollout, or
    live licensed validation.
-6. #99 and #60 are throughput follow-ups; #60 depends on safe #83 resolution.
-7. #94 remains upstream-blocked because actionlint v1.7.12 is still latest and
+7. #99 and #60 are throughput follow-ups; #60 depends on safe #83 resolution.
+8. #94 remains upstream-blocked because actionlint v1.7.12 is still latest and
    does not compile with yaml/v4 rc.6.
-8. #29 and #27 require live canaries/monitoring; #30 is the umbrella tracker.
+9. #29 and #27 require live canaries/monitoring; #30 is the umbrella tracker.
 
-There are no open dependency PRs. The root Go module is current. The only
+There are no open dependency PRs in the central repository. Organization-wide
+open dependency PRs were classified separately and are unrelated to the
+selected central lifecycle policy. The root Go module is current. The only
 available direct isolated-module update is yaml/v4 rc.6, which remains blocked
 by #94; unrelated indirect-module version advertisements were not promoted into
 direct dependencies.
@@ -69,7 +76,7 @@ go test ./internal/enrollment
 passed
 
 .devcontainer/scripts/verify.sh
-passed: 676 Node tests (674 pass, 2 Windows-only skips) plus all Go
+passed: 678 Node tests (676 pass, 2 Windows-only skips) plus all Go
 packages/modules, actionlint, harness, and credential-literal policy
 ```
 
@@ -131,3 +138,6 @@ Consumer migration must preserve the audited workflow shapes, use the smallest
 authorized immutable revision compatible with each provisioned editor layout,
 and prove the organization enrollment audit green. No organization credential,
 App, secret, runner, or ruleset policy changes are part of this rollout.
+
+Session 038 records the live consumer rollout, the corrected manual-only editor
+contract, completed merge evidence, and the remaining external prerequisites.

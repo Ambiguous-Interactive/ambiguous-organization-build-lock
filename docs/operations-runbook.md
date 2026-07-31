@@ -63,8 +63,9 @@ and immutable lock-action allowlist. The `Organization Unity enrollment audit`
 workflow runs daily at `23 8 * * *`, can be dispatched manually, and also runs
 after relevant policy changes reach `main`. It uses the reader App to check out
 each current default branch without persisting credentials, analyzes exact Git
-objects without executing consumer code, and revalidates every default-branch
-head before reporting.
+objects without executing consumer code—including immutable workflows, actions,
+and checked-in PowerShell scripts—and revalidates every default-branch head
+before reporting.
 
 The audit derives the reader-App token scope, checkout targets, and exact-head
 revalidation set from the validated registry. The required baseline cannot be
@@ -91,14 +92,16 @@ audit` workflow. Its completed run triggers the secret-bearing audit through
 `workflow_dispatch` trigger, so selecting a feature-branch ref cannot expose the
 reader App credential to branch-controlled workflow code.
 
-The audit fails closed if a repository, workflow, commit, reader credential,
-exception, or revalidation result is missing or ambiguous. Findings contain
+The audit fails closed if a repository, workflow, reachable checked-in
+PowerShell script, commit, reader credential, exception, or revalidation result
+is missing or ambiguous. Findings contain
 only repository, commit, workflow path, job, classification, and stable reason
-code. The workflow opens or updates one marker-fenced drift issue and closes it
-only after a complete clean audit. Never copy matched workflow source, secret
-values, or raw API responses into that issue. The sanitized active inventory
-and exact commit list in the issue are the retained evidence linked to issue
-#42 and rollout tracker #30.
+code. They never contain matched source. The workflow opens or updates one
+marker-fenced drift issue and closes it only after a complete clean audit.
+Never copy matched workflow source,
+secret values, or raw API responses into that issue. The sanitized active
+inventory and exact commit list in the issue are the retained evidence linked
+to issue #42 and rollout tracker #30.
 
 The complete source-free JSON audit is retained as a 30-day Actions artifact.
 The issue includes its validated exact artifact URL, total finding and
@@ -163,20 +166,56 @@ reader access. Treat either condition as scope drift.
 1. A hosted preflight proves that the repository can see a registered runner
    with the required labels. Busy and temporarily offline runners both count as
    available infrastructure; the job queues until one accepts it.
-2. The licensed job validates local credential shape and verifies that it is
+2. Before the licensed job references Unity credentials, it performs a bounded,
+   failure-propagating check for the exact canonical editor using
+   `ensure-editor.ps1 -CiManagedOnly -RequireHealthyExisting`. Missing or
+   unhealthy editor state keeps the job red for manual host maintenance. CI
+   must not install, download, repair, move, quarantine, or provision an
+   editor, and provisioning-budget environment controls are prohibited. The
+   mandatory gate is a direct workflow invocation; reachable checked-in
+   PowerShell wrappers are still audited for hidden provisioning and unresolved
+   script-variable invocation fails closed. An approved immutable, exact-input
+   current-PR-head guard may run first; no other step may precede the approved
+   bounded, no-profile removal bootstrap. It rejects a reparse-point
+   `.ci` parent, removes only `.ci/unity-helpers`, and proves absence. The
+   trusted, immutable `unity-helpers` checkout follows and immediately precedes
+   the gate, is
+   unconditional and failure-propagating, sets `persist-credentials: false`
+   and `clean: true`, and has no additional inputs. This prevents skipped,
+   stale, or subsequently overwritten helper content from satisfying
+   provenance. Forced recreation prevents persistent local Git configuration
+   from surviving `clean: true`. Its closed environment disables system/global
+   Git configuration and sets `core.hooksPath=/dev/null`. Workflow and job
+   `env` mappings must be absent. Inherited variables can preload PowerShell's
+   .NET runtime before the first bootstrap command, or redirect Git, hooks,
+   and the checkout action runtime. Define required values only on later
+   steps, after the bootstrap and mandatory editor gate. The gate has an exact
+   no-profile shell template and one-line validator command. It supplies a
+   quoted literal editor release, the runner-owned
+   `$env:RUNNER_TOOL_CACHE\u6-v3` root, and a closed profile, with no step-local
+   environment or additional commands. The profile is `EditorOnly`, or the
+   reviewed static `matrix.test-mode` map selects
+   `StandaloneWindowsIl2Cpp` only for `standalone`. The release must match the
+   central return input; only a bounded static `matrix.unity-version` axis may
+   supply both dynamically.
+   The optional current-head guard, bootstrap, checkout, gate, and acquire omit
+   `if` so each inherits the preceding step's successful status. Never use
+   `always()` on this prefix: provenance rejection must stop checkout and lock
+   acquisition.
+3. The licensed job validates local credential shape and verifies that it is
    still the current trusted PR head before entering the organization FIFO.
-3. Acquire records the exact repository, run, job, holder suffix, and physical
+4. Acquire records the exact repository, run, job, holder suffix, and physical
    runner identity.
-4. Unity activation and work run only after acquire succeeds. Activation uses
+5. Unity activation and work run only after acquire succeeds. Activation uses
    bounded retry for transient seat handoff.
-5. Unity returns on the same physical identity. Only exact positive return
+6. Unity returns on the same physical identity. Only exact positive return
    evidence is `confirmed/healthy`.
-6. Release always runs with the acquire identity and typed cleanup evidence.
+7. Release always runs with the acquire identity and typed cleanup evidence.
    Waiting jobs are removed from the queue even when they never acquired.
    Invalid or contradictory evidence is degraded to unknown; under schema 4 or
    newer, any removed held capacity is quarantined. The release step fails only
    after exact ownership cleanup.
-7. The stable aggregate fails on preflight failure, cancellation, unexpected
+8. The stable aggregate fails on preflight failure, cancellation, unexpected
    skip, partial matrix execution, missing return evidence, or failed release.
 
 Automatic concurrency must not cancel a job after it can acquire. A superseded

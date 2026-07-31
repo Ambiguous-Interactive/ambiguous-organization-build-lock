@@ -2,10 +2,12 @@ package enrollment
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -15,9 +17,15 @@ const (
 	classifierCheckoutRef   = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 	cleanupClassifierAction = "classify-unity-cleanup-evidence"
 	cleanupGateAction       = "require-confirmed-unity-cleanup"
+	currentHeadAction       = "require-current-pr-head"
 	preflightAction         = "check-unity-runner-availability"
 	releaseAction           = "release-build-lock"
 	returnAction            = "return-unity-license"
+	trustedEditorCheckout   = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+	trustedEditorPath       = ".ci/unity-helpers/scripts/unity/ensure-editor.ps1"
+	trustedEditorRepository = "Ambiguous-Interactive/unity-helpers"
+	trustedEditorRevision   = "76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d"
+	trustedEditorRoot       = ".ci/unity-helpers"
 	validationGateAction    = "require-unity-validation"
 
 	UnityInventoryPaidSerial         = "paid-serial"
@@ -26,6 +34,39 @@ const (
 	UnityInventorySynthetic          = "synthetic"
 	UnityInventoryDisabled           = "disabled"
 	UnityInventoryNonLicensingStatic = "non-licensing-static"
+)
+
+const trustedEditorBootstrapRun = `$workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+$parent = [IO.Path]::GetFullPath((Join-Path $workspace '.ci'))
+$target = [IO.Path]::GetFullPath((Join-Path $parent 'unity-helpers'))
+if (-not $target.StartsWith("$workspace\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Validator checkout path escaped the workspace.'
+}
+if (Test-Path -LiteralPath $parent) {
+  $parentItem = Get-Item -LiteralPath $parent -Force
+  if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Validator checkout parent is a reparse point.'
+  }
+}
+if (Test-Path -LiteralPath $target) {
+  $targetItem = Get-Item -LiteralPath $target -Force
+  if (($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    $targetItem.Delete()
+  } else {
+    Remove-Item -LiteralPath $target -Recurse -Force
+  }
+}
+if (Test-Path -LiteralPath $target) {
+  throw 'Validator checkout directory could not be removed.'
+}`
+
+const (
+	trustedEditorBootstrapShell = `pwsh -NoProfile -Command ". '{0}'"`
+	trustedEditorGatePrefix     = `& "$env:GITHUB_WORKSPACE/.ci/unity-helpers/scripts/unity/ensure-editor.ps1" -UnityVersion '`
+	trustedEditorGateMiddle     = `' -InstallRoot "$env:RUNNER_TOOL_CACHE\u6-v3" -ProvisioningProfile `
+	trustedEditorGateSuffix     = ` -DiagnosticsPath unity-editor-check.json -CiManagedOnly -RequireHealthyExisting`
+	trustedEditorMatrixProfile  = `${{ fromJSON('{"editmode":"EditorOnly","playmode":"EditorOnly","standalone":"StandaloneWindowsIl2Cpp"}')[matrix.test-mode] }}`
+	trustedEditorShell          = `pwsh -NoProfile -NonInteractive -Command ". '{0}'"`
 )
 
 // ValidUnityInventoryClassification is the shared artifact-schema allowlist
@@ -541,6 +582,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		a.analyzer.add("missing-licensed-steps", workflowPath, jobName)
 		return
 	}
+	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps)
 	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
 	acquireCount, returnActionCount := 0, 0
 	acquireID, returnID, classifierID, releaseID := "", "", "", ""
@@ -564,7 +606,9 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			}
 			if acquire, ref := acquireReference(uses); acquire {
 				acquireCount++
-				if acquireCount == 1 && jobFailurePropagates && affirmativeStepRunnable(step) {
+				if acquireCount == 1 &&
+					jobFailurePropagates &&
+					successDependentStepRunnable(step) {
 					firstAcquire = index
 					acquireID = stepID(node)
 					acquireScope = step.scope
@@ -738,6 +782,1794 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if !a.hasAggregate(workflow, workflowPath, jobs, jobName, job, preflightJobs) {
 		a.analyzer.add("missing-unity-aggregate", workflowPath, jobName)
 	}
+}
+
+const maxUnityEditorCheckTimeoutMinutes = 10
+
+var unityEditorProvisioningControls = []string{
+	"uh_ensure_editor_provisioning_budget_seconds",
+	"uh_ensure_editor_install_timeout_seconds",
+}
+
+func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
+	workflowPath, jobName string,
+	workflow, job *yaml.Node,
+	steps []flattenedUnityStep,
+) {
+	credentialsAvailableBeforeSteps := containsUnityCredentialReference(strings.ToLower(
+		nodeScalarText(mappingValue(workflow, "env")) +
+			nodeScalarText(mappingValue(job, "env")),
+	))
+	jobText := strings.ToLower(
+		nodeScalarText(mappingValue(workflow, "env")) +
+			nodeScalarText(mappingValue(job, "env")),
+	)
+	for _, control := range unityEditorProvisioningControls {
+		if strings.Contains(jobText, control) {
+			a.analyzer.add("unity-editor-provisioning-control", workflowPath, jobName)
+		}
+	}
+
+	gateIndex := -1
+	acquireIndex := -1
+	credentialIndex := -1
+	for index, step := range steps {
+		if acquire, _ := acquireReference(stepUses(step.node)); acquire && acquireIndex < 0 {
+			acquireIndex = index
+		}
+		stepText := nodeScalarText(step.node)
+		for _, enclosing := range step.enclosingSteps {
+			stepText += nodeScalarText(enclosing)
+		}
+		if credentialIndex < 0 && unityStepContainsCredential(step) {
+			credentialIndex = index
+		}
+		for _, control := range unityEditorProvisioningControls {
+			if strings.Contains(strings.ToLower(stepText), control) {
+				a.analyzer.add("unity-editor-provisioning-control", workflowPath, jobName)
+			}
+		}
+
+		run := scalarValue(mappingValue(step.node, "run"))
+		if run == "" {
+			continue
+		}
+		direct := auditEnsureEditorSource(run)
+		// A checked-in wrapper can hide the actual invocation behind arbitrary
+		// PowerShell control flow. Audit every statically reachable wrapper for
+		// prohibited provisioning, but require the mandatory gate to be a
+		// direct workflow invocation whose execution conditions are visible in
+		// the workflow AST.
+		candidate := direct.topLevel &&
+			a.trustedEditorGate(run, workflow, job, steps, index) &&
+			step.scope == "job" &&
+			len(step.enclosingSteps) == 0
+		delegated := editorSourceAudit{}
+		if !candidate {
+			delegated = a.delegatedEditorAudit(run)
+		}
+		unresolved := hasUnresolvedPowerShellEditorInvocation(run)
+		if step.scope == "job" {
+			unresolved = hasUnresolvedPowerShellWorkflowInvocation(run)
+		}
+		if direct.unsafe || delegated.unsafe || unresolved {
+			a.analyzer.add("unsafe-unity-editor-provisioning", workflowPath, jobName)
+		}
+		if direct.provisioningControl || delegated.provisioningControl {
+			a.analyzer.add("unity-editor-provisioning-control", workflowPath, jobName)
+		}
+		if !candidate || gateIndex >= 0 {
+			continue
+		}
+
+		if !successDependentStepRunnable(step) {
+			a.analyzer.add("unsafe-unity-editor-check", workflowPath, jobName)
+			continue
+		}
+		if !requiredBoundedTimeout(step.node, maxUnityEditorCheckTimeoutMinutes) {
+			a.analyzer.add("unbounded-unity-editor-check", workflowPath, jobName)
+		}
+		if !criticalStepFailurePropagates(step) {
+			a.analyzer.add("unsafe-unity-editor-check", workflowPath, jobName)
+		}
+		gateIndex = index
+	}
+
+	if gateIndex < 0 {
+		a.analyzer.add("missing-unity-editor-check", workflowPath, jobName)
+		return
+	}
+	if acquireIndex >= 0 && gateIndex >= acquireIndex {
+		a.analyzer.add("unity-editor-check-after-lock", workflowPath, jobName)
+	}
+	if credentialsAvailableBeforeSteps ||
+		(credentialIndex >= 0 && gateIndex >= credentialIndex) {
+		a.analyzer.add("unity-editor-check-after-credentials", workflowPath, jobName)
+	}
+}
+
+func (a *unityPolicyAnalyzer) trustedEditorGate(
+	run string,
+	workflow *yaml.Node,
+	job *yaml.Node,
+	steps []flattenedUnityStep,
+	gateIndex int,
+) bool {
+	gate := steps[gateIndex]
+	// This body is deliberately exact. A merely present trusted-looking
+	// invocation could be skipped by a custom shell or preceded by a write
+	// that replaces the freshly checked-out validator.
+	gateVersion, gateProfile, validGateBody := trustedEditorGateBody(run)
+	if !validGateBody ||
+		!trustedEditorGateProfile(gateProfile, job) ||
+		!trustedEditorGateMatchesReturn(
+			gateVersion,
+			job,
+			steps,
+			gateIndex,
+		) ||
+		scalarValue(mappingValue(gate.node, "shell")) != trustedEditorShell ||
+		mappingValue(gate.node, "env") != nil {
+		return false
+	}
+	bootstrapIndex := 0
+	switch gateIndex {
+	case 2:
+	case 3:
+		if !a.trustedCurrentHeadGuard(steps[0]) {
+			return false
+		}
+		bootstrapIndex = 1
+	default:
+		return false
+	}
+	if !trustedEditorBootstrap(steps[bootstrapIndex]) {
+		return false
+	}
+	// The bootstrap itself is PowerShell running on .NET. Any inherited
+	// workflow/job environment would let a consumer preload that runtime (for
+	// example with DOTNET_STARTUP_HOOKS or CoreCLR profiler variables) before
+	// the exact bootstrap body can enforce provenance. Keep this contract
+	// closed: values needed by later steps must be step-local.
+	if mappingValue(workflow, "env") != nil || mappingValue(job, "env") != nil {
+		return false
+	}
+	checkout := steps[gateIndex-1]
+	if checkout.scope != "job" || len(checkout.enclosingSteps) != 0 ||
+		stepUses(checkout.node) != trustedEditorCheckout ||
+		!successDependentStepRunnable(checkout) ||
+		!safeCheckoutGitEnvironment(checkout.node) {
+		return false
+	}
+	with := mappingValue(checkout.node, "with")
+	if with == nil || with.Kind != yaml.MappingNode || len(with.Content) != 10 {
+		return false
+	}
+	return scalarValue(mappingValue(with, "repository")) == trustedEditorRepository &&
+		scalarValue(mappingValue(with, "ref")) == trustedEditorRevision &&
+		scalarValue(mappingValue(with, "path")) == trustedEditorRoot &&
+		strings.EqualFold(
+			scalarValue(mappingValue(with, "persist-credentials")),
+			"false",
+		) &&
+		strings.EqualFold(scalarValue(mappingValue(with, "clean")), "true")
+}
+
+func (a *unityPolicyAnalyzer) trustedCurrentHeadGuard(
+	step flattenedUnityStep,
+) bool {
+	if step.scope != "job" ||
+		len(step.enclosingSteps) != 0 ||
+		!successDependentStepRunnable(step) ||
+		!requiredBoundedTimeout(step.node, 2) ||
+		!exactLockActionReference(stepUses(step.node), currentHeadAction) ||
+		!a.approved[strings.ToLower(actionRef(stepUses(step.node)))] ||
+		!trustedLeafExecution(step.node) {
+		return false
+	}
+	with := mappingValue(step.node, "with")
+	return mappingHasOnlyKeys(with, map[string]bool{
+		"github-token":        true,
+		"pull-request-number": true,
+		"expected-head-sha":   true,
+	}) &&
+		exactExpression(mappingValue(with, "github-token"), "github.token") &&
+		exactExpression(
+			mappingValue(with, "pull-request-number"),
+			"github.event.pull_request.number",
+		) &&
+		exactExpression(
+			mappingValue(with, "expected-head-sha"),
+			"github.event.pull_request.head.sha",
+		)
+}
+
+func trustedEditorGateBody(run string) (string, string, bool) {
+	body := strings.TrimSpace(run)
+	if !strings.HasPrefix(body, trustedEditorGatePrefix) ||
+		!strings.HasSuffix(body, trustedEditorGateSuffix) {
+		return "", "", false
+	}
+	remainder := strings.TrimSuffix(
+		strings.TrimPrefix(body, trustedEditorGatePrefix),
+		trustedEditorGateSuffix,
+	)
+	middle := strings.Index(remainder, trustedEditorGateMiddle)
+	if middle < 0 {
+		return "", "", false
+	}
+	version := remainder[:middle]
+	profile := remainder[middle+len(trustedEditorGateMiddle):]
+	if profile != "EditorOnly" && profile != trustedEditorMatrixProfile {
+		return "", "", false
+	}
+	if version == "${{ matrix.unity-version }}" {
+		return version, profile, true
+	}
+	if !validUnityVersion(version) {
+		return "", "", false
+	}
+	return version, profile, validUnityEditorRelease(version)
+}
+
+func trustedEditorGateCommand(version string) string {
+	return trustedEditorGateCommandWithProfile(version, "EditorOnly")
+}
+
+func trustedEditorGateCommandWithProfile(version, profile string) string {
+	return trustedEditorGatePrefix + version + trustedEditorGateMiddle +
+		profile + trustedEditorGateSuffix
+}
+
+func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
+	strategy := mappingValue(job, "strategy")
+	matrix := mappingValue(strategy, "matrix")
+	if matrix == nil {
+		return profile == "EditorOnly"
+	}
+	if matrix.Kind != yaml.MappingNode ||
+		mappingValue(matrix, "include") != nil ||
+		mappingValue(matrix, "exclude") != nil {
+		return false
+	}
+	modes := mappingValue(matrix, "test-mode")
+	if modes == nil {
+		return profile == "EditorOnly"
+	}
+	if profile != "EditorOnly" && profile != trustedEditorMatrixProfile {
+		return false
+	}
+	if modes.Kind != yaml.SequenceNode ||
+		len(modes.Content) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(modes.Content))
+	for _, mode := range modes.Content {
+		value := scalarValue(mode)
+		if mode.Kind != yaml.ScalarNode ||
+			(value != "editmode" &&
+				value != "playmode" &&
+				value != "standalone") ||
+			seen[value] {
+			return false
+		}
+		seen[value] = true
+	}
+	return profile == trustedEditorMatrixProfile || !seen["standalone"]
+}
+
+func trustedEditorGateMatchesReturn(
+	gateVersion string,
+	job *yaml.Node,
+	steps []flattenedUnityStep,
+	gateIndex int,
+) bool {
+	acquireIndex := -1
+	returnIndex := -1
+	var returnVersion *yaml.Node
+	for index := gateIndex + 1; index < len(steps); index++ {
+		if acquire, _ := acquireReference(stepUses(steps[index].node)); acquire &&
+			acquireIndex < 0 {
+			acquireIndex = index
+		}
+		if lockActionName(stepUses(steps[index].node)) == returnAction {
+			if returnIndex >= 0 {
+				return false
+			}
+			returnIndex = index
+			returnVersion = mappingValue(
+				mappingValue(steps[index].node, "with"),
+				"unity-version",
+			)
+		}
+	}
+	if acquireIndex < 0 || returnIndex <= acquireIndex || returnVersion == nil {
+		return false
+	}
+	if validUnityVersion(gateVersion) {
+		return scalarValue(returnVersion) == gateVersion
+	}
+	return gateVersion == "${{ matrix.unity-version }}" &&
+		exactExpression(returnVersion, "matrix.unity-version") &&
+		staticUnityVersionMatrix(job, steps, acquireIndex, returnIndex)
+}
+
+func trustedEditorBootstrap(step flattenedUnityStep) bool {
+	return step.scope == "job" &&
+		len(step.enclosingSteps) == 0 &&
+		successDependentStepRunnable(step) &&
+		requiredBoundedTimeout(step.node, 2) &&
+		scalarValue(mappingValue(step.node, "shell")) ==
+			trustedEditorBootstrapShell &&
+		strings.TrimSpace(scalarValue(mappingValue(step.node, "run"))) ==
+			trustedEditorBootstrapRun &&
+		mappingValue(step.node, "env") == nil
+}
+
+func safeCheckoutGitEnvironment(node *yaml.Node) bool {
+	env := mappingValue(node, "env")
+	if env == nil || env.Kind != yaml.MappingNode || len(env.Content) != 10 {
+		return false
+	}
+	expected := map[string]string{
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "core.hooksPath",
+		"GIT_CONFIG_VALUE_0":  "/dev/null",
+		"GIT_CONFIG_NOSYSTEM": "1",
+		"GIT_CONFIG_GLOBAL":   "/dev/null",
+	}
+	for key, value := range expected {
+		if scalarValue(mappingValue(env, key)) != value {
+			return false
+		}
+	}
+	return true
+}
+
+func unityStepContainsCredential(step flattenedUnityStep) bool {
+	if containsUnityCredentialReference(strings.ToLower(nodeScalarText(step.node))) {
+		return true
+	}
+	for _, enclosing := range step.enclosingSteps {
+		if containsUnityCredentialReference(strings.ToLower(nodeScalarText(enclosing))) {
+			return true
+		}
+	}
+	return false
+}
+
+type editorSourceAudit struct {
+	found               bool
+	topLevel            bool
+	unsafe              bool
+	provisioningControl bool
+}
+
+type powerShellPathReference struct {
+	path               string
+	start              int
+	end                int
+	repositoryRelative bool
+	scriptRelative     bool
+}
+
+func auditEnsureEditorSource(text string) editorSourceAudit {
+	clean := stripPowerShellComments(text)
+	result := editorSourceAudit{}
+	lower := strings.ToLower(clean)
+	for _, control := range unityEditorProvisioningControls {
+		if strings.Contains(lower, control) {
+			result.provisioningControl = true
+		}
+	}
+
+	for _, command := range powerShellCommands(clean) {
+		references := powerShellPathReferences(command)
+		for index, reference := range references {
+			if !strings.EqualFold(path.Base(reference.path), "ensure-editor.ps1") {
+				continue
+			}
+			invoked := powerShellCommandInvokesReference(command, reference)
+			if !invoked {
+				if !inertPowerShellReference(command) {
+					result.found = true
+					result.unsafe = true
+				}
+				continue
+			}
+			result.found = true
+			end := len(command)
+			if index+1 < len(references) {
+				end = references[index+1].start
+			}
+			arguments := strings.TrimLeft(command[reference.end:end], `"'`)
+			if !reference.repositoryRelative ||
+				!enabledPowerShellSwitch(arguments, "cimanagedonly") ||
+				!enabledPowerShellSwitch(arguments, "requirehealthyexisting") {
+				result.unsafe = true
+			}
+		}
+	}
+	result.topLevel = topLevelEnsureEditorInvocation(clean)
+	return result
+}
+
+func topLevelEnsureEditorInvocation(text string) bool {
+	depth := 0
+	var prior strings.Builder
+	for _, line := range strings.Split(stripPowerShellComments(text), "\n") {
+		invocations := make(map[int]powerShellPathReference)
+		for _, reference := range powerShellPathReferences(line) {
+			if strings.EqualFold(path.Base(reference.path), "ensure-editor.ps1") &&
+				powerShellCommandInvokesReference(line, reference) {
+				invocations[reference.start] = reference
+			}
+		}
+		inSingleQuote := false
+		inDoubleQuote := false
+		for index := 0; index < len(line); index++ {
+			if reference, invoked := invocations[index]; invoked &&
+				depth == 0 &&
+				simplePowerShellInvocation(line, reference) &&
+				!powerShellContainsFlowTermination(prior.String()) {
+				return true
+			}
+			char := line[index]
+			if char == '`' && !inSingleQuote && index+1 < len(line) {
+				index++
+				continue
+			}
+			if char == '\'' && !inDoubleQuote {
+				if inSingleQuote && index+1 < len(line) && line[index+1] == '\'' {
+					index++
+					continue
+				}
+				inSingleQuote = !inSingleQuote
+				continue
+			}
+			if char == '"' && !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+				continue
+			}
+			if inSingleQuote || inDoubleQuote {
+				continue
+			}
+			switch char {
+			case '{':
+				depth++
+			case '}':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+		prior.WriteString(line)
+		prior.WriteByte('\n')
+	}
+	return false
+}
+
+func simplePowerShellInvocation(
+	command string,
+	reference powerShellPathReference,
+) bool {
+	prefix := strings.TrimSpace(command[:reference.start])
+	prefix = strings.TrimSpace(strings.TrimRight(prefix, `"'`))
+	if prefix == "" || prefix == "&" {
+		return true
+	}
+	assignment := strings.LastIndex(prefix, "=")
+	if assignment < 0 || strings.TrimSpace(prefix[assignment+1:]) != "&" {
+		return false
+	}
+	variable := strings.TrimSpace(prefix[:assignment])
+	if !strings.HasPrefix(variable, "$") || len(variable) == 1 {
+		return false
+	}
+	for _, char := range variable[1:] {
+		if !unicode.IsLetter(char) &&
+			!unicode.IsDigit(char) &&
+			!strings.ContainsRune("_:-{}", char) {
+			return false
+		}
+	}
+	return true
+}
+
+func powerShellContainsFlowTermination(text string) bool {
+	outside := powerShellUnquotedText(text)
+	for _, token := range strings.FieldsFunc(
+		strings.ToLower(outside),
+		func(char rune) bool {
+			return !unicode.IsLetter(char) && !unicode.IsDigit(char) && char != '-'
+		},
+	) {
+		switch token {
+		case "break", "continue", "exit", "return":
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellUnquotedText(text string) string {
+	clean := stripPowerShellComments(text)
+	var outside strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(clean); index++ {
+		char := clean[index]
+		if char == '`' && !inSingleQuote && index+1 < len(clean) {
+			outside.WriteByte(' ')
+			index++
+			outside.WriteByte(' ')
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(clean) && clean[index+1] == '\'' {
+				outside.WriteString("  ")
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			outside.WriteByte(' ')
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			outside.WriteByte(' ')
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			outside.WriteByte(' ')
+			continue
+		}
+		outside.WriteByte(char)
+	}
+	return outside.String()
+}
+
+func stripPowerShellComments(text string) string {
+	var builder strings.Builder
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	inSingleQuote := false
+	inDoubleQuote := false
+	inBlockComment := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if inBlockComment {
+			if char == '#' && index+1 < len(text) && text[index+1] == '>' {
+				inBlockComment = false
+				builder.WriteByte(' ')
+				index++
+			} else if char == '\n' {
+				builder.WriteByte('\n')
+			}
+			continue
+		}
+		if !inSingleQuote && !inDoubleQuote &&
+			char == '<' && index+1 < len(text) && text[index+1] == '#' {
+			inBlockComment = true
+			builder.WriteByte(' ')
+			index++
+			continue
+		}
+		if !inSingleQuote && !inDoubleQuote && char == '#' {
+			for index < len(text) && text[index] != '\n' {
+				index++
+			}
+			if index < len(text) {
+				builder.WriteByte('\n')
+			}
+			continue
+		}
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			builder.WriteByte(char)
+			index++
+			builder.WriteByte(text[index])
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				builder.WriteString("''")
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		}
+		builder.WriteByte(char)
+	}
+	return builder.String()
+}
+
+func powerShellCommands(text string) []string {
+	result := make([]string, 0)
+	var continued strings.Builder
+	for _, line := range strings.Split(stripPowerShellComments(text), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasSuffix(trimmed, "`") {
+			continued.WriteString(strings.TrimSpace(strings.TrimSuffix(trimmed, "`")))
+			continued.WriteByte(' ')
+			continue
+		}
+		continued.WriteString(trimmed)
+		if !balancedPowerShellQuotes(continued.String()) {
+			continued.WriteByte('\n')
+			continue
+		}
+		for _, command := range splitPowerShellCommands(continued.String()) {
+			if command = strings.TrimSpace(command); command != "" {
+				result = append(result, command)
+			}
+		}
+		continued.Reset()
+	}
+	if command := strings.TrimSpace(continued.String()); command != "" {
+		result = append(result, command)
+	}
+	return result
+}
+
+func balancedPowerShellQuotes(text string) bool {
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(text); index++ {
+		char := text[index]
+		if char == '`' && !inSingleQuote && index+1 < len(text) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(text) && text[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+		}
+	}
+	return !inSingleQuote && !inDoubleQuote
+}
+
+func splitPowerShellCommands(line string) []string {
+	result := make([]string, 0)
+	start := 0
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(line); index++ {
+		char := line[index]
+		if !inSingleQuote && !inDoubleQuote &&
+			strings.HasPrefix(line[index:], "${{") {
+			if closing := strings.Index(line[index+3:], "}}"); closing >= 0 {
+				index += closing + 4
+				continue
+			}
+		}
+		if char == '`' && !inSingleQuote && index+1 < len(line) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(line) && line[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		separatorLength := 0
+		switch {
+		case char == ';':
+			separatorLength = 1
+		case char == '|':
+			separatorLength = 1
+		case char == '}' ||
+			(char == '{' && (index == 0 || line[index-1] != '$')):
+			separatorLength = 1
+		case char == '(' &&
+			powerShellHostInvocation(
+				powerShellCommandTokens(strings.TrimSpace(line[index+1:])),
+			):
+			separatorLength = 1
+		case index+1 < len(line) &&
+			char == '&' && line[index+1] == '&':
+			separatorLength = 2
+		}
+		if separatorLength == 0 {
+			continue
+		}
+		result = append(result, line[start:index])
+		index += separatorLength - 1
+		start = index + 1
+	}
+	result = append(result, line[start:])
+	return result
+}
+
+func (a *unityPolicyAnalyzer) delegatedEditorAudit(run string) editorSourceAudit {
+	result := editorSourceAudit{}
+	visited := make(map[string]bool)
+	for _, reference := range invokedPowerShellReferences(run) {
+		candidate := reference.path
+		candidateResult := a.auditDelegatedEditorScript(candidate, visited)
+		result.merge(candidateResult)
+	}
+	return result
+}
+
+func (a *unityPolicyAnalyzer) auditDelegatedEditorScript(
+	scriptPath string,
+	visited map[string]bool,
+) editorSourceAudit {
+	if visited[scriptPath] {
+		return editorSourceAudit{}
+	}
+	visited[scriptPath] = true
+	content, ok := a.analyzer.snapshot.Files[scriptPath]
+	if !ok {
+		return editorSourceAudit{unsafe: true}
+	}
+	source := string(content)
+	result := auditEnsureEditorSource(source)
+	if hasUnresolvedPowerShellScriptInvocation(source) {
+		result.unsafe = true
+	}
+	if strings.EqualFold(path.Base(scriptPath), "ensure-editor.ps1") {
+		// The terminal helper can retain manual-mode controls. Only controls in
+		// its CI caller and reachable wrappers are CI policy.
+		result.provisioningControl = false
+	}
+	for _, reference := range invokedPowerShellReferences(source) {
+		candidate := reference.path
+		if reference.scriptRelative {
+			candidate = path.Clean(path.Join(path.Dir(scriptPath), candidate))
+		}
+		result.merge(a.auditDelegatedEditorScript(candidate, visited))
+	}
+	return result
+}
+
+func hasUnresolvedPowerShellScriptInvocation(text string) bool {
+	return hasUnresolvedPowerShellInvocation(
+		text,
+		powerShellVariableMayReferenceScript,
+		true,
+	)
+}
+
+func hasUnresolvedPowerShellWorkflowInvocation(text string) bool {
+	return hasUnresolvedPowerShellInvocation(
+		text,
+		func(_ string, variable string) bool {
+			return strings.TrimSpace(variable) != ""
+		},
+		true,
+	)
+}
+
+func hasUnresolvedPowerShellEditorInvocation(text string) bool {
+	return hasUnresolvedPowerShellInvocation(
+		text,
+		powerShellVariableMayReferenceEditorScript,
+		false,
+	)
+}
+
+func hasUnresolvedPowerShellInvocation(
+	text string,
+	mayReference func(string, string) bool,
+	rejectExpression bool,
+) bool {
+	for _, command := range powerShellCommands(text) {
+		if dynamicPowerShellEvaluation(command) {
+			return true
+		}
+		inSingleQuote := false
+		inDoubleQuote := false
+		for index := 0; index < len(command); index++ {
+			char := command[index]
+			if char == '`' && !inSingleQuote && index+1 < len(command) {
+				index++
+				continue
+			}
+			if char == '\'' && !inDoubleQuote {
+				if inSingleQuote && index+1 < len(command) &&
+					command[index+1] == '\'' {
+					index++
+					continue
+				}
+				inSingleQuote = !inSingleQuote
+				continue
+			}
+			if char == '"' && !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+				continue
+			}
+			if inSingleQuote || inDoubleQuote {
+				continue
+			}
+			operator := (char == '&' &&
+				powerShellCallOperator(command, index)) ||
+				(char == '.' &&
+					(strings.TrimSpace(command[:index]) == "" ||
+						strings.HasSuffix(
+							strings.TrimSpace(command[:index]),
+							"{",
+						)))
+			if !operator {
+				continue
+			}
+			next := index + 1
+			for next < len(command) &&
+				unicode.IsSpace(rune(command[next])) {
+				next++
+			}
+			if next < len(command) &&
+				(command[next] == '\'' || command[next] == '"') &&
+				quotedDynamicPowerShellTarget(command, next) {
+				return true
+			}
+			targetTokens := powerShellCommandTokens(command[next:])
+			if len(targetTokens) > 0 &&
+				dynamicPowerShellCommandTarget(
+					text,
+					targetTokens[0],
+					mayReference,
+				) {
+				return true
+			}
+			if next < len(command) && command[next] == '$' {
+				end := next + 1
+				for end < len(command) &&
+					(unicode.IsLetter(rune(command[end])) ||
+						unicode.IsDigit(rune(command[end])) ||
+						strings.ContainsRune("_:{}-", rune(command[end]))) {
+					end++
+				}
+				if mayReference(
+					text,
+					command[next:end],
+				) {
+					return true
+				}
+			} else if next < len(command) && command[next] == '(' {
+				expression := strings.ToLower(command[next:])
+				if (rejectExpression &&
+					!safeLiteralPowerShellJoinPathInvocation(expression)) ||
+					strings.Contains(
+						normalizePowerShellPathExpression(expression),
+						"ensure-editor.ps1",
+					) {
+					return true
+				}
+			}
+		}
+
+		tokens := powerShellCommandTokens(command)
+		hostIndex := powerShellHostInvocationIndex(tokens)
+		if hostIndex < 0 {
+			continue
+		}
+		tokens = tokens[hostIndex:]
+		stopParsing := false
+	fileOptions:
+		for index, token := range tokens {
+			singleQuotedOption := singleQuotedPowerShellToken(token)
+			rawOption := strings.Trim(token, `"'(){}[]`)
+			option := powerShellSemanticToken(token)
+			if token == "--%" {
+				stopParsing = true
+				continue
+			}
+			optionName := strings.TrimLeft(strings.ToLower(option), "-")
+			if optionName == "?" ||
+				(optionName != "" &&
+					(strings.HasPrefix("help", optionName) ||
+						strings.HasPrefix("version", optionName))) {
+				break fileOptions
+			}
+			argument := ""
+			if separator := strings.Index(rawOption, ":"); separator >= 0 {
+				argument = rawOption[separator+1:]
+				option = powerShellSemanticToken(rawOption[:separator])
+				if singleQuotedOption {
+					argument = "'" + argument + "'"
+				}
+			} else if index+1 < len(tokens) {
+				argument = tokens[index+1]
+			}
+			if (strings.EqualFold(option, "-file") ||
+				strings.EqualFold(option, "-f")) &&
+				argument != "" {
+				if index+2 < len(tokens) && tokens[index+1] == "--%" {
+					argument = tokens[index+2]
+					stopParsing = true
+				}
+				if dynamicPowerShellFileArgument(
+					text,
+					argument,
+					stopParsing,
+					mayReference,
+				) {
+					return true
+				}
+				break
+			}
+		}
+	}
+	return false
+}
+
+func powerShellCallOperator(command string, index int) bool {
+	prefix := strings.TrimSpace(command[:index])
+	if prefix == "" {
+		return true
+	}
+	if strings.EqualFold(prefix, "return") {
+		return true
+	}
+	for _, suffix := range []string{"=", "(", "{", ";", "|", "&&"} {
+		if strings.HasSuffix(prefix, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellCommandTokens(command string) []string {
+	result := make([]string, 0)
+	var token strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	flush := func() {
+		if token.Len() == 0 {
+			return
+		}
+		result = append(result, token.String())
+		token.Reset()
+	}
+	for index := 0; index < len(command); index++ {
+		char := command[index]
+		if char == '`' && !inSingleQuote && index+1 < len(command) {
+			token.WriteByte(char)
+			index++
+			token.WriteByte(command[index])
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(command) &&
+				command[index+1] == '\'' {
+				token.WriteString("''")
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			token.WriteByte(char)
+			continue
+		}
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			token.WriteByte(char)
+			continue
+		}
+		if unicode.IsSpace(rune(char)) && !inSingleQuote && !inDoubleQuote {
+			flush()
+			continue
+		}
+		if char == '=' && !inSingleQuote && !inDoubleQuote {
+			current := token.String()
+			assignment := len(result) == 0 &&
+				powerShellAssignmentTarget(current)
+			if !assignment && len(result) > 0 &&
+				(current == "" || strings.Contains("+-*/%?", current)) &&
+				powerShellAssignmentTokens(result) {
+				assignment = true
+			}
+			if assignment {
+				flush()
+				result = append(result, "=")
+			} else {
+				token.WriteString("`=")
+			}
+			continue
+		}
+		token.WriteByte(char)
+	}
+	flush()
+	return result
+}
+
+func powerShellAssignmentTarget(token string) bool {
+	token = strings.TrimSpace(token)
+	var ok bool
+	token, ok = trimLeadingPowerShellTypeConstraints(token)
+	if !ok {
+		return false
+	}
+	return len(token) > 1 && strings.HasPrefix(token, "$")
+}
+
+func trimLeadingPowerShellTypeConstraints(token string) (string, bool) {
+	for strings.HasPrefix(token, "[") {
+		depth := 0
+		closing := -1
+		inSingleQuote := false
+		inDoubleQuote := false
+		for index := 0; index < len(token); index++ {
+			char := token[index]
+			if char == '`' && !inSingleQuote && index+1 < len(token) {
+				index++
+				continue
+			}
+			if char == '\'' && !inDoubleQuote {
+				if inSingleQuote && index+1 < len(token) &&
+					token[index+1] == '\'' {
+					index++
+					continue
+				}
+				inSingleQuote = !inSingleQuote
+				continue
+			}
+			if char == '"' && !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+				continue
+			}
+			if inSingleQuote || inDoubleQuote {
+				continue
+			}
+			switch char {
+			case '[':
+				depth++
+			case ']':
+				depth--
+				if depth == 0 {
+					closing = index
+				}
+			}
+			if closing >= 0 {
+				break
+			}
+		}
+		if closing < 0 || depth != 0 || inSingleQuote || inDoubleQuote {
+			return token, false
+		}
+		token = token[closing+1:]
+	}
+	return token, true
+}
+
+func powerShellAssignmentTokens(tokens []string) bool {
+	if len(tokens) == 0 ||
+		!powerShellAssignmentTarget(tokens[len(tokens)-1]) {
+		return false
+	}
+	for _, token := range tokens[:len(tokens)-1] {
+		var ok bool
+		token, ok = trimLeadingPowerShellTypeConstraints(token)
+		if !ok || token != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func dynamicPowerShellFileArgument(
+	text, argument string,
+	stopParsing bool,
+	mayReference func(string, string) bool,
+) bool {
+	if strings.Contains(argument, "${{") {
+		return true
+	}
+	if stopParsing {
+		return windowsEnvironmentExpansion(argument)
+	}
+	trimmed := strings.TrimSpace(argument)
+	if strings.HasPrefix(trimmed, "(") ||
+		strings.HasPrefix(trimmed, "@") {
+		return true
+	}
+	_, dynamic := powerShellTokenSemantics(argument)
+	if !dynamic {
+		return false
+	}
+	variables, expression := powerShellDynamicReferences(argument)
+	if expression {
+		return true
+	}
+	for _, variable := range variables {
+		if mayReference(text, variable) {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellUnescapeToken(token string) string {
+	var result strings.Builder
+	for index := 0; index < len(token); index++ {
+		if token[index] == '`' && index+1 < len(token) {
+			index++
+		}
+		result.WriteByte(token[index])
+	}
+	return result.String()
+}
+
+func powerShellSemanticToken(token string) string {
+	value, _ := powerShellTokenSemantics(token)
+	return value
+}
+
+func powerShellTokenSemantics(token string) (string, bool) {
+	var value strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	dynamic := false
+	for index := 0; index < len(token); index++ {
+		char := token[index]
+		if inSingleQuote {
+			if char == '\'' {
+				if index+1 < len(token) && token[index+1] == '\'' {
+					value.WriteByte('\'')
+					index++
+				} else {
+					inSingleQuote = false
+				}
+				continue
+			}
+			value.WriteByte(char)
+			continue
+		}
+		if char == '`' && index+1 < len(token) {
+			index++
+			value.WriteByte(token[index])
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			inSingleQuote = true
+			continue
+		}
+		if char == '"' {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if char == '$' && powerShellVariableStartsAt(token, index) {
+			dynamic = true
+		}
+		value.WriteByte(char)
+	}
+	return value.String(), dynamic
+}
+
+func powerShellVariableStartsAt(text string, index int) bool {
+	next := index + 1
+	return next < len(text) &&
+		(unicode.IsLetter(rune(text[next])) ||
+			unicode.IsDigit(rune(text[next])) ||
+			strings.ContainsRune("_:{(?^$", rune(text[next])))
+}
+
+func powerShellDynamicReferences(token string) ([]string, bool) {
+	var variables []string
+	inSingleQuote := false
+	inDoubleQuote := false
+	for index := 0; index < len(token); index++ {
+		char := token[index]
+		if inSingleQuote {
+			if char == '\'' {
+				if index+1 < len(token) && token[index+1] == '\'' {
+					index++
+				} else {
+					inSingleQuote = false
+				}
+			}
+			continue
+		}
+		if char == '`' && index+1 < len(token) {
+			index++
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			inSingleQuote = true
+			continue
+		}
+		if char == '"' {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if char != '$' || index+1 >= len(token) {
+			continue
+		}
+		next := token[index+1]
+		if strings.ContainsRune("(?$^", rune(next)) {
+			return variables, true
+		}
+		end := index + 1
+		if next == '{' {
+			closing := strings.IndexByte(token[end+1:], '}')
+			if closing < 0 {
+				return variables, true
+			}
+			end += closing + 2
+		} else {
+			for end < len(token) &&
+				(unicode.IsLetter(rune(token[end])) ||
+					unicode.IsDigit(rune(token[end])) ||
+					strings.ContainsRune("_:-", rune(token[end]))) {
+				end++
+			}
+		}
+		if end > index+1 {
+			variables = append(variables, token[index:end])
+			index = end - 1
+		}
+	}
+	return variables, false
+}
+
+func dynamicPowerShellCommandTarget(
+	text, token string,
+	mayReference func(string, string) bool,
+) bool {
+	value, dynamic := powerShellTokenSemantics(token)
+	if !dynamic {
+		return false
+	}
+	variables, expression := powerShellDynamicReferences(token)
+	if expression {
+		return true
+	}
+	if safeInterpolatedPowerShellPath(value, variables) {
+		return false
+	}
+	for _, variable := range variables {
+		if mayReference(text, variable) {
+			return true
+		}
+	}
+	return false
+}
+
+func windowsEnvironmentExpansion(text string) bool {
+	start := strings.Index(text, "%")
+	if start < 0 {
+		return false
+	}
+	end := strings.Index(text[start+1:], "%")
+	return end > 0
+}
+
+func powerShellHostInvocation(tokens []string) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+	index := 0
+	if tokens[index] == "&" {
+		index++
+	}
+	if index >= len(tokens) {
+		return false
+	}
+	executable := powerShellSemanticToken(tokens[index])
+	executable = path.Base(strings.ReplaceAll(executable, "\\", "/"))
+	executable = strings.TrimSuffix(strings.ToLower(executable), ".exe")
+	return executable == "pwsh" || executable == "powershell"
+}
+
+func powerShellHostInvocationIndex(tokens []string) int {
+	if powerShellHostInvocation(tokens) {
+		return 0
+	}
+	if len(tokens) > 1 &&
+		strings.EqualFold(tokens[0], "return") &&
+		powerShellHostInvocation(tokens[1:]) {
+		return 1
+	}
+	for index, token := range tokens {
+		if token == "&" && powerShellHostInvocation(tokens[index:]) {
+			return index
+		}
+		if index > 0 && tokens[index-1] == "=" &&
+			powerShellHostInvocation(tokens[index:]) {
+			return index
+		}
+	}
+	return -1
+}
+
+func singleQuotedPowerShellToken(token string) bool {
+	return len(token) >= 2 && token[0] == '\'' && token[len(token)-1] == '\''
+}
+
+func safeLiteralPowerShellJoinPathInvocation(expression string) bool {
+	references := powerShellPathReferences(expression)
+	if len(references) != 1 || !references[0].repositoryRelative {
+		return false
+	}
+	reference := references[0]
+	prefix := normalizePowerShellPathExpression(expression[:reference.start])
+	switch prefix {
+	case "join-path$psscriptroot",
+		"join-path${psscriptroot}",
+		"join-path$env:github_workspace",
+		"join-path${env:github_workspace}":
+	default:
+		return false
+	}
+	tail := strings.TrimLeft(
+		expression[reference.end:],
+		" \t\r\n'\"",
+	)
+	if !strings.HasPrefix(tail, ")") {
+		return false
+	}
+	arguments := strings.TrimSpace(tail[1:])
+	return arguments == "" || strings.HasPrefix(arguments, "-")
+}
+
+func quotedDynamicPowerShellTarget(command string, start int) bool {
+	quote := command[start]
+	var target strings.Builder
+	interpolated := false
+	end := start + 1
+	for end < len(command) {
+		char := command[end]
+		if quote == '\'' && char == '\'' &&
+			end+1 < len(command) && command[end+1] == '\'' {
+			target.WriteByte('\'')
+			end += 2
+			continue
+		}
+		if quote == '"' && char == '`' && end+1 < len(command) {
+			target.WriteByte(command[end+1])
+			end += 2
+			continue
+		}
+		if quote == '"' && char == '$' {
+			interpolated = true
+		}
+		if char == quote {
+			break
+		}
+		target.WriteByte(char)
+		end++
+	}
+	if end >= len(command) {
+		return true
+	}
+	if interpolated {
+		variables, expression := powerShellDynamicReferences(target.String())
+		if expression ||
+			!safeInterpolatedPowerShellPath(target.String(), variables) {
+			return true
+		}
+	}
+	name := strings.ToLower(
+		path.Base(strings.ReplaceAll(target.String(), "\\", "/")),
+	)
+	name = strings.TrimSuffix(name, ".exe")
+	if name == "iex" || name == "invoke-expression" {
+		return true
+	}
+	if name != "pwsh" && name != "powershell" {
+		return false
+	}
+	for _, token := range strings.FieldsFunc(
+		strings.ToLower(powerShellUnquotedText(command[end+1:])),
+		func(char rune) bool {
+			return !unicode.IsLetter(char) && !unicode.IsDigit(char) && char != '-'
+		},
+	) {
+		if token == "-c" || token == "-command" {
+			return true
+		}
+	}
+	return false
+}
+
+func safeInterpolatedPowerShellPath(target string, variables []string) bool {
+	if len(variables) != 1 {
+		return false
+	}
+	variable := strings.ToLower(variables[0])
+	if strings.HasPrefix(variable, "${") && strings.HasSuffix(variable, "}") {
+		variable = "$" + variable[2:len(variable)-1]
+	}
+	if variable != "$env:github_workspace" && variable != "$psscriptroot" {
+		return false
+	}
+	lower := strings.ToLower(strings.ReplaceAll(target, "\\", "/"))
+	for _, prefix := range []string{
+		"$env:github_workspace/",
+		"${env:github_workspace}/",
+		"$psscriptroot/",
+		"${psscriptroot}/",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func dynamicPowerShellEvaluation(command string) bool {
+	lower := strings.ToLower(powerShellUnquotedText(command))
+	if strings.Contains(lower, "[scriptblock]::create") ||
+		strings.Contains(lower, "-encodedcommand") {
+		return true
+	}
+	shell := false
+	dynamicArgument := false
+	for _, token := range strings.FieldsFunc(lower, func(char rune) bool {
+		return !unicode.IsLetter(char) && !unicode.IsDigit(char) && char != '-'
+	}) {
+		if token == "iex" || token == "invoke-expression" {
+			return true
+		}
+		if token == "pwsh" || token == "powershell" {
+			shell = true
+		}
+		if token == "-c" || token == "-command" {
+			dynamicArgument = true
+		}
+	}
+	return shell && dynamicArgument
+}
+
+func powerShellVariableMayReferenceEditorScript(text, variable string) bool {
+	variable = strings.ToLower(strings.TrimSpace(variable))
+	variable = strings.TrimSuffix(strings.TrimPrefix(variable, "${"), "}")
+	variable = strings.TrimPrefix(variable, "$")
+	if strings.Contains(
+		strings.NewReplacer("-", "", "_", "").Replace(variable),
+		"ensureeditor",
+	) {
+		return true
+	}
+	needle := "$" + variable
+	for _, command := range powerShellCommands(text) {
+		lower := strings.ToLower(command)
+		variableIndex := strings.Index(lower, needle)
+		assignmentIndex := strings.Index(lower, "=")
+		if variableIndex < 0 || assignmentIndex <= variableIndex {
+			continue
+		}
+		if strings.Contains(
+			normalizePowerShellPathExpression(lower[assignmentIndex+1:]),
+			"ensure-editor.ps1",
+		) {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellVariableMayReferenceScript(text, variable string) bool {
+	variable = strings.ToLower(strings.TrimSpace(variable))
+	variable = strings.TrimSuffix(strings.TrimPrefix(variable, "${"), "}")
+	variable = strings.TrimPrefix(variable, "$")
+	if variable == "" {
+		return false
+	}
+	if strings.Contains(variable, "script") ||
+		variable == "child" ||
+		variable == "tool" {
+		return true
+	}
+	assignments := powerShellVariableAssignments(text)
+	expression, assigned := assignments[variable]
+	if assigned {
+		expression = expandPowerShellVariables(expression, assignments, map[string]bool{
+			variable: true,
+		})
+		if strings.Contains(normalizePowerShellPathExpression(expression), ".ps1") {
+			return true
+		}
+	}
+	needle := "$" + variable
+	for _, command := range powerShellCommands(text) {
+		lower := strings.ToLower(command)
+		variableIndex := strings.Index(lower, needle)
+		assignmentIndex := strings.Index(lower, "=")
+		if variableIndex < 0 || assignmentIndex <= variableIndex {
+			continue
+		}
+		expression := normalizePowerShellPathExpression(lower[assignmentIndex+1:])
+		if strings.Contains(expression, ".ps1") {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellVariableAssignments(text string) map[string]string {
+	result := make(map[string]string)
+	for _, command := range powerShellCommands(text) {
+		assignment := strings.Index(command, "=")
+		if assignment < 0 {
+			continue
+		}
+		left := strings.TrimSpace(command[:assignment])
+		if !strings.HasPrefix(left, "$") || len(left) == 1 {
+			continue
+		}
+		name := strings.ToLower(
+			strings.TrimSuffix(strings.TrimPrefix(left, "${"), "}"),
+		)
+		name = strings.TrimPrefix(name, "$")
+		valid := name != ""
+		for _, char := range name {
+			if !unicode.IsLetter(char) &&
+				!unicode.IsDigit(char) &&
+				!strings.ContainsRune("_:-", char) {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			result[name] = command[assignment+1:]
+		}
+	}
+	return result
+}
+
+func expandPowerShellVariables(
+	expression string,
+	assignments map[string]string,
+	visiting map[string]bool,
+) string {
+	var result strings.Builder
+	for index := 0; index < len(expression); {
+		if expression[index] != '$' {
+			result.WriteByte(expression[index])
+			index++
+			continue
+		}
+		end := index + 1
+		braced := end < len(expression) && expression[end] == '{'
+		if braced {
+			end++
+		}
+		for end < len(expression) &&
+			(unicode.IsLetter(rune(expression[end])) ||
+				unicode.IsDigit(rune(expression[end])) ||
+				strings.ContainsRune("_:-", rune(expression[end]))) {
+			end++
+		}
+		if braced && end < len(expression) && expression[end] == '}' {
+			end++
+		}
+		name := strings.ToLower(strings.Trim(expression[index:end], "${}"))
+		value, ok := assignments[name]
+		if !ok || visiting[name] {
+			result.WriteString(expression[index:end])
+			index = end
+			continue
+		}
+		visiting[name] = true
+		result.WriteString(expandPowerShellVariables(value, assignments, visiting))
+		delete(visiting, name)
+		index = end
+	}
+	return result.String()
+}
+
+func normalizePowerShellPathExpression(expression string) string {
+	return strings.Map(func(char rune) rune {
+		if unicode.IsSpace(char) ||
+			strings.ContainsRune("`'\"+()", char) {
+			return -1
+		}
+		return char
+	}, expression)
+}
+
+func (result *editorSourceAudit) merge(other editorSourceAudit) {
+	result.found = result.found || other.found
+	result.topLevel = result.topLevel || other.topLevel
+	result.unsafe = result.unsafe || other.unsafe
+	result.provisioningControl = result.provisioningControl || other.provisioningControl
+}
+
+func invokedPowerShellReferences(text string) []powerShellPathReference {
+	seen := make(map[string]bool)
+	result := make([]powerShellPathReference, 0)
+	for _, command := range powerShellCommands(text) {
+		for _, reference := range powerShellPathReferences(command) {
+			if !powerShellCommandInvokesReference(command, reference) {
+				continue
+			}
+			key := reference.path + "\x00" + strconv.FormatBool(reference.scriptRelative)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, reference)
+		}
+	}
+	return result
+}
+
+func powerShellPathReferences(text string) []powerShellPathReference {
+	normalized := strings.ReplaceAll(text, "\\", "/")
+	lower := strings.ToLower(normalized)
+	result := make([]powerShellPathReference, 0)
+	for offset := 0; ; {
+		index := strings.Index(lower[offset:], ".ps1")
+		if index < 0 {
+			break
+		}
+		end := offset + index + len(".ps1")
+		start := end - len(".ps1")
+		for start > 0 && !powerShellPathDelimiter(rune(normalized[start-1])) {
+			start--
+		}
+		candidate := strings.TrimSpace(normalized[start:end])
+		candidateLower := strings.ToLower(candidate)
+		scriptRelative := false
+		commandPrefix := strings.ToLower(normalized[:start])
+		if join := strings.LastIndex(commandPrefix, "join-path"); join >= 0 {
+			joinExpression := commandPrefix[join:]
+			scriptRelative = strings.Contains(joinExpression, "$psscriptroot") ||
+				strings.Contains(joinExpression, "${psscriptroot}")
+		}
+		for _, prefix := range []string{
+			"$env:github_workspace/",
+			"${env:github_workspace}/",
+			"${{github.workspace}}/",
+			"./",
+		} {
+			if strings.HasPrefix(candidateLower, prefix) {
+				candidate = candidate[len(prefix):]
+				candidateLower = candidateLower[len(prefix):]
+				break
+			}
+		}
+		for _, prefix := range []string{
+			"$psscriptroot/",
+			"${psscriptroot}/",
+		} {
+			if strings.HasPrefix(candidateLower, prefix) {
+				candidate = candidate[len(prefix):]
+				candidateLower = candidateLower[len(prefix):]
+				scriptRelative = true
+				break
+			}
+		}
+		candidate = path.Clean(candidate)
+		if strings.EqualFold(path.Ext(candidate), ".ps1") {
+			clean, err := cleanRepositoryPath(candidate)
+			repositoryRelative := err == nil &&
+				clean == candidate &&
+				!strings.Contains(candidate, ":") &&
+				!strings.Contains(candidate, "$")
+			result = append(result, powerShellPathReference{
+				path:               candidate,
+				start:              start,
+				end:                end,
+				repositoryRelative: repositoryRelative,
+				scriptRelative:     scriptRelative && repositoryRelative,
+			})
+		}
+		offset = end
+	}
+	return result
+}
+
+func powerShellCommandInvokesReference(
+	command string,
+	reference powerShellPathReference,
+) bool {
+	if reference.start < 0 || reference.start > len(command) {
+		return false
+	}
+	prefix := strings.TrimSpace(command[:reference.start])
+	prefix = strings.TrimSpace(strings.TrimRight(prefix, `"'`))
+	if prefix == "" {
+		return true
+	}
+	lowerPrefix := strings.ToLower(prefix)
+	if strings.Contains(lowerPrefix, "& (join-path") ||
+		strings.Contains(lowerPrefix, ". (join-path") {
+		return true
+	}
+	last := prefix[len(prefix)-1]
+	if strings.ContainsRune("&.{(", rune(last)) {
+		return true
+	}
+	fields := strings.Fields(strings.ToLower(prefix))
+	return len(fields) > 0 && fields[len(fields)-1] == "-file"
+}
+
+func inertPowerShellReference(command string) bool {
+	lower := strings.ToLower(strings.TrimSpace(command))
+	for _, commandName := range []string{
+		"throw ", "write-debug ", "write-error ", "write-host ",
+		"write-information ", "write-output ", "write-verbose ", "write-warning ",
+	} {
+		if strings.HasPrefix(lower, commandName) {
+			return true
+		}
+	}
+	return false
+}
+
+func enabledPowerShellSwitch(arguments, name string) bool {
+	if strings.Contains(arguments, "$(") {
+		return false
+	}
+	var token strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	flush := func() bool {
+		value := strings.ToLower(token.String())
+		token.Reset()
+		return value == "-"+name || value == "-"+name+":$true"
+	}
+	for index := 0; index <= len(arguments); index++ {
+		var char byte
+		if index < len(arguments) {
+			char = arguments[index]
+		}
+		if index < len(arguments) && char == '`' && !inSingleQuote && index+1 < len(arguments) {
+			index++
+			continue
+		}
+		if index < len(arguments) && char == '\'' && !inDoubleQuote {
+			if inSingleQuote && index+1 < len(arguments) && arguments[index+1] == '\'' {
+				index++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if index < len(arguments) && char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if inSingleQuote || inDoubleQuote {
+			continue
+		}
+		if index == len(arguments) || unicode.IsSpace(rune(char)) ||
+			strings.ContainsRune(";,|(){}[]", rune(char)) {
+			if flush() {
+				return true
+			}
+			continue
+		}
+		token.WriteByte(char)
+	}
+	return false
+}
+
+func powerShellPathDelimiter(char rune) bool {
+	return unicode.IsSpace(char) ||
+		strings.ContainsRune(`"'&(){}[]|;=,`, char)
+}
+
+func requiredBoundedTimeout(node *yaml.Node, maximum int) bool {
+	timeout := mappingValue(node, "timeout-minutes")
+	if timeout == nil || timeout.Kind != yaml.ScalarNode {
+		return false
+	}
+	value, err := strconv.Atoi(timeout.Value)
+	return err == nil && value > 0 && value <= maximum
 }
 
 func (a *unityPolicyAnalyzer) flattenedSteps(
@@ -1055,6 +2887,16 @@ func affirmativeStepRunnable(step flattenedUnityStep) bool {
 	return true
 }
 
+// successDependentStepRunnable is stricter than affirmativeStepRunnable:
+// security setup and acquisition must inherit GitHub's implicit success()
+// dependency. An explicit always() is affirmative but would continue after a
+// failed provenance bootstrap.
+func successDependentStepRunnable(step flattenedUnityStep) bool {
+	return mappingValue(step.node, "if") == nil &&
+		len(step.enclosingConditions) == 0 &&
+		criticalStepFailurePropagates(step)
+}
+
 func affirmativeCondition(condition *yaml.Node) bool {
 	return condition == nil || conditionIsSafeAlways(condition)
 }
@@ -1370,7 +3212,7 @@ func staticUnityVersionMatrix(
 				seen[identity] {
 				return false
 			}
-			if key == "unity-version" && !validUnityVersion(value) {
+			if key == "unity-version" && !validUnityEditorRelease(value) {
 				return false
 			}
 			seen[identity] = true
@@ -1419,7 +3261,7 @@ func trustedLeafExecution(step *yaml.Node) bool {
 
 func validUnityVersion(value string) bool {
 	parts := strings.Split(value, ".")
-	if len(parts) != 3 || len(parts[0]) != 4 {
+	if len(parts) != 3 || len(parts[0]) != 4 || len(parts[1]) == 0 {
 		return false
 	}
 	for _, character := range parts[0] + parts[1] {
@@ -1438,6 +3280,13 @@ func validUnityVersion(value string) bool {
 		}
 	}
 	return true
+}
+
+func validUnityEditorRelease(value string) bool {
+	if !validUnityVersion(value) {
+		return false
+	}
+	return strings.Count(strings.Split(value, ".")[2], "f") == 1
 }
 
 func literalEvidenceSuffix(value string) bool {
@@ -1572,9 +3421,280 @@ func stepActivatesUnity(step *yaml.Node) bool {
 	if run == nil || run.Kind != yaml.ScalarNode {
 		return false
 	}
-	text := strings.ToLower(run.Value)
-	return (strings.Contains(text, "unity-editor") || strings.Contains(text, "unity.exe")) &&
-		!strings.Contains(text, "-returnlicense")
+	editorAudit := auditEnsureEditorSource(run.Value)
+	if editorAudit.found && !editorAudit.unsafe {
+		hasEditorExecution := false
+		for _, command := range powerShellCommands(run.Value) {
+			text := strings.ToLower(command)
+			if commandInvokesUnityExecutable(command) ||
+				strings.Contains(text, "-batchmode") ||
+				strings.Contains(text, "-serial") ||
+				strings.Contains(text, "-manuallicensefile") ||
+				strings.Contains(text, "-executemethod") ||
+				strings.Contains(text, "-runtests") {
+				hasEditorExecution = true
+				break
+			}
+		}
+		if !hasEditorExecution {
+			return false
+		}
+	}
+	for _, command := range powerShellCommands(run.Value) {
+		if commandInvokesUnityExecutable(command) &&
+			(!commandHasExactPowerShellArgument(command, "-returnlicense") ||
+				commandHasUnityActivationArgument(command)) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandInvokesUnityExecutable(command string) bool {
+	return commandInvokesNamedExecutable(command, "unity.exe") ||
+		commandInvokesNamedExecutable(command, "unity-editor")
+}
+
+func commandInvokesNamedExecutable(command, executable string) bool {
+	tokens := powerShellCommandTokens(command)
+	semantic := make([]string, len(tokens))
+	for index, token := range tokens {
+		semantic[index] = powerShellCommandSemanticToken(token)
+	}
+	if powerShellStartProcessInvokesExecutable(tokens, semantic, executable) {
+		return true
+	}
+	for index, raw := range tokens {
+		attachedCall := false
+		subexpressionCall := false
+		switch {
+		case strings.HasPrefix(raw, "$(&"):
+			raw = strings.TrimPrefix(raw, "$(&")
+			attachedCall = true
+		case strings.HasPrefix(raw, "$("):
+			raw = strings.TrimPrefix(raw, "$(")
+			subexpressionCall = true
+		case strings.HasPrefix(raw, "&"):
+			raw = strings.TrimPrefix(raw, "&")
+			attachedCall = true
+		}
+		quoted := strings.HasPrefix(raw, "'") ||
+			strings.HasPrefix(raw, `"`)
+		value := powerShellSemanticToken(raw)
+		value = strings.Trim(value, "(){}")
+		name := strings.ToLower(
+			path.Base(strings.ReplaceAll(value, "\\", "/")),
+		)
+		if name != executable {
+			continue
+		}
+		if attachedCall ||
+			(subexpressionCall && !quoted) ||
+			(index == 0 && !quoted) ||
+			(index > 0 && semantic[index-1] == "&") ||
+			(index > 0 && semantic[index-1] == "$(&") ||
+			(index > 0 && semantic[index-1] == "=" && !quoted) ||
+			(index == 1 && semantic[0] == "return" && !quoted) {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellCommandSemanticToken(token string) string {
+	value := strings.ToLower(
+		strings.Trim(
+			powerShellSemanticToken(token),
+			"(){}[]",
+		),
+	)
+	for _, prefix := range []string{"$(&", "$("} {
+		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
+			return strings.TrimPrefix(value, prefix)
+		}
+	}
+	return value
+}
+
+func powerShellStartProcessInvokesExecutable(
+	raw, semantic []string,
+	executable string,
+) bool {
+	for index, token := range semantic {
+		if !powerShellStartProcessCommand(token) ||
+			!powerShellTokenAtCommandPosition(semantic, index) {
+			continue
+		}
+		for argument := index + 1; argument < len(raw); argument++ {
+			option := semantic[argument]
+			name, attached, recognized := startProcessParameter(option)
+			if name != "filepath" || !recognized {
+				continue
+			}
+			if attached != "" {
+				return powerShellExecutableName(attached) == executable
+			}
+			if argument+1 < len(raw) {
+				return powerShellExecutableName(raw[argument+1]) == executable
+			}
+			return false
+		}
+		for argument := index + 1; argument < len(raw); argument++ {
+			option := semantic[argument]
+			if strings.HasPrefix(option, "-") {
+				_, attached, recognized := startProcessParameter(option)
+				if !recognized {
+					return false
+				}
+				if startProcessParameterTakesValue(option) &&
+					attached == "" &&
+					argument+1 < len(raw) {
+					argument++
+				}
+				continue
+			}
+			return powerShellExecutableName(raw[argument]) == executable
+		}
+	}
+	return false
+}
+
+func powerShellStartProcessCommand(token string) bool {
+	if token == "start-process" || token == "saps" || token == "start" {
+		return true
+	}
+	if strings.Contains(token, ":") ||
+		strings.Contains(token, "/") ||
+		strings.Count(token, "\\") != 1 {
+		return false
+	}
+	parts := strings.SplitN(token, "\\", 2)
+	if parts[0] == "" || parts[0] == "." || parts[0] == ".." ||
+		parts[1] != "start-process" {
+		return false
+	}
+	for _, char := range parts[0] {
+		if !unicode.IsLetter(char) &&
+			!unicode.IsDigit(char) &&
+			!strings.ContainsRune("._-", char) {
+			return false
+		}
+	}
+	return true
+}
+
+func startProcessParameter(option string) (string, string, bool) {
+	option = strings.TrimPrefix(strings.ToLower(option), "-")
+	attached := ""
+	if separator := strings.IndexByte(option, ':'); separator >= 0 {
+		attached = option[separator+1:]
+		option = option[:separator]
+	}
+	parameters := []string{
+		"argumentlist",
+		"confirm",
+		"credential",
+		"debug",
+		"environment",
+		"erroraction",
+		"errorvariable",
+		"filepath",
+		"informationaction",
+		"informationvariable",
+		"loaduserprofile",
+		"nonewwindow",
+		"outbuffer",
+		"outvariable",
+		"passthru",
+		"pipelinevariable",
+		"progressaction",
+		"redirectstandarderror",
+		"redirectstandardinput",
+		"redirectstandardoutput",
+		"usenewenvironment",
+		"verb",
+		"verbose",
+		"wait",
+		"warningaction",
+		"warningvariable",
+		"whatif",
+		"windowstyle",
+		"workingdirectory",
+	}
+	match := ""
+	for _, parameter := range parameters {
+		if parameter == option {
+			return parameter, attached, true
+		}
+		if strings.HasPrefix(parameter, option) {
+			if match != "" {
+				return "", attached, false
+			}
+			match = parameter
+		}
+	}
+	return match, attached, match != ""
+}
+
+func startProcessParameterTakesValue(option string) bool {
+	parameter, _, recognized := startProcessParameter(option)
+	if !recognized {
+		return false
+	}
+	switch parameter {
+	case "confirm",
+		"debug",
+		"loaduserprofile",
+		"nonewwindow",
+		"passthru",
+		"usenewenvironment",
+		"verbose",
+		"wait",
+		"whatif":
+		return false
+	default:
+		return true
+	}
+}
+
+func powerShellExecutableName(token string) string {
+	value := powerShellSemanticToken(token)
+	value = strings.Trim(value, "(){}")
+	return strings.ToLower(
+		path.Base(strings.ReplaceAll(value, "\\", "/")),
+	)
+}
+
+func powerShellTokenAtCommandPosition(tokens []string, index int) bool {
+	return index == 0 ||
+		(index > 0 &&
+			(tokens[index-1] == "=" ||
+				tokens[index-1] == "&" ||
+				tokens[index-1] == "$(&")) ||
+		(index == 1 && tokens[0] == "return")
+}
+
+func commandHasExactPowerShellArgument(command, argument string) bool {
+	for _, token := range powerShellCommandTokens(command) {
+		if strings.EqualFold(powerShellSemanticToken(token), argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandHasUnityActivationArgument(command string) bool {
+	for _, argument := range []string{
+		"-serial",
+		"-manuallicensefile",
+		"-executemethod",
+		"-runtests",
+	} {
+		if commandHasExactPowerShellArgument(command, argument) {
+			return true
+		}
+	}
+	return false
 }
 
 func stepReturnsUnity(step *yaml.Node) bool {
@@ -1582,12 +3702,15 @@ func stepReturnsUnity(step *yaml.Node) bool {
 	if run == nil || run.Kind != yaml.ScalarNode {
 		return false
 	}
-	text := strings.ToLower(run.Value)
-	if !strings.Contains(text, "-returnlicense") {
-		return false
+	for _, command := range powerShellCommands(run.Value) {
+		if commandInvokesUnityExecutable(command) &&
+			commandHasExactPowerShellArgument(command, "-returnlicense") {
+			return true
+		}
 	}
-	return strings.Contains(text, "unity-editor") || strings.Contains(text, "unity.exe") ||
-		(strings.Contains(text, "& $") && strings.Contains(text, "@return"))
+	text := strings.ToLower(run.Value)
+	return strings.Contains(text, "& $") && strings.Contains(text, "@return") &&
+		commandHasExactPowerShellArgument(run.Value, "-returnlicense")
 }
 
 func jobEnvContainsCredential(job *yaml.Node) bool {

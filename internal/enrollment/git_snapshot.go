@@ -6,7 +6,14 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"strconv"
 	"strings"
+)
+
+const (
+	maxPolicySnapshotFiles     = 512
+	maxPolicySnapshotFileBytes = 1 << 20
+	maxPolicySnapshotBytes     = 16 << 20
 )
 
 // LoadGitSnapshot reads policy-relevant blobs from an exact commit object. It
@@ -31,7 +38,7 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 		return Snapshot{}, fmt.Errorf("list commit %s: %w", sha, err)
 	}
 
-	files := make(map[string][]byte)
+	policyFiles := make([]string, 0)
 	for _, file := range bytes.Split(tree, []byte{0}) {
 		if len(file) == 0 {
 			continue
@@ -40,13 +47,53 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 		if !policyFile(name) {
 			continue
 		}
+		policyFiles = append(policyFiles, name)
+		if len(policyFiles) > maxPolicySnapshotFiles {
+			return Snapshot{}, fmt.Errorf(
+				"commit %s exceeds the %d policy-file limit",
+				sha,
+				maxPolicySnapshotFiles,
+			)
+		}
 		clean, err := cleanRepositoryPath(name)
 		if err != nil || clean != name || strings.Contains(name, ":") {
 			return Snapshot{}, fmt.Errorf("invalid tree path %q", name)
 		}
+	}
+
+	files := make(map[string][]byte, len(policyFiles))
+	policyBytes := int64(0)
+	for _, name := range policyFiles {
+		sizeOutput, err := git(ctx, repositoryRoot, "cat-file", "-s", sha+":"+name)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("size %s at %s: %w", name, sha, err)
+		}
+		size, err := strconv.ParseInt(strings.TrimSpace(string(sizeOutput)), 10, 64)
+		if err != nil || size < 0 {
+			return Snapshot{}, fmt.Errorf("invalid blob size for %s at %s", name, sha)
+		}
+		if size > maxPolicySnapshotFileBytes {
+			return Snapshot{}, fmt.Errorf(
+				"policy file %s at %s exceeds the %d-byte limit",
+				name,
+				sha,
+				maxPolicySnapshotFileBytes,
+			)
+		}
+		policyBytes += size
+		if policyBytes > maxPolicySnapshotBytes {
+			return Snapshot{}, fmt.Errorf(
+				"commit %s exceeds the %d-byte policy snapshot limit",
+				sha,
+				maxPolicySnapshotBytes,
+			)
+		}
 		content, err := git(ctx, repositoryRoot, "show", sha+":"+name)
 		if err != nil {
 			return Snapshot{}, fmt.Errorf("read %s at %s: %w", name, sha, err)
+		}
+		if int64(len(content)) != size {
+			return Snapshot{}, fmt.Errorf("blob size changed for %s at %s", name, sha)
 		}
 		files[name] = content
 	}
@@ -56,6 +103,9 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 
 func policyFile(file string) bool {
 	if strings.HasPrefix(file, ".github/workflows/") && isYAML(file) {
+		return true
+	}
+	if strings.EqualFold(path.Ext(file), ".ps1") {
 		return true
 	}
 	base := strings.ToLower(path.Base(file))

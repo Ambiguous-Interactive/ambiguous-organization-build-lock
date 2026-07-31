@@ -37,15 +37,57 @@ or writer App. The current inventory is recorded in
    label set has a registered runner visible to the repository; it does not
    require the runner to be online or idle. Make the licensed job depend on the
    preflight so an impossible label set fails instead of queueing forever.
-3. Validate local Unity secret shape, then check that a PR run is still the
+3. Before referencing Unity credentials or entering the organization FIFO,
+   require the exact manually installed editor with a bounded,
+   failure-propagating call to `ensure-editor.ps1 -CiManagedOnly
+   -RequireHealthyExisting`. A missing, unhealthy, or non-canonical editor is
+   an offline runner-maintenance failure; CI must not install, download,
+   repair, move, quarantine, or otherwise provision an editor. Do not restore
+   `UH_ENSURE_EDITOR_PROVISIONING_BUDGET_SECONDS` or
+   `UH_ENSURE_EDITOR_INSTALL_TIMEOUT_SECONDS`. The enrollment audit follows
+   workflow-reachable checked-in PowerShell scripts to reject hidden
+   provisioning, but only a direct workflow invocation satisfies the mandatory
+   gate because arbitrary wrapper control flow cannot prove that the check ran.
+   Reachable wrappers must use literal checked-in script paths; unresolved
+   script-variable invocation fails closed. The only permitted preceding step
+   is the approved immutable, exact-input current-PR-head guard. Then run the
+   approved bounded, no-profile bootstrap that removes only the exact
+   `.ci/unity-helpers` directory, rejects a reparse-point `.ci` parent, and
+   proves absence. Then, immediately before that gate,
+   check out the approved `unity-helpers` repository, revision, and destination
+   with the approved immutable `actions/checkout` revision,
+   `persist-credentials: false`, and `clean: true`. The checkout must be
+   unconditional, failure-propagating, and contain no additional inputs; no
+   intervening step may replace the helper tree. Forced recreation prevents
+   persistent local `.git/config` from surviving `clean: true`. Its exact
+   five-entry
+   environment disables system/global Git configuration and pins
+   `core.hooksPath` to `/dev/null`. Workflow- and job-level `env` mappings must
+   be absent: inherited values can inject code into PowerShell/.NET before the
+   first bootstrap command, or redirect Git, hooks, and the checkout action
+   runtime. Put required values in step-local environments after the bootstrap
+   and mandatory editor gate. The gate itself uses the approved exact
+   no-profile shell template and one-line validator command, with a quoted
+   literal editor release, the runner-owned
+   `$env:RUNNER_TOOL_CACHE\u6-v3` root, a closed provisioning profile, no step
+   environment, and no additional commands. The profile is `EditorOnly` unless
+   the reviewed static `matrix.test-mode` map selects
+   `StandaloneWindowsIl2Cpp` for `standalone`. Its version must exactly match the
+   central return version; the only dynamic form is the reviewed static
+   `matrix.unity-version` axis used by both steps.
+   The optional current-head guard, bootstrap, checkout, gate, and acquire must
+   omit `if`, preserving GitHub's implicit `success()` chain; `always()` is
+   prohibited on this prefix because it could continue after provenance
+   rejection.
+4. Validate local Unity secret shape, then check that a PR run is still the
    current head immediately before expensive setup and again before acquire.
-4. Acquire immediately before the activation-capable section. Pass a stable,
+5. Acquire immediately before the activation-capable section. Pass a stable,
    non-empty `runner.name` and set lifecycle downgrade guards compatible with
    the committed live configuration.
-5. Keep activation, tests/build, return, central evidence classification, release,
+6. Keep activation, tests/build, return, central evidence classification, release,
    and the final cleanup gate in one job on one physical runner identity. Use
    bounded activation retry for transient seat handoff.
-6. Run the pinned central `return-unity-license` action and
+7. Run the pinned central `return-unity-license` action and
    `classify-unity-cleanup-evidence` with exactly
    `always() && steps.<acquire-id>.outputs.acquired == 'true'`. Bind both to
    the one approved acquire step used by the cleanup gate. The return action
@@ -86,7 +128,7 @@ or writer App. The current inventory is recorded in
    The central return pin must appear in both `approvedLockShas` and the
    narrower `approvedReturnShas`; older globally approved releases do not
    authorize this credential-bearing action.
-7. Preserve fallback cleanup for runner loss. It must target the exact acquire
+8. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
    proven. A separate fallback job is classified as `fallback-cleanup`, not as
    a second paid lifecycle, only when it cannot acquire or activate Unity, runs
@@ -94,7 +136,7 @@ or writer App. The current inventory is recorded in
    action with the exact literal source-job holder identity and
    `unknown/healthy/return-terminated`, propagates release failure, and is
    covered with its source job by a hosted always-reporting aggregate.
-8. Run `require-confirmed-unity-cleanup` after release with `if: always()` and no
+9. Run `require-confirmed-unity-cleanup` after release with `if: always()` and no
    `continue-on-error`. Exact `acquired=false` makes the gate non-applicable
    because licensed work is guarded by `acquired == 'true'`; missing or invalid
    acquisition state remains fail-closed. A local quarantine, missing
@@ -105,7 +147,7 @@ or writer App. The current inventory is recorded in
    removal, and a coherent cooldown or direct release; the incident still blocks
    all new admission. The central return evidence has already been deleted
    before classification completes and must never be uploaded.
-9. Emit one stable, always-reporting aggregate. Use the central
+10. Emit one stable, always-reporting aggregate. Use the central
    `classify-unity-changes` action in a hosted, failure-propagating classifier
    job; it defaults to requiring Unity and skips only the central
    Unity-independent path allowlist. Use `require-unity-validation` for the
@@ -116,7 +158,7 @@ or writer App. The current inventory is recorded in
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
-10. Disable automatic cancellation for every scope that can terminate a job
+11. Disable automatic cancellation for every scope that can terminate a job
     after acquire. Superseded runs exit before acquire; holders finish cleanup.
 
 The conditional classifier and aggregate have an exact static shape. All five
