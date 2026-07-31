@@ -2,7 +2,7 @@
 
 Date: 2026-07-31
 
-Status: implementation and independent review green; CI pending
+Status: central implementation merged and verified; authorization pending
 
 ## Trigger
 
@@ -58,5 +58,14 @@ public action defaults need manifest-level assertions in addition to runtime
 fallback tests. No repository-wide skill change is justified by this single
 interface addition.
 
-Hosted-Windows CI, immutable authorization, and consumer canary evidence remain
-pending.
+## Immutable rollout boundary
+
+PR #164 squash-merged as
+`d72d1072accbc8090874b5aa257be3e56774de5d`. Post-merge Build lock CI run
+`30596311160` passed both Linux and hosted-Windows jobs, and organization
+enrollment audit run `30596311153` passed on that exact `main` commit.
+
+This separate authorization change adds that now-reachable implementation to
+both `approvedLockShas` and the narrower credential-bearing
+`approvedReturnShas`. Consumers may pin it only after this authorization merges
+and main remains green. Exact-head consumer canary evidence remains pending.
