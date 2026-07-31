@@ -2,7 +2,7 @@
 
 Date: 2026-07-30
 
-Status: implementation and hosted validation complete; exact-head review pending
+Status: central implementation merged and verified; immutable rollout in progress
 
 ## Selection
 
@@ -107,7 +107,14 @@ remaining actionable high-impact finding.
 
 ## Rollout boundary
 
-The updated classifier cannot be approved or pinned by consumers until its
-merge commit is reachable. After this central PR merges, a separate reviewed
-authorization/consumer migration must pin that immutable commit and prove the
-organization enrollment audit green. No organization policy is changed here.
+PR #161 squash-merged as
+`ce12fde93e67a27062350601fb97e4a2f546d405`. Post-merge Build lock CI run
+`30594478305` passed both Linux and hosted-Windows jobs, and organization
+enrollment audit run `30594478303` passed on that exact `main` commit.
+
+The separate authorization change adds this now-reachable commit to both
+`approvedLockShas` and the narrower credential-bearing `approvedReturnShas`.
+Only after that review merges may consumer workflows pin the new immutable
+revision. Consumer migration must then preserve the audited workflow shapes
+and prove the organization enrollment audit green. No organization credential,
+App, secret, runner, or ruleset policy changes are part of this rollout.
