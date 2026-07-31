@@ -1168,6 +1168,14 @@ function normalizeEntry(entry, schemaVersion = DEFAULT_SCHEMA_VERSION) {
       throw new Error(`Schema ${schemaVersion} entry ${normalized.holderId || "<unknown>"} is missing runnerId.`);
     }
   }
+  if (Object.hasOwn(entry, "jobId")) {
+    normalized.jobId = String(entry.jobId || "");
+    if (!/^[1-9][0-9]*$/.test(normalized.jobId)) {
+      throw new Error(
+        `Schema ${schemaVersion} entry ${normalized.holderId || "<unknown>"} has an invalid numeric Actions job ID.`
+      );
+    }
+  }
   return normalized;
 }
 
@@ -1246,7 +1254,8 @@ function normalizeState(raw, lockName) {
   if (parsedSchemaVersion >= 2) {
     const mirrorFields = [
       "holderId", "repository", "workflow", "job", "runId", "runAttempt", "runUrl",
-      "queuedAt", "acquiredAt", "expiresAt", ...(schemaVersion >= 3 ? ["runnerId"] : [])
+      "queuedAt", "acquiredAt", "expiresAt", ...(schemaVersion >= 3 ? ["runnerId"] : []),
+      ...(Object.hasOwn(rawHolders[0] || {}, "jobId") || Object.hasOwn(state.holder || {}, "jobId") ? ["jobId"] : [])
     ];
     const mirrorMatches = rawHolders.length
       ? state.holder && mirrorFields.every((field) => String(state.holder[field] || "") === String(rawHolders[0][field] || ""))
@@ -1327,7 +1336,8 @@ function stableState(state) {
     queuedAt: holder.queuedAt,
     acquiredAt: holder.acquiredAt,
     expiresAt: holder.expiresAt,
-    ...(schemaVersion >= 3 ? { runnerId: holder.runnerId } : {})
+    ...(schemaVersion >= 3 ? { runnerId: holder.runnerId } : {}),
+    ...(holder.jobId ? { jobId: holder.jobId } : {})
   }));
   return {
     schemaVersion,
@@ -1345,7 +1355,8 @@ function stableState(state) {
       runAttempt: entry.runAttempt,
       runUrl: entry.runUrl,
       queuedAt: entry.queuedAt,
-      ...(schemaVersion >= 3 ? { runnerId: entry.runnerId } : {})
+      ...(schemaVersion >= 3 ? { runnerId: entry.runnerId } : {}),
+      ...(entry.jobId ? { jobId: entry.jobId } : {})
     })),
     ...(schemaVersion >= 4 ? { reservations: state.reservations.map((reservation) => ({ ...reservation })) } : {}),
     ...(schemaVersion >= 5 ? { activeIncident: state.activeIncident ? { ...state.activeIncident } : null } : {}),
@@ -1662,6 +1673,20 @@ function identityIsNewer(existing, incoming, context) {
         `refusing conflicting identity from ${incoming.runnerId}.`
     };
   }
+  if (
+    incomingAttempt === storedAttempt &&
+    existing.jobId &&
+    incoming.jobId &&
+    existing.jobId !== incoming.jobId
+  ) {
+    return {
+      compatible: false,
+      newer: false,
+      reason:
+        `${context} ${incoming.holderId} is already bound to Actions job ${existing.jobId} for this run attempt ` +
+        `and runner; refusing conflicting exact job ${incoming.jobId}.`
+    };
+  }
   return { compatible: true, newer: incomingAttempt > storedAttempt, reason: "" };
 }
 
@@ -1675,6 +1700,76 @@ function identityIsNewerOrThrow(existing, incoming, context) {
 
 function isActiveRunStatus(status) {
   return ACTIVE_RUN_STATUSES.has(status || "");
+}
+
+async function getRunAttemptJobs(identity, authToken, options = {}) {
+  const parsed = parseRepository(identity.repository);
+  const jobs = [];
+  let totalCount = 0;
+  let page = 1;
+  do {
+    const response = await api(
+      "GET",
+      `/repos/${parsed.owner}/${parsed.repo}/actions/runs/${encodeURIComponent(identity.runId)}` +
+        `/attempts/${encodeURIComponent(identity.runAttempt)}/jobs?filter=all&per_page=100&page=${page}`,
+      undefined,
+      authToken,
+      options.apiOptions
+    );
+    if (!response || !Array.isArray(response.jobs) || !Number.isInteger(response.total_count)) {
+      throw new Error(`Malformed workflow jobs response for ${identity.repository}/${identity.runId}.`);
+    }
+    totalCount = response.total_count;
+    jobs.push(...response.jobs);
+    page++;
+    if (page > 1000) {
+      throw new Error(`Workflow jobs response for ${identity.repository}/${identity.runId} exceeded pagination limits.`);
+    }
+  } while (jobs.length < totalCount);
+  return jobs;
+}
+
+async function resolveCurrentJobId(identity, authToken, options = {}) {
+  if (
+    !authToken ||
+    !/^[1-9][0-9]*$/.test(identity.runId || "") ||
+    !/^[1-9][0-9]*$/.test(identity.runAttempt || "") ||
+    !identity.runnerId
+  ) {
+    console.log(
+      "::warning::Cannot record the current numeric Actions job ID; github-token, run identity, and runner-id are required. " +
+        "The scheduled reaper will retain this identity while its workflow run remains active."
+    );
+    return "";
+  }
+
+  let jobs;
+  try {
+    jobs = await getRunAttemptJobs(identity, authToken, options);
+  } catch (error) {
+    console.log(
+      `::warning::Cannot record the current numeric Actions job ID for ${identity.repository}/${identity.runId} ` +
+        `(${oneLine(error.message)}); the scheduled reaper will retain this identity while its workflow run remains active.`
+    );
+    return "";
+  }
+
+  const matchingJobs = jobs.filter(
+    (job) =>
+      job &&
+      job.runner_name === identity.runnerId &&
+      isActiveRunStatus(job.status) &&
+      /^[1-9][0-9]*$/.test(String(job.id || ""))
+  );
+  if (matchingJobs.length !== 1) {
+    console.log(
+      `::warning::Current numeric Actions job lookup for ${identity.repository}/${identity.runId} found ` +
+        `${matchingJobs.length} active jobs on runner ${identity.runnerId}; the scheduled reaper will retain this ` +
+        "identity while its workflow run remains active."
+    );
+    return "";
+  }
+  return String(matchingJobs[0].id);
 }
 
 async function getRunStatus(repository, runId, authToken, options = {}) {
@@ -1732,7 +1827,6 @@ async function getRunStatus(repository, runId, authToken, options = {}) {
 }
 
 async function getIdentityJobStatus(identity, observedAt, authToken, options = {}) {
-  const parsed = parseRepository(identity.repository);
   const observedTime = parseTime(observedAt);
   if (
     !/^[1-9][0-9]*$/.test(identity.runAttempt || "") ||
@@ -1742,29 +1836,17 @@ async function getIdentityJobStatus(identity, observedAt, authToken, options = {
     return { known: false, status: "", conclusion: "", jobId: "" };
   }
 
-  const jobs = [];
-  let totalCount = 0;
-  let page = 1;
+  if (!/^[1-9][0-9]*$/.test(identity.jobId || "")) {
+    console.log(
+      `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} has no recorded numeric job ID; ` +
+        "retaining workflow-run status as the fail-closed fallback."
+    );
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
+
+  let jobs;
   try {
-    do {
-      const response = await api(
-        "GET",
-        `/repos/${parsed.owner}/${parsed.repo}/actions/runs/${encodeURIComponent(identity.runId)}` +
-          `/attempts/${encodeURIComponent(identity.runAttempt)}/jobs?filter=all&per_page=100&page=${page}`,
-        undefined,
-        authToken,
-        options.apiOptions
-      );
-      if (!response || !Array.isArray(response.jobs) || !Number.isInteger(response.total_count)) {
-        throw new Error(`Malformed workflow jobs response for ${identity.repository}/${identity.runId}.`);
-      }
-      totalCount = response.total_count;
-      jobs.push(...response.jobs);
-      page++;
-      if (page > 1000) {
-        throw new Error(`Workflow jobs response for ${identity.repository}/${identity.runId} exceeded pagination limits.`);
-      }
-    } while (jobs.length < totalCount);
+    jobs = await getRunAttemptJobs(identity, authToken, options);
   } catch (error) {
     if (error.status === 401 || error.status === 404) {
       console.log(
@@ -1782,27 +1864,34 @@ async function getIdentityJobStatus(identity, observedAt, authToken, options = {
     throw error;
   }
 
-  const matchingJobs = jobs.filter((job) => {
-    if (!job || job.runner_name !== identity.runnerId) {
-      return false;
-    }
-    const startedAt = parseTime(job.started_at);
-    const completedAt = parseTime(job.completed_at);
-    return startedAt > 0 && startedAt <= observedTime && (completedAt <= 0 || observedTime <= completedAt);
-  });
+  const matchingJobs = jobs.filter(
+    (job) =>
+      job &&
+      String(job.id || "") === identity.jobId &&
+      job.runner_name === identity.runnerId
+  );
   if (matchingJobs.length !== 1) {
     console.log(
       `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} found ` +
-        `${matchingJobs.length} jobs on runner ${identity.runnerId} containing ${observedAt}; ` +
+        `${matchingJobs.length} jobs with ID ${identity.jobId} on runner ${identity.runnerId}; ` +
         `retaining workflow-run status as the fail-closed fallback.`
     );
     return { known: false, status: "", conclusion: "", jobId: "" };
   }
 
   const job = matchingJobs[0];
+  const status = String(job.status || "");
+  if (!isActiveRunStatus(status) && status !== "completed") {
+    console.log(
+      `::warning::Exact holder-job lookup for ${identity.repository}/${identity.runId} returned ` +
+        `${status ? `unrecognized status ${status}` : "a missing status"} for job ${identity.jobId}; ` +
+        "retaining workflow-run status as the fail-closed fallback."
+    );
+    return { known: false, status: "", conclusion: "", jobId: "" };
+  }
   return {
     known: true,
-    status: job.status || "",
+    status,
     conclusion: job.conclusion || "",
     jobId: String(job.id || "")
   };
@@ -2389,6 +2478,12 @@ async function acquire(config) {
     let admissionMayHaveBeenWrittenByThisInvocation = false;
     let preActivationReservation = null;
 
+    const currentJobId = await resolveCurrentJobId(identity, config.githubToken, { apiOptions });
+    if (currentJobId) {
+      identity.jobId = currentJobId;
+      console.log(`Recorded exact Actions job ID ${currentJobId} for scheduled stale-state verification.`);
+    }
+
     const cleanupBeforeActivation = async (reason, options = {}) => {
       const result = await cleanupIdentity(config, identity, {
         maxAttempts: 3,
@@ -2697,10 +2792,45 @@ async function acquire(config) {
             );
           }
         }
+        if (myHolder && identity.jobId && myHolder.jobId && myHolder.jobId !== identity.jobId) {
+          throw new Error(
+            `Holder ${identity.holderId} is already bound to Actions job ${myHolder.jobId}; ` +
+              `refusing conflicting exact job ${identity.jobId}.`
+          );
+        }
+        const backfillHolderJobId = Boolean(myHolder && identity.jobId && !myHolder.jobId);
+        if (backfillHolderJobId) {
+          myHolder.jobId = identity.jobId;
+          changed = true;
+        }
         if (myHolder) {
           lockStateMayNeedCleanup = true;
           await revalidatePrHead({ force: true, cleanup: true });
           recordPostCleanupNeeded();
+          let acquiredStateSha = sha || "";
+          if (backfillHolderJobId) {
+            const write = await writeState(config, sha, state, `Backfill exact job for ${config.lockName}`, { apiOptions });
+            if (write.conflict) {
+              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              continue;
+            }
+            const verified = await readState(config, { apiOptions });
+            const verifiedHolder = verified.state.holders.find(
+              (holder) => holder.holderId === identity.holderId
+            );
+            if (
+              !verifiedHolder ||
+              verified.state.schemaVersion !== state.schemaVersion ||
+              (runnerSerialization && verifiedHolder.runnerId !== identity.runnerId) ||
+              verifiedHolder.runAttempt !== identity.runAttempt ||
+              verifiedHolder.jobId !== identity.jobId
+            ) {
+              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              continue;
+            }
+            acquiredStateSha = verified.sha || write.sha;
+            console.log(`Backfilled exact Actions job ID ${identity.jobId} into the existing holder.`);
+          }
           const waitMs = Date.now() - started;
           const position = queuePosition(state, identity.holderId);
           console.log(
@@ -2710,7 +2840,7 @@ async function acquire(config) {
             acquired: true,
             lockName: config.lockName,
             holderId: identity.holderId,
-            stateSha: sha || "",
+            stateSha: acquiredStateSha,
             waitMs,
             attempts,
             staleRecovered,
@@ -2732,11 +2862,29 @@ async function acquire(config) {
             if (runnerSerialization) {
               attemptAdvanced = identityIsNewerOrThrow(entry, identity, "Queued request");
             }
+            if (
+              !attemptAdvanced &&
+              entry.jobId &&
+              identity.jobId &&
+              entry.jobId !== identity.jobId
+            ) {
+              throw new Error(
+                `Queued request ${identity.holderId} is already bound to Actions job ${entry.jobId}; ` +
+                  `refusing conflicting exact job ${identity.jobId}.`
+              );
+            }
             const refreshedEntry = {
               ...identity,
-              queuedAt: attemptAdvanced ? identity.queuedAt : entry.queuedAt
+              queuedAt: attemptAdvanced ? identity.queuedAt : entry.queuedAt,
+              ...((attemptAdvanced ? identity.jobId : identity.jobId || entry.jobId)
+                ? { jobId: attemptAdvanced ? identity.jobId : identity.jobId || entry.jobId }
+                : {})
             };
-            if (entry.runnerId !== refreshedEntry.runnerId || entry.runAttempt !== refreshedEntry.runAttempt) {
+            if (
+              entry.runnerId !== refreshedEntry.runnerId ||
+              entry.runAttempt !== refreshedEntry.runAttempt ||
+              String(entry.jobId || "") !== String(refreshedEntry.jobId || "")
+            ) {
               changed = true;
             }
             state.queue.push(refreshedEntry);
@@ -2869,6 +3017,7 @@ async function acquire(config) {
           const verifiedHolder = verified.state.holders.find((holder) => holder.holderId === identity.holderId);
           if (
             !verifiedHolder ||
+            (identity.jobId && verifiedHolder.jobId !== identity.jobId) ||
             (runnerSerialization &&
               (verified.state.schemaVersion !== state.schemaVersion ||
                 verifiedHolder.runnerId !== identity.runnerId ||
@@ -3128,7 +3277,8 @@ function sameReapRunVersion(candidate, proven) {
     "queuedAt",
     "acquiredAt",
     "expiresAt",
-    "runnerId"
+    "runnerId",
+    "jobId"
   ].every((field) => String(candidate[field] || "") === String(proven[field] || ""));
 }
 
@@ -3771,6 +3921,7 @@ module.exports = {
   release,
   reap,
   reapDeadlineBudgets,
+  resolveCurrentJobId,
   resolveReleaseReport,
   run,
   runCancellationCleanup,

@@ -362,6 +362,11 @@ a newer schema than the running action fail closed with an upgrade error.
 Schema 3 adds `runnerId` to holders and queue entries. Compatible clients keep
 writing schema 2 until `runnerSerialization` is activated, then the state
 upgrades one-way so a temporary configuration outage cannot disable it.
+Every schema may also carry an optional numeric `jobId`. Acquire records it
+only when the Actions API identifies exactly one active job on the declared
+physical runner. Older clients preserve safety if they omit or drop this
+optional field: while the workflow run remains active, the scheduled reaper
+retains any holder or queue entry whose exact numeric job ID is unavailable.
 
 Schema 4 adds `reservations`. Confirmed resource cleanup creates a cooldown;
 unknown cleanup creates a non-expiring quarantine. Both consume capacity.
@@ -381,7 +386,8 @@ without growing the queue. Existing holders may finish and clean up. Incidents
 never expire and cannot be recovered by same-runner admission.
 
 State never stores tokens or environment dumps. It stores only run identity,
-holder timing, queue entries, and public run URLs.
+including the public numeric Actions job ID when proven, holder timing, queue
+entries, and public run URLs.
 
 Holder identity intentionally excludes `GITHUB_RUN_ATTEMPT`; reruns of the same
 workflow run can therefore release a lock left by the previous attempt instead
@@ -559,9 +565,13 @@ unverified holder, reservation, and queue entry remains unchanged; a completed
 queue entry already proven safe within the scanned FIFO prefix is checkpointed
 without reordering, and the action fails visibly so delivery monitoring can
 escalate it. Before schema 4 the reaper clears a holder when the holder workflow
-run has completed,
-or when the lease has expired and the run cannot be proven active. The same
-stale predicate is used by acquire and the reaper.
+run has completed, when its recorded numeric job ID is terminal, or when the
+lease has expired and the run cannot be proven active. It never infers a matrix
+job from runner timestamps: API and runner clocks can disagree, and sequential
+matrix legs can share one runner. If an active run's holder has no exact numeric
+job ID, the reaper retains it until run-level evidence becomes conclusive. The
+scheduled reaper alone evaluates staleness; acquire treats every observed holder
+and queued entry as live until the reaper has reconciled it.
 
 Under schema 4 and 5, stale holders are quarantined instead of freed. A queued job
 on the same physical runner reclaims a quarantine first (return-at-start), which is

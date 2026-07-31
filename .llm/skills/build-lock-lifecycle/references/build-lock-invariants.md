@@ -17,6 +17,11 @@
   before routine queue cleanup. Its status reads and CAS reconciliation use
   internal deadlines shorter than the outer workflow timeout; unverified
   identities remain unchanged, while a partial safe checkpoint fails visibly.
+- Job-level stale proof requires a recorded numeric Actions job ID bound to the
+  exact run attempt and physical runner, an explicitly recognized job status,
+  and CAS verification that the ID survived admission or backfill. Never infer
+  a job from runner/API clock windows or names; missing, malformed, ambiguous,
+  mismatched, or concurrently dropped evidence retains an active run.
 - Invalid or contradictory cleanup diagnostics never veto exact ownership
   cleanup; degrade their evidence conservatively, preserve capacity as unsafe,
   and fail only after the cleanup attempt.
