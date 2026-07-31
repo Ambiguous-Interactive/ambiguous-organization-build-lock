@@ -78,6 +78,11 @@ release, and cleanup-gate terminal suffix. CI includes a narrow
 `windows-latest` job that executes the real native deletion helper without
 Unity.
 
+The first hosted-Windows run reached the helper's original 30-second process
+timeout during cold PowerShell `Add-Type` compilation. The helper remains
+bounded, with a 120-second allowance for the hosted cold start; CI must confirm
+the revised bound before merge.
+
 ## Adversarial review
 
 The first independent review found three unsafe paths: authoritative read

@@ -76,6 +76,9 @@
 - `go -C tools/actionlint run -mod=readonly
   github.com/rhysd/actionlint/cmd/actionlint -color`: passed after adding the
   narrow hosted-Windows job.
+- First hosted-Windows run: failed because cold Windows PowerShell `Add-Type`
+  compilation reached the original 30-second subprocess bound; the bound was
+  raised to 120 seconds and requires the next CI run for confirmation.
 
 ## Adversarial review
 - Unsafe success paths considered: unreadable/empty-digest evidence, mutation

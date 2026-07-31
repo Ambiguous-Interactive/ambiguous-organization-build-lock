@@ -309,7 +309,7 @@ function identityBoundDeleteWindows(
         ...statEnvironment("UNITY_DELETE_FILE", claimedIdentity.returnLogStat)
       },
       stdio: "ignore",
-      timeout: 30000,
+      timeout: 120000,
       windowsHide: true
     }
   );

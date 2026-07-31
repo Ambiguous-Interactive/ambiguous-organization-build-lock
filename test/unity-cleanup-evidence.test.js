@@ -781,7 +781,7 @@ test("Windows identity deletion invokes the private handle-based helper with exa
     "1700000000500000000"
   );
   assert.equal(invocation.options.stdio, "ignore");
-  assert.equal(invocation.options.timeout, 30000);
+  assert.equal(invocation.options.timeout, 120000);
   assert.equal(
     invocation.args.some((argument) => argument.includes(claimedTarget.evidenceDirectory)),
     false
