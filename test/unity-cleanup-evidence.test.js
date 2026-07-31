@@ -737,6 +737,7 @@ test("Windows identity deletion invokes the private handle-based helper with exa
     size
   });
   const claimedTarget = {
+    runnerTemp: "D:\\actions\\_temp",
     evidenceDirectory: "D:\\actions\\_temp\\unity-return-123-1-qora.consuming-abcd",
     returnLogPath:
       "D:\\actions\\_temp\\unity-return-123-1-qora.consuming-abcd\\return-license.log"
@@ -778,6 +779,8 @@ test("Windows identity deletion invokes the private handle-based helper with exa
   assert.equal(invocation.options.env.UNITY_DELETE_FILE_SIZE, "123");
   assert.equal(invocation.options.env.UNITY_DELETE_EXPECTED_DIGEST, "a".repeat(64));
   assert.equal(invocation.options.env.UNITY_DELETE_TEST_DIAGNOSTICS, "false");
+  assert.equal(invocation.options.env.TEMP, claimedTarget.runnerTemp);
+  assert.equal(invocation.options.env.TMP, claimedTarget.runnerTemp);
   assert.equal(
     invocation.options.env.UNITY_DELETE_FILE_CTIME_NS,
     "1700000000500000000"
