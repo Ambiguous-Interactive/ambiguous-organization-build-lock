@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:30658003577:unity-tests:2022.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
+    "holderId": "Ambiguous-Interactive/DoxReloaded:30658207208:unity-tests:unity-tests-1",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
     "job": "unity-tests",
-    "runId": "30658003577",
+    "runId": "30658207208",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003577",
-    "queuedAt": "2026-07-31T19:24:43.460Z",
-    "acquiredAt": "2026-07-31T19:28:18.445Z",
-    "expiresAt": "2026-07-31T23:28:18.445Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30658207208",
+    "queuedAt": "2026-07-31T19:29:03.483Z",
+    "acquiredAt": "2026-07-31T19:29:43.416Z",
+    "expiresAt": "2026-07-31T23:29:43.416Z",
+    "runnerId": "tiny-box-linux"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30658003577:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30658003577",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003577",
-      "queuedAt": "2026-07-31T19:24:43.460Z",
-      "acquiredAt": "2026-07-31T19:28:18.445Z",
-      "expiresAt": "2026-07-31T23:28:18.445Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:30658207208:unity-tests:unity-tests-1",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "d448764b-8963-4b45-b9bd-4fe4ff46c03d",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30658003577:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "30658003577",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30658003577",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-31T19:29:03.209Z",
+      "availableAt": "2026-07-31T19:29:04.209Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T19:29:43.416Z"
+  "updatedAt": "2026-07-31T19:29:03.209Z"
 }
