@@ -211,6 +211,17 @@ section, guard every licensed step on the acquire output, and release with
     incident-id: ${{ steps.release-build-lock.outputs.incident-id }}
 ```
 
+The cleanup classifier requires the central return action's digest-bound,
+current-run evidence path. It rejects path escape, link/reparse ancestry,
+unexpected directory contents, hard links, or identity changes; atomically
+claims the action-owned directory under a private random name, performs the
+authoritative bounded read and classification there, and uses Windows-native
+handles with a mutation-exclusive file handle to reverify the digest and delete
+the classified file and empty directory by identity before reporting
+`classification-complete=true`. There is no pathname-delete fallback on
+unsupported platforms. Supplemental evidence paths are read-only inputs and
+are not deleted by the classifier.
+
 The central return action is Windows-only. It rejects reparse points anywhere
 in the CI-managed editor path and verifies the editor's Authenticode signature,
 code-signing EKU, and centrally allowlisted Unity leaf-certificate thumbprint

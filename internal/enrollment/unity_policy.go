@@ -96,7 +96,6 @@ type flattenedUnityStep struct {
 	scope               string
 	enclosingConditions []*yaml.Node
 	enclosingSteps      []*yaml.Node
-	cleanupWrapper      bool
 }
 
 // AnalyzeUnityEnrollment classifies Unity-related jobs and rejects incomplete
@@ -548,28 +547,11 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	acquireScope, returnScope, classifierScope := "", "", ""
 	returnAlways := false
 	classifier, release, gate := -1, -1, -1
-	classifierIsWrapper := false
 	classifierTyped, classifierAlways := false, false
 	releaseAlways, releaseTyped, gateAlways, gateTyped := false, false, false, false
 	jobFailurePropagates := criticalNodeFailurePropagates(job)
 	for index, step := range steps {
 		node := step.node
-		if step.cleanupWrapper {
-			if !jobFailurePropagates || !criticalStepFailurePropagates(step) {
-				continue
-			}
-			unityReturn = index
-			returnID = stepID(node)
-			returnScope = step.scope
-			returnAlways = cleanupStepAlways(step)
-			classifier = index
-			classifierID = returnID
-			classifierScope = step.scope
-			classifierAlways = returnAlways
-			classifierTyped = true
-			classifierIsWrapper = true
-			continue
-		}
 		uses := stepUses(node)
 		if uses != "" {
 			if isRemoteAction(uses) {
@@ -627,7 +609,6 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 				classifierID = stepID(node)
 				classifierScope = step.scope
 				classifierAlways = classifierCondition
-				classifierIsWrapper = false
 			case releaseAction:
 				if !jobFailurePropagates || !cleanupStepAlways(step) {
 					a.analyzer.add("release-not-always", workflowPath, jobName)
@@ -672,7 +653,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		returnScope = ""
 		returnAlways = false
 	}
-	if !classifierIsWrapper && classifier >= 0 && unityReturn >= 0 &&
+	if classifier >= 0 && unityReturn >= 0 &&
 		returnID != "" && classifierScope == returnScope {
 		classifierTyped = typedClassifierInputs(steps[classifier].node, returnID)
 		if returnActionCount > 0 {
@@ -721,8 +702,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		if !classifierTyped {
 			a.analyzer.add("classifier-inputs-not-typed", workflowPath, jobName)
 		}
-		if unityReturn >= 0 && (classifier < unityReturn ||
-			(classifier == unityReturn && !classifierIsWrapper)) {
+		if unityReturn >= 0 && classifier <= unityReturn {
 			a.analyzer.add("classifier-before-unity-return", workflowPath, jobName)
 		}
 	}
@@ -824,107 +804,8 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 			return nil, err
 		}
 		result = append(result, nested...)
-		wrapper := flattenedUnityStep{
-			node:                step,
-			scope:               scope,
-			enclosingConditions: append([]*yaml.Node(nil), enclosingConditions...),
-			enclosingSteps:      append([]*yaml.Node(nil), enclosingSteps...),
-		}
-		if a.validCleanupComposite(wrapper, manifest) {
-			wrapper.cleanupWrapper = true
-			result = append(result, wrapper)
-		}
 	}
 	return result, nil
-}
-
-func (a *unityPolicyAnalyzer) validCleanupComposite(
-	wrapper flattenedUnityStep,
-	manifest *yaml.Node,
-) bool {
-	if stepID(wrapper.node) == "" || !cleanupStepAlways(wrapper) {
-		return false
-	}
-	runs := mappingValue(manifest, "runs")
-	steps := sequenceValues(mappingValue(runs, "steps"))
-	if len(steps) == 0 {
-		return false
-	}
-
-	trustedClassifiers := make(map[string]bool)
-	redundantClassifier := ""
-	returnIndex := -1
-	returnID := ""
-	for index, step := range steps {
-		if compositeReturnEvidence(step) && stepID(step) != "" &&
-			conditionIsSafeAlways(mappingValue(step, "if")) {
-			returnIndex = index
-			returnID = stepID(step)
-		}
-		if lockActionName(stepUses(step)) != cleanupClassifierAction ||
-			!a.approved[strings.ToLower(actionRef(stepUses(step)))] ||
-			stepID(step) == "" || !criticalNodeFailurePropagates(step) {
-			continue
-		}
-		if returnIndex >= 0 && index > returnIndex &&
-			conditionIsSafeAlways(mappingValue(step, "if")) &&
-			typedClassifierInputs(step, returnID) {
-			trustedClassifiers[stepID(step)] = true
-			redundantClassifier = stepID(step)
-			continue
-		}
-	}
-	if redundantClassifier == "" {
-		return false
-	}
-
-	outputs := mappingValue(manifest, "outputs")
-	for _, output := range []string{
-		"resource-cleanup-status",
-		"resource-health",
-		"resource-reason",
-		"classification-complete",
-	} {
-		definition := mappingValue(outputs, output)
-		if definition == nil || definition.Kind != yaml.MappingNode ||
-			!outputForwardsTrustedClassifiers(
-				mappingValue(definition, "value"),
-				output,
-				redundantClassifier,
-				trustedClassifiers,
-			) {
-			return false
-		}
-	}
-	return true
-}
-
-func outputForwardsTrustedClassifiers(
-	value *yaml.Node,
-	output, required string,
-	trusted map[string]bool,
-) bool {
-	if value == nil || value.Kind != yaml.ScalarNode {
-		return false
-	}
-	expression := strings.Join(strings.Fields(value.Value), "")
-	expression = strings.TrimPrefix(expression, "${{")
-	expression = strings.TrimSuffix(expression, "}}")
-	parts := strings.Split(expression, "||")
-	foundRequired := false
-	for _, part := range parts {
-		const prefix = "steps."
-		suffix := ".outputs." + output
-		if !strings.HasPrefix(part, prefix) || !strings.HasSuffix(part, suffix) {
-			return false
-		}
-		id := strings.TrimSuffix(strings.TrimPrefix(part, prefix), suffix)
-		if !trusted[id] {
-			return false
-		}
-		foundRequired = foundRequired || id == required
-	}
-	return foundRequired
 }
 
 func stepReferenceID(value *yaml.Node, output string) string {
@@ -1699,47 +1580,6 @@ func stepReturnsUnity(step *yaml.Node) bool {
 	}
 	return strings.Contains(text, "unity-editor") || strings.Contains(text, "unity.exe") ||
 		(strings.Contains(text, "& $") && strings.Contains(text, "@return"))
-}
-
-func compositeReturnEvidence(step *yaml.Node) bool {
-	if !stepReturnsUnity(step) || !conditionIsSafeAlways(mappingValue(step, "if")) ||
-		!criticalNodeFailurePropagates(step) {
-		return false
-	}
-	shell := mappingValue(step, "shell")
-	if shell == nil || shell.Kind != yaml.ScalarNode || shell.Value != "bash" {
-		return false
-	}
-	lines := make([]string, 0)
-	for _, line := range strings.Split(scalarValue(mappingValue(step, "run")), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	expected := []string{
-		`return_log="${RUNNER_TEMP}/return.log"`,
-		"command_completed=false",
-		"evidence_capture_complete=false",
-		"set +e",
-		`unity-editor -batchmode -returnlicense -logFile "$return_log"`,
-		"return_exit_code=$?",
-		"set -e",
-		"command_completed=true",
-		"evidence_capture_complete=true",
-		`echo "return-log-path=$return_log" >> "$GITHUB_OUTPUT"`,
-		`echo "return-command-completed=$command_completed" >> "$GITHUB_OUTPUT"`,
-		`echo "return-exit-code=$return_exit_code" >> "$GITHUB_OUTPUT"`,
-		`echo "evidence-capture-complete=$evidence_capture_complete" >> "$GITHUB_OUTPUT"`,
-	}
-	if len(lines) != len(expected) {
-		return false
-	}
-	for index := range expected {
-		if lines[index] != expected[index] {
-			return false
-		}
-	}
-	return true
 }
 
 func jobEnvContainsCredential(job *yaml.Node) bool {

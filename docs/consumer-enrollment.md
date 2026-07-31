@@ -57,10 +57,23 @@ or writer App. The current inventory is recorded in
    run-scoped log path, command-completed state, signed exit code,
    capture-complete attestation, and SHA-256 of the exact redacted log bytes.
    Bind that digest directly into the classifier so later workflow steps
-   cannot replace evidence. Run typed release and the final cleanup gate with
-   literal `always()`. Only exact entitlement and ULF success lines in the
+   cannot replace evidence. The classifier accepts only the exact current-run
+   `RUNNER_TEMP/unity-return-<run>-<attempt>-<suffix>/return-license.log`
+   contract, rejects link/reparse ancestry, hard links, and identity changes,
+   then atomically claims the action-owned directory under a private random
+   name. The authoritative bounded read, digest check, and classification occur
+   only after that claim. On the central action's required Windows runner, the
+   classifier opens the exact file and empty directory through
+   identity-verified native handles. The file handle excludes write/delete
+   sharing while it rechecks the digest and deletes those objects with no
+   pathname fallback, and verifies absence before it reports
+   `classification-complete=true`. Run typed release and the final cleanup gate
+   with literal `always()`. Only exact entitlement and ULF success lines in the
    dedicated return log are `confirmed/healthy`; exit zero, supplemental proof,
-   or a missing serial is not proof.
+   or a missing serial is not proof. Supplemental evidence is classified but
+   is not deletion-owned by the central classifier; its producer must retain a
+   separately bounded stale-evidence policy without changing the terminal
+   return/classifier/release/gate suffix.
    Signer rotation requires a reviewed central action release. The immediate
    signature-check-to-process-start interval assumes no concurrently executing
    same-account process is mutating the verified editor image; sequential
@@ -85,8 +98,8 @@ or writer App. The current inventory is recorded in
    may warn rather than fail only when release reports `global-quarantined`, the
    exact incident identity, caller-local confirmed/healthy evidence, exact holder
    removal, and a coherent cooldown or direct release; the incident still blocks
-   all new admission. Delete raw evidence afterward under `if: always()` and never
-   upload it.
+   all new admission. The central return evidence has already been deleted
+   before classification completes and must never be uploaded.
 9. Emit one stable, always-reporting aggregate. Use the central
    `classify-unity-changes` action in a hosted, failure-propagating classifier
    job; it defaults to requiring Unity and skips only the central

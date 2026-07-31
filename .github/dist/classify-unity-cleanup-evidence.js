@@ -2,6 +2,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { TextDecoder } = require("node:util");
@@ -24,6 +25,8 @@ const ACCOUNT_BLOCKED_PATTERN = /(?:^|[^0-9])20111(?:$|[^0-9])/;
 const UNCLASSIFIED_20113_PATTERN = /(?:^|[^0-9])20113(?:$|[^0-9])/;
 const RETURN_400006_PATTERN = /(?:^|[^0-9])400006(?:$|[^0-9])/;
 const ZERO_DIGEST = "0".repeat(64);
+const EVIDENCE_SUFFIX_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
 
 function parseBoolean(name, raw) {
   if (raw !== "true" && raw !== "false") {
@@ -63,8 +66,8 @@ function parseInputs(inputs) {
     .map((value) => value.trim())
     .filter(Boolean);
   const returnLogDigest = String(inputs["return-log-digest"] || "").trim();
-  if (returnLogDigest && !/^[a-f0-9]{64}$/.test(returnLogDigest)) {
-    throw new Error("return-log-digest must be a lowercase SHA-256 digest.");
+  if (!/^[a-f0-9]{64}$/.test(returnLogDigest)) {
+    throw new Error("return-log-digest is required as a lowercase SHA-256 digest.");
   }
   return {
     returnLogPath,
@@ -93,8 +96,262 @@ function sameStat(before, after) {
     && before.ino === after.ino
     && before.mode === after.mode
     && before.size === after.size
+    && before.birthtimeNs === after.birthtimeNs
     && before.mtimeNs === after.mtimeNs
     && before.ctimeNs === after.ctimeNs;
+}
+
+function sameObjectStat(before, after) {
+  return before.dev === after.dev
+    && before.ino === after.ino
+    && before.mode === after.mode
+    && before.birthtimeNs === after.birthtimeNs;
+}
+
+function samePath(left, right, pathImpl) {
+  const normalizedLeft = pathImpl.resolve(left);
+  const normalizedRight = pathImpl.resolve(right);
+  if (pathImpl === path.win32 || pathImpl.sep === "\\") {
+    return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
+  }
+  return normalizedLeft === normalizedRight;
+}
+
+function resolveReturnEvidenceTarget(environment, returnLogPath, pathImpl = path) {
+  const runID = String(environment.GITHUB_RUN_ID || "").trim();
+  const runAttempt = String(environment.GITHUB_RUN_ATTEMPT || "").trim();
+  const runnerTemp = String(environment.RUNNER_TEMP || "").trim();
+  if (!/^[1-9][0-9]*$/.test(runID) || !/^[1-9][0-9]*$/.test(runAttempt)) {
+    throw new Error("GitHub run identity is invalid.");
+  }
+  if (!pathImpl.isAbsolute(runnerTemp) || !pathImpl.isAbsolute(returnLogPath)) {
+    throw new Error("Return evidence paths must be absolute.");
+  }
+  const resolvedRunnerTemp = pathImpl.resolve(runnerTemp);
+  const resolvedReturnLog = pathImpl.resolve(returnLogPath);
+  const evidenceDirectory = pathImpl.dirname(resolvedReturnLog);
+  const directoryName = pathImpl.basename(evidenceDirectory);
+  const expectedPrefix = `unity-return-${runID}-${runAttempt}-`;
+  const suffix = directoryName.startsWith(expectedPrefix)
+    ? directoryName.slice(expectedPrefix.length)
+    : "";
+  if (
+    pathImpl.basename(resolvedReturnLog) !== "return-license.log"
+    || !EVIDENCE_SUFFIX_PATTERN.test(suffix)
+    || !samePath(pathImpl.dirname(evidenceDirectory), resolvedRunnerTemp, pathImpl)
+    || !samePath(
+      resolvedReturnLog,
+      pathImpl.join(resolvedRunnerTemp, directoryName, "return-license.log"),
+      pathImpl
+    )
+  ) {
+    throw new Error("Return evidence path is not the exact run-scoped central return path.");
+  }
+  return {
+    evidenceDirectory,
+    returnLogPath: resolvedReturnLog,
+    runAttempt,
+    runID,
+    runnerTemp: resolvedRunnerTemp
+  };
+}
+
+function inspectReturnEvidenceTarget(target, io = fs, pathImpl = path) {
+  const absolute = pathImpl.resolve(target.returnLogPath);
+  const parsed = pathImpl.parse(absolute);
+  let current = parsed.root;
+  let runnerTempStat;
+  let evidenceDirectoryStat;
+  let returnLogStat;
+  for (const component of absolute.slice(parsed.root.length).split(pathImpl.sep).filter(Boolean)) {
+    current = pathImpl.join(current, component);
+    const stat = io.lstatSync(current, { bigint: true });
+    if (stat.isSymbolicLink()) {
+      throw new Error("Return evidence path contains a symbolic link or reparse point.");
+    }
+    if (samePath(current, target.returnLogPath, pathImpl)) {
+      if (!stat.isFile() || Number(stat.nlink) !== 1) {
+        throw new Error("Return evidence is not a singly linked regular file.");
+      }
+      returnLogStat = stat;
+    } else if (!stat.isDirectory()) {
+      throw new Error("Return evidence ancestry is not a directory.");
+    }
+    if (samePath(current, target.runnerTemp, pathImpl)) {
+      runnerTempStat = stat;
+    }
+    if (samePath(current, target.evidenceDirectory, pathImpl)) {
+      evidenceDirectoryStat = stat;
+    }
+  }
+  if (!runnerTempStat || !evidenceDirectoryStat || !returnLogStat) {
+    throw new Error("Return evidence path identity could not be established.");
+  }
+  return { evidenceDirectoryStat, returnLogStat, runnerTempStat };
+}
+
+function assertSameTargetIdentity(expected, observed) {
+  for (const name of ["runnerTempStat", "evidenceDirectoryStat", "returnLogStat"]) {
+    if (!sameStat(expected[name], observed[name])) {
+      throw new Error("Return evidence identity changed before deletion.");
+    }
+  }
+}
+
+function assertClaimedTargetIdentity(expected, observed) {
+  if (
+    !sameObjectStat(expected.runnerTempStat, observed.runnerTempStat)
+    || !sameObjectStat(expected.evidenceDirectoryStat, observed.evidenceDirectoryStat)
+    || !sameStat(expected.returnLogStat, observed.returnLogStat)
+  ) {
+    throw new Error("Return evidence identity changed during deletion.");
+  }
+}
+
+function assertPathAbsent(candidate, io = fs) {
+  try {
+    io.lstatSync(candidate, { bigint: true });
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error("Consumed return evidence remains after deletion.");
+}
+
+function claimConsumedReturnEvidence(
+  target,
+  expectedIdentity,
+  io = fs,
+  pathImpl = path,
+  randomBytes = crypto.randomBytes
+) {
+  assertSameTargetIdentity(
+    expectedIdentity,
+    inspectReturnEvidenceTarget(target, io, pathImpl)
+  );
+  const nonce = randomBytes(16).toString("hex");
+  if (!/^[a-f0-9]{32}$/.test(nonce)) {
+    throw new Error("Return evidence claim identity is invalid.");
+  }
+  const consumingDirectory = `${target.evidenceDirectory}.consuming-${nonce}`;
+  const claimedTarget = {
+    ...target,
+    evidenceDirectory: consumingDirectory,
+    returnLogPath: pathImpl.join(consumingDirectory, "return-license.log")
+  };
+  assertPathAbsent(consumingDirectory, io);
+  io.renameSync(target.evidenceDirectory, consumingDirectory);
+  assertPathAbsent(target.evidenceDirectory, io);
+  const claimedIdentity = inspectReturnEvidenceTarget(claimedTarget, io, pathImpl);
+  assertClaimedTargetIdentity(
+    expectedIdentity,
+    claimedIdentity
+  );
+  return { claimedIdentity, claimedTarget };
+}
+
+function statEnvironment(prefix, stat) {
+  return {
+    [`${prefix}_DEV`]: stat.dev.toString(),
+    [`${prefix}_INO`]: stat.ino.toString(),
+    [`${prefix}_SIZE`]: stat.size.toString(),
+    [`${prefix}_NLINK`]: stat.nlink.toString(),
+    [`${prefix}_BIRTHTIME_NS`]: stat.birthtimeNs.toString(),
+    [`${prefix}_MTIME_NS`]: stat.mtimeNs.toString(),
+    [`${prefix}_CTIME_NS`]: stat.ctimeNs.toString()
+  };
+}
+
+function identityBoundDeleteWindows(
+  claimedTarget,
+  claimedIdentity,
+  expectedDigest,
+  {
+    platform = process.platform,
+    spawnSync = childProcess.spawnSync,
+    systemRoot = WINDOWS_SYSTEM_ROOT,
+    diagnostics = process.env.UNITY_DELETE_TEST_DIAGNOSTICS === "true"
+  } = {}
+) {
+  if (platform !== "win32") {
+    throw new Error("Identity-bound return evidence deletion requires Windows.");
+  }
+  const powershell = path.win32.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe"
+  );
+  const script = path.join(__dirname, "delete-unity-return-evidence.ps1");
+  const result = spawnSync(
+    powershell,
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      script
+    ],
+    {
+      env: {
+        SystemRoot: systemRoot,
+        TEMP: claimedTarget.runnerTemp,
+        TMP: claimedTarget.runnerTemp,
+        UNITY_DELETE_TEST_DIAGNOSTICS: diagnostics ? "true" : "false",
+        UNITY_DELETE_DIRECTORY_PATH: claimedTarget.evidenceDirectory,
+        UNITY_DELETE_EXPECTED_DIGEST: expectedDigest,
+        UNITY_DELETE_FILE_PATH: claimedTarget.returnLogPath,
+        ...statEnvironment(
+          "UNITY_DELETE_DIRECTORY",
+          claimedIdentity.evidenceDirectoryStat
+        ),
+        ...statEnvironment("UNITY_DELETE_FILE", claimedIdentity.returnLogStat)
+      },
+      stdio: diagnostics ? ["ignore", "ignore", "inherit"] : "ignore",
+      timeout: 120000,
+      windowsHide: true
+    }
+  );
+  if (result.error || result.signal || result.status !== 0) {
+    throw new Error("Identity-bound return evidence deletion failed.");
+  }
+}
+
+function deleteClaimedReturnEvidence(
+  claimedTarget,
+  claimedIdentity,
+  originalTarget,
+  io = fs,
+  pathImpl = path,
+  deleteByIdentity = identityBoundDeleteWindows,
+  expectedDigest
+) {
+  assertClaimedTargetIdentity(
+    claimedIdentity,
+    inspectReturnEvidenceTarget(claimedTarget, io, pathImpl)
+  );
+  const entries = io.readdirSync(claimedTarget.evidenceDirectory, { withFileTypes: true });
+  if (
+    entries.length !== 1
+    || entries[0].name !== "return-license.log"
+    || entries[0].isSymbolicLink()
+    || !entries[0].isFile()
+  ) {
+    throw new Error("Return evidence directory contains an unexpected entry.");
+  }
+  deleteByIdentity(claimedTarget, claimedIdentity, expectedDigest);
+  assertPathAbsent(claimedTarget.returnLogPath, io);
+  assertPathAbsent(claimedTarget.evidenceDirectory, io);
+  assertPathAbsent(originalTarget.evidenceDirectory, io);
+  const runnerTempAfterDeletion = io.lstatSync(originalTarget.runnerTemp, { bigint: true });
+  if (!sameObjectStat(claimedIdentity.runnerTempStat, runnerTempAfterDeletion)) {
+    throw new Error("Runner temporary directory identity changed during deletion.");
+  }
 }
 
 function boundedRead(filePath, expectedStat, maximumBytes, io = fs) {
@@ -151,6 +408,7 @@ function collectEvidence({
   maxFileBytes = MAX_EVIDENCE_FILE_BYTES,
   maxTotalBytes = MAX_EVIDENCE_TOTAL_BYTES,
   maxFiles = MAX_EVIDENCE_FILES,
+  expectedReturnStat,
   io = fs
 }) {
   let captureComplete = captureAttested === true;
@@ -161,6 +419,7 @@ function collectEvidence({
   let maximumBufferedEntries = 0;
   let maximumTraversalDepth = 0;
   let returnLog = Buffer.alloc(0);
+  let returnLogReadComplete = false;
   const supplemental = [];
   const digest = crypto.createHash("sha256");
   const observedFileIdentities = new Set();
@@ -176,6 +435,10 @@ function collectEvidence({
       }
     }
     if (stat.isSymbolicLink() || !stat.isFile()) {
+      captureComplete = false;
+      return;
+    }
+    if (kind === "return" && expectedReturnStat && !sameStat(expectedReturnStat, stat)) {
       captureComplete = false;
       return;
     }
@@ -218,6 +481,7 @@ function collectEvidence({
       observedFileIdentities.add(identity);
       if (kind === "return") {
         returnLog = data;
+        returnLogReadComplete = true;
       } else {
         supplemental.push(data);
       }
@@ -329,6 +593,7 @@ function collectEvidence({
   }
   return {
     returnLog,
+    returnLogReadComplete,
     supplemental,
     captureComplete,
     digest: digest.digest("hex"),
@@ -447,7 +712,16 @@ function appendOutputs(outputPath, values) {
   fs.appendFileSync(outputPath, `${lines.join("\n")}\n`, { encoding: "utf8" });
 }
 
-function run({ inputs, outputPath, log = console.log }) {
+function run({
+  inputs,
+  outputPath,
+  environment = process.env,
+  io = fs,
+  pathImpl = path,
+  randomBytes = crypto.randomBytes,
+  deleteByIdentity = identityBoundDeleteWindows,
+  log = console.log
+}) {
   const defaults = {
     resourceSafe: false,
     cleanupStatus: "unknown",
@@ -458,9 +732,25 @@ function run({ inputs, outputPath, log = console.log }) {
   };
   appendOutputs(outputPath, defaults);
   const parsed = parseInputs(inputs);
-  const evidence = collectEvidence(parsed);
+  const target = resolveReturnEvidenceTarget(environment, parsed.returnLogPath, pathImpl);
+  const targetIdentity = inspectReturnEvidenceTarget(target, io, pathImpl);
+  const { claimedIdentity, claimedTarget } = claimConsumedReturnEvidence(
+    target,
+    targetIdentity,
+    io,
+    pathImpl,
+    randomBytes
+  );
+  const evidence = collectEvidence({
+    ...parsed,
+    returnLogPath: claimedTarget.returnLogPath,
+    expectedReturnStat: claimedIdentity.returnLogStat,
+    io
+  });
+  if (!evidence.returnLogReadComplete) {
+    throw new Error("Central return evidence could not be read and validated.");
+  }
   if (
-    parsed.returnLogDigest &&
     crypto.createHash("sha256").update(evidence.returnLog).digest("hex") !== parsed.returnLogDigest
   ) {
     throw new Error("Return log digest does not match the central return output.");
@@ -472,6 +762,15 @@ function run({ inputs, outputPath, log = console.log }) {
     commandCompleted: parsed.commandCompleted,
     captureComplete: evidence.captureComplete
   });
+  deleteClaimedReturnEvidence(
+    claimedTarget,
+    claimedIdentity,
+    target,
+    io,
+    pathImpl,
+    deleteByIdentity,
+    parsed.returnLogDigest
+  );
   const completed = {
     ...result,
     classificationComplete: true,
@@ -518,9 +817,14 @@ module.exports = {
   MAX_EVIDENCE_FILES,
   MAX_EVIDENCE_TOTAL_BYTES,
   MAX_VISITED_ENTRIES,
+  claimConsumedReturnEvidence,
   classifyEvidence,
   collectEvidence,
+  deleteClaimedReturnEvidence,
   environmentInputs,
+  identityBoundDeleteWindows,
+  inspectReturnEvidenceTarget,
   parseInputs,
+  resolveReturnEvidenceTarget,
   run
 };

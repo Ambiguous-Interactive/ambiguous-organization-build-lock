@@ -14,8 +14,8 @@ inputs:
     description: Literal true only when the return wrapper completed bounded evidence capture.
     required: true
   return-log-digest:
-    description: Expected SHA-256 of the exact return log; required by the central return contract.
-    required: false
+    description: Expected SHA-256 of the exact return log from the central return action.
+    required: true
   supplemental-evidence-paths:
     description: Newline-separated run-scoped log files or directories used only for account-health evidence.
     required: false
@@ -29,7 +29,7 @@ outputs:
   resource-reason:
     description: Stable allowlisted evidence reason.
   classification-complete:
-    description: True when bounded classification completed deterministically.
+    description: True only after bounded classification and verified central return evidence deletion.
   evidence-digest:
     description: SHA-256 digest of bounded evidence identity and bytes.
 runs:
