@@ -400,6 +400,23 @@ try {
         foreach ($diagnostic in $safeDiagnostics) {
             [Console]::Error.WriteLine("native-compiler: " + $diagnostic)
         }
+        foreach ($record in @($_) + @($Error | Select-Object -First 20)) {
+            $diagnosticType = $record.Exception.GetType().FullName
+            $diagnosticID = [string]$record.FullyQualifiedErrorId
+            $diagnosticMessage = [regex]::Replace(
+                [string]$record.Exception.Message,
+                '[^A-Za-z0-9 .,()''_-]',
+                '?'
+            )
+            if ($diagnosticMessage.Length -gt 500) {
+                $diagnosticMessage = $diagnosticMessage.Substring(0, 500)
+            }
+            [Console]::Error.WriteLine(
+                "native-compile-record: type=" + $diagnosticType +
+                " id=" + $diagnosticID +
+                " message=" + $diagnosticMessage
+            )
+        }
     }
     exit 1
 }
