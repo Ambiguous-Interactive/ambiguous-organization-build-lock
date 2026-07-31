@@ -392,6 +392,14 @@ try {
 } catch {
     if ($env:UNITY_DELETE_TEST_DIAGNOSTICS -eq "true") {
         [Console]::Error.WriteLine("native-stage: compile")
+        $compilerDiagnostics = (@($_) + @($Error | Select-Object -First 20) | Out-String)
+        $safeDiagnostics = [regex]::Matches(
+            $compilerDiagnostics,
+            'CS[0-9]{4}:[^\r\n]*'
+        ) | ForEach-Object { $_.Value } | Select-Object -Unique
+        foreach ($diagnostic in $safeDiagnostics) {
+            [Console]::Error.WriteLine("native-compiler: " + $diagnostic)
+        }
     }
     exit 1
 }
