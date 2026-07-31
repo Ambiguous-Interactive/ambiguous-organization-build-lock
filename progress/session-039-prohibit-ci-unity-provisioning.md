@@ -162,7 +162,8 @@ classified this P2, not a provenance bypass: Git ownership protection remains
 enabled and the exact helper checkout and gate passed. The safe transition is
 to retain all five Git-isolation environment entries while centrally allowing,
 then requiring, literal `set-safe-directory: false`; consumers must move under
-the transitional policy before it is tightened.
+the transitional policy before it is tightened. Issue #168 records the exact
+Windows evidence, source-backed impact analysis, and rollout acceptance gates.
 
 Central enforcement must not merge while it would make an enrolled default
 branch red. Publication and merge therefore wait for DoxReloaded, DxMessaging,
