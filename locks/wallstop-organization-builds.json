@@ -27,8 +27,12 @@
       "acquiredAt": "2026-07-31T23:31:42.012Z",
       "expiresAt": "2026-08-01T03:31:42.012Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "237001b1-6324-4ff2-a574-f3db3945a9b5",
       "holderId": "Ambiguous-Interactive/qora-redux:30673130617:unity:qora",
       "repository": "Ambiguous-Interactive/qora-redux",
       "workflow": "Unity Tests",
@@ -36,14 +40,13 @@
       "runId": "30673130617",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30673130617",
-      "queuedAt": "2026-07-31T23:32:44.350Z",
-      "acquiredAt": "2026-07-31T23:32:46.985Z",
-      "expiresAt": "2026-08-01T03:32:46.985Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-07-31T23:37:13.075Z",
+      "availableAt": "2026-07-31T23:37:14.075Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-07-31T23:32:46.985Z"
+  "updatedAt": "2026-07-31T23:37:13.076Z"
 }
