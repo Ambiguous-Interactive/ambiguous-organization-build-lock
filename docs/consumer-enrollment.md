@@ -56,7 +56,9 @@ or writer App. The current inventory is recorded in
    proves absence. Then, immediately before that gate,
    check out the approved `unity-helpers` repository, revision, and destination
    with the approved immutable `actions/checkout` revision,
-   `persist-credentials: false`, and `clean: true`. The checkout must be
+   `persist-credentials: false`, and `clean: true`. During the safe-directory
+   transition it may also set literal `set-safe-directory: false`; no other
+   checkout input, expression, or value is permitted. The checkout must be
    unconditional, failure-propagating, and contain no additional inputs; no
    intervening step may replace the helper tree. Forced recreation prevents
    persistent local `.git/config` from surviving `clean: true`. Its exact

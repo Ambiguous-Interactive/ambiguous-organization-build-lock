@@ -181,7 +181,8 @@ reader access. Treat either condition as scope drift.
    trusted, immutable `unity-helpers` checkout follows and immediately precedes
    the gate, is
    unconditional and failure-propagating, sets `persist-credentials: false`
-   and `clean: true`, and has no additional inputs. This prevents skipped,
+   and `clean: true`, and may temporarily add only literal
+   `set-safe-directory: false`. This prevents skipped,
    stale, or subsequently overwritten helper content from satisfying
    provenance. Forced recreation prevents persistent local Git configuration
    from surviving `clean: true`. Its closed environment disables system/global

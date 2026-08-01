@@ -67,8 +67,12 @@ safe invocation behind a branch that its workflow arguments never execute.
 Snapshot tests prove that both workflow and PowerShell bytes remain bound to
 the requested Git object even in the presence of a local replace ref. The
 trusted gate additionally requires the exact immutable checkout to be the
-immediately preceding top-level step with exactly the five approved inputs:
+immediately preceding top-level step with the five approved inputs:
 repository, ref, path, `persist-credentials: false`, and `clean: true`.
+The safe-directory transition accepts one additional input only when it is the
+literal `set-safe-directory: false`; expressions, `true`, and all other inputs
+remain rejected. The central policy will require that literal after enrolled
+consumers have migrated.
 Focused Go tests for the enrollment analyzer and command pass.
 
 The durable lesson is enforced at the narrowest executable boundary by the

@@ -858,6 +858,64 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	legacy := strings.Replace(
+		base,
+		"          clean: true\n",
+		"          clean: true\n          set-safe-directory: false\n",
+		1,
+	)
+	accepted, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": legacy,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(accepted.Findings), "missing-unity-editor-check") {
+		t.Fatalf("literal false safe-directory transition was rejected: %#v", accepted.Findings)
+	}
+
+	for name, value := range map[string]string{
+		"true":       "true",
+		"expression": "${{ false }}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			workflow := strings.Replace(
+				legacy,
+				"set-safe-directory: false",
+				"set-safe-directory: "+value,
+				1,
+			)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-editor-check") {
+				t.Fatalf("unsafe safe-directory input passed: %#v", result.Findings)
+			}
+		})
+	}
+
+	extra := strings.Replace(
+		legacy,
+		"          set-safe-directory: false\n",
+		"          set-safe-directory: false\n          lfs: false\n",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": extra,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-unity-editor-check") {
+		t.Fatalf("extra checkout input passed: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentRejectsSameNamedFakeEditorGate(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
