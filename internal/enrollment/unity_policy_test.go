@@ -93,6 +93,7 @@ func centralReturnSteps() string {
           path: .ci/unity-helpers
           persist-credentials: false
           clean: true
+          set-safe-directory: false
       - name: Require manually installed Unity editor
         timeout-minutes: 10
         shell: ` + trustedEditorShell + `
@@ -337,6 +338,7 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
           path: .ci/unity-helpers
           persist-credentials: false
           clean: true
+          set-safe-directory: false
 `
 	gateBlock := `      - name: Require manually installed Unity editor
         timeout-minutes: 10
@@ -475,8 +477,10 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
 		{
 			name: "untrusted checkout overwrites helper",
 			from: "          clean: true\n" +
+				"          set-safe-directory: false\n" +
 				"      - name: Require manually installed Unity editor",
 			to: "          clean: true\n" +
+				"          set-safe-directory: false\n" +
 				"      - name: Overwrite Unity editor validator\n" +
 				"        uses: " + trustedEditorCheckout + "\n" +
 				"        with:\n" +
@@ -862,18 +866,27 @@ func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
 	base := unityWorkflow(centralReturnSteps(), safeAggregate())
 	legacy := strings.Replace(
 		base,
-		"          clean: true\n",
-		"          clean: true\n          set-safe-directory: false\n",
+		"          set-safe-directory: false\n",
+		"",
 		1,
 	)
-	accepted, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+	legacyResult, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/unity.yml": legacy,
 	}), unityAuditPolicy())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(findingCodes(accepted.Findings), "missing-unity-editor-check") {
-		t.Fatalf("literal false safe-directory transition was rejected: %#v", accepted.Findings)
+	if !strings.Contains(findingCodes(legacyResult.Findings), "missing-unity-editor-check") {
+		t.Fatalf("checkout without safe-directory false passed: %#v", legacyResult.Findings)
+	}
+	literal, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": base,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(literal.Findings), "missing-unity-editor-check") {
+		t.Fatalf("literal false safe-directory input was rejected: %#v", literal.Findings)
 	}
 
 	for name, value := range map[string]string{
@@ -882,7 +895,7 @@ func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			workflow := strings.Replace(
-				legacy,
+				base,
 				"set-safe-directory: false",
 				"set-safe-directory: "+value,
 				1,
@@ -900,7 +913,7 @@ func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
 	}
 
 	extra := strings.Replace(
-		legacy,
+		base,
 		"          set-safe-directory: false\n",
 		"          set-safe-directory: false\n          lfs: false\n",
 		1,

@@ -949,7 +949,7 @@ func (a *unityPolicyAnalyzer) trustedEditorGate(
 	}
 	with := mappingValue(checkout.node, "with")
 	if with == nil || with.Kind != yaml.MappingNode ||
-		(len(with.Content) != 10 && len(with.Content) != 12) {
+		len(with.Content) != 12 {
 		return false
 	}
 	allowedCheckoutInputs := map[string]bool{
@@ -959,15 +959,13 @@ func (a *unityPolicyAnalyzer) trustedEditorGate(
 		"persist-credentials": true,
 		"clean":               true,
 	}
-	if len(with.Content) == 12 {
-		allowedCheckoutInputs["set-safe-directory"] = true
-		// actions/checkout otherwise attempts a global safe.directory write. Under
-		// the intentionally isolated Git configuration that write is both noisy
-		// and impossible, so the only permitted transitional override is the
-		// literal false input. No expression or additional input is accepted.
-		if scalarValue(mappingValue(with, "set-safe-directory")) != "false" {
-			return false
-		}
+	allowedCheckoutInputs["set-safe-directory"] = true
+	// actions/checkout otherwise attempts a global safe.directory write. Under
+	// the intentionally isolated Git configuration that write is both noisy
+	// and impossible, so the checkout must explicitly disable that behavior.
+	// No expression or additional input is accepted.
+	if scalarValue(mappingValue(with, "set-safe-directory")) != "false" {
+		return false
 	}
 	if !mappingHasOnlyKeys(with, allowedCheckoutInputs) {
 		return false

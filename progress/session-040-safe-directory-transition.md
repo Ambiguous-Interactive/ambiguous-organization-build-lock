@@ -13,16 +13,16 @@ ordering, cleanup, and aggregate all passed, so this is a reliability defect,
 not a provenance bypass.
 
 The change preserves all five Git-isolation environment entries. The analyzer
-now accepts either the existing five checkout inputs or the same closed input
-set plus literal `set-safe-directory: false`. `true`, expressions, and extra
-inputs fail closed. No organization credential, App, runner, ruleset, or secret
-policy is changed.
+now requires the same closed input set plus literal `set-safe-directory: false`.
+Omission, `true`, expressions, and extra inputs fail closed. No organization
+credential, App, runner, ruleset, or secret policy is changed.
 
 ## Red-green evidence
 
 The new table-driven contract test proves:
 
-- the literal-false transition remains enrollment-valid;
+- literal `set-safe-directory: false` remains enrollment-valid;
+- omission is rejected;
 - `set-safe-directory: true` is rejected;
 - an expression-valued input is rejected; and
 - an unrelated additional checkout input is rejected.
@@ -34,10 +34,9 @@ go test ./internal/enrollment -run 'TestUnityEnrollment(RejectsCIEditorProvision
 passed
 ```
 
-Consumer migration and the real hosted-Windows proof remain delivery gates
-before tightening the central analyzer to require the literal input. The
-existing issue #168 evidence and the PR timeline remain authoritative for that
-rollout state.
+Consumer migration and the real hosted-Windows proof were delivery gates before
+tightening the central analyzer. The existing issue #168 evidence and the PR
+timeline remain authoritative for that rollout state.
 
 The migration has now been published on the active consumer surfaces without
 changing organization policy or credentials:
@@ -48,5 +47,5 @@ changing organization policy or credentials:
   intentional editor-gate version literals.
 
 All three remain subject to their real Unity/Windows and repository checks;
-none is treated as migrated evidence until its exact-head checks pass and the
-reviewed PR merges.
+each is treated as migrated evidence only after its exact-head checks passed and
+the reviewed PR merged.
