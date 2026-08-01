@@ -38,3 +38,15 @@ Consumer migration and the real hosted-Windows proof remain delivery gates
 before tightening the central analyzer to require the literal input. The
 existing issue #168 evidence and the PR timeline remain authoritative for that
 rollout state.
+
+The migration has now been published on the active consumer surfaces without
+changing organization policy or credentials:
+
+- IshoBoy #338, one trusted checkout input plus its exact contract assertion;
+- qora-redux #201, one trusted checkout input plus its exact contract assertion;
+- DoxReloaded #305, one trusted checkout input and validator fixes for the
+  intentional editor-gate version literals.
+
+All three remain subject to their real Unity/Windows and repository checks;
+none is treated as migrated evidence until its exact-head checks pass and the
+reviewed PR merges.
