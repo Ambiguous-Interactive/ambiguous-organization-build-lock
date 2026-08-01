@@ -54,8 +54,9 @@ The boundary is now satisfied for this bounded slice:
 - IshoBoy PR #345 merged as `35319da64ed967e86edb16ff484a0c7367643460` and
   migrated its Unity license preflight to the central action at the immutable
   central merge commit.
-- IshoBoy's post-merge default-branch Unity validation and cross-platform
-  pre-commit checks completed successfully at that merge commit.
+- IshoBoy's post-merge default-branch Unity validation run `30711576126` and
+  cross-platform pre-commit run `30711576138` completed successfully at that
+  merge commit.
 - Trusted central enrollment audit run `30711594952` completed successfully
   against the merged default branches after the consumer migration.
 
@@ -68,7 +69,7 @@ material was changed.
 
 Observed fact: the authoritative boundary for a cross-repository action
 migration is the consumer's merged default-branch workflow plus a fresh central
-enrollment audit, not a pull-request diff alone. This is recorded here because
+enrollment audit, not a pull request diff alone. This is recorded here because
 the audit must be rerun after the consumer merge. No new `.llm/` guidance is
 promoted; the existing fail-closed and audit instructions already express this
 invariant.
