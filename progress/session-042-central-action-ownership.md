@@ -57,3 +57,13 @@ The remaining work for #171 is any future migration of repository-specific
 implementation, if a consumer demonstrates that it is genuinely centralizable.
 This PR establishes the central ownership guard without replacing diagnostic or
 test logic with an unreviewed generic action.
+
+## Adversarial review and remediation
+
+Copilot review of the first pushed head found that the check covered direct
+workflow steps but not `runs.steps` inside a local composite action. That was a
+reachable bypass of the stated snapshot-wide contract. The analyzer now applies
+the same ownership check while recursively loading composite manifests, and a
+regression test proves the wrapper path emits the same finding. The prior head
+is not treated as complete evidence; full verification and a fresh exact-head
+review are required after this remediation.

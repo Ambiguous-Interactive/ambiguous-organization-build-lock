@@ -99,6 +99,19 @@ func TestForeignOrganizationActionFilesAreRejected(t *testing.T) {
 	}
 }
 
+func TestForeignOrganizationActionFilesAreRejectedThroughCompositeActions(t *testing.T) {
+	findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
+		".github/workflows/unity.yml":        workflow("", "", "      - uses: ./.github/actions/wrapper\n"),
+		".github/actions/wrapper/action.yml": "name: wrapper\nruns:\n  using: composite\n  steps:\n    - uses: Ambiguous-Interactive/unity-helpers/.github/actions/validate-unity-license@" + testSHA + "\n",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codes := findingCodes(findings); !strings.Contains(codes, "foreign-action-reference:.github/actions/wrapper/action.yml:") {
+		t.Fatalf("expected transitive foreign action finding, got %s", codes)
+	}
+}
+
 func TestCancellationPolicyDirectBoundaries(t *testing.T) {
 	tests := []struct {
 		name                string

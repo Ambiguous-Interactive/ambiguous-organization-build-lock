@@ -620,6 +620,7 @@ func (a *analyzer) actionLicensed(actionPath string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		a.validateActionOwnership(uses, manifestPath, "")
 		if acquire, ref := acquireReference(uses); acquire {
 			a.validateAcquireRef(ref, manifestPath, "")
 			licensed = true
