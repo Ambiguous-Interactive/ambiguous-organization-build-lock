@@ -858,12 +858,15 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		if step.scope == "job" {
 			unresolved = hasUnresolvedPowerShellWorkflowInvocation(run)
 		}
-		// A working-directory is security-relevant only when this run step
-		// resolves an editor invocation through a relative path. It must not make
-		// unrelated build steps fail, and the exact trusted gate uses an absolute
+		// A working-directory is security-relevant when this run step invokes a
+		// repository-relative PowerShell script: the script is resolved from the
+		// redirected directory, so auditing only the repository-root spelling can
+		// inspect a decoy while the runner executes a different file. It must not
+		// make unrelated commands fail, and the exact trusted gate uses an absolute
 		// workspace path even when job defaults set a directory.
 		workingDirectoryUnsafe := workingDirectory && !candidate &&
-			(direct.found || delegated.found || unresolved)
+			(direct.found || delegated.found || unresolved ||
+				hasRepositoryRelativePowerShellScriptInvocation(run))
 		if direct.unsafe || delegated.unsafe || unresolved || workingDirectoryUnsafe {
 			a.analyzer.add("unsafe-unity-editor-provisioning", workflowPath, jobName)
 		}
@@ -1224,6 +1227,18 @@ func auditEnsureEditorSource(text string) editorSourceAudit {
 	}
 	result.topLevel = topLevelEnsureEditorInvocation(clean)
 	return result
+}
+
+func hasRepositoryRelativePowerShellScriptInvocation(text string) bool {
+	for _, command := range powerShellCommands(text) {
+		for _, reference := range powerShellPathReferences(command) {
+			if reference.repositoryRelative &&
+				powerShellCommandInvokesReference(command, reference) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func topLevelEnsureEditorInvocation(text string) bool {
