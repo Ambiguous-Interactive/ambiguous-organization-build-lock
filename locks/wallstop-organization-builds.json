@@ -27,8 +27,12 @@
       "acquiredAt": "2026-08-01T08:52:25.054Z",
       "expiresAt": "2026-08-01T12:52:25.054Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "bbee65af-6bca-4550-83dd-98424fbb5518",
       "holderId": "Ambiguous-Interactive/DxMessaging:30693252936:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
@@ -36,14 +40,13 @@
       "runId": "30693252936",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30693252936",
-      "queuedAt": "2026-08-01T09:13:13.071Z",
-      "acquiredAt": "2026-08-01T09:13:18.268Z",
-      "expiresAt": "2026-08-01T13:13:18.268Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-01T09:14:06.189Z",
+      "availableAt": "2026-08-01T09:14:07.189Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-01T09:13:18.268Z"
+  "updatedAt": "2026-08-01T09:14:06.190Z"
 }
