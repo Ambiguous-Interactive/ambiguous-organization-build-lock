@@ -44,7 +44,20 @@ changing organization policy or credentials:
 - IshoBoy #338, one trusted checkout input plus its exact contract assertion;
 - qora-redux #201, one trusted checkout input plus its exact contract assertion;
 - DoxReloaded #305, one trusted checkout input and validator fixes for the
-  intentional editor-gate version literals.
+  intentional editor-gate version literals. It merged at `7b7760c2` after
+  exact-head run #30697864858 passed static validation, EditMode and PlayMode
+  XML validation, WebGL and Windows builds, artifact uploads, the typed
+  aggregate (`static-validation=success` and every licensed outcome
+  `success`), license return, healthy cleanup classification, lock release,
+  and confirmed cleanup. RCA issue #314 records the original WebGL stall and
+  the fail-closed watchdog/result-gate remediation.
+
+The DoxReloaded investigation also exposed a second organization-wide gate
+requirement: an `always()` aggregate must consume the static-validation result,
+not merely list the job in `needs`. Central commit
+`df3ebdd070ee55d8c924127ad347053335aa46a9` adds the required typed input and
+an explicit failure when static validation is not `success`; the analyzer and
+contract tests require the aggregate to pass `needs.static-validation.result`.
 
 All three remain subject to their real Unity/Windows and repository checks;
 each is treated as migrated evidence only after its exact-head checks passed and
