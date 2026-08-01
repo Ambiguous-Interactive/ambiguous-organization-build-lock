@@ -858,7 +858,13 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		if step.scope == "job" {
 			unresolved = hasUnresolvedPowerShellWorkflowInvocation(run)
 		}
-		if direct.unsafe || delegated.unsafe || unresolved || workingDirectory {
+		// A working-directory is security-relevant only when this run step
+		// resolves an editor invocation through a relative path. It must not make
+		// unrelated build steps fail, and the exact trusted gate uses an absolute
+		// workspace path even when job defaults set a directory.
+		workingDirectoryUnsafe := workingDirectory && !candidate &&
+			(direct.found || delegated.found || unresolved)
+		if direct.unsafe || delegated.unsafe || unresolved || workingDirectoryUnsafe {
 			a.analyzer.add("unsafe-unity-editor-provisioning", workflowPath, jobName)
 		}
 		if direct.provisioningControl || delegated.provisioningControl {

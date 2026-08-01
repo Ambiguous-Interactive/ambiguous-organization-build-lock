@@ -929,6 +929,36 @@ func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentWorkingDirectoryDoesNotRejectExactGate(t *testing.T) {
+	workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
+	workflow = strings.Replace(
+		workflow,
+		"runs-on: [self-hosted, Windows]\n",
+		"runs-on: [self-hosted, Windows]\n    defaults:\n      run:\n        working-directory: Assets\n",
+		1,
+	)
+	workflow = strings.Replace(
+		workflow,
+		"      - id: acquire\n",
+		"      - name: Build from project subdirectory\n"+
+			"        working-directory: Assets\n"+
+			"        run: Write-Host build\n"+
+			"      - id: acquire\n",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := findingCodes(result.Findings)
+	if strings.Contains(findings, "unsafe-unity-editor-provisioning") ||
+		strings.Contains(findings, "missing-unity-editor-check") {
+		t.Fatalf("working-directory on unrelated steps rejected exact gate: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentRejectsSameNamedFakeEditorGate(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
