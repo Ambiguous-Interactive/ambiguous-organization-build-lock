@@ -30,6 +30,7 @@ const {
   release,
   reap,
   reapDeadlineBudgets,
+  resolveCurrentJobId,
   resolveReleaseReport,
   runCancellationCleanup,
   selectEligibleQueueEntries,
@@ -5330,6 +5331,7 @@ test("stale evaluation reclaims a completed holder job while sibling matrix jobs
     runAttempt: "1",
     runUrl: "https://github.com/owner/repo/actions/runs/123",
     runnerId: "runner-a",
+    jobId: "11",
     queuedAt: "2026-06-06T00:00:30.000Z",
     acquiredAt: "2026-06-06T00:01:00.000Z",
     expiresAt: "2999-01-01T00:00:00.000Z"
@@ -5372,6 +5374,60 @@ test("stale evaluation reclaims a completed holder job while sibling matrix jobs
   });
 });
 
+test("stale evaluation does not resolve a live sequential matrix holder to its completed predecessor", async () => {
+  const holder = {
+    holderId: "owner/repo:30645211053:unity-tests:2021.3.45f1-playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "30645211053",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/30645211053",
+    runnerId: "runner-a",
+    queuedAt: "2026-07-31T16:00:55.276Z",
+    acquiredAt: "2026-07-31T16:00:58.333Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/30645211053") {
+      return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+    }
+    if (parsed.pathname === "/repos/owner/repo/actions/runs/30645211053/attempts/1/jobs") {
+      return jsonResponse(200, {
+        total_count: 2,
+        jobs: [
+          {
+            id: 91204876077,
+            name: "Unity 2021.3.45f1 editmode",
+            runner_name: "runner-a",
+            status: "completed",
+            conclusion: "success",
+            started_at: "2026-07-31T15:59:30.000Z",
+            completed_at: "2026-07-31T16:01:02.000Z"
+          },
+          {
+            id: 91204876143,
+            name: "Unity 2021.3.45f1 playmode",
+            runner_name: "runner-a",
+            status: "in_progress",
+            conclusion: null,
+            started_at: "2026-07-31T16:01:03.000Z",
+            completed_at: null
+          }
+        ]
+      });
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    assert.deepEqual(await evaluateStale(holder, "reader"), {
+      stale: false,
+      reason: "holder run is in_progress"
+    });
+  });
+});
+
 test("queue cleanup drops a completed waiting job while sibling matrix jobs keep the run active", async () => {
   const entry = {
     holderId: "owner/repo:123:unity-tests:editmode",
@@ -5382,6 +5438,7 @@ test("queue cleanup drops a completed waiting job while sibling matrix jobs keep
     runAttempt: "1",
     runUrl: "https://github.com/owner/repo/actions/runs/123",
     runnerId: "runner-a",
+    jobId: "21",
     queuedAt: "2026-06-06T00:01:00.000Z"
   };
 
@@ -5419,7 +5476,7 @@ test("queue cleanup drops a completed waiting job while sibling matrix jobs keep
   });
 });
 
-test("exact holder-job lookup fails closed when runner timestamps do not identify one job", async () => {
+test("legacy holder-job lookup fails closed without a recorded numeric job ID", async () => {
   const holder = {
     holderId: "owner/repo:123:unity-tests:playmode",
     repository: "owner/repo",
@@ -5440,21 +5497,6 @@ test("exact holder-job lookup fails closed when runner timestamps do not identif
       if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
         return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
       }
-      if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
-        return jsonResponse(200, {
-          total_count: 1,
-          jobs: [
-            {
-              id: 31,
-              runner_name: "runner-a",
-              status: "completed",
-              conclusion: "success",
-              started_at: "2026-06-06T00:02:00.000Z",
-              completed_at: "2026-06-06T00:03:00.000Z"
-            }
-          ]
-        });
-      }
       return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
     },
     async (logs) => {
@@ -5462,9 +5504,101 @@ test("exact holder-job lookup fails closed when runner timestamps do not identif
         stale: false,
         reason: "holder run is in_progress"
       });
-      assert.match(logs.join("\n"), /found 0 jobs/);
+      assert.match(logs.join("\n"), /has no recorded numeric job ID/);
     }
   );
+});
+
+test("exact holder-job lookup retains holders and queue entries with missing or unknown statuses", async (t) => {
+  const holder = {
+    holderId: "owner/repo:123:unity-tests:playmode",
+    repository: "owner/repo",
+    workflow: "Unity Tests",
+    job: "unity-tests",
+    runId: "123",
+    runAttempt: "1",
+    runUrl: "https://github.com/owner/repo/actions/runs/123",
+    runnerId: "runner-a",
+    jobId: "31",
+    queuedAt: "2026-06-06T00:00:30.000Z",
+    acquiredAt: "2026-06-06T00:01:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z"
+  };
+  const { acquiredAt: _acquiredAt, expiresAt: _expiresAt, ...queueEntry } = holder;
+  const cases = [
+    { name: "missing status", job: { id: 31, runner_name: "runner-a" }, warning: /missing status/ },
+    {
+      name: "unknown status",
+      job: { id: 31, runner_name: "runner-a", status: "mystery" },
+      warning: /unrecognized status mystery/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withMockedFetch(async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/123") {
+          return jsonResponse(200, { status: "in_progress", run_attempt: 1 });
+        }
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+          return jsonResponse(200, { total_count: 1, jobs: [testCase.job] });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        assert.deepEqual(await evaluateStale(holder, "reader"), {
+          stale: false,
+          reason: "holder run is in_progress"
+        });
+        assert.equal(await queueEntryIsFinished(queueEntry, "reader"), false);
+        assert.match(logs.join("\n"), testCase.warning);
+      });
+    });
+  }
+});
+
+test("current job lookup records the unique active job on the exact runner", async () => {
+  const identity = {
+    repository: "owner/repo",
+    runId: "123",
+    runAttempt: "2",
+    runnerId: "runner-a"
+  };
+
+  await withMockedFetch(async (url) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, "/repos/owner/repo/actions/runs/123/attempts/2/jobs");
+    return jsonResponse(200, {
+      total_count: 3,
+      jobs: [
+        { id: 40, runner_name: "runner-a", status: "completed" },
+        { id: 41, runner_name: "runner-a", status: "in_progress" },
+        { id: 42, runner_name: "runner-b", status: "in_progress" }
+      ]
+    });
+  }, async () => {
+    assert.equal(await resolveCurrentJobId(identity, "github-token"), "41");
+  });
+});
+
+test("current job lookup fails closed when the runner has no unique active job", async () => {
+  const identity = {
+    repository: "owner/repo",
+    runId: "123",
+    runAttempt: "1",
+    runnerId: "runner-a"
+  };
+
+  await withMockedFetch(async () => jsonResponse(200, {
+    total_count: 2,
+    jobs: [
+      { id: 51, runner_name: "runner-a", status: "in_progress" },
+      { id: 52, runner_name: "runner-a", status: "in_progress" }
+    ]
+  }), async (logs) => {
+    assert.equal(await resolveCurrentJobId(identity, "github-token"), "");
+    assert.match(logs.join("\n"), /found 2 active jobs/);
+  });
 });
 
 test("exact holder-job lookup rejects missing Actions read permission", async () => {
@@ -5477,6 +5611,7 @@ test("exact holder-job lookup rejects missing Actions read permission", async ()
     runAttempt: "1",
     runUrl: "https://github.com/owner/repo/actions/runs/123",
     runnerId: "runner-a",
+    jobId: "31",
     queuedAt: "2026-06-06T00:00:30.000Z",
     acquiredAt: "2026-06-06T00:01:00.000Z",
     expiresAt: "2999-01-01T00:00:00.000Z"
@@ -5992,8 +6127,8 @@ test("normalizeState rejects state files written by a newer schema", () => {
 });
 
 test("schema 3 preserves physical runner identity", () => {
-  const holder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "unity-runner-a");
-  const queued = withRunner(semaphoreQueueEntry("other/repo", "888", "playmode"), "unity-runner-b");
+  const holder = { ...withRunner(semaphoreHolder("other/repo", "999", "editmode"), "unity-runner-a"), jobId: "71" };
+  const queued = { ...withRunner(semaphoreQueueEntry("other/repo", "888", "playmode"), "unity-runner-b"), jobId: "72" };
 
   const normalized = normalizeState(
     { ...semaphoreState([holder], [queued]), schemaVersion: 3 },
@@ -6003,6 +6138,151 @@ test("schema 3 preserves physical runner identity", () => {
   assert.equal(normalized.schemaVersion, 3);
   assert.equal(normalized.holders[0].runnerId, "unity-runner-a");
   assert.equal(normalized.queue[0].runnerId, "unity-runner-b");
+  assert.equal(normalized.holders[0].jobId, "71");
+  assert.equal(normalized.queue[0].jobId, "72");
+});
+
+test("state normalization rejects malformed optional numeric Actions job IDs", () => {
+  const holder = { ...semaphoreHolder("other/repo", "999", "editmode"), jobId: "01" };
+  assert.throws(
+    () => normalizeState(semaphoreState([holder]), "wallstop-organization-builds"),
+    /invalid numeric Actions job ID/
+  );
+});
+
+test("idempotent acquire backfills an exact job ID into the holder and legacy mirror", async () => {
+  const holder = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
+  let state = { ...semaphoreState([holder]), schemaVersion: 3 };
+  let putCalls = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+      await withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+          return jsonResponse(200, {
+            total_count: 1,
+            jobs: [{ id: 81, runner_name: "runner-a", status: "in_progress" }]
+          });
+        }
+        if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+          return jsonResponse(200, { object: { sha: "branch-sha" } });
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          if (options.method === "PUT") {
+            putCalls++;
+            const body = JSON.parse(options.body);
+            state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+            return jsonResponse(200, { content: { sha: "backfilled" } });
+          }
+          return base64Content(state, putCalls ? "backfilled" : "state-sha");
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await acquire(semaphoreConfig({ githubToken: "github-token", runnerId: "runner-a" }));
+      });
+    });
+    assert.equal(readEnvironmentFile(outputFile).acquired, "true");
+  });
+
+  assert.equal(putCalls, 1);
+  assert.equal(state.holders[0].jobId, "81");
+  assert.equal(state.holder.jobId, "81");
+});
+
+test("idempotent acquire fails closed on a conflicting exact holder job ID", async () => {
+  const holder = {
+    ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a"),
+    jobId: "80"
+  };
+  const state = { ...semaphoreState([holder]), schemaVersion: 3 };
+  let putCalls = 0;
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+        return jsonResponse(200, {
+          total_count: 1,
+          jobs: [{ id: 81, runner_name: "runner-a", status: "in_progress" }]
+        });
+      }
+      if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+        return jsonResponse(200, { object: { sha: "branch-sha" } });
+      }
+      if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+        return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        if (options.method === "PUT") putCalls++;
+        return base64Content(state, "state-sha");
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(
+        () => acquire(semaphoreConfig({ githubToken: "github-token", runnerId: "runner-a" })),
+        /refusing conflicting exact job 81/
+      );
+    });
+  });
+
+  assert.equal(putCalls, 0);
+});
+
+test("same-attempt queue refresh serializes a missing exact job ID", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-06-06T01:00:00.000Z");
+  const queued = withRunner(semaphoreQueueEntry("owner/repo", "123", "playmode"), "runner-a");
+  let state = {
+    ...semaphoreState([withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b")], [queued]),
+    schemaVersion: 3
+  };
+  const writtenStates = [];
+  Date.now = () => (now += 30000);
+
+  try {
+    await withActionEnv(semaphoreActionEnv, async () => {
+      await withImmediateTimers(async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+            return jsonResponse(200, {
+              total_count: 1,
+              jobs: [{ id: 82, runner_name: "runner-a", status: "in_progress" }]
+            });
+          }
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              const body = JSON.parse(options.body);
+              state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+              writtenStates.push(structuredClone(state));
+              return jsonResponse(200, { content: { sha: `state-${writtenStates.length}` } });
+            }
+            return base64Content(state, "state-sha");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await assert.rejects(
+            () => acquire(semaphoreConfig({ githubToken: "github-token", runnerId: "runner-a" })),
+            /Timed out waiting for build lock/
+          );
+        });
+      });
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+
+  assert.ok(writtenStates.some((candidate) => candidate.queue.some((entry) => entry.jobId === "82")));
 });
 
 test("schema 3 rejects entries without physical runner identity", () => {
@@ -6422,6 +6702,75 @@ test("activated acquire rejects schema downgrade during post-write verification"
   });
 });
 
+test("fresh admission does not succeed when post-write state loses its proven exact job ID", async (t) => {
+  for (const testCase of [
+    { name: "missing job ID", verificationJobId: "" },
+    { name: "conflicting job ID", verificationJobId: "92" }
+  ]) {
+    await t.test(testCase.name, async () => {
+      const empty = { ...semaphoreState([]), schemaVersion: 3 };
+      let writtenState = null;
+      let stateReads = 0;
+      let putCalls = 0;
+
+      const observedState = (jobId) => {
+        const observed = structuredClone(writtenState);
+        if (jobId) {
+          observed.holders[0].jobId = jobId;
+          observed.holder.jobId = jobId;
+        } else {
+          delete observed.holders[0].jobId;
+          delete observed.holder.jobId;
+        }
+        return observed;
+      };
+
+      await withActionEnv(semaphoreActionEnv, async () => {
+        await withImmediateTimers(async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+              return jsonResponse(200, {
+                total_count: 1,
+                jobs: [{ id: 91, runner_name: "runner-a", status: "in_progress" }]
+              });
+            }
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+              return base64Content({ maxHolders: 1, runnerSerialization: true }, "cfg");
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              if (options.method === "PUT") {
+                putCalls++;
+                const body = JSON.parse(options.body);
+                writtenState = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "written" } });
+              }
+              stateReads++;
+              if (stateReads === 1) return base64Content(empty, "empty");
+              if (stateReads === 2) {
+                return base64Content(observedState(testCase.verificationJobId), "unverified");
+              }
+              return base64Content(observedState("92"), "conflicting");
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async () => {
+            await assert.rejects(
+              () => acquire(semaphoreConfig({ githubToken: "github-token", runnerId: "runner-a" })),
+              /refusing conflicting exact job 91/
+            );
+          });
+        });
+      });
+
+      assert.equal(putCalls, 1, "the unverified write must not be reported as acquired");
+      assert.equal(stateReads, 3, "acquire must retry from a fresh snapshot after failed verification");
+    });
+  }
+});
+
 test("normalizeState fails closed on malformed schemas and duplicate active runners", async (t) => {
   const holderA = withRunner(semaphoreHolder("other/repo", "999", "a"), "runner-a");
   const holderA2 = withRunner(semaphoreHolder("other/repo", "888", "b"), "runner-a");
@@ -6526,12 +6875,18 @@ test("acquire takes a free slot alongside an active holder when max holders allo
           }
           return base64Content(state, "state-sha");
         }
+        if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+          return jsonResponse(200, {
+            total_count: 1,
+            jobs: [{ id: 73, runner_name: "runner-a", status: "in_progress" }]
+          });
+        }
         if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
           return jsonResponse(200, { status: "in_progress", conclusion: null });
         }
         return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
       }, async (logs) => {
-        await acquire(semaphoreConfig());
+        await acquire(semaphoreConfig({ githubToken: "github-token", runnerId: "runner-a" }));
 
         assert.match(logs.join("\n"), /Max concurrent holders: 2/);
       });
@@ -6550,6 +6905,7 @@ test("acquire takes a free slot alongside an active holder when max holders allo
   );
   assert.equal(state.schemaVersion, 2, "compatible clients must keep writing schema 2 before activation");
   assert.equal(state.holders.some((entry) => Object.hasOwn(entry, "runnerId")), false);
+  assert.equal(state.holders[1].jobId, "73");
   assert.equal(state.holder.holderId, activeHolder.holderId, "legacy mirror must stay the first holder");
   assert.deepEqual(state.queue, []);
 });

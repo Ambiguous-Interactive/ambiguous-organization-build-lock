@@ -362,6 +362,14 @@ completed queue entry was already proven within the scanned FIFO prefix, that
 bounded cleanup is checkpointed and the action still fails red to make the
 incomplete scan operator-visible.
 
+Job-level proof is the numeric Actions job ID recorded by acquire after finding
+exactly one active job on the declared runner. Never substitute a timestamp
+window or a similarly named matrix leg. If `jobId` is absent (including state
+written by an older client), malformed, missing from the exact run attempt, or
+bound to another runner, retain the holder or queue entry while the workflow
+run is active. Run-level terminal status and lease-governed unavailable-run
+handling remain valid fallback evidence.
+
 Monitor and alert on:
 
 - `20111` or any account-blocked classification;
