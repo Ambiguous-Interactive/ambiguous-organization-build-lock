@@ -63,6 +63,58 @@ func findingCodes(findings []Finding) string {
 	return strings.Join(codes, ",")
 }
 
+func TestForeignOrganizationActionFilesAreRejected(t *testing.T) {
+	foreign := "Ambiguous-Interactive/unity-helpers/.github/actions/validate-unity-license@" + testSHA
+	central := "Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/validate-unity-license@" + testSHA
+	tests := []struct {
+		name     string
+		uses     string
+		wantCode string
+	}{
+		{name: "foreign action file", uses: foreign, wantCode: "foreign-action-reference"},
+		{name: "foreign action with dot path", uses: strings.Replace(foreign, "/.github/actions/", "/.github/./actions/", 1), wantCode: "foreign-action-reference"},
+		{name: "foreign action with parent path", uses: strings.Replace(foreign, "/.github/actions/", "/.github/workflows/../actions/", 1), wantCode: "foreign-action-reference"},
+		{name: "central action file", uses: central},
+		{name: "central action with normalized path", uses: strings.Replace(central, "/.github/actions/", "/.github/workflows/../actions/", 1)},
+		{name: "foreign reusable workflow", uses: "Ambiguous-Interactive/unity-helpers/.github/workflows/ci.yml@" + testSHA},
+		{name: "foreign organization repository action", uses: "Other-Organization/unity-helpers/.github/actions/validate-unity-license@" + testSHA},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
+				".github/workflows/unity.yml": workflow("", "", "      - uses: "+testCase.uses+"\n"),
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			codes := findingCodes(findings)
+			if testCase.wantCode == "" {
+				if strings.Contains(codes, "foreign-action-reference") {
+					t.Fatalf("unexpected foreign action finding: %s", codes)
+				}
+				return
+			}
+			if !strings.Contains(codes, testCase.wantCode) {
+				t.Fatalf("expected %s, got %s", testCase.wantCode, codes)
+			}
+		})
+	}
+}
+
+func TestForeignOrganizationActionFilesAreRejectedThroughCompositeActions(t *testing.T) {
+	findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
+		".github/workflows/unity.yml":        workflow("", "", "      - uses: ./.github/actions/wrapper\n"),
+		".github/actions/wrapper/action.yml": "name: wrapper\nruns:\n  using: composite\n  steps:\n    - uses: Ambiguous-Interactive/unity-helpers/.github/actions/validate-unity-license@" + testSHA + "\n",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codes := findingCodes(findings); !strings.Contains(codes, "foreign-action-reference:.github/actions/wrapper/action.yml:") {
+		t.Fatalf("expected transitive foreign action finding, got %s", codes)
+	}
+}
+
 func TestCancellationPolicyDirectBoundaries(t *testing.T) {
 	tests := []struct {
 		name                string
