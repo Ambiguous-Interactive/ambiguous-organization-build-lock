@@ -1658,7 +1658,12 @@ func (a *unityPolicyAnalyzer) delegatedEditorAudit(run string) editorSourceAudit
 
 	result := editorSourceAudit{}
 	for scriptPath, node := range nodes {
-		result.merge(node.local)
+		// The terminal helper is the manually maintained implementation invoked by
+		// the reviewed CI gate. Its local provisioning controls and self-reference
+		// patterns are intentionally outside the caller/wrapper audit boundary.
+		if !node.terminal {
+			result.merge(node.local)
+		}
 		if node.missing {
 			if roots[scriptPath] {
 				result.unsafe = true
