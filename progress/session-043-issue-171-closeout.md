@@ -20,11 +20,11 @@ transitive composites, reusable workflows, and path-equivalent bypasses.
 
 On the current default branches, the organization-scoped GitHub code search
 for both `Ambiguous-Interactive/unity-helpers/.github/actions` and
-`unity-helpers/.github/actions` returned only two records in this repository:
-the sanitized Session 041 evidence and the analyzer regression test. No active
-consumer workflow or action manifest was returned. Session 042 independently
-recorded a six-repository default-branch scan with zero live cross-repository
-action-file references before the enforcement merge.
+`unity-helpers/.github/actions` returned no consumer workflow or action-manifest
+matches. The remaining repository-local matches are audit evidence and
+regression coverage, including this record. Session 042 independently recorded
+a six-repository default-branch scan with zero live cross-repository action-file
+references before the enforcement merge.
 
 This evidence is source-free with respect to credentials and licensed logs;
 references to `unity-helpers` checkout repositories remain valid and are not
