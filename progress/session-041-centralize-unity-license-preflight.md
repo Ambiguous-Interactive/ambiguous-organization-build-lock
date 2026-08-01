@@ -78,7 +78,7 @@ Audit history and final safety evidence:
   `unapproved-lock-ref` finding for IshoBoy. Its two IshoBoy findings are the
   same pre-existing aggregate gaps recorded above.
 
-The migration therefore moved the caller off Unity Helpers and is
+The migration therefore moved the caller off Unity Helpers and is now
 enrollment-clean for this bounded preflight slice.
 The broad issue remains open: repository-specific diagnostic and test
 composites in Unity Helpers and DxMessaging were intentionally not replaced by
