@@ -1,0 +1,22 @@
+name: Validate Unity license credentials
+description: >-
+  Fail closed before lock acquisition unless classic serial activation has all
+  required credentials and no retired licensing-server credential.
+inputs:
+  activation-mode:
+    description: Activation contract; only classic serial activation is supported.
+    required: false
+    default: serial
+outputs:
+  serial-present:
+    description: Whether UNITY_SERIAL was present without exposing its value.
+    value: ${{ steps.validate.outputs.serial-present }}
+  email-present:
+    description: Whether UNITY_EMAIL was present without exposing its value.
+    value: ${{ steps.validate.outputs.email-present }}
+  password-present:
+    description: Whether UNITY_PASSWORD was present without exposing its value.
+    value: ${{ steps.validate.outputs.password-present }}
+runs:
+  using: node24
+  main: ../../dist/validate-unity-license.js
