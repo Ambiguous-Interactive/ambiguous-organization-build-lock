@@ -27,6 +27,10 @@ or writer App. The current inventory is recorded in
 6. Protect workflow changes with CODEOWNERS or rulesets and restrict write
    access to trusted principals. Trusted PR jobs do not use approval-only
    environments.
+7. Use action files only from this central repository. A remote action path
+   under `Ambiguous-Interactive/*/.github/actions/` is a policy finding unless
+   it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`;
+   reusable workflow calls are audited separately as workflow graph edges.
 
 ## Workflow contract
 
