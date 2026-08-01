@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:30716697768:unity-tests:6000.3.16f1-playmode",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "30716697768",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30716697768",
+    "queuedAt": "2026-08-01T20:36:08.238Z",
+    "acquiredAt": "2026-08-01T20:36:10.592Z",
+    "expiresAt": "2026-08-02T00:36:10.592Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "8d6be933-e96d-4abf-b159-95f226d2445a",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30716697768:unity-tests:6000.3.16f1-editmode",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30716697768:unity-tests:6000.3.16f1-playmode",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
       "job": "unity-tests",
       "runId": "30716697768",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30716697768",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-01T20:35:26.726Z",
-      "availableAt": "2026-08-01T20:35:27.726Z"
+      "queuedAt": "2026-08-01T20:36:08.238Z",
+      "acquiredAt": "2026-08-01T20:36:10.592Z",
+      "expiresAt": "2026-08-02T00:36:10.592Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-01T20:35:26.727Z"
+  "updatedAt": "2026-08-01T20:36:10.592Z"
 }
