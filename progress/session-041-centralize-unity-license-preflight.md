@@ -48,7 +48,7 @@ enrollment proof until that consumer migration is complete.
 
 ## Delivery evidence
 
-The boundary is now satisfied for this bounded slice:
+The consumer migration for this bounded slice merged and was re-audited:
 
 - Central PR #172 merged as `3ac54fdfb47f79b4f794a5cdc647f2fb4804569a`.
 - IshoBoy PR #345 merged as `35319da64ed967e86edb16ff484a0c7367643460` and
@@ -57,19 +57,38 @@ The boundary is now satisfied for this bounded slice:
 - IshoBoy's post-merge default-branch Unity validation run `30711576126` and
   cross-platform pre-commit run `30711576138` completed successfully at that
   merge commit.
-- Trusted central enrollment audit run `30711594952` completed successfully
-  against the merged default branches after the consumer migration.
+- Trusted central enrollment audit run `30711594952` completed with
+  `complete: true` after request run `30711587499`, reading IshoBoy default
+  branch head `35319da64ed967e86edb16ff484a0c7367643460`.
 
+Safety evidence from that same audit artifact
+`unity-enrollment-audit-30711594952-1`:
+
+- Before the consumer merge, audit run `30711151856` read IshoBoy
+  `dd17e9387d3685d7761e038000ab42bec32b8640` with two findings
+  (`missing-fallback-aggregate`, `missing-unity-aggregate`).
+- After the consumer merge, audit run `30711594952` reports those same two
+  finding codes plus a new `unapproved-lock-ref` on
+  `.github/workflows/unity-ci.yml` / `unity-validation`.
+- Organization finding count rose from 109 to 110 solely from that IshoBoy
+  change. Central merge `3ac54fdfb47f79b4f794a5cdc647f2fb4804569a` is not in
+  `approvedLockShas`, so the enrollment analyzer correctly flags the new
+  remote lock-repo pin until a reviewed authorization update lands.
+
+The migration therefore moved the caller off Unity Helpers, but it is not yet
+enrollment-clean: authorizing the immutable preflight pin remains outstanding.
 The broad issue remains open: repository-specific diagnostic and test
 composites in Unity Helpers and DxMessaging were intentionally not replaced by
 this low-churn license-preflight migration. No organization policy or secret
-material was changed.
+material was changed by the central or consumer migration PRs.
 
 ## Continuous-improvement disposition
 
-Observed fact: the authoritative boundary for a cross-repository action
+Observed fact: a successful enrollment-audit workflow conclusion is not proof
+that a consumer pin is policy-clean. The authoritative boundary for this
 migration is the consumer's merged default-branch workflow plus a fresh central
-enrollment audit, not a pull request diff alone. This is recorded here because
-the audit must be rerun after the consumer merge. No new `.llm/` guidance is
-promoted; the existing fail-closed and audit instructions already express this
-invariant.
+enrollment audit whose findings are inspected for newly introduced lock-ref
+drift, not a pull-request diff or a green audit job alone. This is recorded
+here because the post-merge audit newly reported `unapproved-lock-ref` for the
+unapproved central preflight pin. No new `.llm/` guidance is promoted; the
+existing approved-SHA and audit instructions already express this invariant.
