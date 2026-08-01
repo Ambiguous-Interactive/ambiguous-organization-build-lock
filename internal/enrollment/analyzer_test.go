@@ -72,7 +72,10 @@ func TestForeignOrganizationActionFilesAreRejected(t *testing.T) {
 		wantCode string
 	}{
 		{name: "foreign action file", uses: foreign, wantCode: "foreign-action-reference"},
+		{name: "foreign action with dot path", uses: strings.Replace(foreign, "/.github/actions/", "/.github/./actions/", 1), wantCode: "foreign-action-reference"},
+		{name: "foreign action with parent path", uses: strings.Replace(foreign, "/.github/actions/", "/.github/workflows/../actions/", 1), wantCode: "foreign-action-reference"},
 		{name: "central action file", uses: central},
+		{name: "central action with normalized path", uses: strings.Replace(central, "/.github/actions/", "/.github/workflows/../actions/", 1)},
 		{name: "foreign reusable workflow", uses: "Ambiguous-Interactive/unity-helpers/.github/workflows/ci.yml@" + testSHA},
 		{name: "foreign organization repository action", uses: "Other-Organization/unity-helpers/.github/actions/validate-unity-license@" + testSHA},
 	}

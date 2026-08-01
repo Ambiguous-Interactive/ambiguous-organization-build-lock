@@ -67,3 +67,9 @@ the same ownership check while recursively loading composite manifests, and a
 regression test proves the wrapper path emits the same finding. The prior head
 is not treated as complete evidence; full verification and a fresh exact-head
 review are required after this remediation.
+
+Cursor's fresh exact-head review then found that raw string matching missed
+path-equivalent action references such as `.github/workflows/../actions`. The
+ownership check now parses the remote repository tuple and normalizes its action
+path before classifying it; dot and parent-path mutations are covered by the
+table-driven test. This second finding was also fixed before merge readiness.

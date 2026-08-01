@@ -274,12 +274,17 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 // covers only remote action paths, where a repository-local action owner would
 // otherwise be easy to overlook during enrollment review.
 func (a *analyzer) validateActionOwnership(uses, workflowPath, jobName string) {
-	normalized := strings.ToLower(uses)
-	organizationPrefix := strings.ToLower(UnityEnrollmentOrganization) + "/"
-	centralPrefix := strings.ToLower(lockActionPrefix)
-	if strings.HasPrefix(normalized, organizationPrefix) &&
-		strings.Contains(normalized, "/.github/actions/") &&
-		!strings.HasPrefix(normalized, centralPrefix) {
+	at := strings.LastIndex(uses, "@")
+	if at < 0 {
+		at = len(uses)
+	}
+	parts := strings.SplitN(uses[:at], "/", 3)
+	if len(parts) != 3 || !strings.EqualFold(parts[0], UnityEnrollmentOrganization) {
+		return
+	}
+	actionPath := path.Clean(strings.ReplaceAll(parts[2], "\\", "/"))
+	if strings.HasPrefix(strings.ToLower(actionPath), ".github/actions/") &&
+		!strings.EqualFold(parts[1], "ambiguous-organization-build-lock") {
 		a.add("foreign-action-reference", workflowPath, jobName)
 	}
 }
