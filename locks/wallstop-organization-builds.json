@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30715167807:unity-tests:unity-tests",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "30715167807",
+    "holderId": "Ambiguous-Interactive/qora-redux:30715818435:unity:qora",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "30715818435",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30715167807",
-    "queuedAt": "2026-08-01T19:38:32.989Z",
-    "acquiredAt": "2026-08-01T19:38:34.449Z",
-    "expiresAt": "2026-08-01T23:38:34.449Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/30715818435",
+    "queuedAt": "2026-08-01T19:59:31.301Z",
+    "acquiredAt": "2026-08-01T19:59:33.635Z",
+    "expiresAt": "2026-08-01T23:59:33.635Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30715167807:unity-tests:unity-tests",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "30715167807",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30715167807",
-      "queuedAt": "2026-08-01T19:38:32.989Z",
-      "acquiredAt": "2026-08-01T19:38:34.449Z",
-      "expiresAt": "2026-08-01T23:38:34.449Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/qora-redux:30715818435:unity:qora",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "d673d12c-4a1b-485c-a364-53c632a3f828",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:30715167807:unity-tests:unity-tests",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "30715167807",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30715167807",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-01T20:01:58.933Z",
+      "availableAt": "2026-08-01T20:01:59.933Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-01T19:59:33.636Z"
+  "updatedAt": "2026-08-01T20:01:58.934Z"
 }
