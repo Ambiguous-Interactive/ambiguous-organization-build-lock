@@ -35,6 +35,9 @@ function unsafe(reason) {
 
 function evaluateValidationGate(values) {
   const observed = observedValues(values);
+  if (observed.staticValidationResult !== "success") {
+    return unsafe("static validation did not succeed");
+  }
   if (observed.classifierResult !== "success") {
     return unsafe("Unity change classification did not succeed");
   }
@@ -90,6 +93,7 @@ function allowedValue(value, allowed) {
 function formatDiagnostic(values, reason) {
   return [
     reason,
+    `static-validation=${allowedValue(values.staticValidationResult, ALLOWED.jobResult)}`,
     `classifier=${allowedValue(values.classifierResult, ALLOWED.jobResult)}`,
     `unity-required=${allowedValue(values.unityRequired, ALLOWED.boolean)}`,
     `trusted=${allowedValue(values.trustedRevision, ALLOWED.boolean)}`,
@@ -129,6 +133,7 @@ function input(name, environment = process.env) {
 
 function environmentValues(environment = process.env) {
   return {
+    staticValidationResult: input("static-validation-result", environment),
     classifierResult: input("classifier-result", environment),
     unityRequired: input("unity-required", environment),
     trustedRevision: input("trusted-revision", environment),

@@ -467,6 +467,7 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
   assert.deepEqual(
     yamlRequiredTopLevelMappingKeys(validation, "inputs", "require-unity-validation/action.yml"),
     [
+      "static-validation-result",
       "classifier-result",
       "unity-required",
       "trusted-revision",
