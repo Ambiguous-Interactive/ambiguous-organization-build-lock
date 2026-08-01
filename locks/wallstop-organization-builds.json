@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30679249242:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "30679249242",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30679249242",
+    "queuedAt": "2026-08-01T02:05:27.564Z",
+    "acquiredAt": "2026-08-01T02:05:29.950Z",
+    "expiresAt": "2026-08-01T06:05:29.950Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "27272071-3ed4-4651-be9b-ab3fdf2953db",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30674768679:platform-build-windows:platform-build-windows",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "platform-build-windows",
-      "runId": "30674768679",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30674768679",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-01T02:03:35.386Z",
-      "availableAt": "2026-08-01T02:03:36.386Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:30679249242:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "30679249242",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30679249242",
+      "queuedAt": "2026-08-01T02:05:27.564Z",
+      "acquiredAt": "2026-08-01T02:05:29.950Z",
+      "expiresAt": "2026-08-01T06:05:29.950Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-01T02:03:35.387Z"
+  "updatedAt": "2026-08-01T02:05:29.951Z"
 }
