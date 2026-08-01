@@ -3037,6 +3037,10 @@ concurrency:
   group: unity-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  static-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
   classify:
     runs-on: ubuntu-latest
     outputs:
@@ -3097,11 +3101,12 @@ jobs:
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
   aggregate:
     if: always()
-    needs: [classify, preflight, unity, cleanup]
+    needs: [static-validation, classify, preflight, unity, cleanup]
     runs-on: ubuntu-latest
     steps:
       - uses: ` + validationAction + `
         with:
+          static-validation-result: ${{ needs.static-validation.result }}
           classifier-result: ${{ needs.classify.result }}
           unity-required: ${{ needs.classify.outputs.unity-required }}
           trusted-revision: ${{ github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository) }}
@@ -3174,8 +3179,8 @@ jobs:
 			mutate: func(value string) string {
 				return strings.Replace(
 					value,
-					"    needs: [classify, preflight, unity, cleanup]",
-					"    needs: [preflight, unity, cleanup]",
+					"    needs: [static-validation, classify, preflight, unity, cleanup]",
+					"    needs: [static-validation, preflight, unity, cleanup]",
 					1,
 				)
 			},

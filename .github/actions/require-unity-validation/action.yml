@@ -1,6 +1,9 @@
 name: Require Unity validation
 description: Pass only an explicit untrusted skip, audited non-Unity skip, or complete licensed Unity validation.
 inputs:
+  static-validation-result:
+    description: GitHub result of the fail-closed static validation job.
+    required: true
   classifier-result:
     description: GitHub result of the trusted Unity change-classifier job.
     required: true

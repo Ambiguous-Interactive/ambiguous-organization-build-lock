@@ -22,6 +22,7 @@ const gateRuntimePath = path.join(
 );
 
 const licensedSuccess = {
+  staticValidationResult: "success",
   classifierResult: "success",
   unityRequired: "true",
   trustedRevision: "true",
@@ -114,6 +115,7 @@ test("validation diagnostic exposes only allowlisted typed values", () => {
 
 test("GitHub action input environment preserves validation input names", () => {
   assert.deepEqual(environmentValues({
+    "INPUT_STATIC-VALIDATION-RESULT": "success",
     "INPUT_CLASSIFIER-RESULT": "success",
     "INPUT_UNITY-REQUIRED": "true",
     "INPUT_TRUSTED-REVISION": "true",

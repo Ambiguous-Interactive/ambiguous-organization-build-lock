@@ -4674,6 +4674,7 @@ func (a *unityPolicyAnalyzer) hasFallbackAggregate(
 }
 
 type validationGateReferences struct {
+	static     string
 	classifier string
 	preflight  string
 	unity      string
@@ -4707,24 +4708,27 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 	with := mappingValue(step, "with")
 	if with == nil || with.Kind != yaml.MappingNode ||
 		!mappingHasOnlyKeys(with, map[string]bool{
-			"classifier-result":       true,
-			"unity-required":          true,
-			"trusted-revision":        true,
-			"preflight-result":        true,
-			"unity-result":            true,
-			"fallback-result":         true,
-			"fallback-cleanup-result": true,
+			"static-validation-result": true,
+			"classifier-result":        true,
+			"unity-required":           true,
+			"trusted-revision":         true,
+			"preflight-result":         true,
+			"unity-result":             true,
+			"fallback-result":          true,
+			"fallback-cleanup-result":  true,
 		}) ||
 		!trustedRevisionExpression(mappingValue(with, "trusted-revision")) {
 		return false
 	}
 	references := validationGateReferences{
+		static:     needsResultReference(mappingValue(with, "static-validation-result")),
 		classifier: needsResultReference(mappingValue(with, "classifier-result")),
 		preflight:  needsResultReference(mappingValue(with, "preflight-result")),
 		unity:      needsResultReference(mappingValue(with, "unity-result")),
 		fallback:   needsResultReference(mappingValue(with, "fallback-result")),
 	}
-	if references.classifier == "" ||
+	if references.static != "static-validation" ||
+		references.classifier == "" ||
 		references.preflight == "" ||
 		references.unity != licensedJob ||
 		references.fallback == "" ||
@@ -4738,12 +4742,13 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 		return false
 	}
 	distinctReferences := map[string]bool{
+		references.static:     true,
 		references.classifier: true,
 		references.preflight:  true,
 		references.unity:      true,
 		references.fallback:   true,
 	}
-	if len(distinctReferences) != 4 ||
+	if len(distinctReferences) != 5 ||
 		!a.validationClassifierMatches(workflow, jobs, references.classifier) ||
 		!a.validationPreflightMatches(workflow, jobs, references.preflight) ||
 		!validationJobIsolationSafe(workflow, mappingValue(jobs, references.unity)) ||
@@ -4751,6 +4756,7 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 		return false
 	}
 	for _, reference := range []string{
+		references.static,
 		references.classifier,
 		references.preflight,
 		references.unity,
