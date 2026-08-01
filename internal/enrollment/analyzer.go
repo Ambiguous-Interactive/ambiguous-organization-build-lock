@@ -250,6 +250,7 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		a.validateActionOwnership(uses, workflowPath, jobName)
 		if acquire, ref := acquireReference(uses); acquire {
 			a.validateAcquireRef(ref, workflowPath, jobName)
 			licensed = true
@@ -266,6 +267,21 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 
 	a.jobMemo[key] = licensed
 	return licensed, nil
+}
+
+// validateActionOwnership keeps organization-owned action files centralized.
+// Reusable workflows remain separately audited as call-graph edges; this rule
+// covers only remote action paths, where a repository-local action owner would
+// otherwise be easy to overlook during enrollment review.
+func (a *analyzer) validateActionOwnership(uses, workflowPath, jobName string) {
+	normalized := strings.ToLower(uses)
+	organizationPrefix := strings.ToLower(UnityEnrollmentOrganization) + "/"
+	centralPrefix := strings.ToLower(lockActionPrefix)
+	if strings.HasPrefix(normalized, organizationPrefix) &&
+		strings.Contains(normalized, "/.github/actions/") &&
+		!strings.HasPrefix(normalized, centralPrefix) {
+		a.add("foreign-action-reference", workflowPath, jobName)
+	}
 }
 
 func (a *analyzer) validatePRJobGuards(workflowPath, jobName string, prEvents map[string]bool) error {
