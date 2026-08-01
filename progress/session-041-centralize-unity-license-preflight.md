@@ -88,9 +88,9 @@ material was changed by the central or consumer migration PRs.
 ## Continuous-improvement disposition
 
 Observed fact: a successful enrollment-audit workflow conclusion is not proof
-that a consumer pin is policy-clean. The authoritative boundary for this
-migration is the consumer's merged default-branch workflow plus a fresh central
-enrollment audit whose findings are inspected for newly introduced lock-ref
+that a consumer pin is policy-clean. The authoritative boundary is the
+consumer's merged default-branch workflow plus a fresh central enrollment audit
+whose findings are inspected for newly introduced lock-ref
 drift, not a pull-request diff or a green audit job alone. This is recorded
 here because the post-merge audit exposed an authorization gap that was then
 closed through a reviewed SHA-list update. No new `.llm/` guidance is
