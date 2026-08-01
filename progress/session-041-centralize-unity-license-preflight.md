@@ -61,8 +61,7 @@ The consumer migration for this bounded slice merged and was re-audited:
   `complete: true` after request run `30711587499`, reading IshoBoy default
   branch head `35319da64ed967e86edb16ff484a0c7367643460`.
 
-Safety evidence from that same audit artifact
-`unity-enrollment-audit-30711594952-1`:
+Audit history and final safety evidence:
 
 - Before the consumer merge, audit run `30711151856` read IshoBoy
   `dd17e9387d3685d7761e038000ab42bec32b8640` with two findings
@@ -71,12 +70,16 @@ Safety evidence from that same audit artifact
   finding codes plus a new `unapproved-lock-ref` on
   `.github/workflows/unity-ci.yml` / `unity-validation`.
 - Organization finding count rose from 109 to 110 solely from that IshoBoy
-  change. Central merge `3ac54fdfb47f79b4f794a5cdc647f2fb4804569a` is not in
-  `approvedLockShas`, so the enrollment analyzer correctly flags the new
-  remote lock-repo pin until a reviewed authorization update lands.
+  change. PR #173 then added the central merge SHA to `approvedLockShas`.
+- Final main Build lock CI run `30712163836` and enrollment audit run
+  `30712163838` both completed successfully at main merge
+  `8d659467aad64cdf6b0b1c2a0a2d44a898731e7c`. The final audit is complete,
+  reads IshoBoy at `35319da64ed967e86edb16ff484a0c7367643460`, and reports no
+  `unapproved-lock-ref` finding for IshoBoy. Its two IshoBoy findings are the
+  same pre-existing aggregate gaps recorded above.
 
-The migration therefore moved the caller off Unity Helpers, but it is not yet
-enrollment-clean: authorizing the immutable preflight pin remains outstanding.
+The migration therefore moved the caller off Unity Helpers and is
+enrollment-clean for this bounded preflight slice.
 The broad issue remains open: repository-specific diagnostic and test
 composites in Unity Helpers and DxMessaging were intentionally not replaced by
 this low-churn license-preflight migration. No organization policy or secret
@@ -89,6 +92,7 @@ that a consumer pin is policy-clean. The authoritative boundary for this
 migration is the consumer's merged default-branch workflow plus a fresh central
 enrollment audit whose findings are inspected for newly introduced lock-ref
 drift, not a pull-request diff or a green audit job alone. This is recorded
-here because the post-merge audit newly reported `unapproved-lock-ref` for the
-unapproved central preflight pin. No new `.llm/` guidance is promoted; the
-existing approved-SHA and audit instructions already express this invariant.
+here because the post-merge audit exposed an authorization gap that was then
+closed through a reviewed SHA-list update. No new `.llm/` guidance is
+promoted; the existing approved-SHA and audit instructions already express
+this invariant.
