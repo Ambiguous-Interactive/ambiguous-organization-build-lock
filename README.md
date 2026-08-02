@@ -332,8 +332,9 @@ or rerun until supported release, post-action, or fallback cleanup has removed
 the caller from both holders and queue and a fresh lock-state read confirms it.
 The error identifies the sanitized source run and recovery inputs. Operators
 must reconcile every Unity Portal activation, then dispatch `Recover build
-lock` with `operation=recover-incident`, the exact incident ID, and
-`portal-cleanup-confirmed=true`. Never edit `lock-state` or recover an incident
+lock` with `operation=recover-incident`, optionally the exact incident ID, and
+`portal-cleanup-confirmed=true`. Leaving the ID blank binds the single active
+incident from canonical state; never edit `lock-state` or recover an incident
 without that external proof.
 
 `holder-id-suffix` may contain internal spaces or colons, but must not contain
@@ -596,10 +597,11 @@ confirming Unity portal cleanup; like auto-recovery it starts a cooldown rather
 than freeing capacity outright.
 
 For schema 5, dispatch `Recover build lock` with
-`operation=recover-incident`, the exact incident ID, and
-`portal-cleanup-confirmed=true` only after the Unity portal inventory is
-reconciled. Recovery clears the global incident into a normal cooldown; a
-wrong ID or missing proof fails closed.
+`operation=recover-incident` and `portal-cleanup-confirmed=true` only after the
+Unity portal inventory is reconciled. Supplying the exact incident ID is
+recommended; when it is omitted, the action binds to the one active incident
+from its canonical lock-state read and still compares that immutable ID before
+the CAS write. A wrong ID, no active incident, or missing proof fails closed.
 
 Operators do not have to read `lock-state` to find that ID. The independent
 `Build lock incident recovery audit` reads committed lock state every ten
