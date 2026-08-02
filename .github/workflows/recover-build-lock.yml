@@ -20,7 +20,7 @@ on:
         type: boolean
         default: false
       incident-id:
-        description: Exact global incident ID (recover-incident only)
+        description: Exact global incident ID (optional; auto-populates from the single active incident)
         required: false
         type: string
       portal-cleanup-confirmed:

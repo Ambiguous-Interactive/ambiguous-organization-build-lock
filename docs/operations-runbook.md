@@ -230,7 +230,7 @@ runner quarantine.
 | Normal holder | One slot consumed | Let the owning run finish. Do not cancel it merely because a newer commit exists. |
 | Confirmed-cleanup cooldown | One slot consumed until `availableAt` | Wait for expiry. At the live one-second setting this is normally transient. |
 | Runner quarantine | One slot consumed without expiry | Reasons include `return-ulf-skipped`, `unity-return-400006`, timeout, termination, incomplete logs, and missing positive evidence. Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
-| Global account incident | All new admission blocked; existing holders finish cleanup. A holder with independently confirmed cleanup may pass its terminal gate with an incident warning. | Stop canaries and follow the sanitized source-run provenance in the acquire error or in the `Build lock incident recovery audit` alert issue, which publishes the exact incident ID and dispatch inputs. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID and `portal-cleanup-confirmed=true`. Never edit lock state directly. |
+| Global account incident | All new admission blocked; existing holders finish cleanup. A holder with independently confirmed cleanup may pass its terminal gate with an incident warning. | Stop canaries and follow the sanitized source-run provenance in the acquire error or in the `Build lock incident recovery audit` alert issue, which publishes the exact incident ID and dispatch inputs. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID or leave it blank to bind the single active incident, plus `portal-cleanup-confirmed=true`. Never edit lock state directly. |
 | Degraded cleanup report | Exact holder/queue cleanup is attempted; under schema 4 or newer, a removed holder becomes a quarantine | Use `report-validation-error` to correct the typed inputs. The rejected value is intentionally not logged. Treat the failed step and unknown cleanup as red, reconcile the resource, and recover only by exact reservation ID when one was created. |
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |
 | Runner unavailable | Licensed work must remain pending or red | Restore eligible runner capacity. Never turn an unavailable required job into skip/green. |
@@ -304,7 +304,9 @@ identifier copy/paste while preserving explicit `portal-cleanup-confirmed=true`
 proof instead of requiring the operator to read lock state by hand. The alert
 body is deterministic, so an unchanged incident does not churn the issue. A
 recovered lock closes the alert without rewriting it, so the closed issue stays
-readable as the retained incident record.
+readable as the retained incident record. An omitted incident ID is frozen from
+the first canonical state read and must still match on every CAS retry; a
+changed or absent incident fails closed.
 
 The audit covers the global account incident only. A runner quarantine is
 reclaimed by the same physical runner or auto-recovered by the scheduled reaper

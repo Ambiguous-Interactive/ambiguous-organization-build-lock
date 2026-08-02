@@ -3341,6 +3341,7 @@ async function reap(config, options = {}) {
   await ensureStateBranch(config, { apiOptions: scanApiOptions });
   console.log(`::group::Reap stale build lock ${config.lockName}`);
   let ambiguousReap = false;
+  let boundIncidentId = config.incidentId || "";
 
   for (let attempts = 1; attempts <= 10; attempts++) {
     const { state, sha } = await readState(config, { apiOptions: scanApiOptions });
@@ -3355,18 +3356,22 @@ async function reap(config, options = {}) {
       if (!config.portalCleanupConfirmed) {
         throw new Error("Global incident recovery requires portal-cleanup-confirmed=true proof.");
       }
-      if (!config.incidentId) {
-        throw new Error("Global incident recovery requires the exact incident-id.");
-      }
       const incident = state.activeIncident;
+      if (!boundIncidentId) {
+        boundIncidentId = incident?.incidentId || "";
+      }
+      const incidentId = boundIncidentId;
+      if (!incidentId) {
+        throw new Error("Global incident recovery requires an active incident to bind as the exact incident-id.");
+      }
       if (ambiguousReap && !incident) {
         writeReapOutputs({ reaped: true, stateSha: sha || "" });
-        appendSummary(`Recovered global incident ${config.incidentId}; ${config.lockName} entered cooldown.`);
+        appendSummary(`Recovered global incident ${incidentId}; ${config.lockName} entered cooldown.`);
         console.log("::endgroup::");
         return;
       }
-      if (!incident || incident.incidentId !== config.incidentId) {
-        throw new Error(`Active global incident ${config.incidentId} was not found.`);
+      if (!incident || incident.incidentId !== incidentId) {
+        throw new Error(`Active global incident ${incidentId} was not found.`);
       }
       if (state.reservations.some((reservation) => reservation.runnerId === incident.runnerId)) {
         throw new Error(`Runner ${incident.runnerId} already has a lifecycle reservation; drain it before incident recovery.`);
@@ -3391,7 +3396,7 @@ async function reap(config, options = {}) {
         )
       );
       state.activeIncident = null;
-      const write = await writeState(config, sha, state, `Recover global incident ${config.incidentId}`);
+      const write = await writeState(config, sha, state, `Recover global incident ${incidentId}`);
       if (write.conflict) {
         if (write.ambiguous) {
           ambiguousReap = true;
@@ -3400,7 +3405,7 @@ async function reap(config, options = {}) {
         continue;
       }
       writeReapOutputs({ reaped: true, stateSha: write.sha });
-      appendSummary(`Recovered global incident ${config.incidentId}; ${config.lockName} entered cooldown.`);
+      appendSummary(`Recovered global incident ${incidentId}; ${config.lockName} entered cooldown.`);
       console.log("::endgroup::");
       return;
     }
