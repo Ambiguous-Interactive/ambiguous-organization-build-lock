@@ -8867,6 +8867,49 @@ test("schema 5 incident recovery requires exact ID and portal proof then enters 
   assert.match(state.reservations[0].reason, new RegExp(incident.incidentId));
 });
 
+test("schema 5 incident recovery binds an omitted ID to the single active incident", async () => {
+  const incident = accountIncident();
+  let state = accountHealthState([], [], [], incident);
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+    if (parsed.pathname === SEMAPHORE_CONFIG_PATH) return base64Content({ releaseCooldownSeconds: 360 }, "cfg");
+    if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+      if (options.method === "PUT") {
+        state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+        return jsonResponse(200, { content: { sha: "recovered" } });
+      }
+      return base64Content(state, "before");
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, () => reap(semaphoreConfig({
+    operation: "recover-incident",
+    portalCleanupConfirmed: true
+  })));
+  assert.equal(state.activeIncident, null);
+  assert.equal(state.reservations.length, 1);
+  assert.match(state.reservations[0].reason, new RegExp(incident.incidentId));
+});
+
+test("schema 5 incident recovery rejects an omitted ID without an active incident", async () => {
+  let writes = 0;
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: "branch" } });
+    if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+      if (options.method === "PUT") writes++;
+      return base64Content(accountHealthState(), "before");
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => reap(semaphoreConfig({ operation: "recover-incident", portalCleanupConfirmed: true })),
+      /active incident to bind as the exact incident-id/
+    );
+  });
+  assert.equal(writes, 0);
+});
+
 test("schema 5 incident recovery rejects missing proof and mismatched incident IDs", async (t) => {
   const incident = accountIncident();
   for (const testCase of [

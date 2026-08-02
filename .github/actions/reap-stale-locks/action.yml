@@ -24,7 +24,7 @@ inputs:
     required: false
     default: "false"
   incident-id:
-    description: Exact active global incident ID required for incident recovery.
+    description: Optional exact active global incident ID; when omitted, bind to the single active incident in lock state.
     required: false
   portal-cleanup-confirmed:
     description: Explicit proof that Unity portal cleanup was completed.

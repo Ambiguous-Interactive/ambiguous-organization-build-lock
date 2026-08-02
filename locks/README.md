@@ -10,7 +10,9 @@ reconciliation plus its exact incident ID.
 
 Operators do not need to read this branch to recover an incident. The scheduled
 `Build lock incident recovery audit` publishes the exact incident ID and the
-declared recovery inputs in one deduplicated alert issue.
+declared recovery inputs in one deduplicated alert issue. The ID may also be
+left blank in the recovery form: the action binds to the single active incident
+from lock state, while portal-cleanup proof remains mandatory.
 
 ## Lock Config
 
