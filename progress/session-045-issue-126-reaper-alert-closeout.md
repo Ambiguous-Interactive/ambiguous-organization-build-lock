@@ -46,10 +46,22 @@ the audit also runs after completed scheduled/manual reaper runs.
 No licensed Unity workflow, lock configuration, credential, or organization
 policy changed.
 
-## Delivery gate
+## Delivery and live closeout evidence
 
-The branch still requires complete repository verification, push, CI, reviewer
-feedback, merge, and post-merge default-branch verification before this issue
-can be treated as closed. The live alert must also be rechecked after the new
-workflow reaches `main`; this record does not claim that external state in
-advance.
+PR #178 was squash-merged at `ec9768d20b62ea013f35d30936db5fdcb0410eb1`,
+whose exact-head CI passed, including the hosted-Windows evidence-deletion job.
+Cursor Bugbot reviewed that exact head and reported no actionable findings on
+permissions, trigger semantics, or fail-closed behavior. Copilot was requested
+through the reviewer API and tagged comment but returned no review submission;
+there was no feedback to remediate.
+
+The first scheduled reaper delivery from the merged head was run
+`30727490453`, completed successfully at `2026-08-02T01:41:02Z`, and used head
+`ec9768d20b62ea013f35d30936db5fdcb0410eb1`. Its completion-triggered audit was
+run `30727495525`, completed successfully, and synchronized the marker issue
+to `State: healthy` at `2026-08-02T01:41:27Z`. Issue #126 closed at
+`2026-08-02T01:41:28Z`.
+
+The default branch remained green at the merge commit: post-merge Build lock
+CI run `30727434178` passed both validation jobs. No licensed Unity workflow,
+lock configuration, credential, or organization policy changed.
