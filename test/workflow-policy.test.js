@@ -2880,6 +2880,9 @@ test("reaper delivery audit is independent, least privilege, and fail-closed", (
 
   assert.equal(workflowHasTrigger(text, "schedule"), true);
   assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_run"), true);
+  assert.match(text, /workflows:\s*\["Reap stale build locks"\]/);
+  assert.match(text, /types:\s*\[completed\]/);
   assert.deepEqual(jobs.map((job) => job.name), ["audit"]);
   assert.equal(concurrency.group, "reaper-delivery-audit");
   assert.equal(concurrency["cancel-in-progress"], "false");

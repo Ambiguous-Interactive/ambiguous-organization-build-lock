@@ -277,8 +277,9 @@ minutes late.
 The independent `Reaper delivery audit` workflow requests checks at minutes
 7, 17, 27, 37, 47, and 57. It queries scheduled reaper run history rather than
 depending on the reaper itself having run. It opens, updates, reopens, or closes
-one marker-identified incident issue. The issue contains run IDs, timestamps,
-reason codes, and commit SHAs only. It synchronizes an alert when:
+one marker-identified incident issue. It also re-runs after each completed
+scheduled/manual reaper run, so a healthy delivery closes a stale alert without
+waiting for the next schedule. The issue contains run IDs, timestamps, reason codes, and commit SHAs only. It synchronizes an alert when:
 
 - no scheduled run history can be proven;
 - the latest delivery exceeds the 30-minute delivery threshold;
