@@ -41,3 +41,13 @@ write retry behavior remains unchanged.
 
 The change improves the normal operator path but does not introduce automatic
 portal recovery or permit recovery of multiple/ambiguous incidents.
+
+## Review and remediation
+
+Cursor Bugbot reviewed the pushed head and found two actionable issues: the
+omitted ID was rebound on each CAS retry, and operator documentation still had
+conflicting exact-ID wording. The implementation now freezes the first bound
+ID for the entire retry loop, adds a changed-incident CAS regression, and
+synchronizes the action, lock, README, and operations-runbook language. The
+focused recovery/documentation suite passes after remediation; a fresh full
+verifier is required before merge.

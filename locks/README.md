@@ -4,9 +4,10 @@ The lock actions create JSON state files on the `lock-state` branch.
 
 Never edit or delete lock files by hand. `Reap stale build locks` owns
 scheduled/manual stale-state reaping. Use the separate `Recover build lock`
-workflow for exact-ID recovery. A runner quarantine requires Unity portal
+workflow for proof-bearing recovery. A runner quarantine requires Unity portal
 cleanup proof plus its exact reservation ID; a global incident requires portal
-reconciliation plus its exact incident ID.
+reconciliation plus its exact incident ID or an omitted ID bound to the single
+active incident in lock state.
 
 Operators do not need to read this branch to recover an incident. The scheduled
 `Build lock incident recovery audit` publishes the exact incident ID and the
@@ -39,8 +40,9 @@ schema-4 state.
 fully drained, including holders, queue entries, cooldowns, and quarantines.
 Schema 5 is active for the live lock. It stores at most one immutable global
 account incident. A global incident blocks admission without growing the queue
-and never expires. Recovery requires the exact incident ID and explicit Unity
-portal cleanup proof, then applies the configured confirmed-cleanup cooldown.
+and never expires. Recovery requires an exact incident ID (supplied by the
+operator or bound from the single active incident) and explicit Unity portal
+cleanup proof, then applies the configured confirmed-cleanup cooldown.
 
 ## Live lock
 

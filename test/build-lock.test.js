@@ -8910,6 +8910,32 @@ test("schema 5 incident recovery rejects an omitted ID without an active inciden
   assert.equal(writes, 0);
 });
 
+test("schema 5 incident recovery freezes an omitted ID across CAS retries", async () => {
+  const firstIncident = accountIncident({ runnerId: "runner-a" });
+  const laterIncident = accountIncident({ runnerId: "runner-b" });
+  let stateReads = 0;
+  let writes = 0;
+  await withMockedFetch(async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") return jsonResponse(200, { object: { sha: `branch-${stateReads}` } });
+    if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+      if (options.method === "PUT") {
+        writes++;
+        return jsonResponse(409, { message: "state changed" });
+      }
+      stateReads++;
+      return base64Content(accountHealthState([], [], [], stateReads === 1 ? firstIncident : laterIncident), `state-${stateReads}`);
+    }
+    return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+  }, async () => {
+    await assert.rejects(
+      () => reap(semaphoreConfig({ operation: "recover-incident", portalCleanupConfirmed: true })),
+      new RegExp(`Active global incident ${firstIncident.incidentId} was not found`)
+    );
+  });
+  assert.equal(writes, 1);
+});
+
 test("schema 5 incident recovery rejects missing proof and mismatched incident IDs", async (t) => {
   const incident = accountIncident();
   for (const testCase of [

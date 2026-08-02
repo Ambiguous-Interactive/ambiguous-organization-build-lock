@@ -3341,6 +3341,7 @@ async function reap(config, options = {}) {
   await ensureStateBranch(config, { apiOptions: scanApiOptions });
   console.log(`::group::Reap stale build lock ${config.lockName}`);
   let ambiguousReap = false;
+  let boundIncidentId = config.incidentId || "";
 
   for (let attempts = 1; attempts <= 10; attempts++) {
     const { state, sha } = await readState(config, { apiOptions: scanApiOptions });
@@ -3356,7 +3357,10 @@ async function reap(config, options = {}) {
         throw new Error("Global incident recovery requires portal-cleanup-confirmed=true proof.");
       }
       const incident = state.activeIncident;
-      const incidentId = config.incidentId || incident?.incidentId || "";
+      if (!boundIncidentId) {
+        boundIncidentId = incident?.incidentId || "";
+      }
+      const incidentId = boundIncidentId;
       if (!incidentId) {
         throw new Error("Global incident recovery requires an active incident to bind as the exact incident-id.");
       }
