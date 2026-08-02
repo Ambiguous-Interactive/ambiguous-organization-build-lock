@@ -59,8 +59,9 @@ represented as resolved by this issue closeout.
 
 ## Default-branch verification
 
-At the time of this record, the post-merge `master` CI, devcontainer,
-release-drafter, and stuck-job watchdog runs were green at the merge commit.
+At the time of this record, the post-merge DxMessaging `master` CI,
+devcontainer, release-drafter, and stuck-job watchdog runs were green at the
+merge commit.
 The post-merge Performance Numbers and Unity Tests runs were still queued and
 remain required follow-up verification before declaring the default branch
 fully green.
