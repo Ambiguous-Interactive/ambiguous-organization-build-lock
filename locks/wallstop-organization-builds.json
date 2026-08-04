@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:30873187653:unity-validation:isho-ci",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-validation",
-    "runId": "30873187653",
+    "holderId": "Ambiguous-Interactive/DxMessaging:30873081088:perf-benchmarks:perf-6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Performance Numbers",
+    "job": "perf-benchmarks",
+    "runId": "30873081088",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30873187653",
-    "queuedAt": "2026-08-04T02:57:06.431Z",
-    "acquiredAt": "2026-08-04T02:57:08.804Z",
-    "expiresAt": "2026-08-04T06:57:08.804Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30873081088",
+    "queuedAt": "2026-08-04T03:02:12.923Z",
+    "acquiredAt": "2026-08-04T03:02:15.763Z",
+    "expiresAt": "2026-08-04T07:02:15.763Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:30873187653:unity-validation:isho-ci",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-validation",
-      "runId": "30873187653",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30873187653",
-      "queuedAt": "2026-08-04T02:57:06.431Z",
-      "acquiredAt": "2026-08-04T02:57:08.804Z",
-      "expiresAt": "2026-08-04T06:57:08.804Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:30873081088:perf-benchmarks:perf-6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -39,12 +26,27 @@
       "queuedAt": "2026-08-04T03:02:12.923Z",
       "acquiredAt": "2026-08-04T03:02:15.763Z",
       "expiresAt": "2026-08-04T07:02:15.763Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "91880196555"
+      "runnerId": "ELI-MACHINE"
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "2d760d9f-37b0-413b-9af3-0f3e746e0731",
+      "holderId": "Ambiguous-Interactive/IshoBoy:30873187653:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "30873187653",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30873187653",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-04T03:04:41.139Z",
+      "availableAt": "2026-08-04T03:04:42.139Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-04T03:02:15.763Z"
+  "updatedAt": "2026-08-04T03:04:41.140Z"
 }
