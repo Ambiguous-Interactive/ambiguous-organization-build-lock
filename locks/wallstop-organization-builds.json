@@ -1,21 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:30941989920:unity-tests:unity-tests",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "30941989920",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30941989920",
-    "queuedAt": "2026-08-04T19:20:59.685Z",
-    "acquiredAt": "2026-08-04T19:21:01.259Z",
-    "expiresAt": "2026-08-04T23:21:01.259Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "7567dfa4-54ce-43c2-bd59-6fd07d0fda17",
       "holderId": "Ambiguous-Interactive/DoxReloaded:30941989920:unity-tests:unity-tests",
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "workflow": "Build and Deploy",
@@ -23,30 +14,12 @@
       "runId": "30941989920",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30941989920",
-      "queuedAt": "2026-08-04T19:20:59.685Z",
-      "acquiredAt": "2026-08-04T19:21:01.259Z",
-      "expiresAt": "2026-08-04T23:21:01.259Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
-  "queue": [],
-  "reservations": [
-    {
-      "reservationId": "88de9783-831a-4b5a-926f-f870802bb316",
-      "holderId": "Ambiguous-Interactive/DxMessaging:30935136833:unity-tests:2022.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "30935136833",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30935136833",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-04T19:30:19.164Z",
-      "availableAt": "2026-08-04T19:30:20.164Z"
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "return-terminated",
+      "createdAt": "2026-08-04T19:30:23.288Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-04T19:30:19.165Z"
+  "updatedAt": "2026-08-04T19:30:23.288Z"
 }
