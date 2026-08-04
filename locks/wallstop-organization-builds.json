@@ -27,20 +27,6 @@
       "acquiredAt": "2026-08-04T15:53:16.366Z",
       "expiresAt": "2026-08-04T19:53:16.366Z",
       "runnerId": "DAD-MACHINE"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:30933194219:perf-benchmarks:perf-6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "30933194219",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30933194219",
-      "queuedAt": "2026-08-04T17:23:13.015Z",
-      "acquiredAt": "2026-08-04T17:23:16.260Z",
-      "expiresAt": "2026-08-04T21:23:16.260Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "92072791555"
     }
   ],
   "queue": [
@@ -68,7 +54,22 @@
       "jobId": "92049196180"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "6e1b0515-894f-4798-8859-a2002a918d77",
+      "holderId": "Ambiguous-Interactive/DxMessaging:30933194219:perf-benchmarks:perf-6000.3.16f1-standalone",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "30933194219",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/30933194219",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-08-04T18:04:31.175Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-04T17:43:59.897Z"
+  "updatedAt": "2026-08-04T18:04:31.176Z"
 }
