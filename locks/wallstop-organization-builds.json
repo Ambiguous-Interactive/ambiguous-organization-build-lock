@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:30982107197:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "30982107197",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30982107197",
+    "queuedAt": "2026-08-05T06:45:34.187Z",
+    "acquiredAt": "2026-08-05T06:45:36.982Z",
+    "expiresAt": "2026-08-05T10:45:36.982Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "2c92d717-ddca-4c6d-b415-6c70aa91e38a",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:30982164668:unity-tests:unity-tests",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "30982164668",
+      "holderId": "Ambiguous-Interactive/IshoBoy:30982107197:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "30982107197",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/30982164668",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-05T06:45:20.799Z",
-      "availableAt": "2026-08-05T06:45:21.799Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/30982107197",
+      "queuedAt": "2026-08-05T06:45:34.187Z",
+      "acquiredAt": "2026-08-05T06:45:36.982Z",
+      "expiresAt": "2026-08-05T10:45:36.982Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-05T06:45:20.799Z"
+  "updatedAt": "2026-08-05T06:45:36.982Z"
 }
