@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:31142501662:unitypackage-smoke:unitypackage-smoke-31142501662",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unitypackage-smoke",
-    "runId": "31142501662",
+    "holderId": "Ambiguous-Interactive/IshoBoy:31144503759:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "31144503759",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31142501662",
-    "queuedAt": "2026-08-07T03:30:26.266Z",
-    "acquiredAt": "2026-08-07T03:30:26.908Z",
-    "expiresAt": "2026-08-07T07:30:26.908Z",
-    "runnerId": "GitHub Actions 1000172878"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/31144503759",
+    "queuedAt": "2026-08-07T03:31:28.800Z",
+    "acquiredAt": "2026-08-07T03:31:31.121Z",
+    "expiresAt": "2026-08-07T07:31:31.121Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:31142501662:unitypackage-smoke:unitypackage-smoke-31142501662",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "31142501662",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31142501662",
-      "queuedAt": "2026-08-07T03:30:26.266Z",
-      "acquiredAt": "2026-08-07T03:30:26.908Z",
-      "expiresAt": "2026-08-07T07:30:26.908Z",
-      "runnerId": "GitHub Actions 1000172878"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:31144503759:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "179a4981-2780-4e34-a976-2b3155638ce3",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31142501662:unitypackage-smoke:unitypackage-smoke-31142501662",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "31142501662",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31142501662",
+      "runnerId": "GitHub Actions 1000172878",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-07T03:32:29.623Z",
+      "availableAt": "2026-08-07T03:32:30.623Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-07T03:31:31.121Z"
+  "updatedAt": "2026-08-07T03:32:29.623Z"
 }
