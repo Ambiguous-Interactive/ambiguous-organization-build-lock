@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:31230897738:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "31230897738",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/31230897738",
+    "queuedAt": "2026-08-08T00:48:26.565Z",
+    "acquiredAt": "2026-08-08T00:48:29.160Z",
+    "expiresAt": "2026-08-08T04:48:29.160Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "cf9dc716-5e81-4920-ac04-14d793f8ded6",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31227843274:unity-tests-single-threaded:6000.3.16f1-playmode-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "31227843274",
-      "runAttempt": "3",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31227843274",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-08T00:47:29.420Z",
-      "availableAt": "2026-08-08T00:47:30.420Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:31230897738:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "31230897738",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/31230897738",
+      "queuedAt": "2026-08-08T00:48:26.565Z",
+      "acquiredAt": "2026-08-08T00:48:29.160Z",
+      "expiresAt": "2026-08-08T04:48:29.160Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-08T00:47:29.421Z"
+  "updatedAt": "2026-08-08T00:48:29.161Z"
 }
