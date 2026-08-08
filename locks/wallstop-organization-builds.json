@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:31264174274:unity-tests:2022.3.45f1-editmode",
+    "holderId": "Ambiguous-Interactive/unity-helpers:31266634715:unity-tests:6000.5.2f1-editmode",
     "repository": "Ambiguous-Interactive/unity-helpers",
     "workflow": "Unity Tests",
     "job": "unity-tests",
-    "runId": "31264174274",
+    "runId": "31266634715",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31264174274",
-    "queuedAt": "2026-08-08T15:27:12.576Z",
-    "acquiredAt": "2026-08-08T15:27:14.954Z",
-    "expiresAt": "2026-08-08T19:27:14.954Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31266634715",
+    "queuedAt": "2026-08-08T16:22:49.414Z",
+    "acquiredAt": "2026-08-08T16:22:51.909Z",
+    "expiresAt": "2026-08-08T20:22:51.909Z",
+    "runnerId": "ELI-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:31264174274:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "31264174274",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31264174274",
-      "queuedAt": "2026-08-08T15:27:12.576Z",
-      "acquiredAt": "2026-08-08T15:27:14.954Z",
-      "expiresAt": "2026-08-08T19:27:14.954Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:31266634715:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -55,7 +42,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "e6fccea9-236f-4a1c-be80-04eb932d275f",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31264174274:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "31264174274",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31264174274",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-08-08T16:25:36.465Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-08T16:23:07.358Z"
+  "updatedAt": "2026-08-08T16:25:36.466Z"
 }
