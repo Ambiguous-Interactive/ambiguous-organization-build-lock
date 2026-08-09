@@ -116,13 +116,24 @@ function run({
   return unityRequired;
 }
 
-function main() {
+/*
+ * The runner uppercases an input name and replaces SPACES, never hyphens, so `event-name` arrives
+ * as INPUT_EVENT-NAME. The underscored spelling is indistinguishable from an absent input, and an
+ * absent event name classifies as "not a pull request" -- so every pull request this action has
+ * ever seen required Unity over an unread diff. check-unity-runners.js already spells it this way,
+ * and action-manifests.test.js now refuses the underscored form across every committed runtime.
+ */
+function input(environment, name) {
+  return text(environment[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`]);
+}
+
+function main(environment = process.env) {
   try {
     run({
-      eventName: process.env.INPUT_EVENT_NAME,
-      baseSHA: process.env.INPUT_BASE_SHA,
-      headSHA: process.env.INPUT_HEAD_SHA,
-      outputPath: process.env.GITHUB_OUTPUT || ""
+      eventName: input(environment, "event-name"),
+      baseSHA: input(environment, "base-sha"),
+      headSHA: input(environment, "head-sha"),
+      outputPath: environment.GITHUB_OUTPUT || ""
     });
   } catch {
     console.error("::error title=Unity change classification failed::Classification failed closed.");
@@ -137,6 +148,7 @@ if (require.main === module) {
 module.exports = {
   classifyUnityChanges,
   findChangedPaths,
+  input,
   isUnityIndependent,
   run
 };
