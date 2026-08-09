@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:31339421915:unity-tests:6000.3.16f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "31339421915",
+    "holderId": "Ambiguous-Interactive/IshoBoy:31340857487:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "31340857487",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31339421915",
-    "queuedAt": "2026-08-09T22:59:06.623Z",
-    "acquiredAt": "2026-08-09T22:59:09.057Z",
-    "expiresAt": "2026-08-10T02:59:09.057Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/31340857487",
+    "queuedAt": "2026-08-09T23:28:46.106Z",
+    "acquiredAt": "2026-08-09T23:28:48.647Z",
+    "expiresAt": "2026-08-10T03:28:48.647Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:31339421915:unity-tests:6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "31339421915",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31339421915",
-      "queuedAt": "2026-08-09T22:59:06.623Z",
-      "acquiredAt": "2026-08-09T22:59:09.057Z",
-      "expiresAt": "2026-08-10T02:59:09.057Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:31340857487:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -55,7 +42,22 @@
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "c4e85c67-bad2-4fa4-9595-b6418ac8478e",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31339421915:unity-tests:6000.3.16f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "31339421915",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31339421915",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-08-09T23:30:16.558Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-09T23:28:48.647Z"
+  "updatedAt": "2026-08-09T23:30:16.559Z"
 }
