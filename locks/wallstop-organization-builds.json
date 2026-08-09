@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/qora-redux:31290553677:unity:qora",
-    "repository": "Ambiguous-Interactive/qora-redux",
-    "workflow": "Unity Tests",
-    "job": "unity",
-    "runId": "31290553677",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31290553677",
-    "queuedAt": "2026-08-09T02:42:00.521Z",
-    "acquiredAt": "2026-08-09T02:42:03.451Z",
-    "expiresAt": "2026-08-09T06:42:03.451Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/qora-redux:31290553677:unity:qora",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "31290553677",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31290553677",
-      "queuedAt": "2026-08-09T02:42:00.521Z",
-      "acquiredAt": "2026-08-09T02:42:03.451Z",
-      "expiresAt": "2026-08-09T06:42:03.451Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-08-09T02:46:20.262Z"
+    },
+    {
+      "reservationId": "20593770-bd61-408a-8e93-3ca861a8c407",
+      "holderId": "Ambiguous-Interactive/qora-redux:31290553677:unity:qora",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Tests",
+      "job": "unity",
+      "runId": "31290553677",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31290553677",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-09T02:46:45.248Z",
+      "availableAt": "2026-08-09T02:46:46.248Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-09T02:46:20.263Z"
+  "updatedAt": "2026-08-09T02:46:45.248Z"
 }
