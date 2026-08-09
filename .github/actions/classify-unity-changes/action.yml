@@ -10,6 +10,12 @@ inputs:
   head-sha:
     description: Pull request head commit SHA.
     required: false
+  independent-paths:
+    description: >-
+      Newline-separated directory prefixes of the form "dir/**" that THIS caller declares inert to
+      its own Unity build. Unioned with the central allowlist, never narrowing it. Assets/,
+      Packages/ and ProjectSettings/ are refused. Any other syntax fails closed.
+    required: false
 outputs:
   unity-required:
     description: True unless a pull request changes only centrally audited Unity-independent paths.

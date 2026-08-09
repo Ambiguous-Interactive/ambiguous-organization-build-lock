@@ -11,6 +11,7 @@ const {
   classifyUnityChanges,
   findChangedPaths,
   isUnityIndependent,
+  parseDeclaredIndependentPaths,
   run
 } = require("../.github/dist/classify-unity-changes.js");
 
@@ -185,3 +186,93 @@ function fixtureRepository(root, changedPaths) {
   git("commit", "--quiet", "--message", "head");
   return { baseSHA, directory, headSHA: git("rev-parse", "HEAD").trim() };
 }
+
+/*
+ * CALLER-DECLARED INDEPENDENT PATHS. Inertness beyond documentation is caller-relative and cannot
+ * live in one shared list: `Benchmarks/**` is inert to DoxReloaded's Unity build and would not be
+ * for another repository. The built-in allowlist stays exactly as it is and the declaration is
+ * UNIONED with it, so a declaration can only widen what a caller skips on and never narrows the
+ * central floor.
+ */
+test("declared independent prefixes widen the allowlist without touching the central floor", () => {
+  const declared = parseDeclaredIndependentPaths("Benchmarks/**\nscripts/**");
+  assert.deepEqual(declared, ["Benchmarks/", "scripts/"]);
+
+  assert.equal(isUnityIndependent("Benchmarks/Baselines/x.json", declared), true);
+  assert.equal(isUnityIndependent("scripts/lint.py", declared), true);
+  assert.equal(isUnityIndependent("Assets/Game.cs", declared), true === false);
+  assert.equal(isUnityIndependent("Packages/manifest.json", declared), false);
+  assert.equal(isUnityIndependent(".github/workflows/build-deploy.yml", declared), false);
+
+  // The central floor is unchanged with or without a declaration.
+  assert.equal(isUnityIndependent(".llm/context.md", declared), true);
+  assert.equal(isUnityIndependent(".llm/context.md", []), true);
+  assert.equal(isUnityIndependent("Benchmarks/Baselines/x.json", []), false);
+
+  assert.equal(classifyUnityChanges(["Benchmarks/a.json", ".llm/b.md"], declared), false);
+  assert.equal(classifyUnityChanges(["Benchmarks/a.json", "Assets/Game.cs"], declared), true);
+});
+
+/*
+ * ONLY `<prefix>/**` IS ACCEPTED, AND ANYTHING ELSE FAILS CLOSED. This input is a security gate's
+ * trusted input and it is editable by whoever can edit the calling workflow, so the grammar is the
+ * smallest one that expresses the need and can be audited by reading it. A general glob would need
+ * a matcher a reviewer has to reason about; a prefix does not.
+ */
+test("a declaration that is not an auditable directory prefix is refused rather than guessed", () => {
+  for (const bad of [
+    "Benchmarks",            // no /** suffix -- a bare name could be a file
+    "Benchmarks/*",          // one level, and the matcher does not implement it
+    "**",                    // would make everything independent
+    "/**",                   // absolute
+    "**/x/**",               // leading wildcard
+    "../outside/**",         // escapes the repository
+    "Assets/**",             // Unity compiles it: refused by name, not by review
+    "Packages/**",
+    "ProjectSettings/**",
+    "Assets/Scripts/**",     // under a reserved prefix
+    ".github/**",            // would cover the workflow that gates Unity
+    ".github/workflows/**",
+    "Bench marks/**"         // whitespace inside a segment
+  ]) {
+    assert.throws(() => parseDeclaredIndependentPaths(bad), /declared independent path/, bad);
+  }
+
+  assert.deepEqual(parseDeclaredIndependentPaths(""), []);
+  assert.deepEqual(parseDeclaredIndependentPaths("  \n\n  "), []);
+  assert.deepEqual(parseDeclaredIndependentPaths("a/b/**\n\n a/b/** \n"), ["a/b/"]);
+  // A sibling of a reserved prefix is fine; only overlap is refused.
+  assert.deepEqual(parseDeclaredIndependentPaths(".github/scripts/**"), [".github/scripts/"]);
+});
+
+test("committed classifier runtime honours a declaration through the runner input name", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-declared-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = fixtureRepository(root, ["Benchmarks/Baselines/x.json", "progress/s.md"]);
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "pull_request",
+    "INPUT_BASE-SHA": workspace.baseSHA,
+    "INPUT_HEAD-SHA": workspace.headSHA,
+    "INPUT_INDEPENDENT-PATHS": "Benchmarks/**"
+  }, workspace.directory);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=false");
+});
+
+test("committed classifier runtime fails CLOSED on an unparseable declaration", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-bad-decl-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = fixtureRepository(root, ["progress/s.md"]);
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "pull_request",
+    "INPUT_BASE-SHA": workspace.baseSHA,
+    "INPUT_HEAD-SHA": workspace.headSHA,
+    "INPUT_INDEPENDENT-PATHS": "Assets/**"
+  }, workspace.directory);
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
+});
