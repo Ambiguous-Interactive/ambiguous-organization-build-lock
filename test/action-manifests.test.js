@@ -376,7 +376,14 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
       "inputs",
       "classify-unity-changes/action.yml"
     ),
-    ["event-name", "base-sha", "head-sha"]
+    /*
+     * `independent-paths` is a CALLER-DECLARED widening of the allowlist, and it is listed here
+     * because this assertion is the reason an input cannot be added to a security gate silently.
+     * Its grammar is deliberately the narrowest one that expresses the need -- `dir/**` only, with
+     * Assets/, Packages/ and ProjectSettings/ refused by name -- so the reviewable question stays
+     * "is that directory inert to that repository's Unity build".
+     */
+    ["event-name", "base-sha", "head-sha", "independent-paths"]
   );
   assert.deepEqual(
     yamlRequiredTopLevelMappingKeys(
