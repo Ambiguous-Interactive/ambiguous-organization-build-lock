@@ -90,3 +90,19 @@ consumer workaround.
 Continuous-improvement disposition: revise this existing dated session record. The durable mechanism is
 the executable analyzer contract, not new agent guidance; the current task-development and workflow-policy
 skills already require exact environment bindings and red-green proof.
+
+## Delivery evidence
+
+- Classifier input repair merged in PR #184 at `9fdd48c6099d07e129e96d550efec7397a6674ee`.
+- Analyzer recognition repair merged in PR #185 at
+  `f5c883c96dba0cf79240df7ac150a3ef545b3287`.
+- Post-merge Build lock CI run `31322464342` passed both hosted and Windows jobs at that exact commit.
+- Post-merge enrollment audit run `31322464382` completed retrieval, revalidated consumer heads, and
+  retained zero Qora findings at exact Qora main `167c4322c7ffb39480edf625468eb893c49f6bec`.
+- That audit exposed the pinned token action's `app-id` deprecation. The current App-ID secret cannot be
+  relabeled as the distinct client ID; issue #188 owns provisioning and the warning-free migration.
+
+The merged commit is now added to `approvedLockShas` so consumers can pin its corrected classifier and
+central validator without creating `unapproved-lock-ref` drift. It is intentionally not added to
+`approvedReturnShas`: neither merged change modified the return action, and the narrower credential-bearing
+allowlist must not expand without return-specific review.
