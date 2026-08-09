@@ -3026,7 +3026,20 @@ func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
 }
 
 func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
-	licensedSteps := centralReturnSteps()
+	credentialValidation := `      - name: Validate Unity credentials
+        uses: ` + lockActionPrefix + `validate-unity-license@` + testSHA + `
+        env:
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSING_SERVER: ${{ secrets.UNITY_LICENSING_SERVER }}
+`
+	licensedSteps := strings.Replace(
+		centralReturnSteps(),
+		"      - id: acquire",
+		credentialValidation+"      - id: acquire",
+		1,
+	)
 	workflow := `name: Unity
 on:
   pull_request:
@@ -3247,6 +3260,62 @@ jobs:
 					value,
 					"  unity:\n    needs:",
 					"  unity:\n    env:\n      NODE_OPTIONS: --require=spoof.js\n    needs:",
+					1,
+				)
+			},
+		},
+		{
+			name: "credential validator omits email binding",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}\n",
+					"",
+					1,
+				)
+			},
+		},
+		{
+			name: "credential validator aliases email binding",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}",
+					"          EMAIL_ALIAS: ${{ secrets.UNITY_EMAIL }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "credential validator reads another secret",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}",
+					"          UNITY_EMAIL: ${{ secrets.OTHER_EMAIL }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "credential validator adds process preload",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"          UNITY_LICENSING_SERVER: ${{ secrets.UNITY_LICENSING_SERVER }}",
+					"          UNITY_LICENSING_SERVER: ${{ secrets.UNITY_LICENSING_SERVER }}\n"+
+						"          NODE_OPTIONS: --require=spoof.js",
+					1,
+				)
+			},
+		},
+		{
+			name: "Unity credential environment belongs to another central action",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"validate-unity-license@",
+					"require-current-pr-head@",
 					1,
 				)
 			},
