@@ -233,6 +233,40 @@ test("all action manifest entrypoints resolve to committed JavaScript files", as
   }
 });
 
+/*
+ * The runner exposes an input as INPUT_<NAME uppercased, SPACES replaced>. Hyphens survive, so the
+ * underscored spelling of a hyphenated input reads as an absent input -- silently, in whichever
+ * direction that action's default happens to point. classify-unity-changes shipped that way and
+ * answered "not a pull request" for every pull request it ever classified.
+ */
+test("no action runtime reads a hyphenated input under its underscored spelling", () => {
+  const distSources = fs
+    .readdirSync(distRoot)
+    .filter((entry) => entry.endsWith(".js"))
+    .map((entry) => ({ name: entry, text: fs.readFileSync(path.join(distRoot, entry), "utf8") }));
+  assert.ok(distSources.length > 0, "expected at least one committed action runtime");
+
+  let hyphenatedInputCount = 0;
+  for (const manifest of actionManifests) {
+    const manifestName = path.relative(actionsRoot, manifest);
+    const text = fs.readFileSync(manifest, "utf8");
+    for (const inputName of yamlRequiredTopLevelMappingKeys(text, "inputs", manifestName)) {
+      if (!inputName.includes("-")) {
+        continue;
+      }
+      hyphenatedInputCount++;
+      const wrong = new RegExp(`INPUT_${escapeRegExp(inputName.replace(/-/g, "_").toUpperCase())}\\b`);
+      for (const source of distSources) {
+        assert.ok(
+          !wrong.test(source.text),
+          `${source.name} reads ${manifestName} input ${inputName} as ${wrong.source}, which the runner never sets`
+        );
+      }
+    }
+  }
+  assert.ok(hyphenatedInputCount > 0, "expected at least one hyphenated action input to guard");
+});
+
 test("opt-in acquire cleanup action has post cleanup while legacy acquire remains explicit-only", () => {
   const legacy = readActionManifest("acquire-build-lock");
   const optIn = readActionManifest("acquire-build-lock-with-cleanup");
