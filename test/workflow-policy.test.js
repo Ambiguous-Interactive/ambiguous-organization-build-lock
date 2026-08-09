@@ -37,6 +37,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "node tools/llm-harness.mjs check",
       "go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
       "bash tools/workflows/ci.sh javascript",
+      "sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck",
       "bash tools/workflows/ci.sh shellcheck",
       "node --test test/*.test.js",
       "go test ./...",
