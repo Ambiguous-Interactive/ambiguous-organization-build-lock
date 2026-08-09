@@ -66,3 +66,27 @@ job and its cleanup result are all skipped/empty ("audited non-Unity skip"),
 and `DoxReloaded`'s `unity-lock-cleanup` job skips on
 `needs.unity-tests.result != 'skipped'`. The allowlist is unchanged and remains
 conservative: anything not explicitly independent still requires Unity.
+
+## Enrollment analyzer follow-up
+
+Adversarial review of the Qora consumer exposed a second central contradiction. Typed aggregate
+recognition was introduced before credential preflight moved here. Its execution-environment guard
+allowed central actions either no environment or only the two writer App bindings, so the later
+`validate-unity-license` action's intentional four `UNITY_*` bindings made both Qora and IshoBoy appear
+to lack their licensed and fallback aggregates.
+
+The analyzer now recognizes only the exact central validator shape: the action name must be
+`validate-unity-license`, and its step environment must contain exactly `UNITY_SERIAL`, `UNITY_EMAIL`,
+`UNITY_PASSWORD`, and `UNITY_LICENSING_SERVER`, each bound to its same-named secret. Missing, extra,
+aliased, or cross-bound values remain fail-closed, as does putting the credential environment on any
+other central action or an enclosing composite caller.
+
+Red-green evidence: adding the exact central validator to the accepted typed-aggregate fixture produced
+`missing-unity-aggregate` and `missing-fallback-aggregate` before the analyzer change. The focused test
+now passes along with five hostile environment mutations. The revised analyzer also reports zero findings
+against Qora's exact current main commit `167c4322c7ffb39480edf625468eb893c49f6bec`, without a Qora
+consumer workaround.
+
+Continuous-improvement disposition: revise this existing dated session record. The durable mechanism is
+the executable analyzer contract, not new agent guidance; the current task-development and workflow-policy
+skills already require exact environment bindings and red-green proof.

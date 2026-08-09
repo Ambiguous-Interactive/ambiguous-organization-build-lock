@@ -28,6 +28,7 @@ const (
 	trustedEditorRevision   = "76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d"
 	trustedEditorRoot       = ".ci/unity-helpers"
 	validationGateAction    = "require-unity-validation"
+	validationLicenseAction = "validate-unity-license"
 
 	UnityInventoryPaidSerial         = "paid-serial"
 	UnityInventoryFallbackCleanup    = "fallback-cleanup"
@@ -4976,7 +4977,8 @@ func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Nod
 		return false
 	}
 	for _, step := range steps {
-		if lockActionName(stepUses(step.node)) == "" {
+		action := lockActionName(stepUses(step.node))
+		if action == "" {
 			continue
 		}
 		for _, enclosing := range step.enclosingSteps {
@@ -4985,6 +4987,12 @@ func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Nod
 			}
 		}
 		env := mappingValue(step.node, "env")
+		if action == validationLicenseAction {
+			if !exactUnityLicenseValidationEnvironment(env) {
+				return false
+			}
+			continue
+		}
 		if env == nil {
 			continue
 		}
@@ -5006,6 +5014,25 @@ func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Nod
 		}
 	}
 	return true
+}
+
+func exactUnityLicenseValidationEnvironment(env *yaml.Node) bool {
+	return env != nil &&
+		env.Kind == yaml.MappingNode &&
+		len(env.Content) == 8 &&
+		mappingHasOnlyKeys(env, map[string]bool{
+			"UNITY_SERIAL":           true,
+			"UNITY_EMAIL":            true,
+			"UNITY_PASSWORD":         true,
+			"UNITY_LICENSING_SERVER": true,
+		}) &&
+		exactExpression(mappingValue(env, "UNITY_SERIAL"), "secrets.UNITY_SERIAL") &&
+		exactExpression(mappingValue(env, "UNITY_EMAIL"), "secrets.UNITY_EMAIL") &&
+		exactExpression(mappingValue(env, "UNITY_PASSWORD"), "secrets.UNITY_PASSWORD") &&
+		exactExpression(
+			mappingValue(env, "UNITY_LICENSING_SERVER"),
+			"secrets.UNITY_LICENSING_SERVER",
+		)
 }
 
 func (a *unityPolicyAnalyzer) validationFallbackMatches(
