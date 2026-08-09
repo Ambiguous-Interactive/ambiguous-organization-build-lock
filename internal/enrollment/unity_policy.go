@@ -3854,6 +3854,58 @@ func mappingHasOnlyKeys(node *yaml.Node, allowed map[string]bool) bool {
 	return true
 }
 
+func validDeclaredIndependentPaths(value *yaml.Node) bool {
+	if value == nil {
+		return true
+	}
+	if value.Kind != yaml.ScalarNode {
+		return false
+	}
+	declaration := strings.TrimSpace(value.Value)
+	if declaration == "" || strings.Contains(declaration, "${{") || strings.Contains(declaration, "}}") {
+		return declaration == ""
+	}
+	for _, line := range strings.Split(declaration, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		segments := strings.Split(line, "/")
+		if len(segments) < 2 || segments[len(segments)-1] != "**" {
+			return false
+		}
+		for _, segment := range segments[:len(segments)-1] {
+			if !validDeclaredIndependentPathSegment(segment) {
+				return false
+			}
+		}
+		prefix := strings.Join(segments[:len(segments)-1], "/") + "/"
+		for _, reserved := range []string{"Assets/", "Packages/", "ProjectSettings/", ".github/workflows/"} {
+			if strings.HasPrefix(prefix, reserved) || strings.HasPrefix(reserved, prefix) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validDeclaredIndependentPathSegment(segment string) bool {
+	if segment == "" || segment == "." || segment == ".." {
+		return false
+	}
+	for _, character := range segment {
+		if (character < 'A' || character > 'Z') &&
+			(character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') &&
+			character != '.' &&
+			character != '_' &&
+			character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func literalHolderSuffix(value string) bool {
 	return value != "" &&
 		strings.TrimSpace(value) == value &&
@@ -4759,10 +4811,12 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		!criticalNodeFailurePropagates(classify) ||
 		classifyWith == nil ||
 		!mappingHasOnlyKeys(classifyWith, map[string]bool{
-			"event-name": true,
-			"base-sha":   true,
-			"head-sha":   true,
+			"event-name":        true,
+			"base-sha":          true,
+			"head-sha":          true,
+			"independent-paths": true,
 		}) ||
+		!validDeclaredIndependentPaths(mappingValue(classifyWith, "independent-paths")) ||
 		!exactExpression(mappingValue(classifyWith, "event-name"), "github.event_name") ||
 		!exactExpression(
 			mappingValue(classifyWith, "base-sha"),
