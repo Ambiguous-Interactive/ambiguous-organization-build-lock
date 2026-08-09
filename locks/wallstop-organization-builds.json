@@ -1,40 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:31290048422:unity-tests-standalone:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "31290048422",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31290048422",
+    "queuedAt": "2026-08-09T02:46:49.611Z",
+    "acquiredAt": "2026-08-09T02:46:51.958Z",
+    "expiresAt": "2026-08-09T06:46:51.958Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "a0f5341a-f47e-43e0-a3fa-93f744089841",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31290048422:unity-tests-standalone:6000.5.2f1-standalone",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31290048422:unity-tests-standalone:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests-standalone",
       "runId": "31290048422",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31290048422",
-      "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-09T02:46:20.262Z"
-    },
-    {
-      "reservationId": "20593770-bd61-408a-8e93-3ca861a8c407",
-      "holderId": "Ambiguous-Interactive/qora-redux:31290553677:unity:qora",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Tests",
-      "job": "unity",
-      "runId": "31290553677",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31290553677",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-09T02:46:45.248Z",
-      "availableAt": "2026-08-09T02:46:46.248Z"
+      "queuedAt": "2026-08-09T02:46:49.611Z",
+      "acquiredAt": "2026-08-09T02:46:51.958Z",
+      "expiresAt": "2026-08-09T06:46:51.958Z",
+      "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-09T02:46:45.248Z"
+  "updatedAt": "2026-08-09T02:46:51.958Z"
 }
