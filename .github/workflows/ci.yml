@@ -48,6 +48,12 @@ jobs:
       - name: Run Go tests
         run: go test ./...
 
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Run Go race detector
+        run: go test -race ./...
+
       - name: Verify Go module checksums
         run: bash tools/workflows/ci.sh verify-modules
 
