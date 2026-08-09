@@ -104,18 +104,84 @@ test("committed classifier runtime requires Unity on non-pull-request events", (
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-runtime-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "output.txt");
-  const result = childProcess.spawnSync(
-    process.execPath,
-    [path.join(__dirname, "..", ".github", "dist", "classify-unity-changes.js")],
-    {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GITHUB_OUTPUT: outputPath,
-        INPUT_EVENT_NAME: "push"
-      }
-    }
-  );
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "push"
+  });
   assert.equal(result.status, 0);
   assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
 });
+
+/*
+ * Actions expose `event-name` as INPUT_EVENT-NAME: the runner uppercases the input name and
+ * replaces spaces, never hyphens. Reading INPUT_EVENT_NAME instead is indistinguishable from an
+ * absent input, so the runtime answered "not a pull request" for every pull request this action
+ * has ever classified while every unit test of run() -- which is handed its arguments -- passed.
+ * These two spawn the committed runtime through the env names the runner actually sets.
+ */
+test("committed classifier runtime classifies a pull request diff through runner input names", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-diff-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = fixtureRepository(root, [".llm/context.md", "progress/session.md"]);
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "pull_request",
+    "INPUT_BASE-SHA": workspace.baseSHA,
+    "INPUT_HEAD-SHA": workspace.headSHA
+  }, workspace.directory);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=false");
+});
+
+test("committed classifier runtime requires Unity for a pull request touching Unity paths", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-unity-diff-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = fixtureRepository(root, [".llm/context.md", "Assets/Game.cs"]);
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "pull_request",
+    "INPUT_BASE-SHA": workspace.baseSHA,
+    "INPUT_HEAD-SHA": workspace.headSHA
+  }, workspace.directory);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=true");
+});
+
+function classifierRuntime(env, cwd = undefined) {
+  return childProcess.spawnSync(
+    process.execPath,
+    [path.join(__dirname, "..", ".github", "dist", "classify-unity-changes.js")],
+    { cwd, encoding: "utf8", env: { ...process.env, ...env } }
+  );
+}
+
+function fixtureRepository(root, changedPaths) {
+  const directory = path.join(root, "workspace");
+  const git = (...args) => childProcess.execFileSync("git", args, {
+    cwd: directory,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "fixture",
+      GIT_AUTHOR_EMAIL: "fixture@example.com",
+      GIT_COMMITTER_NAME: "fixture",
+      GIT_COMMITTER_EMAIL: "fixture@example.com"
+    }
+  });
+  fs.mkdirSync(directory, { recursive: true });
+  git("init", "--quiet", "--initial-branch", "main");
+  fs.writeFileSync(path.join(directory, "README.md"), "base\n", "utf8");
+  git("add", "--all");
+  git("commit", "--quiet", "--message", "base");
+  const baseSHA = git("rev-parse", "HEAD").trim();
+  for (const changedPath of changedPaths) {
+    const destination = path.join(directory, changedPath);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, "head\n", "utf8");
+  }
+  git("add", "--all");
+  git("commit", "--quiet", "--message", "head");
+  return { baseSHA, directory, headSHA: git("rev-parse", "HEAD").trim() };
+}
