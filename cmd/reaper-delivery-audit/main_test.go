@@ -121,7 +121,7 @@ func TestWorkflowRunsUsesBoundedSameRepositoryRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requested = request.Clone(request.Context())
 		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(writer, `{"workflow_runs":[{"id":9,"event":"schedule","status":"completed","conclusion":"success","head_sha":"%s","created_at":"2026-07-26T19:50:00Z","run_started_at":"2026-07-26T19:51:00Z","updated_at":"2026-07-26T19:52:00Z"}]}`, strings.Repeat("a", 40))
+		_, _ = fmt.Fprintf(writer, `{"workflow_runs":[{"id":9,"event":"schedule","status":"completed","conclusion":"success","head_sha":"%s","created_at":"2026-07-26T19:50:00Z","run_started_at":"2026-07-26T19:51:00Z","updated_at":"2026-07-26T19:52:00Z"}]}`, strings.Repeat("a", 40))
 	}))
 	defer server.Close()
 
@@ -159,7 +159,7 @@ func TestWorkflowRunsRejectsOversizedOrMalformedResponses(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(writer, test.body)
+				_, _ = fmt.Fprint(writer, test.body)
 			}))
 			defer server.Close()
 			client := testGitHubClient(server.URL, server.Client())
@@ -241,14 +241,14 @@ func TestSyncIncidentDeduplicatesAndTransitionsOneIssue(t *testing.T) {
 			t.Parallel()
 			var mutationMethod, mutationPath, mutationState string
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				switch {
-				case request.Method == http.MethodGet:
+				switch request.Method {
+				case http.MethodGet:
 					issues := []incidentIssue{}
 					if test.existing != nil {
 						test.existing.User.Login = incidentActor
 						issues = append(issues, *test.existing)
 					}
-					json.NewEncoder(writer).Encode(issues)
+					_ = json.NewEncoder(writer).Encode(issues)
 				default:
 					mutationMethod, mutationPath = request.Method, request.URL.Path
 					var body map[string]any
@@ -257,7 +257,7 @@ func TestSyncIncidentDeduplicatesAndTransitionsOneIssue(t *testing.T) {
 					}
 					mutationState, _ = body["state"].(string)
 					writer.WriteHeader(http.StatusOK)
-					fmt.Fprint(writer, `{}`)
+					_, _ = fmt.Fprint(writer, `{}`)
 				}
 			}))
 			defer server.Close()
@@ -311,12 +311,12 @@ func TestSyncIncidentRejectsUntrustedOrDuplicateMarkerIssues(t *testing.T) {
 			var creates int
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if request.Method == http.MethodGet {
-					json.NewEncoder(writer).Encode(test.issues())
+					_ = json.NewEncoder(writer).Encode(test.issues())
 					return
 				}
 				creates++
 				writer.WriteHeader(http.StatusCreated)
-				fmt.Fprint(writer, `{}`)
+				_, _ = fmt.Fprint(writer, `{}`)
 			}))
 			defer server.Close()
 
@@ -341,13 +341,13 @@ func TestRunSucceedsAfterSynchronizingKnownAlert(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case strings.Contains(request.URL.Path, "/actions/workflows/"):
-			fmt.Fprint(writer, `{"workflow_runs":[]}`)
+			_, _ = fmt.Fprint(writer, `{"workflow_runs":[]}`)
 		case request.Method == http.MethodGet:
-			fmt.Fprint(writer, `[]`)
+			_, _ = fmt.Fprint(writer, `[]`)
 		default:
 			issueCreated = true
 			writer.WriteHeader(http.StatusCreated)
-			fmt.Fprint(writer, `{}`)
+			_, _ = fmt.Fprint(writer, `{}`)
 		}
 	}))
 	defer server.Close()
@@ -376,13 +376,13 @@ func TestRunFailsClosedAfterSynchronizingAmbiguousEvidence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case strings.Contains(request.URL.Path, "/actions/workflows/"):
-			fmt.Fprint(writer, `{"workflow_runs":[`)
+			_, _ = fmt.Fprint(writer, `{"workflow_runs":[`)
 		case request.Method == http.MethodGet:
-			fmt.Fprint(writer, `[]`)
+			_, _ = fmt.Fprint(writer, `[]`)
 		default:
 			issueCreated = true
 			writer.WriteHeader(http.StatusCreated)
-			fmt.Fprint(writer, `{}`)
+			_, _ = fmt.Fprint(writer, `{}`)
 		}
 	}))
 	defer server.Close()

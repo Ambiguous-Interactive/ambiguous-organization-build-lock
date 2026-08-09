@@ -35,16 +35,16 @@ func acquireStep(indent string) string {
 		indent + "    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n"
 }
 
-func conditionalAcquireStep(indent, condition string) string {
-	return indent + "- if: " + condition + "\n" +
-		indent + "  uses: " + acquire + "\n" +
-		indent + "  with:\n" +
-		indent + "    github-token: ${{ github.token }}\n" +
-		indent + "    pull-request-number: ${{ github.event.pull_request.number }}\n" +
-		indent + "    expected-head-sha: ${{ github.event.pull_request.head.sha }}\n" +
-		indent + "  env:\n" +
-		indent + "    BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n" +
-		indent + "    BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n"
+func conditionalAcquireStep(condition string) string {
+	return "      - if: " + condition + "\n" +
+		"        uses: " + acquire + "\n" +
+		"        with:\n" +
+		"          github-token: ${{ github.token }}\n" +
+		"          pull-request-number: ${{ github.event.pull_request.number }}\n" +
+		"          expected-head-sha: ${{ github.event.pull_request.head.sha }}\n" +
+		"        env:\n" +
+		"          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n" +
+		"          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n"
 }
 
 func currentHeadGuard(indent, sha string) string {
@@ -467,7 +467,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: steps.ready == 'true'\n        uses:", 1) +
-					conditionalAcquireStep("      ", "steps.ready == 'true' && github.event_name == 'pull_request'"),
+					conditionalAcquireStep("steps.ready == 'true' && github.event_name == 'pull_request'"),
 			},
 		},
 		{
@@ -538,7 +538,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: always()\n        uses:", 1) +
-					conditionalAcquireStep("      ", "always() && success()"),
+					conditionalAcquireStep("always() && success()"),
 			},
 		},
 		{
@@ -546,7 +546,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
-					conditionalAcquireStep("      ", "steps.a == 'true' || steps.b == 'true'"),
+					conditionalAcquireStep("steps.a == 'true' || steps.b == 'true'"),
 			},
 		},
 		{
@@ -563,7 +563,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 			files: map[string]string{
 				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: (steps.a == 'true' || steps.b == 'true')\n        uses:", 1) +
-					conditionalAcquireStep("      ", "success() && (steps.a == 'true' || steps.b == 'true')"),
+					conditionalAcquireStep("success() && (steps.a == 'true' || steps.b == 'true')"),
 			},
 		},
 		{

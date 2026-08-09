@@ -194,8 +194,8 @@ func auditRepository(root string) ([]finding, error) {
 			return nil, readErr
 		}
 		relative, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			contents.Close()
+	if relErr != nil {
+			_ = contents.Close()
 			return nil, relErr
 		}
 		fileFindings, auditErr := auditReader(filepath.ToSlash(relative), contents)
@@ -259,32 +259,32 @@ func auditUnityAutomationRepository(root string, allowed map[string]bool) ([]fin
 func run(root string, stdout, stderr io.Writer) int {
 	findings, err := auditRepository(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow credential audit failed: %s\n", safeDiagnosticComponent(err.Error()))
+		_, _ = fmt.Fprintf(stderr, "workflow credential audit failed: %s\n", safeDiagnosticComponent(err.Error()))
 		return 1
 	}
 	if len(findings) > 0 {
 		for _, finding := range findings {
-			fmt.Fprintln(stderr, finding.String())
+			_, _ = fmt.Fprintln(stderr, finding.String())
 		}
 		return 1
 	}
-	fmt.Fprintln(stdout, "Workflow credential-literal policy passed.")
+	_, _ = fmt.Fprintln(stdout, "Workflow credential-literal policy passed.")
 	return 0
 }
 
 func runUnityAutomation(root string, allowed map[string]bool, stdout, stderr io.Writer) int {
 	findings, err := auditUnityAutomationRepository(root, allowed)
 	if err != nil {
-		fmt.Fprintf(stderr, "Unity automation audit failed: %s\n", safeDiagnosticComponent(err.Error()))
+		_, _ = fmt.Fprintf(stderr, "Unity automation audit failed: %s\n", safeDiagnosticComponent(err.Error()))
 		return 1
 	}
 	if len(findings) > 0 {
 		for _, finding := range findings {
-			fmt.Fprintln(stderr, finding.String())
+			_, _ = fmt.Fprintln(stderr, finding.String())
 		}
 		return 1
 	}
-	fmt.Fprintln(stdout, "Registered Unity automation policy passed.")
+	_, _ = fmt.Fprintln(stdout, "Registered Unity automation policy passed.")
 	return 0
 }
 
@@ -294,7 +294,7 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	}
 	if args[0] == "unity-automation" {
 		if len(args) < 2 {
-			fmt.Fprintln(stderr, "usage: workflow-credential-audit unity-automation ROOT [ALLOWED_PATH ...]")
+			_, _ = fmt.Fprintln(stderr, "usage: workflow-credential-audit unity-automation ROOT [ALLOWED_PATH ...]")
 			return 2
 		}
 		allowed := make(map[string]bool, len(args)-2)
@@ -304,7 +304,7 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 		return runUnityAutomation(args[1], allowed, stdout, stderr)
 	}
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "usage: workflow-credential-audit [ROOT] | unity-automation ROOT [ALLOWED_PATH ...]")
+		_, _ = fmt.Fprintln(stderr, "usage: workflow-credential-audit [ROOT] | unity-automation ROOT [ALLOWED_PATH ...]")
 		return 2
 	}
 	return run(args[0], stdout, stderr)

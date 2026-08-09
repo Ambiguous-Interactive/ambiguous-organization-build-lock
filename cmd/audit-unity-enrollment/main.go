@@ -36,21 +36,21 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if !*validatePolicyOnly && (*outputPath == "" || *repositoriesRoot == "") {
-		fmt.Fprintln(stderr, "policy, repositories-root, and output are required")
+		_, _ = fmt.Fprintln(stderr, "policy, repositories-root, and output are required")
 		return 2
 	}
 	content, err := os.ReadFile(*policyPath)
 	if err != nil {
-		fmt.Fprintln(stderr, "cannot read Unity enrollment policy")
+		_, _ = fmt.Fprintln(stderr, "cannot read Unity enrollment policy")
 		return 2
 	}
 	registry, err := enrollment.ParseUnityEnrollmentRegistry(content)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid Unity enrollment policy: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "invalid Unity enrollment policy: %v\n", err)
 		return 2
 	}
 	if *validatePolicyOnly {
-		fmt.Fprintln(stdout, "Unity enrollment policy is valid.")
+		_, _ = fmt.Fprintln(stdout, "Unity enrollment policy is valid.")
 		return 0
 	}
 
@@ -69,7 +69,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				Repository: repository.Repository,
 				Code:       "repository-retrieval-incomplete",
 			})
-			fmt.Fprintf(stderr, "Unity enrollment retrieval failed for %s\n", repository.Repository)
+			_, _ = fmt.Fprintf(stderr, "Unity enrollment retrieval failed for %s\n", repository.Repository)
 			continue
 		}
 		audit.Repositories = append(audit.Repositories, enrollment.UnityAuditedRepository{
@@ -91,7 +91,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				SHA:        sha,
 				Code:       "repository-analysis-incomplete",
 			})
-			fmt.Fprintf(stderr, "Unity enrollment analysis failed for %s\n", repository.Repository)
+			_, _ = fmt.Fprintf(stderr, "Unity enrollment analysis failed for %s\n", repository.Repository)
 			continue
 		}
 		audit.Inventory = append(audit.Inventory, result.Inventory...)
@@ -107,10 +107,10 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	}
 	sortAudit(&audit)
 	if err := writeAudit(*outputPath, audit); err != nil {
-		fmt.Fprintln(stderr, "cannot write Unity enrollment audit artifact")
+		_, _ = fmt.Fprintln(stderr, "cannot write Unity enrollment audit artifact")
 		return 2
 	}
-	fmt.Fprintf(
+	_, _ = fmt.Fprintf(
 		stdout,
 		"Audited %d/%d enrolled repositories; active-jobs=%d findings=%d complete=%t\n",
 		len(audit.Repositories),

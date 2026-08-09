@@ -208,7 +208,7 @@ func (client *Client) Request(
 	if err != nil {
 		return nil, nil, errors.New("GitHub API request failed")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
 	}

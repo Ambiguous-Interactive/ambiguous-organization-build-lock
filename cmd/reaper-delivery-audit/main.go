@@ -263,7 +263,7 @@ func run(
 ) int {
 	client, err := newGitHubClient(config, httpClient)
 	if err != nil {
-		fmt.Fprintln(stderr, "Reaper delivery audit failed: invalid configuration.")
+		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: invalid configuration.")
 		return 1
 	}
 	runs, err := client.workflowRuns(ctx, config.Repository, config.Workflow)
@@ -274,18 +274,18 @@ func run(
 		auditFailed = result.Reason == "workflow-evidence-invalid"
 	}
 	if err := client.syncIncident(ctx, config.Repository, result); err != nil {
-		fmt.Fprintln(stderr, "Reaper delivery audit failed: incident-sync-failed.")
+		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: incident-sync-failed.")
 		return 1
 	}
 	if auditFailed {
-		fmt.Fprintf(stderr, "Reaper delivery audit failed: %s.\n", result.Reason)
+		_, _ = fmt.Fprintf(stderr, "Reaper delivery audit failed: %s.\n", result.Reason)
 		return 1
 	}
 	if !result.Healthy {
-		fmt.Fprintf(stdout, "Reaper delivery alert synchronized: %s.\n", result.Reason)
+		_, _ = fmt.Fprintf(stdout, "Reaper delivery alert synchronized: %s.\n", result.Reason)
 		return 0
 	}
-	fmt.Fprintln(stdout, "Reaper delivery audit passed: healthy.")
+	_, _ = fmt.Fprintln(stdout, "Reaper delivery audit passed: healthy.")
 	return 0
 }
 

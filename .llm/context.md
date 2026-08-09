@@ -64,6 +64,11 @@ go mod verify
 go -C tools/actionlint mod verify
 go mod tidy -diff
 go -C tools/actionlint mod tidy -diff
+golangci-lint run --timeout=5m
+bash tools/workflows/ci.sh javascript
+bash tools/workflows/ci.sh shellcheck
+go vet ./...
+go test -race ./...
 go run ./cmd/workflow-credential-audit .
 ```
 

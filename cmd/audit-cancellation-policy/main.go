@@ -27,13 +27,13 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "audit arguments: unexpected positional arguments")
+		_, _ = fmt.Fprintln(stderr, "audit arguments: unexpected positional arguments")
 		return 2
 	}
 
 	snapshot, err := enrollment.LoadGitSnapshot(context.Background(), *repositoryRoot, *repository, *sha)
 	if err != nil {
-		fmt.Fprintf(stderr, "audit snapshot: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "audit snapshot: %v\n", err)
 		return 2
 	}
 	findings, err := enrollment.AnalyzePolicy(snapshot, enrollment.Policy{
@@ -41,7 +41,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		RequiredAcquireSHA: *requiredAcquireSHA,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "audit policy: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "audit policy: %v\n", err)
 		return 2
 	}
 	if err := json.NewEncoder(stdout).Encode(struct {
@@ -49,7 +49,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		SHA        string               `json:"sha"`
 		Findings   []enrollment.Finding `json:"findings"`
 	}{Repository: snapshot.Repository, SHA: snapshot.SHA, Findings: findings}); err != nil {
-		fmt.Fprintf(stderr, "encode audit: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "encode audit: %v\n", err)
 		return 2
 	}
 	if len(findings) > 0 {
