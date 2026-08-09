@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:31295808161:unity:qora",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Tests",
+    "job": "unity",
+    "runId": "31295808161",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31295808161",
+    "queuedAt": "2026-08-09T05:05:14.579Z",
+    "acquiredAt": "2026-08-09T05:07:12.025Z",
+    "expiresAt": "2026-08-09T09:07:12.025Z",
+    "runnerId": "DAD-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/qora-redux:31295808161:unity:qora",
       "repository": "Ambiguous-Interactive/qora-redux",
@@ -13,25 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/31295808161",
       "queuedAt": "2026-08-09T05:05:14.579Z",
+      "acquiredAt": "2026-08-09T05:07:12.025Z",
+      "expiresAt": "2026-08-09T09:07:12.025Z",
       "runnerId": "DAD-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
-    {
-      "reservationId": "75517dbb-3ce8-4cf8-a060-80fee55ebcfc",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31294685618:unitypackage-smoke:unitypackage-smoke-31294685618",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "31294685618",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31294685618",
-      "runnerId": "GitHub Actions 1000179705",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-09T05:07:10.282Z",
-      "availableAt": "2026-08-09T05:07:11.282Z"
-    },
     {
       "reservationId": "62bfdfe5-d05c-4c16-94e2-15ee0bab454a",
       "holderId": "Ambiguous-Interactive/IshoBoy:31295739202:unity-validation:isho-ci",
@@ -49,5 +48,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-09T05:07:11.140Z"
+  "updatedAt": "2026-08-09T05:07:12.025Z"
 }
