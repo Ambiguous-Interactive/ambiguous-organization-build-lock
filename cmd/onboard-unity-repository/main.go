@@ -33,17 +33,17 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *policyPath == "" || *repository == "" || *defaultBranch == "" {
-		fmt.Fprintln(stderr, "policy, repository, and default-branch are required")
+		_, _ = fmt.Fprintln(stderr, "policy, repository, and default-branch are required")
 		return 2
 	}
 	content, err := os.ReadFile(*policyPath)
 	if err != nil {
-		fmt.Fprintln(stderr, "cannot read Unity enrollment policy")
+		_, _ = fmt.Fprintln(stderr, "cannot read Unity enrollment policy")
 		return 2
 	}
 	registry, err := enrollment.ParseUnityEnrollmentRegistry(content)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid Unity enrollment policy: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "invalid Unity enrollment policy: %v\n", err)
 		return 2
 	}
 	candidate := enrollment.UnityEnrollmentRepository{
@@ -53,11 +53,11 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		AllowWorkflowDispatch: *allowWorkflowDispatch,
 	}
 	if err := enrollment.ValidateUnityEnrollmentRepository(candidate); err != nil {
-		fmt.Fprintf(stderr, "cannot onboard Unity repository: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cannot onboard Unity repository: %v\n", err)
 		return 2
 	}
 	if *validateOnly {
-		fmt.Fprintln(stdout, "Unity enrollment target values are valid.")
+		_, _ = fmt.Fprintln(stdout, "Unity enrollment target values are valid.")
 		return 0
 	}
 	registry, err = enrollment.AddUnityEnrollmentRepository(
@@ -65,7 +65,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		candidate,
 	)
 	if err != nil {
-		fmt.Fprintf(stderr, "cannot onboard Unity repository: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cannot onboard Unity repository: %v\n", err)
 		return 2
 	}
 	var output bytes.Buffer
@@ -73,14 +73,14 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	encoder.SetEscapeHTML(true)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(registry); err != nil {
-		fmt.Fprintln(stderr, "cannot encode Unity enrollment policy")
+		_, _ = fmt.Fprintln(stderr, "cannot encode Unity enrollment policy")
 		return 2
 	}
 	if err := replaceFile(*policyPath, output.Bytes()); err != nil {
-		fmt.Fprintln(stderr, "cannot write Unity enrollment policy")
+		_, _ = fmt.Fprintln(stderr, "cannot write Unity enrollment policy")
 		return 2
 	}
-	fmt.Fprintf(stdout, "Added %s to the reviewed Unity enrollment registry.\n", *repository)
+	_, _ = fmt.Fprintf(stdout, "Added %s to the reviewed Unity enrollment registry.\n", *repository)
 	return 0
 }
 
@@ -91,17 +91,17 @@ func replaceFile(path string, content []byte) error {
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if _, err := temporary.Write(content); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if err := temporary.Close(); err != nil {

@@ -1955,6 +1955,22 @@ function queuePosition(state, holderId) {
   return index === -1 ? 0 : index + 1;
 }
 
+// Queue entries are untrusted state read from the lock branch. Preserve FIFO
+// order while collapsing repeated holder IDs in one linear pass; the previous
+// filter/findIndex combination made every acquire poll quadratic in queue size.
+function dedupeQueueEntries(queue) {
+  const seen = new Set();
+  const deduped = [];
+  for (const entry of queue) {
+    if (!entry.holderId || seen.has(entry.holderId)) {
+      continue;
+    }
+    seen.add(entry.holderId);
+    deduped.push(entry);
+  }
+  return deduped;
+}
+
 function pruneExpiredCooldowns(state, now = Date.now()) {
   if (state.schemaVersion < 4) {
     return [];
@@ -2852,9 +2868,7 @@ async function acquire(config) {
           return;
         }
 
-        const dedupedQueue = state.queue.filter((entry, index, queue) => {
-          return entry.holderId && queue.findIndex((candidate) => candidate.holderId === entry.holderId) === index;
-        });
+        const dedupedQueue = dedupeQueueEntries(state.queue);
         state.queue = [];
         for (const entry of dedupedQueue) {
           if (entry.holderId === identity.holderId) {
@@ -3911,6 +3925,7 @@ module.exports = {
   createAppJwt,
   createGitHubAppAuth,
   credential,
+  dedupeQueueEntries,
   emptyState,
   evaluateStale,
   installAcquireSignalCleanup,

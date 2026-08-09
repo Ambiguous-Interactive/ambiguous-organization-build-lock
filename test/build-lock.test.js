@@ -16,6 +16,7 @@ const {
   createAppJwt,
   createGitHubAppAuth,
   credential,
+  dedupeQueueEntries,
   emptyState: productionEmptyState,
   evaluateStale,
   installAcquireSignalCleanup,
@@ -6092,6 +6093,14 @@ test("acquire fails closed when the initial lock config read hits an auth outage
     state.holders.map((entry) => entry.holderId),
     ["owner/repo:123:perf-benchmarks:playmode"]
   );
+});
+
+test("dedupeQueueEntries preserves FIFO order in linear queue cleanup", () => {
+  const first = { holderId: "first" };
+  const second = { holderId: "second" };
+  const duplicate = { holderId: "first", runAttempt: "2" };
+
+  assert.deepEqual(dedupeQueueEntries([{}, first, duplicate, second, { holderId: "" }]), [first, second]);
 });
 
 test("normalizeState migrates legacy single-holder files and dedupes the mirror", () => {

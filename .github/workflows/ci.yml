@@ -42,11 +42,29 @@ jobs:
         shell: bash
         run: go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
+      - name: Run Go static analyzers
+        uses: golangci/golangci-lint-action@0a35821d5c230e903fcfe077583637dea1b27b47 # v9.0.0
+        with:
+          version: v2.12.2
+          args: --timeout=5m
+
+      - name: Run JavaScript static analyzers
+        run: bash tools/workflows/ci.sh javascript
+
+      - name: Run shell static analyzers
+        run: bash tools/workflows/ci.sh shellcheck
+
       - name: Run fast action tests
         run: node --test test/*.test.js
 
       - name: Run Go tests
         run: go test ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Run Go race detector
+        run: go test -race ./...
 
       - name: Verify Go module checksums
         run: bash tools/workflows/ci.sh verify-modules

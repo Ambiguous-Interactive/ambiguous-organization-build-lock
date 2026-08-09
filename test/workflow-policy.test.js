@@ -36,8 +36,12 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/ci.sh syntax",
       "node tools/llm-harness.mjs check",
       "go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
+      "bash tools/workflows/ci.sh javascript",
+      "bash tools/workflows/ci.sh shellcheck",
       "node --test test/*.test.js",
       "go test ./...",
+      "go vet ./...",
+      "go test -race ./...",
       "bash tools/workflows/ci.sh verify-modules",
       "bash tools/workflows/ci.sh tidy-modules",
       "go run ./cmd/workflow-credential-audit .",
@@ -1493,6 +1497,18 @@ test("CI isolates actionlint while keeping production Go dependencies upgradable
   assert.equal(setupGoStep.with["cache-dependency-path"], "|");
   assert.match(text, /cache-dependency-path:\s*\|\s*\n\s+go\.sum\s*\n\s+tools\/actionlint\/go\.sum/);
   assert.ok(lintScript, "CI actionlint run script must stay visible to policy scanning");
+
+  assert.deepEqual(
+    steps.filter((step) => step.name === "Run Go vet" || step.name === "Run Go race detector").map((step) => ({
+      name: step.name,
+      run: step.run
+    })),
+    [
+      { name: "Run Go vet", run: "go vet ./..." },
+      { name: "Run Go race detector", run: "go test -race ./..." }
+    ],
+    "CI must keep Go static analysis and race detection as explicit validation steps"
+  );
 
   assert.doesNotMatch(text, /docker:\/\/rhysd\/actionlint/i, "CI actionlint must not depend on Docker pulls");
   assert.doesNotMatch(text, /https:\/\/github\.com\/rhysd\/actionlint\/releases\/download/i, "CI actionlint must not pin an opaque release URL");

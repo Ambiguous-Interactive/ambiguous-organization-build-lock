@@ -100,8 +100,6 @@ type observation struct {
 	Incident *incident
 }
 
-type alertIssue = githubissue.Issue
-
 type config struct {
 	Lock       string
 	StateRef   string
@@ -119,15 +117,16 @@ type githubClient struct {
 func main() {
 	settings, err := parseConfig(os.Args[1:], os.Getenv)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Build lock incident audit failed: invalid configuration.")
+		_, _ = fmt.Fprintln(os.Stderr, "Build lock incident audit failed: invalid configuration.")
 		os.Exit(1)
 	}
 	// A stalled request must not consume the whole job budget: the next scheduled
 	// run cannot replace a pending one, so a hang would leave an incident
 	// unpublished for far longer than one interval.
 	ctx, cancel := context.WithTimeout(context.Background(), auditDeadline)
-	defer cancel()
-	os.Exit(run(ctx, settings, &http.Client{Timeout: requestTimeout}, os.Stdout, os.Stderr))
+	result := run(ctx, settings, &http.Client{Timeout: requestTimeout}, os.Stdout, os.Stderr)
+	cancel()
+	os.Exit(result)
 }
 
 func run(
@@ -138,12 +137,12 @@ func run(
 ) int {
 	client, err := newGitHubClient(settings.APIURL, settings.Repository, settings.Token, httpClient)
 	if err != nil {
-		fmt.Fprintln(stderr, "Build lock incident audit failed: invalid configuration.")
+		_, _ = fmt.Fprintln(stderr, "Build lock incident audit failed: invalid configuration.")
 		return 1
 	}
 	state, err := client.lockState(ctx, settings.Lock, settings.StateRef)
 	if err != nil {
-		fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateUnavailable, err)
+		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateUnavailable, err)
 		return 1
 	}
 	result := classifyState(state, settings.ServerURL, settings.Lock)
@@ -151,18 +150,18 @@ func run(
 	if result.Reason == reasonStateInvalid {
 		// Ambiguous state can neither prove an incident nor prove recovery, so it
 		// must never open, edit, or close the alert.
-		fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
+		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
 		return 1
 	}
 	if err := client.syncAlert(ctx, result, settings.ServerURL); err != nil {
-		fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonSyncFailed, err)
+		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonSyncFailed, err)
 		return 1
 	}
 	if result.Reason == reasonIncidentActive {
-		fmt.Fprintf(stdout, "Build lock incident alert synchronized: %s.\n", result.Incident.IncidentID)
+		_, _ = fmt.Fprintf(stdout, "Build lock incident alert synchronized: %s.\n", result.Incident.IncidentID)
 		return 0
 	}
-	fmt.Fprintln(stdout, "Build lock incident audit passed: no active global incident.")
+	_, _ = fmt.Fprintln(stdout, "Build lock incident audit passed: no active global incident.")
 	return 0
 }
 

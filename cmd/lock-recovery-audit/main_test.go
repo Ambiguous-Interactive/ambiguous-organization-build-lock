@@ -472,7 +472,6 @@ func slicesContains(values []string, want string) bool {
 type stubGitHub struct {
 	t          *testing.T
 	issues     string
-	author     string
 	created    atomic.Int64
 	patched    atomic.Int64
 	lastBody   atomic.Value
@@ -565,14 +564,14 @@ func (stub *stubGitHub) record(request *http.Request) {
 	stub.lastState.Store(payload.State)
 }
 
-func existingAlert(t *testing.T, state, body, author string) string {
+func existingAlert(t *testing.T, state, body string) string {
 	t.Helper()
 	encoded, err := json.Marshal([]map[string]any{{
 		"number": 1,
 		"state":  state,
 		"title":  alertTitle,
 		"body":   body,
-		"user":   map[string]any{"login": author},
+		"user":   map[string]any{"login": alertAuthor},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -623,19 +622,19 @@ func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
 		{
 			"incident reopens a closed alert",
 			activeState,
-			existingAlert(t, "closed", alertMarker+"\n\nsuperseded evidence", alertAuthor),
+			existingAlert(t, "closed", alertMarker+"\n\nsuperseded evidence"),
 			0, 0, 1, "open",
 		},
 		{
 			"unchanged incident does not churn the alert",
 			activeState,
-			existingAlert(t, "open", activeBody, alertAuthor),
+			existingAlert(t, "open", activeBody),
 			0, 0, 0, "",
 		},
 		{
 			"recovered lock closes the alert",
 			healthyState,
-			existingAlert(t, "open", activeBody, alertAuthor),
+			existingAlert(t, "open", activeBody),
 			0, 0, 1, "closed",
 		},
 		{
@@ -647,7 +646,7 @@ func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
 		{
 			"healthy lock leaves a closed alert alone",
 			healthyState,
-			existingAlert(t, "closed", activeBody, alertAuthor),
+			existingAlert(t, "closed", activeBody),
 			0, 0, 0, "",
 		},
 	}
@@ -690,13 +689,13 @@ func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 		{
 			"state retrieval failure",
 			func() *stubGitHub {
-				return &stubGitHub{stateFail: http.StatusInternalServerError, issues: existingAlert(t, "open", activeBody, alertAuthor)}
+				return &stubGitHub{stateFail: http.StatusInternalServerError, issues: existingAlert(t, "open", activeBody)}
 			},
 		},
 		{
 			"missing state file",
 			func() *stubGitHub {
-				return &stubGitHub{stateFail: http.StatusNotFound, issues: existingAlert(t, "open", activeBody, alertAuthor)}
+				return &stubGitHub{stateFail: http.StatusNotFound, issues: existingAlert(t, "open", activeBody)}
 			},
 		},
 		{
@@ -704,7 +703,7 @@ func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 			func() *stubGitHub {
 				return &stubGitHub{
 					stateBody: []byte(strings.Repeat("x", maxStateBytes+1)),
-					issues:    existingAlert(t, "open", activeBody, alertAuthor),
+					issues:    existingAlert(t, "open", activeBody),
 				}
 			},
 		},
@@ -713,7 +712,7 @@ func TestRunFailsClosedWithoutTouchingTheAlert(t *testing.T) {
 			func() *stubGitHub {
 				return &stubGitHub{
 					stateBody: []byte(`{"schemaVersion":5,"activeIncident":{"incidentId":"nope"}}`),
-					issues:    existingAlert(t, "open", activeBody, alertAuthor),
+					issues:    existingAlert(t, "open", activeBody),
 				}
 			},
 		},
@@ -851,7 +850,7 @@ func TestForeignLookalikeCannotSuppressOrCaptureTheAlert(t *testing.T) {
 func TestRenamedAlertIsStillTheSameAlert(t *testing.T) {
 	t.Parallel()
 	active := incidentFixture()
-	renamed := existingAlert(t, "open", alertMarker+"\nsuperseded evidence", alertAuthor)
+	renamed := existingAlert(t, "open", alertMarker+"\nsuperseded evidence")
 	renamed = strings.Replace(renamed, alertTitle, "[P0] "+alertTitle, 1)
 
 	stub := &stubGitHub{t: t, stateBody: stateFixture(t, &active), issues: renamed}
