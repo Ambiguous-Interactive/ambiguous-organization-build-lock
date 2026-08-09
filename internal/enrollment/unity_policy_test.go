@@ -3139,6 +3139,48 @@ jobs:
 		t.Fatalf("typed conditional validation gate produced findings: %#v", result.Findings)
 	}
 
+	declaredPathsWorkflow := strings.Replace(
+		workflow,
+		"          head-sha: ${{ github.event.pull_request.head.sha }}\n",
+		"          head-sha: ${{ github.event.pull_request.head.sha }}\n"+
+			"          independent-paths: \"Benchmarks/**\"\n",
+		1,
+	)
+	declaredPathsResult, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": declaredPathsWorkflow}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(declaredPathsResult.Findings) != 0 {
+		t.Fatalf("caller-declared independent paths produced findings: %#v", declaredPathsResult.Findings)
+	}
+	for _, declaration := range []string{
+		"${{ github.event.pull_request.head.ref }}",
+		"Benchmarks/*",
+		".github/**",
+		"../outside/**",
+	} {
+		invalidDeclarationWorkflow := strings.Replace(
+			workflow,
+			"          head-sha: ${{ github.event.pull_request.head.sha }}\n",
+			"          head-sha: ${{ github.event.pull_request.head.sha }}\n"+
+				"          independent-paths: \""+declaration+"\"\n",
+			1,
+		)
+		invalidResult, err := AnalyzeUnityEnrollment(
+			unityFixture(map[string]string{".github/workflows/unity.yml": invalidDeclarationWorkflow}),
+			unityAuditPolicy(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(invalidResult.Findings) == 0 {
+			t.Fatalf("invalid caller-declared path %q was accepted", declaration)
+		}
+	}
+
 	tests := []struct {
 		name   string
 		mutate func(string) string
