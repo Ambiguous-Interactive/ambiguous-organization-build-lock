@@ -64,10 +64,10 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 			t.Error("missing token")
 		}
 		requests = append(requests, request.Method+" "+request.URL.Path)
-		switch {
-		case request.Method == http.MethodGet:
+		switch request.Method {
+		case http.MethodGet:
 			_ = json.NewEncoder(writer).Encode(current)
-		case request.Method == http.MethodPost:
+		case http.MethodPost:
 			var payload map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&payload)
 			created := issue{Number: 42, State: "open", Title: alertTitle, Body: payload["body"].(string)}
@@ -75,7 +75,7 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 			current = []issue{created}
 			writer.WriteHeader(http.StatusCreated)
 			_, _ = writer.Write([]byte(`{}`))
-		case request.Method == http.MethodPatch:
+		case http.MethodPatch:
 			var payload map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&payload)
 			current[0].State = payload["state"].(string)

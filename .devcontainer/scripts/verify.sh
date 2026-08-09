@@ -14,8 +14,13 @@ done
 
 go -C tools/actionlint run -mod=readonly \
   github.com/rhysd/actionlint/cmd/actionlint -color
+bash tools/workflows/ci.sh javascript
+bash tools/workflows/ci.sh shellcheck
+GOLANGCI_LINT_CACHE="${RUNNER_TEMP:-/tmp}/ambiguous-golangci-cache" golangci-lint run --timeout=5m
 node --test test/*.test.js
 go test ./...
+go vet ./...
+go test -race ./...
 go mod verify
 go -C tools/actionlint mod verify
 go mod tidy -diff

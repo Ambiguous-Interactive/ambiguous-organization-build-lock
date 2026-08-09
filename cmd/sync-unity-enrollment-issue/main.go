@@ -57,7 +57,7 @@ func run(
 	}
 	audit, err := readAudit(*auditPath)
 	if err != nil {
-		fmt.Fprintln(stderr, "Unity enrollment audit artifact is unavailable or invalid")
+		_, _ = fmt.Fprintln(stderr, "Unity enrollment audit artifact is unavailable or invalid")
 		return 2
 	}
 	client, err := newGitHubClient(
@@ -67,7 +67,7 @@ func run(
 		httpClient,
 	)
 	if err != nil {
-		fmt.Fprintln(stderr, "Unity enrollment issue synchronization is not configured")
+		_, _ = fmt.Fprintln(stderr, "Unity enrollment issue synchronization is not configured")
 		return 2
 	}
 	evidenceURL, err := validatedArtifactURL(
@@ -77,17 +77,17 @@ func run(
 		getenv("UNITY_AUDIT_ARTIFACT_URL"),
 	)
 	if err != nil {
-		fmt.Fprintln(stderr, "Unity enrollment evidence link is unavailable or invalid")
+		_, _ = fmt.Fprintln(stderr, "Unity enrollment evidence link is unavailable or invalid")
 		return 2
 	}
 	if err := client.sync(context.Background(), audit, evidenceURL); err != nil {
-		fmt.Fprintln(stderr, "Unity enrollment issue synchronization failed")
+		_, _ = fmt.Fprintln(stderr, "Unity enrollment issue synchronization failed")
 		return 1
 	}
 	if audit.Complete && len(audit.Findings) == 0 {
-		fmt.Fprintln(stdout, "Unity enrollment audit is complete and clean; drift alert is closed.")
+		_, _ = fmt.Fprintln(stdout, "Unity enrollment audit is complete and clean; drift alert is closed.")
 	} else {
-		fmt.Fprintln(stdout, "Unity enrollment drift alert is open with sanitized evidence.")
+		_, _ = fmt.Fprintln(stdout, "Unity enrollment drift alert is open with sanitized evidence.")
 	}
 	return 0
 }
@@ -97,7 +97,7 @@ func readAudit(path string) (enrollment.UnityOrganizationAudit, error) {
 	if err != nil {
 		return enrollment.UnityOrganizationAudit{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	content, err := io.ReadAll(io.LimitReader(file, maxAuditBytes+1))
 	if err != nil || len(content) > maxAuditBytes {
 		return enrollment.UnityOrganizationAudit{}, fmt.Errorf("audit exceeds size limit")

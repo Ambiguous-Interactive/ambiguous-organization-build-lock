@@ -2029,8 +2029,8 @@ func hasUnresolvedPowerShellInvocation(
 			optionName := strings.TrimLeft(strings.ToLower(option), "-")
 			if optionName == "?" ||
 				(optionName != "" &&
-					(strings.HasPrefix("help", optionName) ||
-						strings.HasPrefix("version", optionName))) {
+					((len(optionName) <= len("help") && "help"[:len(optionName)] == optionName) ||
+						(len(optionName) <= len("version") && "version"[:len(optionName)] == optionName))) {
 				break fileOptions
 			}
 			argument := ""
@@ -2324,7 +2324,7 @@ func powerShellCommandTokens(command string) []string {
 			assignment := len(result) == 0 &&
 				powerShellAssignmentTarget(current)
 			if !assignment && len(result) > 0 &&
-				(current == "" || strings.Contains("+-*/%?", current)) &&
+				(current == "" || (len(current) == 1 && strings.ContainsRune("+-*/%?", rune(current[0])))) &&
 				powerShellAssignmentTokens(result) {
 				assignment = true
 			}
@@ -2446,17 +2446,6 @@ func dynamicPowerShellFileArgument(
 		}
 	}
 	return false
-}
-
-func powerShellUnescapeToken(token string) string {
-	var result strings.Builder
-	for index := 0; index < len(token); index++ {
-		if token[index] == '`' && index+1 < len(token) {
-			index++
-		}
-		result.WriteByte(token[index])
-	}
-	return result.String()
 }
 
 func powerShellSemanticToken(token string) string {
@@ -2821,47 +2810,6 @@ func powerShellVariableAssignments(text string) map[string]string {
 	return result
 }
 
-func expandPowerShellVariables(
-	expression string,
-	assignments map[string]string,
-	visiting map[string]bool,
-) string {
-	var result strings.Builder
-	for index := 0; index < len(expression); {
-		if expression[index] != '$' {
-			result.WriteByte(expression[index])
-			index++
-			continue
-		}
-		end := index + 1
-		braced := end < len(expression) && expression[end] == '{'
-		if braced {
-			end++
-		}
-		for end < len(expression) &&
-			(unicode.IsLetter(rune(expression[end])) ||
-				unicode.IsDigit(rune(expression[end])) ||
-				strings.ContainsRune("_:-", rune(expression[end]))) {
-			end++
-		}
-		if braced && end < len(expression) && expression[end] == '}' {
-			end++
-		}
-		name := strings.ToLower(strings.Trim(expression[index:end], "${}"))
-		value, ok := assignments[name]
-		if !ok || visiting[name] {
-			result.WriteString(expression[index:end])
-			index = end
-			continue
-		}
-		visiting[name] = true
-		result.WriteString(expandPowerShellVariables(value, assignments, visiting))
-		delete(visiting, name)
-		index = end
-	}
-	return result.String()
-}
-
 func normalizePowerShellPathExpression(expression string) string {
 	return strings.Map(func(char rune) rune {
 		if unicode.IsSpace(char) ||
@@ -3020,14 +2968,12 @@ func powerShellScriptTokenReference(token string) (powerShellPathReference, bool
 		if strings.HasPrefix(candidateLower, prefix) &&
 			(prefix == "./" || dynamic) {
 			candidate = candidate[len(prefix):]
-			candidateLower = candidateLower[len(prefix):]
 			break
 		}
 	}
 	for _, prefix := range []string{"$psscriptroot/", "${psscriptroot}/"} {
 		if dynamic && strings.HasPrefix(candidateLower, prefix) {
 			candidate = candidate[len(prefix):]
-			candidateLower = candidateLower[len(prefix):]
 			scriptRelative = true
 			break
 		}
@@ -3081,7 +3027,6 @@ func powerShellPathReferences(text string) []powerShellPathReference {
 			if strings.HasPrefix(candidateLower, prefix) &&
 				(prefix == "./" || dynamic) {
 				candidate = candidate[len(prefix):]
-				candidateLower = candidateLower[len(prefix):]
 				break
 			}
 		}
@@ -3091,7 +3036,6 @@ func powerShellPathReferences(text string) []powerShellPathReference {
 		} {
 			if dynamic && strings.HasPrefix(candidateLower, prefix) {
 				candidate = candidate[len(prefix):]
-				candidateLower = candidateLower[len(prefix):]
 				scriptRelative = true
 				break
 			}
@@ -3286,11 +3230,11 @@ func powerShellCommandNameEnd(text string, start int, command string) (int, bool
 		return index, true
 	}
 	char, _ := utf8.DecodeRuneInString(text[index:])
-	if !unicode.IsSpace(char) && !(text[index] == '`' &&
+	if unicode.IsSpace(char) || (text[index] == '`' &&
 		index+1 < len(text) && text[index+1] == '\n') {
-		return 0, false
+		return index, true
 	}
-	return index, true
+	return 0, false
 }
 
 func skipPowerShellTrivia(text string, index int) int {
@@ -3455,19 +3399,6 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 		result = append(result, nested...)
 	}
 	return result, nil
-}
-
-func stepReferenceID(value *yaml.Node, output string) string {
-	if value == nil || value.Kind != yaml.ScalarNode {
-		return ""
-	}
-	expression := strings.Join(strings.Fields(value.Value), "")
-	const prefix = "${{steps."
-	suffix := ".outputs." + output + "}}"
-	if !strings.HasPrefix(expression, prefix) || !strings.HasSuffix(expression, suffix) {
-		return ""
-	}
-	return strings.TrimSuffix(strings.TrimPrefix(expression, prefix), suffix)
 }
 
 func scalarValue(node *yaml.Node) string {
@@ -4514,22 +4445,6 @@ func commandHasUnityActivationArgument(command string) bool {
 	return false
 }
 
-func stepReturnsUnity(step *yaml.Node) bool {
-	run := mappingValue(step, "run")
-	if run == nil || run.Kind != yaml.ScalarNode {
-		return false
-	}
-	for _, command := range powerShellCommands(run.Value) {
-		if commandInvokesUnityExecutable(command) &&
-			commandHasExactPowerShellArgument(command, "-returnlicense") {
-			return true
-		}
-	}
-	text := strings.ToLower(run.Value)
-	return strings.Contains(text, "& $") && strings.Contains(text, "@return") &&
-		commandHasExactPowerShellArgument(run.Value, "-returnlicense")
-}
-
 func jobEnvContainsCredential(job *yaml.Node) bool {
 	env := mappingValue(job, "env")
 	if env == nil || env.Kind != yaml.MappingNode {
@@ -4783,16 +4698,13 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 			return false
 		}
 	}
-	if !a.validationFallbackMatches(
+	return a.validationFallbackMatches(
 		workflow,
 		workflowPath,
 		jobs,
 		references.fallback,
 		licensedJob,
-	) {
-		return false
-	}
-	return true
+	)
 }
 
 func (a *unityPolicyAnalyzer) validationClassifierMatches(
@@ -4919,10 +4831,7 @@ func validationJobIsolationSafe(workflow, job *yaml.Node) bool {
 			return false
 		}
 	}
-	if mappingValue(mappingValue(job, "strategy"), "matrix") != nil {
-		return false
-	}
-	return true
+	return mappingValue(mappingValue(job, "strategy"), "matrix") == nil
 }
 
 func centralReturnExecutionIsolated(workflow, job *yaml.Node) bool {

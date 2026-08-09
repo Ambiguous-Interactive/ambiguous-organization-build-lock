@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -197,7 +198,8 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 			return false, fmt.Errorf("%s:%s cannot define both uses and steps", workflowPath, jobName)
 		}
 		licensed := false
-		if strings.HasPrefix(call, "./") {
+		switch {
+		case strings.HasPrefix(call, "./"):
 			calledPath, err := cleanRepositoryPath(strings.TrimPrefix(call, "./"))
 			if err != nil {
 				return false, err
@@ -217,7 +219,7 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 				}
 				licensed = licensed || calledLicensed
 			}
-		} else if strings.Contains(call, "/.github/workflows/") {
+		case strings.Contains(call, "/.github/workflows/"):
 			at := strings.LastIndex(call, "@")
 			if at < 0 || !isSHA(call[at+1:]) {
 				a.add("mutable-reusable-ref", workflowPath, jobName)
@@ -226,7 +228,7 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 			// treat the call as license-capable so caller cancellation cannot pass.
 			a.add("unresolved-reusable-workflow", workflowPath, jobName)
 			licensed = true
-		} else {
+		default:
 			return false, fmt.Errorf("%s:%s uses is not a reusable workflow", workflowPath, jobName)
 		}
 		a.jobMemo[key] = licensed
@@ -688,7 +690,7 @@ func (a *analyzer) node(file string) (*yaml.Node, error) {
 		return nil, fmt.Errorf("%s must contain one mapping document", file)
 	}
 	var trailing yaml.Node
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return nil, fmt.Errorf("%s must not contain multiple YAML documents", file)
 		}
