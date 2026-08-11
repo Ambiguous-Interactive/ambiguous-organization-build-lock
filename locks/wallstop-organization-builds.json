@@ -27,8 +27,12 @@
       "acquiredAt": "2026-08-11T01:39:09.409Z",
       "expiresAt": "2026-08-11T05:39:09.409Z",
       "runnerId": "DAD-MACHINE"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "ca4f01ce-55db-4647-a014-070e1faa8e35",
       "holderId": "Ambiguous-Interactive/unity-helpers:31449663962:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
@@ -36,14 +40,13 @@
       "runId": "31449663962",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31449663962",
-      "queuedAt": "2026-08-11T01:39:37.425Z",
-      "acquiredAt": "2026-08-11T01:39:39.795Z",
-      "expiresAt": "2026-08-11T05:39:39.795Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-11T01:42:12.062Z",
+      "availableAt": "2026-08-11T01:42:13.062Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-11T01:39:39.795Z"
+  "updatedAt": "2026-08-11T01:42:12.063Z"
 }
