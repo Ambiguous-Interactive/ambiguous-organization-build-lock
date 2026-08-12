@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:31631485229:unity-tests:unity-tests",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "31631485229",
+    "holderId": "Ambiguous-Interactive/unity-helpers:31629967806:unitypackage-smoke:unitypackage-smoke-31629967806",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unitypackage-smoke",
+    "runId": "31629967806",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/31631485229",
-    "queuedAt": "2026-08-12T19:15:10.138Z",
-    "acquiredAt": "2026-08-12T19:15:13.068Z",
-    "expiresAt": "2026-08-12T23:15:13.068Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31629967806",
+    "queuedAt": "2026-08-12T19:26:39.992Z",
+    "acquiredAt": "2026-08-12T19:26:40.865Z",
+    "expiresAt": "2026-08-12T23:26:40.865Z",
+    "runnerId": "GitHub Actions 1000194361"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:31631485229:unity-tests:unity-tests",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "31631485229",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/31631485229",
-      "queuedAt": "2026-08-12T19:15:10.138Z",
-      "acquiredAt": "2026-08-12T19:15:13.068Z",
-      "expiresAt": "2026-08-12T23:15:13.068Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:31629967806:unitypackage-smoke:unitypackage-smoke-31629967806",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "05516406-79f8-42f1-9437-0969a5b5815a",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:31631485229:unity-tests:unity-tests",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "31631485229",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/31631485229",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-12T19:26:57.519Z",
+      "availableAt": "2026-08-12T19:26:58.519Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-12T19:26:40.865Z"
+  "updatedAt": "2026-08-12T19:26:57.519Z"
 }
