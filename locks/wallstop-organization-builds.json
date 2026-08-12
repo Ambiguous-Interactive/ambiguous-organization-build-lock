@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:31610524381:unity-tests:6000.5.2f1-all-modes",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "31610524381",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31610524381",
+    "queuedAt": "2026-08-12T15:35:26.959Z",
+    "acquiredAt": "2026-08-12T15:38:17.270Z",
+    "expiresAt": "2026-08-12T19:38:17.270Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "94162276769"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:31610524381:unity-tests:6000.5.2f1-all-modes",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,26 +25,14 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31610524381",
       "queuedAt": "2026-08-12T15:35:26.959Z",
-      "runnerId": "DAD-MACHINE"
+      "acquiredAt": "2026-08-12T15:38:17.270Z",
+      "expiresAt": "2026-08-12T19:38:17.270Z",
+      "runnerId": "DAD-MACHINE",
+      "jobId": "94162276769"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "b807c613-31c8-47be-8b37-d9fb1bac9c71",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31607846748:unitypackage-smoke:unitypackage-smoke-31607846748",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "31607846748",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31607846748",
-      "runnerId": "GitHub Actions 1000193509",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-12T15:38:14.549Z",
-      "availableAt": "2026-08-12T15:38:15.549Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-12T15:38:14.549Z"
+  "updatedAt": "2026-08-12T15:38:17.270Z"
 }
