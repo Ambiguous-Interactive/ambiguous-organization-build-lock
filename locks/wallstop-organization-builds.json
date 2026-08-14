@@ -1,24 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:31848066588:unity-tests-standalone:6000.5.2f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "31848066588",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31848066588",
+    "queuedAt": "2026-08-14T23:21:23.972Z",
+    "acquiredAt": "2026-08-14T23:21:26.210Z",
+    "expiresAt": "2026-08-15T03:21:26.210Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "3d7365f1-74af-49f4-b429-37138f94ac4e",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31848066588:unity-tests-standalone:2022.3.45f1-standalone",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31848066588:unity-tests-standalone:6000.5.2f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests-standalone",
       "runId": "31848066588",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31848066588",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-14T23:20:56.521Z"
-    },
+      "queuedAt": "2026-08-14T23:21:23.972Z",
+      "acquiredAt": "2026-08-14T23:21:26.210Z",
+      "expiresAt": "2026-08-15T03:21:26.210Z",
+      "runnerId": "ELI-MACHINE"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "86bae648-510a-4d66-b096-00b6c2230d3e",
       "holderId": "Ambiguous-Interactive/unity-helpers:31848066588:unity-tests-standalone:2021.3.45f1-standalone",
@@ -35,5 +47,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-14T23:21:25.610Z"
+  "updatedAt": "2026-08-14T23:21:26.210Z"
 }
