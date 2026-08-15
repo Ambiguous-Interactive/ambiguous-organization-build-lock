@@ -2,32 +2,19 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:31860003089:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Performance Numbers",
-    "job": "perf-benchmarks",
-    "runId": "31860003089",
+    "holderId": "Ambiguous-Interactive/IshoBoy:31860568686:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "31860568686",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31860003089",
-    "queuedAt": "2026-08-15T02:58:43.653Z",
-    "acquiredAt": "2026-08-15T02:58:46.767Z",
-    "expiresAt": "2026-08-15T06:58:46.767Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/31860568686",
+    "queuedAt": "2026-08-15T03:03:37.536Z",
+    "acquiredAt": "2026-08-15T03:03:40.009Z",
+    "expiresAt": "2026-08-15T07:03:40.009Z",
+    "runnerId": "DAD-MACHINE"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:31860003089:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "31860003089",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31860003089",
-      "queuedAt": "2026-08-15T02:58:43.653Z",
-      "acquiredAt": "2026-08-15T02:58:46.767Z",
-      "expiresAt": "2026-08-15T06:58:46.767Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:31860568686:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -43,7 +30,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "064c1508-9b8f-464f-a697-ab6b393ed489",
+      "holderId": "Ambiguous-Interactive/DxMessaging:31860003089:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "31860003089",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31860003089",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-15T03:07:11.994Z",
+      "availableAt": "2026-08-15T03:07:12.994Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-15T03:03:40.010Z"
+  "updatedAt": "2026-08-15T03:07:11.995Z"
 }
