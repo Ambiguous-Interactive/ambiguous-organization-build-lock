@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:31909341843:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Performance Numbers",
+    "job": "perf-benchmarks",
+    "runId": "31909341843",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31909341843",
+    "queuedAt": "2026-08-15T21:28:40.488Z",
+    "acquiredAt": "2026-08-15T21:31:10.695Z",
+    "expiresAt": "2026-08-16T01:31:10.695Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "95071991521"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:31909341843:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,26 +25,14 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/31909341843",
       "queuedAt": "2026-08-15T21:28:40.488Z",
-      "runnerId": "ELI-MACHINE"
+      "acquiredAt": "2026-08-15T21:31:10.695Z",
+      "expiresAt": "2026-08-16T01:31:10.695Z",
+      "runnerId": "ELI-MACHINE",
+      "jobId": "95071991521"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "d750f725-41de-4bd3-b631-33d9f5c762df",
-      "holderId": "Ambiguous-Interactive/unity-helpers:31906642788:unitypackage-smoke:unitypackage-smoke-31906642788",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "31906642788",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31906642788",
-      "runnerId": "GitHub Actions 1000205923",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-15T21:31:04.412Z",
-      "availableAt": "2026-08-15T21:31:05.412Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-15T21:31:04.413Z"
+  "updatedAt": "2026-08-15T21:31:10.695Z"
 }
