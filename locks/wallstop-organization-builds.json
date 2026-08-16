@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:31978519169:unity-tests:2022.3.45f1-editmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "31978519169",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31978519169",
-    "queuedAt": "2026-08-16T23:15:35.791Z",
-    "acquiredAt": "2026-08-16T23:15:38.191Z",
-    "expiresAt": "2026-08-17T03:15:38.191Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:31978519169:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "31978519169",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31978519169",
-      "queuedAt": "2026-08-16T23:15:35.791Z",
-      "acquiredAt": "2026-08-16T23:15:38.191Z",
-      "expiresAt": "2026-08-17T03:15:38.191Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:31979617596:unity-tests:2022.3.45f1-editmode",
@@ -42,7 +16,22 @@
       "runnerId": "DAD-MACHINE"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "3a382762-b3bd-469f-92ea-e093021e113a",
+      "holderId": "Ambiguous-Interactive/unity-helpers:31978519169:unity-tests:2022.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "31978519169",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/31978519169",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-08-16T23:39:37.627Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-16T23:39:35.519Z"
+  "updatedAt": "2026-08-16T23:39:39.114Z"
 }
