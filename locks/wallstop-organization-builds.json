@@ -1,8 +1,34 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:32065860815:unity-tests:2021.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "32065860815",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32065860815",
+    "queuedAt": "2026-08-17T20:29:00.159Z",
+    "acquiredAt": "2026-08-17T20:29:02.450Z",
+    "expiresAt": "2026-08-18T00:29:02.450Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/unity-helpers:32065860815:unity-tests:2021.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "32065860815",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32065860815",
+      "queuedAt": "2026-08-17T20:29:00.159Z",
+      "acquiredAt": "2026-08-17T20:29:02.450Z",
+      "expiresAt": "2026-08-18T00:29:02.450Z",
+      "runnerId": "ELI-MACHINE"
+    }
+  ],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:32062057977:unity-validation:isho-ci",
@@ -30,22 +56,8 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder run is completed",
       "createdAt": "2026-08-17T17:47:47.125Z"
-    },
-    {
-      "reservationId": "f422dd36-85a8-4411-a6a7-09337b376c48",
-      "holderId": "Ambiguous-Interactive/unity-helpers:32063859981:unity-tests:6000.5.2f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32063859981",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32063859981",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "scheduled stale reaping: holder run is completed",
-      "createdAt": "2026-08-17T20:26:59.295Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-17T20:27:15.458Z"
+  "updatedAt": "2026-08-17T20:29:02.450Z"
 }
