@@ -43,7 +43,7 @@ jobs:
         run: go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color
 
       - name: Run Go static analyzers
-        uses: golangci/golangci-lint-action@0a35821d5c230e903fcfe077583637dea1b27b47 # v9.0.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
           args: --timeout=5m
