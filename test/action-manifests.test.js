@@ -339,6 +339,24 @@ test("release accepts the physical runner identity required by schema 3", () => 
   }
 });
 
+// Issue #198: the retry budget was environment-only, so a consumer hitting a
+// transient outage had no discoverable knob and no way to widen the release window.
+test("release exposes its retry budget as documented inputs", () => {
+  const release = readActionManifest("release-build-lock");
+  const inputs = yamlRequiredTopLevelMappingKeys(release, "inputs", "release-build-lock/action.yml");
+
+  for (const name of [
+    "release-retry-deadline-seconds",
+    "api-max-attempts",
+    "api-retry-base-ms",
+    "api-retry-max-ms"
+  ]) {
+    assert.ok(inputs.includes(name), `release-build-lock must expose ${name}`);
+  }
+  assert.match(release, /release-retry-deadline-seconds:[\s\S]*?default:\s*"120"/);
+  assert.match(release, /cleanup-result:[\s\S]*?lock-release-unreachable/);
+});
+
 test("reaper exposes exact confirmed reservation and incident recovery inputs", () => {
   const reaper = readActionManifest("reap-stale-locks");
   const inputs = yamlRequiredTopLevelMappingKeys(reaper, "inputs", "reap-stale-locks/action.yml");
@@ -553,4 +571,15 @@ test("README documents configurable parallelism and transient-auth handling", ()
   assert.match(readme, /locks\/<lock-name>\.config\.json/);
   assert.match(readme, /BUILD_LOCK_AUTH_GRACE_MS/);
   assert.match(readme, /BUILD_LOCK_CONFIG_TTL_MS/);
+});
+
+test("README documents the time-bounded release retry budget", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+  assert.match(readme, /^## Release Retry Budget$/m);
+  assert.match(readme, /`release-retry-deadline-seconds`\s+\(default 120, maximum 3600\)/);
+  assert.match(readme, /cleanup-result=lock-release-unreachable/);
+  for (const name of ["api-max-attempts", "api-retry-base-ms", "api-retry-max-ms"]) {
+    assert.match(readme, new RegExp(`\`${name}\``));
+  }
 });

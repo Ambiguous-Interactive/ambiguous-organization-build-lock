@@ -19,6 +19,13 @@ const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
+// Acquire and release are not symmetric. Acquire must fail fast because waiting
+// holds a runner and delays the queue before any work has started. Release runs
+// after the guarded work finished and the licensed resource was already returned,
+// so the only thing left is recording it: waiting costs this step's own clock,
+// while failing costs the consumer a full matrix re-run. The release path is
+// therefore bounded by wall clock instead of by a fixed attempt count.
+const DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS = 120;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
@@ -55,6 +62,17 @@ const RESOURCE_REASON_CODES = new Set([
   "return-ulf-skipped",
   "activation-timeout",
   "activation-terminated"
+]);
+// Stable cleanup-result code for "the licensed resource was returned but the
+// lock-state write could not be reached". Consumer gates treat it as unsafe like
+// any other non-release result; it exists so the failure text names the condition.
+const UNRECORDED_RELEASE_RESULT = "lock-release-unreachable";
+// Environment overrides for the shared API retry budget, exposed as release action
+// inputs so a consumer hitting a transient outage has a discoverable knob.
+const API_RETRY_INPUT_ENVIRONMENT = new Map([
+  ["api-max-attempts", "BUILD_LOCK_API_MAX_ATTEMPTS"],
+  ["api-retry-base-ms", "BUILD_LOCK_API_RETRY_BASE_MS"],
+  ["api-retry-max-ms", "BUILD_LOCK_API_RETRY_MAX_MS"]
 ]);
 
 function input(name, fallback = "") {
@@ -602,19 +620,75 @@ function integerEnvironment(name, fallback, minimum = 0) {
   return value;
 }
 
+// The retry budget is read from the environment deep inside every API call, so an
+// action input that names the same knob is applied to that environment once, at
+// configuration time. An explicit input wins over an inherited environment value;
+// an invalid value is warned about and ignored by integerEnvironment.
+function applyApiRetryInputs() {
+  for (const [inputName, environmentName] of API_RETRY_INPUT_ENVIRONMENT) {
+    const value = input(inputName);
+    if (value !== "") {
+      process.env[environmentName] = value;
+    }
+  }
+}
+
 function apiRetryOptions(overrides = {}) {
   const retrySleep = overrides.sleep || sleep;
   const signal = overrides.signal;
+  // A caller that supplies an absolute deadline is asking for a time-bounded
+  // budget: keep retrying until the deadline instead of stopping after a fixed
+  // number of backoffs. An explicitly configured attempt ceiling still wins.
+  const timeBounded = Number.isFinite(overrides.deadlineAt);
   return {
-    maxAttempts: integerEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS", DEFAULT_API_MAX_ATTEMPTS, 1),
+    maxAttempts: integerEnvironment(
+      "BUILD_LOCK_API_MAX_ATTEMPTS",
+      timeBounded ? Number.POSITIVE_INFINITY : DEFAULT_API_MAX_ATTEMPTS,
+      1
+    ),
     baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
     maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    deadlineAt: null,
     fullJitter: false,
     now: Date.now,
     random: Math.random,
     ...overrides,
     sleep: (ms) => retrySleep(ms, { signal })
   };
+}
+
+// Decide whether one more attempt fits in the budget, and how long to wait first.
+// An attempt-bounded budget stops after `maxAttempts`. A time-bounded budget stops
+// when the deadline has passed, and shortens its last wait so the final attempt
+// still starts inside the deadline instead of being skipped by a long backoff.
+function apiRetryBudget(retry, attempt, proposeDelayMs) {
+  if (attempt >= retry.maxAttempts) {
+    return { exhausted: true, delayMs: 0, deadlineReason: null };
+  }
+  if (!Number.isFinite(retry.deadlineAt)) {
+    return { exhausted: false, delayMs: proposeDelayMs(), deadlineReason: null };
+  }
+  const now = retry.now();
+  if (now >= retry.deadlineAt) {
+    return {
+      exhausted: true,
+      delayMs: 0,
+      deadlineReason: `deadline ${new Date(retry.deadlineAt).toISOString()}`
+    };
+  }
+  return {
+    exhausted: false,
+    delayMs: boundedRetryDelayMs(proposeDelayMs(), retry.deadlineAt, now),
+    deadlineReason: null
+  };
+}
+
+// Name the budget the next attempt is spending, so a retry warning stays readable
+// whether the bound is an attempt ceiling or a wall-clock deadline.
+function retryProgress(retry, attempt) {
+  return Number.isFinite(retry.maxAttempts)
+    ? `attempt ${attempt + 1}/${retry.maxAttempts}`
+    : `attempt ${attempt + 1} before ${new Date(retry.deadlineAt).toISOString()}`;
 }
 
 function jitter(ms) {
@@ -634,7 +708,7 @@ function acquirePollDelayMs(baseDelayMs, reservations, now = Date.now(), random 
   return baseDelayMs + Math.floor(random() * Math.max(250, Math.floor(baseDelayMs / 3)));
 }
 
-function acquireRetryDelayMs(proposedDelayMs, deadline, now = Date.now()) {
+function boundedRetryDelayMs(proposedDelayMs, deadline, now = Date.now()) {
   return Math.max(0, Math.min(proposedDelayMs, deadline - now));
 }
 
@@ -885,14 +959,15 @@ async function api(method, path, body, authToken, options = {}) {
         if (mutationMethod && isUnknownOutcomeMutationResponse(response)) {
           unknownOutcomeMutationFailure = true;
         }
-        if (attempt >= retry.maxAttempts) {
-          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
+        const budget = apiRetryBudget(retry, attempt, () => retryDelayMs(response, attempt, retry));
+        if (budget.exhausted) {
+          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
         }
-        const delay = retryDelayMs(response, attempt, retry);
+        const delay = budget.delayMs;
         throwIfAborted(retry.signal);
         console.log(
           `::warning::${method} ${path} returned HTTP ${response.status}; retrying in ${delay} ms ` +
-            `(attempt ${attempt + 1}/${retry.maxAttempts}; ${responseDetails(response, data, text)}).`
+            `(${retryProgress(retry, attempt)}; ${responseDetails(response, data, text)}).`
         );
         await retry.sleep(delay);
         continue;
@@ -922,17 +997,18 @@ async function api(method, path, body, authToken, options = {}) {
         requestId: "",
         description: `transport error: ${oneLine(error.message)}`
       };
-      if (attempt >= retry.maxAttempts) {
-        throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
+      const budget = apiRetryBudget(retry, attempt, () => retryDelayMs(null, attempt, retry));
+      if (budget.exhausted) {
+        throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
       }
       if (mutationMethod) {
         unknownOutcomeMutationFailure = true;
       }
-      const delay = retryDelayMs(null, attempt, retry);
+      const delay = budget.delayMs;
       throwIfAborted(retry.signal);
       console.log(
         `::warning::${method} ${path} failed before receiving a response; retrying in ${delay} ms ` +
-          `(attempt ${attempt + 1}/${retry.maxAttempts}; ${oneLine(error.message)}).`
+          `(${retryProgress(retry, attempt)}; ${oneLine(error.message)}).`
       );
       await retry.sleep(delay);
     }
@@ -2044,10 +2120,10 @@ function explicitReleaseMessage(cleanupResult, lockName) {
   return `No release needed for ${lockName}.`;
 }
 
-function writeReleaseOutputs(config, identity, result) {
+function writeReleaseOutputs(config, identity, result, cleanupResult = cleanupResultName(result)) {
   writeOutput("released", String(result.released));
   writeOutput("queue-cleaned", String(result.queueCleaned));
-  writeOutput("cleanup-result", cleanupResultName(result));
+  writeOutput("cleanup-result", cleanupResult);
   writeOutput("lock-name", config.lockName);
   writeOutput("holder-id", identity.holderId);
   writeOutput("state-sha", result.sha || "");
@@ -2282,7 +2358,9 @@ async function cleanupIdentity(config, identity, options = {}) {
     }, state, write.sha, heldBy, heldByRunUrl);
   }
 
-  throw new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
+  const casExhausted = new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
+  casExhausted.code = "LOCK_STATE_CAS_EXHAUSTED";
+  throw casExhausted;
 }
 
 function observationText(config, observation, attempts, elapsedMs) {
@@ -2827,7 +2905,7 @@ async function acquire(config) {
           if (backfillHolderJobId) {
             const write = await writeState(config, sha, state, `Backfill exact job for ${config.lockName}`, { apiOptions });
             if (write.conflict) {
-              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
               continue;
             }
             const verified = await readState(config, { apiOptions });
@@ -2841,7 +2919,7 @@ async function acquire(config) {
               verifiedHolder.runAttempt !== identity.runAttempt ||
               verifiedHolder.jobId !== identity.jobId
             ) {
-              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
               continue;
             }
             acquiredStateSha = verified.sha || write.sha;
@@ -3013,7 +3091,7 @@ async function acquire(config) {
                 quarantineRecovered = true;
               }
             }
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           if (canRecoverQuarantine) {
@@ -3037,7 +3115,7 @@ async function acquire(config) {
                 verifiedHolder.runnerId !== identity.runnerId ||
                 verifiedHolder.runAttempt !== identity.runAttempt))
           ) {
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           await revalidatePrHead({ force: true, cleanup: true });
@@ -3066,7 +3144,7 @@ async function acquire(config) {
               lockStateMayNeedCleanup = true;
               recordPostCleanupNeeded();
             }
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           lockStateMayNeedCleanup = true;
@@ -3075,7 +3153,7 @@ async function acquire(config) {
 
         const pollNow = Date.now();
         const pollDelayMs = acquirePollDelayMs(config.pollSeconds * 1000, reservations, pollNow);
-        await sleep(acquireRetryDelayMs(pollDelayMs, deadline, pollNow), { signal: apiOptions.signal });
+        await sleep(boundedRetryDelayMs(pollDelayMs, deadline, pollNow), { signal: apiOptions.signal });
       } catch (error) {
         if (isCancellationError(error, cancellation)) {
           throw error;
@@ -3101,7 +3179,7 @@ async function acquire(config) {
             );
             const authDeadline = Math.min(deadline, authFailureSince + authGraceMs);
             await sleep(
-              acquireRetryDelayMs(jitter(config.pollSeconds * 1000), authDeadline, now),
+              boundedRetryDelayMs(jitter(config.pollSeconds * 1000), authDeadline, now),
               { signal: apiOptions.signal }
             );
             continue;
@@ -3140,9 +3218,29 @@ async function acquire(config) {
   }
 }
 
+// The lock-state write is the last thing a release does, and it is pure
+// bookkeeping: the licensed resource has already been returned. Bound the whole
+// release by one wall-clock deadline so a transient GitHub outage that outlasts a
+// handful of backoffs cannot red an otherwise successful consumer matrix.
+// `0` restores the shared attempt-bounded budget.
+function releaseRetryApiOptions(config, now = Date.now()) {
+  const seconds = config.releaseRetryDeadlineSeconds;
+  const effective = Number.isInteger(seconds) ? seconds : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
+  return effective > 0 ? { deadlineAt: now + effective * 1000 } : undefined;
+}
+
+// A release that cannot reach the lock-state file after confirmed cleanup is not a
+// lock in an unknown state: the licensed resource was returned, and the stale
+// holder entry left behind is reclaimed by the lock's own lease timeout. Report it
+// under its own stable code so one line tells an operator the resource is safe.
+function isUnrecordedReleaseError(error) {
+  return Boolean(
+    error && (error.code === "GITHUB_API_RETRY_EXHAUSTED" || error.code === "LOCK_STATE_CAS_EXHAUSTED")
+  );
+}
+
 async function release(config) {
   validateLockName(config.lockName);
-  await ensureStateBranch(config);
   const identity = currentIdentity(config);
   if (config.targetHolderId) {
     const targetHolderId = String(config.targetHolderId).trim();
@@ -3170,19 +3268,55 @@ async function release(config) {
     );
   }
 
-  const lockConfig = await readLockConfig(config);
   const resourceReport = config.resourceReport || {
     cleanupStatus: config.resourceSafe === true ? "confirmed" : "unknown",
     health: "healthy",
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
-  const result = await cleanupIdentity(config, identity, {
-    resourceSafe: resourceReport.cleanupStatus === "confirmed",
-    resourceHealth: resourceReport.health,
-    resourceReason: resourceReport.reason,
-    releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
-    reason: resourceReport.reason
-  });
+  const apiOptions = releaseRetryApiOptions(config);
+  let result;
+  try {
+    await ensureStateBranch(config, { apiOptions });
+    const lockConfig = await readLockConfig(config, { apiOptions });
+    result = await cleanupIdentity(config, identity, {
+      resourceSafe: resourceReport.cleanupStatus === "confirmed",
+      resourceHealth: resourceReport.health,
+      resourceReason: resourceReport.reason,
+      releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
+      reason: resourceReport.reason,
+      apiOptions
+    });
+  } catch (error) {
+    if (
+      isUnrecordedReleaseError(error) &&
+      resourceReport.cleanupStatus === "confirmed" &&
+      config.resourceReportDegraded !== true
+    ) {
+      writeReleaseOutputs(
+        config,
+        identity,
+        {
+          released: false,
+          queueCleaned: false,
+          sha: "",
+          heldBy: "",
+          heldByRunUrl: "",
+          globalQuarantined: false,
+          incidentId: "",
+          resourceHealth: resourceReport.health,
+          resourceReason: resourceReport.reason
+        },
+        UNRECORDED_RELEASE_RESULT
+      );
+      throw new Error(
+        `Could not record the release of ${config.lockName} for ${identity.holderId}: ${oneLine(error.message)}. ` +
+          "External cleanup was confirmed and the licensed resource is not held; only the lock-state write is " +
+          `unreachable, so the stale holder entry is reclaimed by the lock's lease timeout (${UNRECORDED_RELEASE_RESULT}).`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
   writeReleaseOutputs(config, identity, result);
   const cleanupResult = cleanupResultName(result);
   if (result.heldBy) {
@@ -3848,6 +3982,7 @@ function config() {
       validationError: ""
     };
   const resourceReport = resourceReportResolution.report;
+  applyApiRetryInputs();
   return {
     token,
     readerToken: readerCredentialRequired(MODE, operation) ? readerCredential(lockRepo.owner) : null,
@@ -3879,6 +4014,11 @@ function config() {
       "minimum-release-cooldown-seconds",
       0,
       86400
+    ),
+    releaseRetryDeadlineSeconds: nonNegativeIntegerInput(
+      "release-retry-deadline-seconds",
+      DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
+      3600
     ),
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
@@ -3917,9 +4057,9 @@ if (require.main === module) {
 module.exports = {
   acquire,
   acquirePollDelayMs,
-  acquireRetryDelayMs,
   api,
   authorizeCaller,
+  boundedRetryDelayMs,
   cleanupIdentity,
   config,
   createAppJwt,

@@ -15,7 +15,11 @@ const ALLOWED = {
     "global-quarantined",
     "released",
     "queue-cleaned",
-    "noop"
+    "noop",
+    // Reported when confirmed cleanup could not be recorded because the lock-state
+    // file stayed unreachable. Still not "noop", so the gate keeps failing; naming
+    // it keeps the diagnostic from reading as an unknown lock state.
+    "lock-release-unreachable"
   ])
 };
 

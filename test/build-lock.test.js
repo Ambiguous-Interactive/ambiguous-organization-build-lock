@@ -9,9 +9,9 @@ const test = require("node:test");
 const {
   acquire,
   acquirePollDelayMs,
-  acquireRetryDelayMs,
   api,
   authorizeCaller,
+  boundedRetryDelayMs,
   config,
   createAppJwt,
   createGitHubAppAuth,
@@ -4127,6 +4127,321 @@ test("release reports noop with holder context when this run has no state to cle
   assert.equal(wrote, false);
 });
 
+// Issue #198: a 503 on the final release write cost a consumer its whole Unity
+// matrix because five attempts of exponential backoff are over in ~15 seconds.
+// A caller that supplies a deadline retries on wall clock instead.
+test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", async (t) => {
+  const startedAt = 1_800_000_000_000;
+
+  await t.test("keeps retrying past the attempt ceiling until the call succeeds", async () => {
+    let now = startedAt;
+    let calls = 0;
+    const delays = [];
+
+    await withMockedFetch(async () => {
+      calls++;
+      return calls <= 8
+        ? jsonResponse(503, { message: "No server is currently available to service your request." })
+        : jsonResponse(200, { ok: true });
+    }, async (logs) => {
+      const result = await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+        deadlineAt: startedAt + 600_000,
+        now: () => now,
+        sleep: async (ms) => {
+          delays.push(ms);
+          now += ms;
+        }
+      });
+
+      assert.deepEqual(result, { ok: true });
+      assert.equal(logs.length, 8);
+      assert.match(logs[7], /attempt 9 before 2027-01-\d\dT/);
+      assert.ok(
+        logs.every((line) => !line.includes("Infinity")),
+        "a time-bounded budget must not advertise an infinite attempt ceiling"
+      );
+    });
+
+    assert.equal(calls, 9, "expected retries to continue well past the 5-attempt ceiling");
+    assert.equal(delays.length, 8);
+    assert.ok(delays.every((ms) => ms <= 10_000), `expected capped backoff, saw ${delays.join()}`);
+    assert.ok(now <= startedAt + 600_000, "expected every attempt to start inside the deadline");
+  });
+
+  await t.test("stops on its deadline and names it in the exhausted error", async () => {
+    let now = startedAt;
+    let calls = 0;
+    const deadlineAt = startedAt + 120_000;
+
+    await withMockedFetch(async () => {
+      calls++;
+      return jsonResponse(503, { message: "No server is currently available." }, { "x-github-request-id": "REQ503" });
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            deadlineAt,
+            now: () => now,
+            sleep: async (ms) => {
+              now += ms;
+            }
+          }),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.match(error.message, /because the bounded deadline elapsed \(deadline /);
+          assert.match(error.message, /HTTP 503: .*request-id=REQ503/);
+          return true;
+        }
+      );
+    });
+
+    assert.ok(calls > 5, `expected more than the 5-attempt ceiling, saw ${calls}`);
+    assert.ok(now >= deadlineAt, "expected the budget to run to its deadline");
+    assert.ok(now < deadlineAt + 10_000, "expected the last wait to be clamped to the deadline");
+  });
+
+  await t.test("leaves the attempt-bounded budget unchanged without a deadline", async () => {
+    let calls = 0;
+
+    await withEnvironment({ BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" }, async () => {
+      await withMockedFetch(async () => {
+        calls++;
+        return jsonResponse(503, { message: "No server is currently available." });
+      }, async () => {
+        await assert.rejects(
+          () => api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token"),
+          /exhausted its bounded GitHub API retry budget after 5 attempt\(s\); last failure/
+        );
+      });
+    });
+
+    assert.equal(calls, 5);
+  });
+});
+
+test("release records a holder removal that needs more than the attempt-bounded budget", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let writeAttempts = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withEnvironment(
+      { BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" },
+      async () => {
+        await withActionEnv(
+          {
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "1",
+            GITHUB_WORKFLOW: "Perf",
+            GITHUB_JOB: "perf-benchmarks",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  writeAttempts++;
+                  return writeAttempts <= 8
+                    ? jsonResponse(503, { message: "No server is currently available." })
+                    : jsonResponse(200, { content: { sha: "state-after-release" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-release"
+                });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await release({
+                token: "token",
+                lockName: "wallstop-organization-builds",
+                holderIdSuffix: "playmode",
+                lockRepository: "o/r",
+                lockRepo: { owner: "o", repo: "r" },
+                stateBranch: "lock-state",
+                statePath: "locks/wallstop-organization-builds.json",
+                resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+              });
+            });
+          }
+        );
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs.released, "true");
+    assert.equal(outputs["state-sha"], "state-after-release");
+  });
+
+  assert.equal(writeAttempts, 9);
+});
+
+test("release separates an unreachable lock-state write from an unknown lock state", async (t) => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  const cases = [
+    {
+      name: "confirmed cleanup reports lock-release-unreachable",
+      report: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" },
+      error: /Could not record the release of wallstop-organization-builds .*lock-release-unreachable/,
+      expected: {
+        "cleanup-result": "lock-release-unreachable",
+        released: "false",
+        "queue-cleaned": "false",
+        "resource-health": "healthy",
+        "resource-reason": "cleanup-confirmed",
+        "state-sha": "",
+        "reservation-id": "",
+        "reservation-state": "",
+        "incident-id": ""
+      }
+    },
+    {
+      name: "unproven cleanup keeps the raw unreachable failure",
+      report: { cleanupStatus: "unknown", health: "healthy", reason: "cleanup-evidence-unknown" },
+      error: /exhausted its bounded GitHub API retry budget/,
+      expected: null
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withTempFile(async (outputFile) => {
+        await withEnvironment(
+          {
+            BUILD_LOCK_API_RETRY_BASE_MS: "0",
+            BUILD_LOCK_API_RETRY_MAX_MS: "0",
+            BUILD_LOCK_API_MAX_ATTEMPTS: "3"
+          },
+          async () => {
+            await withActionEnv(
+              {
+                GITHUB_REPOSITORY: "owner/repo",
+                GITHUB_RUN_ID: "123",
+                GITHUB_RUN_ATTEMPT: "1",
+                GITHUB_WORKFLOW: "Perf",
+                GITHUB_JOB: "perf-benchmarks",
+                GITHUB_OUTPUT: outputFile
+              },
+              async () => {
+                await withMockedFetch(async (url, options = {}) => {
+                  const parsed = new URL(url);
+                  if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                    return jsonResponse(200, { object: { sha: "branch-sha" } });
+                  }
+                  if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                    if (options.method === "PUT") {
+                      return jsonResponse(503, { message: "No server is currently available." });
+                    }
+                    return jsonResponse(200, {
+                      content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                      sha: "state-before-release"
+                    });
+                  }
+                  return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+                }, async () => {
+                  await assert.rejects(
+                    () =>
+                      release({
+                        token: "token",
+                        lockName: "wallstop-organization-builds",
+                        holderIdSuffix: "playmode",
+                        lockRepository: "o/r",
+                        lockRepo: { owner: "o", repo: "r" },
+                        stateBranch: "lock-state",
+                        statePath: "locks/wallstop-organization-builds.json",
+                        resourceReport: testCase.report
+                      }),
+                    testCase.error
+                  );
+                });
+              }
+            );
+          }
+        );
+
+        const outputs = readEnvironmentFile(outputFile);
+        if (!testCase.expected) {
+          assert.deepEqual(outputs, {});
+          return;
+        }
+        assertOutputContract(outputs, releaseOutputNames);
+        for (const [name, value] of Object.entries(testCase.expected)) {
+          assert.equal(outputs[name], value, `output ${name}`);
+        }
+        assert.equal(outputs["holder-id"], "owner/repo:123:perf-benchmarks:playmode");
+        assert.equal(outputs["lock-name"], "wallstop-organization-builds");
+      });
+    });
+  }
+});
+
+test("release retry knobs are configurable through action inputs", async () => {
+  await withEnvironment(
+    {
+      "INPUT_LOCK-NAME": "wallstop-organization-builds",
+      "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+      "INPUT_RELEASE-RETRY-DEADLINE-SECONDS": "300",
+      "INPUT_API-MAX-ATTEMPTS": "9",
+      "INPUT_API-RETRY-BASE-MS": "250",
+      "INPUT_API-RETRY-MAX-MS": "5000",
+      BUILD_LOCK_API_MAX_ATTEMPTS: undefined,
+      BUILD_LOCK_API_RETRY_BASE_MS: undefined,
+      BUILD_LOCK_API_RETRY_MAX_MS: "60000",
+      GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+      GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+      GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
+      BUILD_LOCK_APP_ID: "12345",
+      BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey
+    },
+    () => {
+      assert.equal(config().releaseRetryDeadlineSeconds, 300);
+      assert.deepEqual(
+        [
+          process.env.BUILD_LOCK_API_MAX_ATTEMPTS,
+          process.env.BUILD_LOCK_API_RETRY_BASE_MS,
+          process.env.BUILD_LOCK_API_RETRY_MAX_MS
+        ],
+        ["9", "250", "5000"],
+        "an explicit input must win over an inherited environment value"
+      );
+    }
+  );
+});
+
 test("reap writes full output contract when no stale state is found", async () => {
   const state = emptyState("wallstop-organization-builds");
   let wrote = false;
@@ -7544,7 +7859,7 @@ test("acquire retry delays never exceed their governing deadline", async (t) => 
     }
   ]) {
     await t.test(testCase.name, () => {
-      assert.equal(acquireRetryDelayMs(testCase.proposed, testCase.deadline, now), testCase.expected);
+      assert.equal(boundedRetryDelayMs(testCase.proposed, testCase.deadline, now), testCase.expected);
     });
   }
 });

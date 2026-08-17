@@ -34,13 +34,35 @@ inputs:
     description: Branch that stores lock state JSON files.
     required: false
     default: lock-state
+  release-retry-deadline-seconds:
+    description: >-
+      Wall-clock budget for reaching the lock-state file. Release retries a
+      transient GitHub API failure until this deadline instead of stopping after
+      a fixed attempt count, because the licensed resource is already returned by
+      then. Use 0 to restore the shared attempt-bounded budget.
+    required: false
+    default: "120"
+  api-max-attempts:
+    description: >-
+      Attempt ceiling for the shared GitHub API retry budget. Unset means 5 for
+      attempt-bounded callers and no ceiling while a release deadline is active.
+    required: false
+  api-retry-base-ms:
+    description: Initial GitHub API retry backoff in milliseconds. Unset means 1000.
+    required: false
+  api-retry-max-ms:
+    description: Maximum GitHub API retry backoff in milliseconds. Unset means 10000.
+    required: false
 outputs:
   released:
     description: "true when this action released a held lock."
   queue-cleaned:
     description: "true when this action removed this run from the wait queue."
   cleanup-result:
-    description: "cooldown-started, quarantined, global-quarantined, released, queue-cleaned, or noop."
+    description: >-
+      cooldown-started, quarantined, global-quarantined, released, queue-cleaned,
+      noop, or lock-release-unreachable when confirmed cleanup could not be
+      recorded because the lock-state file stayed unreachable.
   lock-name:
     description: Target lock name.
   holder-id:

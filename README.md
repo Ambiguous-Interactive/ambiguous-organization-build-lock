@@ -546,6 +546,42 @@ Genuinely bad credentials still fail once the grace window is exhausted, and
 the holder-status poll continues to treat post-retry 401s as "status unknown"
 governed by the holder lease.
 
+## Release Retry Budget
+
+Acquire and release are deliberately asymmetric. Acquire fails fast: waiting
+holds a runner and delays the queue before any licensed work has started.
+Release is the opposite. By the time it runs the guarded work is finished and
+the licensed resource has already been returned, so the only thing left is
+recording it — waiting costs this step's own clock, while failing costs the
+consumer a full matrix re-run.
+
+The release action therefore bounds its lock-state reads and writes by wall
+clock instead of by a fixed attempt count. `release-retry-deadline-seconds`
+(default 120, maximum 3600) is the whole budget for reaching the lock-state
+file; retries continue for that long rather than stopping after the shared
+five-attempt ceiling, which exponential backoff exhausts in roughly 15 seconds.
+Set it to `0` to restore the attempt-bounded budget. Keep it below the calling
+step's `timeout-minutes`.
+
+The shared backoff knobs are also exposed as release inputs — `api-max-attempts`,
+`api-retry-base-ms`, and `api-retry-max-ms` — which set
+`BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
+`BUILD_LOCK_API_RETRY_MAX_MS` for the action. An explicit input wins over an
+inherited environment value; an invalid value is warned about and ignored.
+Leaving `api-max-attempts` unset means the release deadline is the only bound.
+`api-retry-max-ms: "0"` disables backoff entirely, including honoring
+`Retry-After`; combined with an active deadline that means continuous retry for
+the whole budget, so do not set it outside tests.
+
+When confirmed external cleanup cannot be recorded because the lock-state file
+stays unreachable for the whole budget, the release step still fails, but it
+reports `cleanup-result=lock-release-unreachable` before failing. That is not a
+lock in an unknown state: the licensed resource was returned, and the stale
+holder entry left behind is reclaimed by the lock's own lease timeout. The
+`require-confirmed-unity-cleanup` gate renders the same code so one diagnostic
+line distinguishes it from a genuinely unsafe cleanup. Cleanup evidence that was
+never confirmed keeps the raw failure and no such claim is made.
+
 ## Stale Recovery
 
 The `Reap stale build locks` workflow requests reaping every five minutes with

@@ -4,6 +4,11 @@
 const fs = require("node:fs");
 
 const ABSENT_VALUES = new Set(["", "missing", "none"]);
+// The central release reports this when external cleanup was confirmed but the
+// lock-state write stayed unreachable. It is still unsafe to proceed as if the
+// lock were released, so the gate keeps failing; naming it separates "the lock is
+// in an unknown state" from "the licensed resource is fine, the record is not".
+const UNRECORDED_RELEASE_RESULT = "lock-release-unreachable";
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const INCIDENT_ID_PATTERN = /^incident-[a-f0-9]{24}$/;
 const ALLOWED = {
@@ -31,7 +36,8 @@ const ALLOWED = {
     "global-quarantined",
     "released",
     "queue-cleaned",
-    "noop"
+    "noop",
+    UNRECORDED_RELEASE_RESULT
   ]),
   reservationState: new Set(["", "none", "missing", "cooldown", "quarantine"])
 };
@@ -79,11 +85,18 @@ function evaluateCleanupGate(values) {
     failures.push("the central release step did not succeed");
   }
   const globalIncidentResult = observed.cleanupResult === "global-quarantined";
-  if (!new Set(["cooldown-started", "global-quarantined", "released"]).has(observed.cleanupResult)) {
-    failures.push("the central release did not report a safe holder-release result");
-  }
-  if (observed.released !== "true") {
-    failures.push("the central release did not confirm holder ownership removal");
+  if (observed.cleanupResult === UNRECORDED_RELEASE_RESULT) {
+    failures.push(
+      "the central release could not record holder removal because the lock-state file stayed unreachable " +
+        "(the licensed resource was returned; the stale holder entry is reclaimed by the lock lease timeout)"
+    );
+  } else {
+    if (!new Set(["cooldown-started", "global-quarantined", "released"]).has(observed.cleanupResult)) {
+      failures.push("the central release did not report a safe holder-release result");
+    }
+    if (observed.released !== "true") {
+      failures.push("the central release did not confirm holder ownership removal");
+    }
   }
   if (observed.releaseHealth !== "healthy") {
     failures.push("the central release did not report healthy resource state");
