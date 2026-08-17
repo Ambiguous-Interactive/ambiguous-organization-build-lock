@@ -590,4 +590,6 @@ test("README documents the time-bounded release retry budget", () => {
   // tell an operator this condition self-heals.
   assert.match(readme, /quarantines the stale\s+holder entry/);
   assert.doesNotMatch(readme, /reclaimed by the lock's own lease\s+timeout/);
+  assert.match(readme, /`Retry-After` from GitHub is honored in full/);
+  assert.match(readme, /neither channel may configure a zero backoff/);
 });

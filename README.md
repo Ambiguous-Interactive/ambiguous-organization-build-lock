@@ -568,17 +568,25 @@ ceiling, which exponential backoff exhausts in roughly 15 seconds. Set it to `0`
 to restore the attempt-bounded budget. Keep it below the calling step's
 `timeout-minutes`.
 
-The deadline deliberately covers only the lock-state read and write. The
-preparatory state-branch and lock-config calls keep the shared attempt budget, so
-a long outage on those cannot spend the budget that exists to protect the write
-itself.
+The deadline covers the whole cleanup, including its compare-and-swap retries,
+and it does not restart per attempt. The preparatory state-branch and lock-config
+calls keep the shared attempt budget, so a long outage on those cannot spend the
+budget that exists to protect the write itself.
+
+While a deadline is active, a `Retry-After` from GitHub is honored in full rather
+than truncated to the backoff cap, because the deadline already bounds the total
+wait and retrying early only re-triggers the same secondary rate limit. The
+backoff cap still applies on the attempt-bounded paths.
 
 The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
 (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
 which set `BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
 `BUILD_LOCK_API_RETRY_MAX_MS` for the action. An explicit input wins over an
 inherited environment value, and an out-of-range input fails the action rather
-than silently running a different budget than the caller asked for. Leaving
+than silently running a different budget than the caller asked for. The same
+ranges apply to those environment variables, which warn and fall back to the
+defaults instead: neither channel may configure a zero backoff, which under an
+active deadline would retry without pause for the whole budget. Leaving
 `api-max-attempts` unset means the release deadline is the only bound.
 
 When confirmed external cleanup cannot be confirmed as recorded because the

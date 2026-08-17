@@ -1817,7 +1817,7 @@ test("writeState does not mark a 401-then-conflict sequence as an ambiguous writ
   // A 401 is rejected before GitHub processes the mutation, so a later CAS conflict
   // cannot mean "our write was silently accepted".
   let calls = 0;
-  await withEnvironment({ BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" }, async () => {
+  await withImmediateTimers(async () => {
     await withMockedFetch(async () => {
       calls++;
       if (calls === 1) {
@@ -2571,12 +2571,7 @@ test("api retries GitHub's transient HTML bad-request interstitial", async () =>
 
 test("writeState marks CAS conflicts after a retryable mutation failure as ambiguous", async () => {
   let calls = 0;
-  const previousBase = process.env.BUILD_LOCK_API_RETRY_BASE_MS;
-  const previousMax = process.env.BUILD_LOCK_API_RETRY_MAX_MS;
-  process.env.BUILD_LOCK_API_RETRY_BASE_MS = "0";
-  process.env.BUILD_LOCK_API_RETRY_MAX_MS = "0";
-
-  try {
+  await withImmediateTimers(async () => {
     await withMockedFetch(async () => {
       calls++;
       if (calls === 1) {
@@ -2599,18 +2594,7 @@ test("writeState marks CAS conflicts after a retryable mutation failure as ambig
     assert.deepEqual(result, { conflict: true, sha: "", ambiguous: true });
     assert.equal(calls, 2);
     });
-  } finally {
-    if (previousBase === undefined) {
-      delete process.env.BUILD_LOCK_API_RETRY_BASE_MS;
-    } else {
-      process.env.BUILD_LOCK_API_RETRY_BASE_MS = previousBase;
-    }
-    if (previousMax === undefined) {
-      delete process.env.BUILD_LOCK_API_RETRY_MAX_MS;
-    } else {
-      process.env.BUILD_LOCK_API_RETRY_MAX_MS = previousMax;
-    }
-  }
+  });
 });
 
 test("writeState preserves unambiguous CAS conflict handling", async () => {
@@ -2638,12 +2622,7 @@ test("writeState preserves unambiguous CAS conflict handling", async () => {
 });
 
 test("writeState does not mark rate-limit rejections as ambiguous writes", async (t) => {
-  const previousBase = process.env.BUILD_LOCK_API_RETRY_BASE_MS;
-  const previousMax = process.env.BUILD_LOCK_API_RETRY_MAX_MS;
-  process.env.BUILD_LOCK_API_RETRY_BASE_MS = "0";
-  process.env.BUILD_LOCK_API_RETRY_MAX_MS = "0";
-
-  try {
+  await withImmediateTimers(async () => {
     for (const testCase of [
       {
         name: "HTTP 429",
@@ -2680,18 +2659,7 @@ test("writeState does not mark rate-limit rejections as ambiguous writes", async
         });
       });
     }
-  } finally {
-    if (previousBase === undefined) {
-      delete process.env.BUILD_LOCK_API_RETRY_BASE_MS;
-    } else {
-      process.env.BUILD_LOCK_API_RETRY_BASE_MS = previousBase;
-    }
-    if (previousMax === undefined) {
-      delete process.env.BUILD_LOCK_API_RETRY_MAX_MS;
-    } else {
-      process.env.BUILD_LOCK_API_RETRY_MAX_MS = previousMax;
-    }
-  }
+  });
 });
 
 test("acquire succeeds idempotently when this run already holds the lock", async () => {
@@ -4203,7 +4171,7 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
   await t.test("leaves the attempt-bounded budget unchanged without a deadline", async () => {
     let calls = 0;
 
-    await withEnvironment({ BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" }, async () => {
+    await withImmediateTimers(async () => {
       await withMockedFetch(async () => {
         calls++;
         return jsonResponse(503, { message: "No server is currently available." });
@@ -4216,6 +4184,93 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
     });
 
     assert.equal(calls, 5);
+  });
+});
+
+// A zero backoff under an active deadline would retry without pause for the whole
+// budget, so the environment channel carries the same floors as the action inputs.
+test("the retry backoff floors apply to the environment channel too", async (t) => {
+  const cases = [
+    {
+      name: "zero backoff ceiling",
+      environment: { BUILD_LOCK_API_RETRY_MAX_MS: "0" },
+      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_MAX_MS=0; expected an integer >= 1000/
+    },
+    {
+      name: "zero base backoff",
+      environment: { BUILD_LOCK_API_RETRY_BASE_MS: "0" },
+      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_BASE_MS=0; expected an integer >= 100/
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const startedAt = 1_800_000_000_000;
+      let now = startedAt;
+      const delays = [];
+
+      await withEnvironment(testCase.environment, async () => {
+        await withMockedFetch(async () => jsonResponse(503, { message: "unavailable" }), async (logs) => {
+          await assert.rejects(
+            () =>
+              api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+                deadlineAt: startedAt + 30_000,
+                now: () => now,
+                sleep: async (ms) => {
+                  delays.push(ms);
+                  now += ms;
+                }
+              }),
+            /exhausted its bounded GitHub API retry budget/
+          );
+          assert.ok(logs.some((line) => testCase.warning.test(line)), "expected the rejected value to be reported");
+        });
+      });
+
+      assert.ok(delays.length > 0);
+      assert.ok(
+        delays.slice(0, -1).every((ms) => ms >= 100),
+        `expected a throttled retry loop, saw ${delays.join()}`
+      );
+    });
+  }
+});
+
+// Truncating a server-directed wait retries back into the same secondary rate
+// limit. maxDelayMs bounds our own backoff, not GitHub's instruction.
+test("a Retry-After instruction is honored in full whenever a deadline bounds it", async (t) => {
+  const startedAt = 1_800_000_000_000;
+
+  const observeFirstDelay = async (options) => {
+    let calls = 0;
+    let delay = null;
+    await withMockedFetch(async () => {
+      calls++;
+      return calls === 1
+        ? jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "45" })
+        : jsonResponse(200, { ok: true });
+    }, async () => {
+      await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+        now: () => startedAt,
+        sleep: async (ms) => {
+          delay = ms;
+        },
+        ...options
+      });
+    });
+    return delay;
+  };
+
+  await t.test("a time-bounded budget waits the full instructed delay", async () => {
+    assert.equal(await observeFirstDelay({ deadlineAt: startedAt + 120_000 }), 45_000);
+  });
+
+  await t.test("the deadline still clamps an instruction that overruns it", async () => {
+    assert.equal(await observeFirstDelay({ deadlineAt: startedAt + 20_000 }), 20_000);
+  });
+
+  await t.test("an attempt-bounded budget keeps the backoff cap", async () => {
+    assert.equal(await observeFirstDelay({}), 10_000);
   });
 });
 
@@ -4238,8 +4293,7 @@ test("release records a holder removal that needs more than the attempt-bounded 
   let writeAttempts = 0;
 
   await withTempFile(async (outputFile) => {
-    await withEnvironment(
-      { BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" },
+    await withImmediateTimers(
       async () => {
         await withActionEnv(
           {
@@ -4342,13 +4396,8 @@ test("release separates an unreachable lock-state write from an unknown lock sta
   for (const testCase of cases) {
     await t.test(testCase.name, async () => {
       await withTempFile(async (outputFile) => {
-        await withEnvironment(
-          {
-            BUILD_LOCK_API_RETRY_BASE_MS: "0",
-            BUILD_LOCK_API_RETRY_MAX_MS: "0",
-            BUILD_LOCK_API_MAX_ATTEMPTS: "3"
-          },
-          async () => {
+        await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "3" }, async () => {
+          await withImmediateTimers(async () => {
             await withActionEnv(
               {
                 GITHUB_REPOSITORY: "owner/repo",
@@ -4392,8 +4441,8 @@ test("release separates an unreachable lock-state write from an unknown lock sta
                 });
               }
             );
-          }
-        );
+          });
+        });
 
         const outputs = readEnvironmentFile(outputFile);
         if (!testCase.expected) {
@@ -4506,8 +4555,7 @@ test("the release deadline is not consumed by the preparatory lock-config read",
   let writeAttempts = 0;
 
   await withTempFile(async (outputFile) => {
-    await withEnvironment(
-      { BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" },
+    await withImmediateTimers(
       async () => {
         await withActionEnv(
           {

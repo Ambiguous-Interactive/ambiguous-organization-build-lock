@@ -85,7 +85,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 732 tests, 730 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 739 tests, 737 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -152,6 +152,33 @@ findings; both were verified and remediated.
    `cleanup-result` enumeration earlier in the README was also extended with the
    new value.
 
+A third independent review raised three findings; two were remediated and one
+was rejected with reasoning.
+
+1. **Rejected — one deadline shared across the compare-and-swap loop.** The
+   review noted the deadline can expire mid-loop and leave later iterations with
+   no retries. That is the requested semantics: a wall-clock budget that
+   restarted per attempt would not be time-bounded, and ten contention rounds
+   cost roughly twenty seconds against a 120-second budget, so the deadline binds
+   only when contention coincides with sustained degradation. In that case the
+   attempt-bounded budget it replaced would also have failed, just sooner. The
+   README now states that the deadline covers the whole cleanup including its
+   compare-and-swap retries and does not restart per attempt.
+2. **Confirmed defect — the guarded hazard was still reachable.** The zero-backoff
+   retry storm the new input ranges prevent was still configurable through the
+   `BUILD_LOCK_API_RETRY_BASE_MS` and `BUILD_LOCK_API_RETRY_MAX_MS` environment
+   variables, whose minimum was 0. Both channels now carry the same floors, and
+   the seven tests that zeroed a production knob for speed were converted to the
+   suite's existing `withImmediateTimers` helper, which is the correct tool for
+   that job.
+3. **Confirmed defect — the change amplified a pre-existing one.** `retryDelayMs`
+   truncates a server-directed `Retry-After` to `maxDelayMs` (issue #200), and
+   removing the attempt ceiling roughly triples the number of truncated waits on
+   the release path, escalating a secondary rate limit on the org-wide lock-repo
+   token. A `Retry-After` is now honored in full whenever a deadline bounds the
+   total wait, and the deadline still clamps an instruction that would overrun
+   it. The attempt-bounded paths keep the cap and remain #200's scope.
+
 ## Safety review
 
 No fail-closed path was weakened. Both consumer gates continue to refuse a run
@@ -175,7 +202,9 @@ issue #200: `retryDelayMs` clamps a server-directed `Retry-After` to
 `maxDelayMs`, so a 30- or 60-second rate-limit instruction is truncated to 10
 seconds and the action retries back into the same secondary rate limit. The
 runner-preflight runtime already works around it by widening `maxDelayMs` to
-60000. It is out of scope here because the fix changes acquire and reap timing.
+60000. This change fixes it for the deadline-bearing release path, because
+leaving it would have amplified the harm there; the attempt-bounded acquire and
+reap paths remain #200's scope, since fixing them changes admission timing.
 
 Continuous-improvement disposition: the retry asymmetry between acquire and
 release is now executable in the runtime, its inputs, and the tests, and is

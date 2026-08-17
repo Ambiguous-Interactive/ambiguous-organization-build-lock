@@ -77,6 +77,9 @@ const API_RETRY_INPUTS = [
   { input: "api-retry-base-ms", environment: "BUILD_LOCK_API_RETRY_BASE_MS", minimum: 100, maximum: 60000 },
   { input: "api-retry-max-ms", environment: "BUILD_LOCK_API_RETRY_MAX_MS", minimum: 1000, maximum: 300000 }
 ];
+const API_RETRY_MINIMUMS = new Map(
+  API_RETRY_INPUTS.map((knob) => [knob.environment, knob.minimum])
+);
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -659,8 +662,19 @@ function apiRetryOptions(overrides = {}) {
       timeBounded ? Number.POSITIVE_INFINITY : DEFAULT_API_MAX_ATTEMPTS,
       1
     ),
-    baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
-    maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    // The environment carries the same floors as the action inputs: a zero backoff
+    // under an active deadline would retry without pause for the whole budget, so
+    // neither channel may configure one.
+    baseDelayMs: integerEnvironment(
+      "BUILD_LOCK_API_RETRY_BASE_MS",
+      DEFAULT_API_RETRY_BASE_MS,
+      API_RETRY_MINIMUMS.get("BUILD_LOCK_API_RETRY_BASE_MS")
+    ),
+    maxDelayMs: integerEnvironment(
+      "BUILD_LOCK_API_RETRY_MAX_MS",
+      DEFAULT_API_RETRY_MAX_MS,
+      API_RETRY_MINIMUMS.get("BUILD_LOCK_API_RETRY_MAX_MS")
+    ),
     deadlineAt: null,
     fullJitter: false,
     now: Date.now,
@@ -844,7 +858,12 @@ function isUnknownOutcomeMutationResponse(response) {
 function retryDelayMs(response, attempt, options) {
   const retryAfter = retryAfterMs(response, options.now);
   if (retryAfter !== null) {
-    return Math.min(retryAfter, options.maxDelayMs);
+    // maxDelayMs exists to stop our own exponential backoff from growing without
+    // bound. A Retry-After is a server instruction, not backoff: truncating it
+    // retries back into the same secondary rate limit. Honor it in full whenever a
+    // deadline already bounds the total wait, and fall back to the backoff cap only
+    // when nothing else would bound it (tracked for the other paths by issue #200).
+    return Number.isFinite(options.deadlineAt) ? retryAfter : Math.min(retryAfter, options.maxDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
   if (options.fullJitter) {
