@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32065860815:unity-tests:2021.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "32065860815",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32065860815",
-    "queuedAt": "2026-08-17T20:29:00.159Z",
-    "acquiredAt": "2026-08-17T20:29:02.450Z",
-    "expiresAt": "2026-08-18T00:29:02.450Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:32065860815:unity-tests:2021.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32065860815",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32065860815",
-      "queuedAt": "2026-08-17T20:29:00.159Z",
-      "acquiredAt": "2026-08-17T20:29:02.450Z",
-      "expiresAt": "2026-08-18T00:29:02.450Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:32062057977:unity-validation:isho-ci",
@@ -56,8 +30,22 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder run is completed",
       "createdAt": "2026-08-17T17:47:47.125Z"
+    },
+    {
+      "reservationId": "cf065397-ef3d-4f1f-9dda-0b0ed5cb9742",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32065860815:unity-tests:2021.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "32065860815",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32065860815",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-08-17T20:29:46.902Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-17T20:29:02.450Z"
+  "updatedAt": "2026-08-17T20:29:46.903Z"
 }
