@@ -70,10 +70,11 @@ an outcome that has already happened.
    confirmed health/reason before failing. The step still fails and both
    consumer gates still refuse the run; they now render the typed code instead
    of `invalid`, so one diagnostic line shows the licensed resource is safe and
-   only the bookkeeping is missing. The code is reserved for an exhausted API
-   budget, the only error that proves the file was unreachable. Compare-and-swap
-   exhaustion under contention and unproven cleanup evidence both keep the raw
-   failure and make no such claim.
+   only its record is in doubt. The wording asserts only the invariant that
+   always holds and describes the reaper consequence conditionally, because
+   GitHub can apply a mutation it never acknowledges. The code is reserved for an
+   exhausted API budget; compare-and-swap exhaustion under contention and
+   unproven cleanup evidence both keep the raw failure and make no such claim.
 5. Retry warnings name the governing bound instead of printing an infinite
    attempt ceiling.
 
@@ -128,6 +129,28 @@ findings. All four were verified against the code and all four were remediated.
    it replaced. The deadline now covers only the cleanup read and write, proven
    by a test in which the lock-config read exhausts its five attempts and the
    write still gets its full time-bounded budget.
+
+A second independent review of the remediated revision raised two further
+findings; both were verified and remediated.
+
+1. **Confirmed defect — an unconditional claim under an ambiguous write.** `api`
+   drops its `unknownOutcomeMutationFailure` flag when it raises the exhausted
+   error, so a release `PUT` that GitHub applies but never acknowledges reached
+   the same code path. The failure text and gate diagnostic asserted a stale
+   holder entry that may not exist. Both now state the invariant that always
+   holds — the licensed resource was returned and only its record is in doubt —
+   and describe the reaper consequence conditionally. A regression assertion
+   requires the conditional phrasing. Suppressing the code for ambiguous writes
+   was rejected: it would remove the diagnostic from the exact reported incident
+   while the operator's next action is identical either way.
+2. **Confirmed documentation drift.** Under the 120-second default, retryable
+   401s on the release path are bounded by the deadline rather than by
+   `BUILD_LOCK_API_MAX_ATTEMPTS`, which the "Transient Auth Failures" section
+   still claimed. The behavior is kept — it is consistent with the acquire path's
+   existing five-minute auth grace window, and it stays inside the release step's
+   own timeout — and the section now states the release exception. The
+   `cleanup-result` enumeration earlier in the README was also extended with the
+   new value.
 
 ## Safety review
 

@@ -3242,13 +3242,15 @@ function releaseRetryApiOptions(config, now = Date.now()) {
   return effective > 0 ? { deadlineAt: now + effective * 1000 } : undefined;
 }
 
-// A release that cannot reach the lock-state file after confirmed cleanup is not a
-// lock in an unknown state: the licensed resource was returned and only the record
-// is missing. Report it under its own stable code so one line tells an operator the
-// resource is safe. Restricted to an exhausted API budget, which is the only error
-// that proves the file was unreachable. Compare-and-swap exhaustion means the
-// opposite - reads and writes succeeded but lost a contention race, possibly after
-// an ambiguous accepted write - so it keeps its own unqualified failure.
+// A release whose record cannot be confirmed after confirmed cleanup is not a lock
+// in an unknown state: the licensed resource was returned, and only the bookkeeping
+// is in doubt. Report it under its own stable code so one line tells an operator the
+// resource is safe. Restricted to an exhausted API budget: a mutation that GitHub
+// may have applied without acknowledging is covered by the conditional wording of
+// the failure text, which never asserts that a stale holder entry exists.
+// Compare-and-swap exhaustion is excluded because it means the opposite - reads and
+// writes reached the file but lost a contention race, so another writer is actively
+// changing state and no claim about this run's record is warranted.
 function isUnrecordedReleaseError(error) {
   return Boolean(error) && error.code === "GITHUB_API_RETRY_EXHAUSTED";
 }
@@ -3322,11 +3324,11 @@ async function release(config) {
         UNRECORDED_RELEASE_RESULT
       );
       throw new Error(
-        `Could not record the release of ${config.lockName} for ${identity.holderId}: ${oneLine(error.message)}. ` +
-          "External cleanup was confirmed and the licensed resource is not held; only the lock-state record is " +
-          `missing (${UNRECORDED_RELEASE_RESULT}). The scheduled reaper quarantines the stale holder entry, which ` +
-          "keeps consuming lock capacity until an acquire on the same physical runner reclaims it or an operator " +
-          "runs the central recovery runbook.",
+        `Could not confirm the release of ${config.lockName} for ${identity.holderId}: ${oneLine(error.message)}. ` +
+          "External cleanup was confirmed and the licensed resource is not held; only the lock-state record is in " +
+          `doubt (${UNRECORDED_RELEASE_RESULT}). If the removal did not land, the scheduled reaper quarantines the ` +
+          "stale holder entry, which keeps consuming lock capacity until an acquire on the same physical runner " +
+          "reclaims it or an operator runs the central recovery runbook.",
         { cause: error }
       );
     }

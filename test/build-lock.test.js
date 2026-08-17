@@ -4316,7 +4316,9 @@ test("release separates an unreachable lock-state write from an unknown lock sta
     {
       name: "confirmed cleanup reports lock-release-unreachable",
       report: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" },
-      error: /Could not record the release of wallstop-organization-builds .*lock-release-unreachable/,
+      // GitHub may apply a mutation it never acknowledges, so the wording must stay
+      // conditional and never assert that a stale holder entry exists.
+      error: /Could not confirm the release of wallstop-organization-builds .*lock-release-unreachable.*If the removal did not land/,
       expected: {
         "cleanup-result": "lock-release-unreachable",
         released: "false",

@@ -157,9 +157,9 @@ test("gate names an unrecorded release instead of reporting an unknown lock stat
   assert.equal(result.safe, false);
   assert.deepEqual(result.failures, [
     "the central release step did not succeed",
-    "the central release could not record holder removal because the lock-state file stayed unreachable " +
-      "(the licensed resource was returned; the stale holder entry is quarantined by the scheduled reaper " +
-      "and keeps consuming lock capacity until it is reclaimed or recovered)"
+    "the central release could not confirm holder removal because the lock-state file stayed unreachable " +
+      "(the licensed resource was returned; if the removal did not land, the scheduled reaper quarantines the " +
+      "stale holder entry and it keeps consuming lock capacity until it is reclaimed or recovered)"
   ]);
 
   const diagnostic = formatDiagnostic(values, result.failures);

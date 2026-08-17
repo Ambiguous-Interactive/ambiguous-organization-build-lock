@@ -285,6 +285,9 @@ identifies an active account incident while `resource-health` and
 `resource-reason` continue to describe this caller's cleanup report.
 `cleanup-result=released` is also possible before schema 4
 or when an ambiguous schema-4 release is confirmed after its reservation expires.
+`cleanup-result=lock-release-unreachable` is the one failing result: confirmed
+cleanup that could not be recorded, described under
+[Release Retry Budget](#release-retry-budget).
 `released=true` remains the backward-compatible
 indication that holder ownership was removed. `queue-cleaned` means
 the current run was waiting but never held the lock, so no licensed work should
@@ -544,7 +547,9 @@ polling through 401s under a consecutive-failure grace window
 (`BUILD_LOCK_AUTH_GRACE_MS`, default 5 minutes; `0` restores fail-fast).
 Genuinely bad credentials still fail once the grace window is exhausted, and
 the holder-status poll continues to treat post-retry 401s as "status unknown"
-governed by the holder lease.
+governed by the holder lease. On the release path the same 401 retries are
+bounded by that step's wall-clock deadline instead of the attempt ceiling; see
+[Release Retry Budget](#release-retry-budget).
 
 ## Release Retry Budget
 
@@ -576,14 +581,16 @@ inherited environment value, and an out-of-range input fails the action rather
 than silently running a different budget than the caller asked for. Leaving
 `api-max-attempts` unset means the release deadline is the only bound.
 
-When confirmed external cleanup cannot be recorded because the lock-state file
-stayed unreachable for the whole budget, the release step still fails, but it
-reports `cleanup-result=lock-release-unreachable` before failing. That is not a
-lock in an unknown state: the licensed resource was returned and only the record
-is missing. The scheduled reaper then quarantines the stale holder entry, which
-keeps consuming lock capacity until an acquire on the same physical runner
-reclaims it or an operator runs the central recovery runbook — so this is a real
-failure worth waiting to avoid, not a self-healing one. The
+When confirmed external cleanup cannot be confirmed as recorded because the
+lock-state file stayed unreachable for the whole budget, the release step still
+fails, but it reports `cleanup-result=lock-release-unreachable` before failing.
+That is not a lock in an unknown state: the licensed resource was returned and
+only its record is in doubt. A mutation GitHub applies without acknowledging is
+covered by the same code, so the wording never asserts that a stale holder entry
+exists. If the removal did not land, the scheduled reaper quarantines the stale
+holder entry, which keeps consuming lock capacity until an acquire on the same
+physical runner reclaims it or an operator runs the central recovery runbook — so
+this is a real failure worth waiting to avoid, not a self-healing one. The
 `require-confirmed-unity-cleanup` gate renders the same code so one diagnostic
 line distinguishes it from a genuinely unsafe cleanup. Compare-and-swap
 exhaustion under contention and cleanup evidence that was never confirmed both

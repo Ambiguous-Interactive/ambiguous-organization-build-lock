@@ -588,6 +588,6 @@ test("README documents the time-bounded release retry budget", () => {
   }
   // The stale holder entry is quarantined, not lease-expired; the README must not
   // tell an operator this condition self-heals.
-  assert.match(readme, /quarantines the stale holder entry/);
-  assert.doesNotMatch(readme, /reclaimed by the lock's own lease timeout/);
+  assert.match(readme, /quarantines the stale\s+holder entry/);
+  assert.doesNotMatch(readme, /reclaimed by the lock's own lease\s+timeout/);
 });
