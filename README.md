@@ -555,32 +555,39 @@ the licensed resource has already been returned, so the only thing left is
 recording it — waiting costs this step's own clock, while failing costs the
 consumer a full matrix re-run.
 
-The release action therefore bounds its lock-state reads and writes by wall
-clock instead of by a fixed attempt count. `release-retry-deadline-seconds`
-(default 120, maximum 3600) is the whole budget for reaching the lock-state
-file; retries continue for that long rather than stopping after the shared
-five-attempt ceiling, which exponential backoff exhausts in roughly 15 seconds.
-Set it to `0` to restore the attempt-bounded budget. Keep it below the calling
-step's `timeout-minutes`.
+The release action therefore bounds its lock-state read and write by wall clock
+instead of by a fixed attempt count. `release-retry-deadline-seconds` (default
+120, maximum 3600) is the budget for reaching the lock-state file; retries
+continue for that long rather than stopping after the shared five-attempt
+ceiling, which exponential backoff exhausts in roughly 15 seconds. Set it to `0`
+to restore the attempt-bounded budget. Keep it below the calling step's
+`timeout-minutes`.
 
-The shared backoff knobs are also exposed as release inputs — `api-max-attempts`,
-`api-retry-base-ms`, and `api-retry-max-ms` — which set
-`BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
+The deadline deliberately covers only the lock-state read and write. The
+preparatory state-branch and lock-config calls keep the shared attempt budget, so
+a long outage on those cannot spend the budget that exists to protect the write
+itself.
+
+The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
+(1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
+which set `BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
 `BUILD_LOCK_API_RETRY_MAX_MS` for the action. An explicit input wins over an
-inherited environment value; an invalid value is warned about and ignored.
-Leaving `api-max-attempts` unset means the release deadline is the only bound.
-`api-retry-max-ms: "0"` disables backoff entirely, including honoring
-`Retry-After`; combined with an active deadline that means continuous retry for
-the whole budget, so do not set it outside tests.
+inherited environment value, and an out-of-range input fails the action rather
+than silently running a different budget than the caller asked for. Leaving
+`api-max-attempts` unset means the release deadline is the only bound.
 
 When confirmed external cleanup cannot be recorded because the lock-state file
-stays unreachable for the whole budget, the release step still fails, but it
+stayed unreachable for the whole budget, the release step still fails, but it
 reports `cleanup-result=lock-release-unreachable` before failing. That is not a
-lock in an unknown state: the licensed resource was returned, and the stale
-holder entry left behind is reclaimed by the lock's own lease timeout. The
+lock in an unknown state: the licensed resource was returned and only the record
+is missing. The scheduled reaper then quarantines the stale holder entry, which
+keeps consuming lock capacity until an acquire on the same physical runner
+reclaims it or an operator runs the central recovery runbook — so this is a real
+failure worth waiting to avoid, not a self-healing one. The
 `require-confirmed-unity-cleanup` gate renders the same code so one diagnostic
-line distinguishes it from a genuinely unsafe cleanup. Cleanup evidence that was
-never confirmed keeps the raw failure and no such claim is made.
+line distinguishes it from a genuinely unsafe cleanup. Compare-and-swap
+exhaustion under contention and cleanup evidence that was never confirmed both
+keep the raw failure, and no such claim is made for either.
 
 ## Stale Recovery
 

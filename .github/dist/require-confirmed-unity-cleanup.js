@@ -88,7 +88,8 @@ function evaluateCleanupGate(values) {
   if (observed.cleanupResult === UNRECORDED_RELEASE_RESULT) {
     failures.push(
       "the central release could not record holder removal because the lock-state file stayed unreachable " +
-        "(the licensed resource was returned; the stale holder entry is reclaimed by the lock lease timeout)"
+        "(the licensed resource was returned; the stale holder entry is quarantined by the scheduled reaper " +
+        "and keeps consuming lock capacity until it is reclaimed or recovered)"
     );
   } else {
     if (!new Set(["cooldown-started", "global-quarantined", "released"]).has(observed.cleanupResult)) {

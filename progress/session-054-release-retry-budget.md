@@ -51,15 +51,18 @@ an outcome that has already happened.
    last attempt starts inside the budget rather than being skipped by a long
    backoff. Callers without a deadline are unchanged. The clamp reuses the
    existing acquire helper, generalized to `boundedRetryDelayMs`.
-2. **Release uses one wall-clock budget.** `release` derives a single deadline
-   from the new `release-retry-deadline-seconds` input (default 120, maximum
-   3600, `0` restores the attempt-bounded budget) and shares it across the
-   state-branch check, the lock-config read, and the cleanup read/write. This
-   is the change that would have absorbed the reported incident.
-3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`,
-   `api-retry-base-ms`, and `api-retry-max-ms` are declared release-action
-   inputs. An explicit input wins over an inherited environment value; an
-   invalid value keeps its existing warn-and-ignore behavior.
+2. **Release bounds the lock-state read and write by wall clock.** `release`
+   derives a deadline from the new `release-retry-deadline-seconds` input
+   (default 120, maximum 3600, `0` restores the attempt-bounded budget) and
+   applies it to the cleanup read/write only. The preparatory state-branch and
+   lock-config calls keep the shared attempt budget on purpose, so a long outage
+   on those cannot spend the budget that exists to protect the write. This is
+   the change that would have absorbed the reported incident.
+3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
+   (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
+   (1000-300000) are declared release-action inputs. An explicit input wins over
+   an inherited environment value, and an out-of-range input fails the action
+   rather than silently running a different budget than the caller requested.
 4. **An unreachable record is named, not conflated with an unknown lock.** When
    confirmed, non-degraded cleanup evidence cannot be recorded because the
    lock-state file stayed unreachable for the whole budget, release emits
@@ -67,8 +70,10 @@ an outcome that has already happened.
    confirmed health/reason before failing. The step still fails and both
    consumer gates still refuse the run; they now render the typed code instead
    of `invalid`, so one diagnostic line shows the licensed resource is safe and
-   only the bookkeeping is missing. Unproven cleanup evidence keeps the raw
-   failure and makes no such claim.
+   only the bookkeeping is missing. The code is reserved for an exhausted API
+   budget, the only error that proves the file was unreachable. Compare-and-swap
+   exhaustion under contention and unproven cleanup evidence both keep the raw
+   failure and make no such claim.
 5. Retry warnings name the governing bound instead of printing an infinite
    attempt ceiling.
 
@@ -79,11 +84,50 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 723 tests, 721 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 732 tests, 730 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
   credential-literal audit.
+
+## Independent review findings and dispositions
+
+An independent adversarial review of the first published revision raised four
+findings. All four were verified against the code and all four were remediated.
+
+1. **Confirmed defect — a false self-healing claim.** The failure text said the
+   abandoned holder entry "is reclaimed by the lock's lease timeout". Under
+   schema 4 and later the scheduled reaper converts a stale holder into a
+   **quarantine** reservation, which carries no `availableAt` and is never
+   removed by `pruneExpiredCooldowns`. The capacity stays consumed until an
+   acquire on the same physical runner reclaims it or an operator runs the
+   central recovery runbook. The original wording would have told an operator to
+   do nothing about a pinned seat. Issue #198's own premise contained the same
+   error; correcting it strengthens the case for the fix, because failing to
+   record a release is worse than the issue assumed. Corrected in the runtime
+   message, the consumer gate failure text, and the README, with a regression
+   assertion that the README cannot reintroduce the lease-timeout claim.
+2. **Confirmed defect — contention reported as an outage.** Compare-and-swap
+   exhaustion was classified as `lock-release-unreachable`. It means the
+   opposite: reads and writes succeeded but lost a contention race, possibly
+   after an ambiguous accepted write, in which case the synthesized
+   `released=false` / empty state SHA outputs would have been wrong.
+   `isUnrecordedReleaseError` is now restricted to an exhausted API retry
+   budget, and the unused error code introduced for the conflated case was
+   removed rather than left as dead contract.
+3. **Accepted — an unvalidated public knob.** `api-retry-max-ms: "0"` would have
+   produced a zero-delay retry storm for the whole deadline and discarded every
+   server-directed `Retry-After` wait, guarded only by a README warning. The
+   three retry inputs now carry explicit ranges and fail the action when
+   violated, matching every other numeric input in the runtime.
+4. **Confirmed defect — a shared budget spent before the call it protects.** The
+   deadline originally covered the state-branch check and the lock-config read.
+   `readLockConfig` fail-closes to safe defaults on an exhausted budget, so a
+   broad outage could silently consume the entire 120 seconds and leave the
+   lock-state write with no retries at all — worse than the five-attempt budget
+   it replaced. The deadline now covers only the cleanup read and write, proven
+   by a test in which the lock-config read exhausts its five attempts and the
+   write still gets its full time-bounded budget.
 
 ## Safety review
 
@@ -103,6 +147,17 @@ reaper when they fail, so neither carries the "work finished, only the record is
 missing" asymmetry that motivates the release deadline. No organization policy,
 credential, consumer workflow, runner capacity, or live lock state was changed.
 
+A separate pre-existing defect found while reviewing this code was filed as
+issue #200: `retryDelayMs` clamps a server-directed `Retry-After` to
+`maxDelayMs`, so a 30- or 60-second rate-limit instruction is truncated to 10
+seconds and the action retries back into the same secondary rate limit. The
+runner-preflight runtime already works around it by widening `maxDelayMs` to
+60000. It is out of scope here because the fix changes acquire and reap timing.
+
 Continuous-improvement disposition: the retry asymmetry between acquire and
 release is now executable in the runtime, its inputs, and the tests, and is
-documented in the README. No new durable LLM guidance is warranted.
+documented in the README. The one durable correction worth recording is that a
+stale holder entry is **quarantined**, not lease-expired, so an unrecorded
+release is not self-healing; that fact now lives in the README section, the
+runtime message, the gate failure text, and a regression assertion, which is
+narrower and more authoritative than a new LLM resource would be.

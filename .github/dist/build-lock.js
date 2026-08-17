@@ -68,12 +68,15 @@ const RESOURCE_REASON_CODES = new Set([
 // any other non-release result; it exists so the failure text names the condition.
 const UNRECORDED_RELEASE_RESULT = "lock-release-unreachable";
 // Environment overrides for the shared API retry budget, exposed as release action
-// inputs so a consumer hitting a transient outage has a discoverable knob.
-const API_RETRY_INPUT_ENVIRONMENT = new Map([
-  ["api-max-attempts", "BUILD_LOCK_API_MAX_ATTEMPTS"],
-  ["api-retry-base-ms", "BUILD_LOCK_API_RETRY_BASE_MS"],
-  ["api-retry-max-ms", "BUILD_LOCK_API_RETRY_MAX_MS"]
-]);
+// inputs so a consumer hitting a transient outage has a discoverable knob. The
+// public inputs carry ranges the bare environment variables do not: a zero backoff
+// under an active deadline would retry without pause for the whole budget, and a
+// zero ceiling would also discard every server-directed Retry-After wait.
+const API_RETRY_INPUTS = [
+  { input: "api-max-attempts", environment: "BUILD_LOCK_API_MAX_ATTEMPTS", minimum: 1, maximum: 100 },
+  { input: "api-retry-base-ms", environment: "BUILD_LOCK_API_RETRY_BASE_MS", minimum: 100, maximum: 60000 },
+  { input: "api-retry-max-ms", environment: "BUILD_LOCK_API_RETRY_MAX_MS", minimum: 1000, maximum: 300000 }
+];
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -622,14 +625,24 @@ function integerEnvironment(name, fallback, minimum = 0) {
 
 // The retry budget is read from the environment deep inside every API call, so an
 // action input that names the same knob is applied to that environment once, at
-// configuration time. An explicit input wins over an inherited environment value;
-// an invalid value is warned about and ignored by integerEnvironment.
+// configuration time. An explicit input wins over an inherited environment value.
+// Unlike the environment variables, an out-of-range input fails the action rather
+// than being ignored: it is a public contract, and silently continuing with a
+// different budget than the caller asked for is not a safe success.
 function applyApiRetryInputs() {
-  for (const [inputName, environmentName] of API_RETRY_INPUT_ENVIRONMENT) {
-    const value = input(inputName);
-    if (value !== "") {
-      process.env[environmentName] = value;
+  for (const knob of API_RETRY_INPUTS) {
+    const raw = input(knob.input);
+    if (raw === "") {
+      continue;
     }
+    if (!/^[0-9]+$/.test(raw)) {
+      throw new Error(`Input ${knob.input} must be an integer.`);
+    }
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isSafeInteger(value) || value < knob.minimum || value > knob.maximum) {
+      throw new Error(`Input ${knob.input} must be between ${knob.minimum} and ${knob.maximum}.`);
+    }
+    process.env[knob.environment] = String(value);
   }
 }
 
@@ -2358,9 +2371,7 @@ async function cleanupIdentity(config, identity, options = {}) {
     }, state, write.sha, heldBy, heldByRunUrl);
   }
 
-  const casExhausted = new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
-  casExhausted.code = "LOCK_STATE_CAS_EXHAUSTED";
-  throw casExhausted;
+  throw new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
 }
 
 function observationText(config, observation, attempts, elapsedMs) {
@@ -3219,10 +3230,12 @@ async function acquire(config) {
 }
 
 // The lock-state write is the last thing a release does, and it is pure
-// bookkeeping: the licensed resource has already been returned. Bound the whole
-// release by one wall-clock deadline so a transient GitHub outage that outlasts a
-// handful of backoffs cannot red an otherwise successful consumer matrix.
-// `0` restores the shared attempt-bounded budget.
+// bookkeeping: the licensed resource has already been returned. Bound it by wall
+// clock so a transient GitHub outage that outlasts a handful of backoffs cannot red
+// an otherwise successful consumer matrix. `0` restores the attempt-bounded budget.
+// The deadline covers only the lock-state read and write. The preparatory calls
+// keep the shared attempt budget on purpose: a long outage on those must not spend
+// the budget that exists to protect the write itself.
 function releaseRetryApiOptions(config, now = Date.now()) {
   const seconds = config.releaseRetryDeadlineSeconds;
   const effective = Number.isInteger(seconds) ? seconds : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
@@ -3230,13 +3243,14 @@ function releaseRetryApiOptions(config, now = Date.now()) {
 }
 
 // A release that cannot reach the lock-state file after confirmed cleanup is not a
-// lock in an unknown state: the licensed resource was returned, and the stale
-// holder entry left behind is reclaimed by the lock's own lease timeout. Report it
-// under its own stable code so one line tells an operator the resource is safe.
+// lock in an unknown state: the licensed resource was returned and only the record
+// is missing. Report it under its own stable code so one line tells an operator the
+// resource is safe. Restricted to an exhausted API budget, which is the only error
+// that proves the file was unreachable. Compare-and-swap exhaustion means the
+// opposite - reads and writes succeeded but lost a contention race, possibly after
+// an ambiguous accepted write - so it keeps its own unqualified failure.
 function isUnrecordedReleaseError(error) {
-  return Boolean(
-    error && (error.code === "GITHUB_API_RETRY_EXHAUSTED" || error.code === "LOCK_STATE_CAS_EXHAUSTED")
-  );
+  return Boolean(error) && error.code === "GITHUB_API_RETRY_EXHAUSTED";
 }
 
 async function release(config) {
@@ -3273,18 +3287,17 @@ async function release(config) {
     health: "healthy",
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
-  const apiOptions = releaseRetryApiOptions(config);
   let result;
   try {
-    await ensureStateBranch(config, { apiOptions });
-    const lockConfig = await readLockConfig(config, { apiOptions });
+    await ensureStateBranch(config);
+    const lockConfig = await readLockConfig(config);
     result = await cleanupIdentity(config, identity, {
       resourceSafe: resourceReport.cleanupStatus === "confirmed",
       resourceHealth: resourceReport.health,
       resourceReason: resourceReport.reason,
       releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
       reason: resourceReport.reason,
-      apiOptions
+      apiOptions: releaseRetryApiOptions(config)
     });
   } catch (error) {
     if (
@@ -3310,8 +3323,10 @@ async function release(config) {
       );
       throw new Error(
         `Could not record the release of ${config.lockName} for ${identity.holderId}: ${oneLine(error.message)}. ` +
-          "External cleanup was confirmed and the licensed resource is not held; only the lock-state write is " +
-          `unreachable, so the stale holder entry is reclaimed by the lock's lease timeout (${UNRECORDED_RELEASE_RESULT}).`,
+          "External cleanup was confirmed and the licensed resource is not held; only the lock-state record is " +
+          `missing (${UNRECORDED_RELEASE_RESULT}). The scheduled reaper quarantines the stale holder entry, which ` +
+          "keeps consuming lock capacity until an acquire on the same physical runner reclaims it or an operator " +
+          "runs the central recovery runbook.",
         { cause: error }
       );
     }

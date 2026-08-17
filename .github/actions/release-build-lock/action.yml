@@ -36,22 +36,28 @@ inputs:
     default: lock-state
   release-retry-deadline-seconds:
     description: >-
-      Wall-clock budget for reaching the lock-state file. Release retries a
+      Wall-clock budget for the lock-state read and write. Release retries a
       transient GitHub API failure until this deadline instead of stopping after
       a fixed attempt count, because the licensed resource is already returned by
-      then. Use 0 to restore the shared attempt-bounded budget.
+      then. Maximum 3600; use 0 to restore the shared attempt-bounded budget.
+      Keep it below the calling step's timeout-minutes.
     required: false
     default: "120"
   api-max-attempts:
     description: >-
-      Attempt ceiling for the shared GitHub API retry budget. Unset means 5 for
-      attempt-bounded callers and no ceiling while a release deadline is active.
+      Attempt ceiling for the shared GitHub API retry budget, 1-100. Unset means
+      5 for attempt-bounded calls and no ceiling while the release deadline is
+      active. Out-of-range values fail the action.
     required: false
   api-retry-base-ms:
-    description: Initial GitHub API retry backoff in milliseconds. Unset means 1000.
+    description: >-
+      Initial GitHub API retry backoff in milliseconds, 100-60000. Unset means
+      1000. Out-of-range values fail the action.
     required: false
   api-retry-max-ms:
-    description: Maximum GitHub API retry backoff in milliseconds. Unset means 10000.
+    description: >-
+      Maximum GitHub API retry backoff in milliseconds, 1000-300000. Unset means
+      10000. Out-of-range values fail the action.
     required: false
 outputs:
   released:

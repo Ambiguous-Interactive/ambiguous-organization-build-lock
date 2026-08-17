@@ -4409,37 +4409,231 @@ test("release separates an unreachable lock-state write from an unknown lock sta
   }
 });
 
-test("release retry knobs are configurable through action inputs", async () => {
-  await withEnvironment(
-    {
-      "INPUT_LOCK-NAME": "wallstop-organization-builds",
-      "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
-      "INPUT_RELEASE-RETRY-DEADLINE-SECONDS": "300",
-      "INPUT_API-MAX-ATTEMPTS": "9",
-      "INPUT_API-RETRY-BASE-MS": "250",
-      "INPUT_API-RETRY-MAX-MS": "5000",
-      BUILD_LOCK_API_MAX_ATTEMPTS: undefined,
-      BUILD_LOCK_API_RETRY_BASE_MS: undefined,
-      BUILD_LOCK_API_RETRY_MAX_MS: "60000",
-      GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
-      GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
-      GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
-      BUILD_LOCK_APP_ID: "12345",
-      BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey
-    },
-    () => {
-      assert.equal(config().releaseRetryDeadlineSeconds, 300);
-      assert.deepEqual(
-        [
-          process.env.BUILD_LOCK_API_MAX_ATTEMPTS,
-          process.env.BUILD_LOCK_API_RETRY_BASE_MS,
-          process.env.BUILD_LOCK_API_RETRY_MAX_MS
-        ],
-        ["9", "250", "5000"],
-        "an explicit input must win over an inherited environment value"
-      );
+test("release retry knobs are configurable through action inputs", async (t) => {
+  const baseEnvironment = {
+    "INPUT_LOCK-NAME": "wallstop-organization-builds",
+    "INPUT_LOCK-REPOSITORY": "Ambiguous-Interactive/ambiguous-organization-build-lock",
+    "INPUT_RELEASE-RETRY-DEADLINE-SECONDS": undefined,
+    "INPUT_API-MAX-ATTEMPTS": undefined,
+    "INPUT_API-RETRY-BASE-MS": undefined,
+    "INPUT_API-RETRY-MAX-MS": undefined,
+    BUILD_LOCK_API_MAX_ATTEMPTS: undefined,
+    BUILD_LOCK_API_RETRY_BASE_MS: undefined,
+    BUILD_LOCK_API_RETRY_MAX_MS: undefined,
+    GITHUB_REPOSITORY: authorizedConsumerEnv.GITHUB_REPOSITORY,
+    GITHUB_REPOSITORY_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_ID,
+    GITHUB_REPOSITORY_OWNER_ID: authorizedConsumerEnv.GITHUB_REPOSITORY_OWNER_ID,
+    BUILD_LOCK_APP_ID: "12345",
+    BUILD_LOCK_APP_PRIVATE_KEY: testAppPrivateKey
+  };
+
+  await t.test("an explicit input wins over an inherited environment value", async () => {
+    await withEnvironment(
+      {
+        ...baseEnvironment,
+        "INPUT_RELEASE-RETRY-DEADLINE-SECONDS": "300",
+        "INPUT_API-MAX-ATTEMPTS": "9",
+        "INPUT_API-RETRY-BASE-MS": "250",
+        "INPUT_API-RETRY-MAX-MS": "5000",
+        BUILD_LOCK_API_RETRY_MAX_MS: "60000"
+      },
+      () => {
+        assert.equal(config().releaseRetryDeadlineSeconds, 300);
+        assert.deepEqual(
+          [
+            process.env.BUILD_LOCK_API_MAX_ATTEMPTS,
+            process.env.BUILD_LOCK_API_RETRY_BASE_MS,
+            process.env.BUILD_LOCK_API_RETRY_MAX_MS
+          ],
+          ["9", "250", "5000"]
+        );
+      }
+    );
+  });
+
+  // A zero backoff under an active deadline would retry without pause for the whole
+  // budget and would also discard every server-directed Retry-After wait, so the
+  // public inputs reject out-of-range values instead of quietly running a different
+  // budget than the caller asked for.
+  const rejected = [
+    ["zero backoff ceiling", "INPUT_API-RETRY-MAX-MS", "0", /api-retry-max-ms must be between 1000 and 300000/],
+    ["zero base backoff", "INPUT_API-RETRY-BASE-MS", "0", /api-retry-base-ms must be between 100 and 60000/],
+    ["zero attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "0", /api-max-attempts must be between 1 and 100/],
+    ["oversized attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "101", /api-max-attempts must be between 1 and 100/],
+    ["non-numeric backoff", "INPUT_API-RETRY-BASE-MS", "1e3", /api-retry-base-ms must be an integer/],
+    ["oversized release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "3601", /must be <= 3600/]
+  ];
+
+  for (const [name, inputName, value, expected] of rejected) {
+    await t.test(`rejects ${name}`, async () => {
+      await withEnvironment({ ...baseEnvironment, [inputName]: value }, () => {
+        assert.throws(() => config(), expected);
+        assert.deepEqual(
+          [
+            process.env.BUILD_LOCK_API_MAX_ATTEMPTS,
+            process.env.BUILD_LOCK_API_RETRY_BASE_MS,
+            process.env.BUILD_LOCK_API_RETRY_MAX_MS
+          ],
+          [undefined, undefined, undefined],
+          "a rejected input must not reach the retry environment"
+        );
+      });
+    });
+  }
+});
+
+// A long outage on the preparatory calls must not spend the budget that exists to
+// protect the lock-state write itself.
+test("the release deadline is not consumed by the preparatory lock-config read", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
     }
-  );
+  };
+  let configReads = 0;
+  let writeAttempts = 0;
+
+  await withTempFile(async (outputFile) => {
+    await withEnvironment(
+      { BUILD_LOCK_API_RETRY_BASE_MS: "0", BUILD_LOCK_API_RETRY_MAX_MS: "0" },
+      async () => {
+        await withActionEnv(
+          {
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "1",
+            GITHUB_WORKFLOW: "Perf",
+            GITHUB_JOB: "perf-benchmarks",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
+                configReads++;
+                return jsonResponse(503, { message: "No server is currently available." });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  writeAttempts++;
+                  return writeAttempts <= 8
+                    ? jsonResponse(503, { message: "No server is currently available." })
+                    : jsonResponse(200, { content: { sha: "state-after-release" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-release"
+                });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async () => {
+              await release({
+                token: "token",
+                lockName: "wallstop-organization-builds",
+                holderIdSuffix: "playmode",
+                lockRepository: "o/r",
+                lockRepo: { owner: "o", repo: "r" },
+                stateBranch: "lock-state",
+                statePath: "locks/wallstop-organization-builds.json",
+                configPath: "locks/wallstop-organization-builds.config.json",
+                resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+              });
+            });
+          }
+        );
+      }
+    );
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["cleanup-result"], "released");
+  });
+
+  assert.equal(configReads, 5, "the lock-config read keeps the shared attempt budget");
+  assert.equal(writeAttempts, 9, "the write keeps its full time-bounded budget");
+});
+
+// Compare-and-swap exhaustion means reads and writes succeeded but lost a
+// contention race, possibly after an ambiguous accepted write. It is the opposite
+// of an unreachable file, so it must not claim the record is merely missing.
+test("release does not report contention as an unreachable lock-state write", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+
+  await withTempFile(async (outputFile) => {
+    await withImmediateTimers(async () => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                return jsonResponse(409, { message: "sha does not match" });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: "state-before-release"
+              });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async () => {
+            await assert.rejects(
+              () =>
+                release({
+                  token: "token",
+                  lockName: "wallstop-organization-builds",
+                  holderIdSuffix: "playmode",
+                  lockRepository: "o/r",
+                  lockRepo: { owner: "o", repo: "r" },
+                  stateBranch: "lock-state",
+                  statePath: "locks/wallstop-organization-builds.json",
+                  resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+                }),
+              /Failed to clean up wallstop-organization-builds after repeated CAS conflicts\./
+            );
+          });
+        }
+      );
+    });
+
+    assert.deepEqual(readEnvironmentFile(outputFile), {});
+  });
 });
 
 test("reap writes full output contract when no stale state is found", async () => {

@@ -577,9 +577,17 @@ test("README documents the time-bounded release retry budget", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
   assert.match(readme, /^## Release Retry Budget$/m);
-  assert.match(readme, /`release-retry-deadline-seconds`\s+\(default 120, maximum 3600\)/);
+  assert.match(readme, /`release-retry-deadline-seconds`\s+\(default\s+120, maximum 3600\)/);
   assert.match(readme, /cleanup-result=lock-release-unreachable/);
-  for (const name of ["api-max-attempts", "api-retry-base-ms", "api-retry-max-ms"]) {
-    assert.match(readme, new RegExp(`\`${name}\``));
+  for (const [name, range] of [
+    ["api-max-attempts", "1-100"],
+    ["api-retry-base-ms", "100-60000"],
+    ["api-retry-max-ms", "1000-300000"]
+  ]) {
+    assert.match(readme, new RegExp(`\`${name}\`\\s+\\(${range}\\)`));
   }
+  // The stale holder entry is quarantined, not lease-expired; the README must not
+  // tell an operator this condition self-heals.
+  assert.match(readme, /quarantines the stale holder entry/);
+  assert.doesNotMatch(readme, /reclaimed by the lock's own lease timeout/);
 });
