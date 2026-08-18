@@ -88,7 +88,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 746 tests, 744 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 750 tests, 748 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -244,6 +244,26 @@ round's fix, and both remediated.
    and the floor guarantees only the shared five-attempt default without ever
    raising a ceiling the caller set above it. A test pins the above-floor case
    the earlier test could not reach.
+
+A seventh independent review raised two findings, both reproduced against the
+committed runtime, and both remediated.
+
+1. **Confirmed defect — the last zero-delay channel.** `retryAfterMs` returns 0
+   for `Retry-After: 0` and for an already-past HTTP date. Honoring that
+   literally under a deadline produced an unthrottled retry loop for the whole
+   budget, measured at roughly 80,000 requests per release step at the default
+   deadline. A server-directed wait may now lengthen the backoff but never
+   shorten it below the configured base, which closes the hazard for both
+   budgets and for every channel that can set one.
+2. **Confirmed defect — a degraded branch check could become a false success.**
+   Tolerating an unreachable state-branch check also tolerated a failed branch
+   *creation*, after which every content read 404s, normalizes to empty state,
+   and reports `cleanup-result=noop` with exit 0 — a release that never happened.
+   The Unity gate would still have refused the run, but the action's own contract
+   was fail-open. An empty state SHA with the branch unverified is now refused
+   under the same `lock-release-unreachable` code instead of being reported as
+   "nothing to release", and the inline comment's false claim that a missing
+   branch surfaces at the write was removed.
 
 ## Safety review
 

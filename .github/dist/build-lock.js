@@ -872,7 +872,13 @@ function retryDelayMs(response, attempt, options) {
     // retries back into the same secondary rate limit. Honor it in full whenever a
     // deadline already bounds the total wait, and fall back to the backoff cap only
     // when nothing else would bound it (tracked for the other paths by issue #200).
-    return Number.isFinite(options.deadlineAt) ? retryAfter : Math.min(retryAfter, options.maxDelayMs);
+    const bounded = Number.isFinite(options.deadlineAt)
+      ? retryAfter
+      : Math.min(retryAfter, options.maxDelayMs);
+    // The instruction may lengthen our backoff, never shorten it below the
+    // configured base. GitHub sometimes sends 0 or an already-past HTTP date, which
+    // would otherwise turn a time-bounded budget into an unthrottled retry loop.
+    return Math.max(bounded, options.baseDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
   if (options.fullJitter) {
@@ -3292,7 +3298,10 @@ function releaseRetryApiOptions(config, now = Date.now()) {
 // writes reached the file but lost a contention race, so another writer is actively
 // changing state and no claim about this run's record is warranted.
 function isUnrecordedReleaseError(error) {
-  return Boolean(error) && error.code === "GITHUB_API_RETRY_EXHAUSTED";
+  return (
+    Boolean(error) &&
+    (error.code === "GITHUB_API_RETRY_EXHAUSTED" || error.code === "LOCK_STATE_UNVERIFIED")
+  );
 }
 
 async function release(config) {
@@ -3335,18 +3344,21 @@ async function release(config) {
     // The state branch is a permanent fixture; this call only bootstraps a
     // repository that has never held lock state. An unreachable check must not
     // fail the release before the write is attempted, so degrade like the lock
-    // config read does and let the lock-state write - which owns the rest of the
-    // budget - report the real outcome. A genuinely missing branch still surfaces
-    // there, and no fail-closed decision is made from this call.
+    // config read does and let the lock-state read and write report the real
+    // outcome. Degrading here cannot become a false success: an unverified branch
+    // makes an empty read indistinguishable from a missing branch, which the
+    // guard below refuses rather than reporting as "nothing to release".
+    let stateBranchVerified = true;
     try {
       await ensureStateBranch(config, { apiOptions: retryBudget.preparation });
     } catch (error) {
       if (!isUnrecordedReleaseError(error)) {
         throw error;
       }
+      stateBranchVerified = false;
       console.log(
         `::warning::Could not verify the ${config.stateBranch} branch (${workflowCommandData(error.message)}); ` +
-          "continuing to the lock-state write."
+          "continuing to the lock-state read and write."
       );
     }
     const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.preparation });
@@ -3358,6 +3370,17 @@ async function release(config) {
       reason: resourceReport.reason,
       apiOptions: retryBudget.cleanup
     });
+    // An empty state SHA means the lock-state file was not there to read. With the
+    // branch unverified that is exactly what a missing or unreachable branch looks
+    // like, so "no lock state to clean" is not provable and must not be reported as
+    // a completed release.
+    if (!stateBranchVerified && !result.sha && cleanupResultName(result) === "noop") {
+      const unverified = new Error(
+        `the ${config.stateBranch} branch could not be verified and no lock state was readable`
+      );
+      unverified.code = "LOCK_STATE_UNVERIFIED";
+      throw unverified;
+    }
   } catch (error) {
     if (
       isUnrecordedReleaseError(error) &&

@@ -4389,6 +4389,36 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
   await t.test("an attempt-bounded budget keeps the backoff cap", async () => {
     assert.equal(await observeFirstDelay({}), 10_000);
   });
+
+  // GitHub sometimes sends 0 or an already-past HTTP date. Honoring that literally
+  // under a deadline would retry with no pause at all for the whole budget.
+  await t.test("an instruction shorter than the base backoff never shortens the wait", async (subtest) => {
+    for (const [name, header] of [
+      ["zero delta-seconds", "0"],
+      ["already-past HTTP date", "Sat, 01 Jan 2000 00:00:00 GMT"]
+    ]) {
+      await subtest.test(name, async () => {
+        let calls = 0;
+        let delay = null;
+        await withMockedFetch(async () => {
+          calls++;
+          return calls === 1
+            ? jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": header })
+            : jsonResponse(200, { ok: true });
+        }, async () => {
+          await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            deadlineAt: startedAt + 120_000,
+            now: () => startedAt,
+            sleep: async (ms) => {
+              delay = ms;
+            }
+          });
+        });
+
+        assert.equal(delay, 1000, "expected the configured base backoff to hold");
+      });
+    }
+  });
 });
 
 test("release records a holder removal that needs more than the attempt-bounded budget", async () => {
@@ -4826,6 +4856,60 @@ test("release degrades unreachable preparatory calls instead of failing on them"
     warned.some((line) => /Unable to read lock config/.test(line)),
     `expected a degraded lock-config warning, saw ${warned.join(" | ")}`
   );
+});
+
+// Degrading the branch check must never become a false success: with the branch
+// unverified, an unreadable lock-state file is indistinguishable from a missing
+// branch, so "nothing to release" is not provable.
+test("release refuses an unprovable noop when the state branch was never verified", async () => {
+  await withTempFile(async (outputFile) => {
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
+      await withImmediateTimers(async () => {
+        await withActionEnv(
+          {
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "1",
+            GITHUB_WORKFLOW: "Perf",
+            GITHUB_JOB: "perf-benchmarks",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(503, { message: "No server is currently available." });
+              }
+              // A missing branch makes every content read a 404, which normalizes
+              // to empty state and would otherwise read as "already free".
+              return jsonResponse(404, { message: "Not Found" });
+            }, async () => {
+              await assert.rejects(
+                () =>
+                  release({
+                    token: "token",
+                    lockName: "wallstop-organization-builds",
+                    holderIdSuffix: "playmode",
+                    lockRepository: "o/r",
+                    lockRepo: { owner: "o", repo: "r" },
+                    stateBranch: "lock-state",
+                    statePath: "locks/wallstop-organization-builds.json",
+                    configPath: "locks/wallstop-organization-builds.config.json",
+                    resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+                  }),
+                /Could not confirm the release of wallstop-organization-builds .*lock-state branch could not be verified/
+              );
+            });
+          }
+        );
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assertOutputContract(outputs, releaseOutputNames);
+    assert.equal(outputs["cleanup-result"], "lock-release-unreachable");
+    assert.equal(outputs.released, "false");
+  });
 });
 
 // Compare-and-swap exhaustion means reads and writes succeeded but lost a
