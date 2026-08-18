@@ -93,7 +93,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 756 tests, 754 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 758 tests, 756 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -446,6 +446,26 @@ one was declined on the facts.
    present. Carrying the unconfirmed identity out on the error would have meant
    re-indenting the whole compare-and-swap loop for a compound scenario whose
    answer is already in the outputs. The README now states where to look.
+
+A fifteenth independent review raised two findings, both confirmed by execution
+and both remediated.
+
+1. **Confirmed defect — a quota header on the wrong response.** The rate-limit
+   reset was read from any retryable response carrying `x-ratelimit-remaining: 0`,
+   not only a rate-limit rejection. A `401 Bad credentials` — which this codebase
+   documents as auth-replica lag that clears in about a second — carrying a
+   45-minute reset made a deadline-bounded call sleep its entire budget in one
+   wait and fail after two requests, producing exactly the outcome the deadline
+   exists to prevent. The reset is now read only from a 403 or 429.
+2. **Confirmed defect — the degrade invariant had a hole.** `ensureStateBranch`
+   got an explicit degrade path but `readLockConfig` relied on
+   `configReadCanFailClosed`, which enumerates statuses and rejects 400. An
+   exhausted budget whose last failure was the transient GitHub HTML 400
+   interstitial — retryable by design — therefore red a release with a healthy,
+   writable lock-state file untouched. An exhausted retry budget now fails closed
+   to safe defaults whatever its last status was, which is the conservative
+   direction in both modes: acquire loses the parallelism and lifecycle it would
+   have to prove, and release holds freed capacity longer.
 
 ## Safety review
 

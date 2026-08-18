@@ -4399,6 +4399,40 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
     assert.equal(delay, 1000, "our own floor stays capped even when the deadline lifts the cap");
   });
 
+  // Any retryable response can carry an exhausted quota header. Only a rate-limit
+  // rejection may be waited out; a 401 replica lag clears in about a second.
+  await t.test("a non-rate-limit failure carrying quota headers keeps normal backoff", async () => {
+    let calls = 0;
+    let now = startedAt;
+    const delays = [];
+
+    await withMockedFetch(async () => {
+      calls++;
+      return calls <= 2
+        ? jsonResponse(
+            401,
+            { message: "Bad credentials" },
+            { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(startedAt / 1000) + 2700) }
+          )
+        : jsonResponse(200, { ok: true });
+    }, async () => {
+      await api("GET", "/repos/o/r/contents/locks/x.json", undefined, "token", {
+        deadlineAt: startedAt + 120_000,
+        now: () => now,
+        sleep: async (ms) => {
+          delays.push(ms);
+          now += ms;
+        }
+      });
+    });
+
+    assert.equal(calls, 3);
+    assert.ok(
+      delays.every((ms) => ms <= 10_000),
+      `a replica-lag 401 must keep exponential backoff, saw ${delays.join()}`
+    );
+  });
+
   // A primary rate limit sends no Retry-After, only the hourly reset. Without
   // reading it, a time-bounded budget spends itself on requests that cannot
   // succeed yet.
@@ -5027,6 +5061,95 @@ test("release mints its App token under the same budget as the call it serves", 
     installationLookups,
     6,
     "minting must inherit the release deadline instead of stopping at its own 3-attempt budget"
+  );
+});
+
+// An unreachable lock config must degrade for every last status, not only the ones
+// configReadCanFailClosed enumerates. The transient GitHub HTML 400 interstitial is
+// retryable but not in that list, so an exhausted budget on it used to red the
+// release before the lock-state write was attempted.
+test("release degrades an unreachable lock config whatever its last status was", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let wrote = false;
+  let warned = [];
+
+  await withTempFile(async (outputFile) => {
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
+      await withImmediateTimers(async () => {
+        await withActionEnv(
+          {
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "1",
+            GITHUB_WORKFLOW: "Perf",
+            GITHUB_JOB: "perf-benchmarks",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
+                return htmlResponse(
+                  400,
+                  "<html><head><title>Bad Request</title></head><body>Whoa there! " +
+                    "GitHub could not process this invalid request.</body></html>"
+                );
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  wrote = true;
+                  return jsonResponse(200, { content: { sha: "state-after-release" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-release"
+                });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await release({
+                token: "token",
+                lockName: "wallstop-organization-builds",
+                holderIdSuffix: "playmode",
+                lockRepository: "o/r",
+                lockRepo: { owner: "o", repo: "r" },
+                stateBranch: "lock-state",
+                statePath: "locks/wallstop-organization-builds.json",
+                configPath: "locks/wallstop-organization-builds.config.json",
+                resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+              });
+              warned = logs.filter((line) => line.startsWith("::warning::"));
+            });
+          }
+        );
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["cleanup-result"], "released");
+  });
+
+  assert.equal(wrote, true, "the lock-state write must still be attempted");
+  assert.ok(
+    warned.some((line) => /Unable to read lock config.*using safe defaults/.test(line)),
+    `expected a degraded lock-config warning, saw ${warned.join(" | ")}`
   );
 });
 

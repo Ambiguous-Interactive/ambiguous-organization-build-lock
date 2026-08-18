@@ -913,6 +913,12 @@ function isUnknownOutcomeMutationResponse(response) {
 // exponential backoff with the capped reset wait and change admission and reaping
 // timing, which this change deliberately leaves alone (issue #200).
 function rateLimitResetMs(response, now = Date.now) {
+  // Only a rate-limit rejection. Any retryable response can carry an exhausted
+  // quota header, and treating a 401 replica lag that clears in about a second as
+  // an hour-long wait would spend a whole budget on one attempt.
+  if (!response || (response.status !== 403 && response.status !== 429)) {
+    return null;
+  }
   if (header(response, "x-ratelimit-remaining") !== "0") {
     return null;
   }
@@ -1695,6 +1701,14 @@ function assertAcquireConfigRequirements(config, lockConfig) {
 function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
+  }
+  // An exhausted retry budget means the configuration could not be read at all,
+  // whatever its last status was. Safe defaults are the conservative direction in
+  // both modes - acquire loses the parallelism and lifecycle it would have to
+  // prove, release holds freed capacity longer - so an unreachable config must
+  // never be the reason an operation fails.
+  if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
+    return true;
   }
   return (
     !error.status ||
