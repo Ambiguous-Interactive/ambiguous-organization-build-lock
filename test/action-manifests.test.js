@@ -593,5 +593,5 @@ test("README documents the time-bounded release retry budget", () => {
   assert.match(readme, /`Retry-After` from GitHub is honored in full/);
   assert.match(readme, /neither channel may configure a zero backoff/);
   assert.match(readme, /The budget is split, not shared\./);
-  assert.match(readme, /may only extend the shared budget, never shorten it/);
+  assert.match(readme, /are both ceilings: whichever a call reaches\s+first ends its budget/);
 });

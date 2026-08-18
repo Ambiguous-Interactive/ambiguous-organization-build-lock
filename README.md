@@ -577,10 +577,13 @@ bounds the API retries inside it and does not restart per call; the cleanup's
 compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
 just past the deadline.
 
-A deadline may only extend the shared budget, never shorten it. A call that
-starts after the deadline has already been spent still gets the ordinary
-five-attempt budget, so no single request is worse off than it would be with no
-deadline at all.
+The deadline and `api-max-attempts` are both ceilings: whichever a call reaches
+first ends its budget. Under them sits a floor, so a deadline never leaves a call
+with fewer attempts than the shared five-attempt default it would have had with
+no deadline at all, and no single request is worse off for the deadline existing.
+The floor never raises an explicitly configured ceiling, and attempts spent on it
+past the deadline behave exactly like an attempt-bounded budget, backoff cap
+included.
 
 While a deadline is active, a `Retry-After` from GitHub is honored in full rather
 than truncated to the backoff cap, because the deadline already bounds the total

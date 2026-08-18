@@ -57,9 +57,10 @@ an outcome that has already happened.
    state-branch and lock-config calls get the first quarter, and the lock-state
    read and write keep the remainder, so neither phase can starve the other.
    Both preparatory calls degrade rather than fail, so neither can red a release
-   before the write is attempted. A deadline only ever extends the shared
-   budget: past it, the ordinary five-attempt budget still applies. This is the
-   change that would have absorbed the reported incident.
+   before the write is attempted. The deadline and `api-max-attempts` are both
+   ceilings, whichever binds first, over a floor that guarantees the shared
+   five-attempt default. This is the change that would have absorbed the
+   reported incident.
 3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
    (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
    (1000-300000) are declared release-action inputs. An explicit input wins over
@@ -87,7 +88,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 744 tests, 742 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 746 tests, 744 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -222,6 +223,27 @@ general invariant rather than a special case.
 The review's documentation note was also taken: the README no longer implies the
 cleanup's compare-and-swap loop is deadline-bounded. Its ten-round ceiling is
 attempt-bounded, so cleanup can finish a round just past the deadline.
+
+A sixth independent review raised two findings, both introduced by the fifth
+round's fix, and both remediated.
+
+1. **Confirmed defect — an unbounded wait past the deadline.** The floor branch
+   returned its proposed delay unclamped while `retryDelayMs` still honored a
+   `Retry-After` in full because a deadline existed, so a spent 120-second budget
+   with `Retry-After: 300` could sleep about seventeen minutes and be killed by
+   the job timeout, losing the new output entirely. Honoring a server-directed
+   wait in full is now conditional on the deadline actually bounding it: floor
+   attempts run with the deadline cleared, so they behave exactly like an
+   attempt-bounded budget, backoff cap included.
+2. **Confirmed defect — a documented invariant the code did not hold.** The floor
+   compared against the constant default rather than the effective ceiling, so a
+   configured `api-max-attempts: 20` was cut short by the deadline while the
+   comment, the README, and the input documentation all promised a deadline only
+   ever extends. The semantics are now stated the way two ceilings actually
+   behave: the deadline and `api-max-attempts` both bind, whichever comes first,
+   and the floor guarantees only the shared five-attempt default without ever
+   raising a ceiling the caller set above it. A test pins the above-floor case
+   the earlier test could not reach.
 
 ## Safety review
 

@@ -4192,6 +4192,62 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
     assert.equal(calls, 5);
   });
 
+  await t.test("the floor keeps the backoff cap on a server-directed wait", async () => {
+    const startedAt = 1_800_000_000_000;
+    const delays = [];
+    let calls = 0;
+
+    await withMockedFetch(async () => {
+      calls++;
+      return jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "300" });
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            deadlineAt: startedAt - 1000,
+            now: () => startedAt,
+            sleep: async (ms) => {
+              delays.push(ms);
+            }
+          }),
+        /exhausted its bounded GitHub API retry budget after 5 attempt\(s\)/
+      );
+    });
+
+    assert.equal(calls, 5);
+    assert.deepEqual(delays, [10_000, 10_000, 10_000, 10_000], "a spent deadline no longer bounds the wait");
+  });
+
+  // Two ceilings both bind. The floor guarantees the shared default; it never
+  // raises a ceiling the caller set above it.
+  await t.test("a deadline still bounds an attempt ceiling configured above the floor", async () => {
+    const startedAt = 1_800_000_000_000;
+    let now = startedAt;
+    let calls = 0;
+
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "20" }, async () => {
+      await withMockedFetch(async () => {
+        calls++;
+        return jsonResponse(503, { message: "No server is currently available." });
+      }, async () => {
+        await assert.rejects(
+          () =>
+            api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+              deadlineAt: startedAt + 60_000,
+              now: () => now,
+              sleep: async (ms) => {
+                now += ms;
+              }
+            }),
+          /because the bounded deadline elapsed/
+        );
+      });
+    });
+
+    assert.ok(calls > 5 && calls < 20, `expected the deadline to bind before the ceiling, saw ${calls}`);
+    assert.ok(now >= startedAt + 60_000);
+  });
+
   await t.test("an explicit attempt ceiling still wins over the spent-deadline floor", async () => {
     let calls = 0;
     const startedAt = 1_800_000_000_000;

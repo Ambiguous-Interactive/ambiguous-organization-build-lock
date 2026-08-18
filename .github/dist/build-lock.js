@@ -688,33 +688,35 @@ function apiRetryOptions(overrides = {}) {
 // retrying until its deadline and shortens its last wait so the final attempt still
 // starts inside the deadline instead of being skipped by a long backoff.
 //
-// A deadline may only extend the shared budget, never shorten it. A call that
-// starts after an already-spent deadline still gets the ordinary attempt budget,
-// so no single request is ever worse off than it was without a deadline. An
-// explicitly configured `maxAttempts` still wins over both.
+// The deadline and `maxAttempts` are both ceilings: whichever is reached first
+// ends the budget. Under them sits a floor, so a deadline never leaves a call with
+// fewer attempts than the shared default it would have had with no deadline at
+// all. The floor never raises an explicitly configured ceiling. Attempts spent on
+// the floor past the deadline behave exactly like an attempt-bounded budget,
+// backoff cap included: nothing bounds their wait any more.
 function apiRetryBudget(retry, attempt, proposeDelayMs) {
   if (attempt >= retry.maxAttempts) {
     return { exhausted: true, delayMs: 0, deadlineReason: null };
   }
   if (!Number.isFinite(retry.deadlineAt)) {
-    return { exhausted: false, delayMs: proposeDelayMs(), deadlineReason: null };
+    return { exhausted: false, delayMs: proposeDelayMs(retry), deadlineReason: null };
   }
   const now = retry.now();
   if (now < retry.deadlineAt) {
     return {
       exhausted: false,
-      delayMs: boundedRetryDelayMs(proposeDelayMs(), retry.deadlineAt, now),
+      delayMs: boundedRetryDelayMs(proposeDelayMs(retry), retry.deadlineAt, now),
       deadlineReason: null
     };
   }
-  if (attempt >= DEFAULT_API_MAX_ATTEMPTS) {
+  if (attempt >= Math.min(retry.maxAttempts, DEFAULT_API_MAX_ATTEMPTS)) {
     return {
       exhausted: true,
       delayMs: 0,
       deadlineReason: `deadline ${new Date(retry.deadlineAt).toISOString()}`
     };
   }
-  return { exhausted: false, delayMs: proposeDelayMs(), deadlineReason: null };
+  return { exhausted: false, delayMs: proposeDelayMs({ ...retry, deadlineAt: null }), deadlineReason: null };
 }
 
 // Name the budget the next attempt is spending, so a retry warning stays readable
@@ -998,7 +1000,7 @@ async function api(method, path, body, authToken, options = {}) {
         if (mutationMethod && isUnknownOutcomeMutationResponse(response)) {
           unknownOutcomeMutationFailure = true;
         }
-        const budget = apiRetryBudget(retry, attempt, () => retryDelayMs(response, attempt, retry));
+        const budget = apiRetryBudget(retry, attempt, (options) => retryDelayMs(response, attempt, options));
         if (budget.exhausted) {
           throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
         }
@@ -1036,7 +1038,7 @@ async function api(method, path, body, authToken, options = {}) {
         requestId: "",
         description: `transport error: ${oneLine(error.message)}`
       };
-      const budget = apiRetryBudget(retry, attempt, () => retryDelayMs(null, attempt, retry));
+      const budget = apiRetryBudget(retry, attempt, (options) => retryDelayMs(null, attempt, options));
       if (budget.exhausted) {
         throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
       }
