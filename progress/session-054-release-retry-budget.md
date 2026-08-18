@@ -51,8 +51,8 @@ an outcome that has already happened.
    last attempt starts inside the budget rather than being skipped by a long
    backoff. Callers without a deadline are unchanged. The clamp reuses the
    existing acquire helper, generalized to `boundedRetryDelayMs`.
-2. **Release bounds itself by wall clock.** The deadline is anchored once, when
-   the action reads its inputs, from the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
+2. **Release bounds itself by wall clock.** `release` derives a deadline from
+   the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
    `0` restores the attempt-bounded budget) and splits it: the preparatory
    state-branch and lock-config calls get the first quarter, and the lock-state
    read and write keep the remainder, so neither phase can starve the other.
@@ -67,7 +67,9 @@ an outcome that has already happened.
    an inherited environment value. Both channels report and ignore an
    out-of-range value: these knobs only change how long a retry waits, and
    failing a release over a tuning typo would abandon the holder cleanup it
-   exists to perform.
+   exists to perform. Minting the App token inherits the budget of the call it
+   serves, so a credential outage cannot bypass the deadline or starve the phase
+   it runs inside.
 4. **An unreachable record is named, not conflated with an unknown lock.** When
    confirmed, non-degraded cleanup evidence cannot be recorded because the
    lock-state file stayed unreachable for the whole budget, release emits
@@ -90,7 +92,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 751 tests, 749 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 752 tests, 750 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -369,6 +371,32 @@ including the one previously deferred.
    requests per release where the old budget made five, multiplied across a
    matrix. The reset is now read as a server-directed wait, so a window that
    reopens after the budget ends is waited on once and then abandoned.
+
+A twelfth independent review raised two findings, both caused by the eleventh
+round's fix, and both remediated.
+
+1. **Confirmed defect — the previous fix broke every real release.** Handing the
+   credential provider a deadline made `jwtApi` resolve its attempt ceiling to
+   `undefined`, which the spread then propagated into the retry options, so the
+   loop `attempt <= undefined` never entered and every minting call threw after
+   zero requests with an uncoded error the unrecorded-release path does not
+   recognise. Since App credentials are mandatory in production, that would have
+   failed every release with no cleanup at all. The whole test suite passed
+   because every existing release test passes a plain string token; that coverage
+   gap is now closed by a release test that uses a real App credential provider
+   and was confirmed red against the defect.
+2. **Confirmed defect — minting was bounded by the wrong phase.** The credential
+   held the full budget while running inside preparatory calls that own only a
+   quarter of it, so a degraded token endpoint could spend the entire deadline
+   before the lock-state read and write began — the starvation the split budget
+   exists to prevent.
+
+Both are fixed by the same change of approach: minting is no longer given a
+deadline of its own at configuration time. `api()` hands the credential provider
+the budget of the call being made, so minting inherits exactly the phase it serves
+and nothing more. `apiRetryOptions` now also ignores undefined-valued overrides,
+so an option built conditionally can never again clobber a computed bound and
+leave the retry loop with none.
 
 ## Safety review
 

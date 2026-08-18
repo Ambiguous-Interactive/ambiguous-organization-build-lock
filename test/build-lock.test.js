@@ -4893,6 +4893,104 @@ test("release degrades unreachable preparatory calls instead of failing on them"
   );
 });
 
+// Production releases always mint an App token first, and minting runs inside the
+// call whose budget it should inherit. Every other release test passes a plain
+// string token, so this is the only one that exercises the real credential path.
+test("release mints its App token under the same budget as the call it serves", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let installationLookups = 0;
+  let wrote = false;
+
+  await withTempFile(async (outputFile) => {
+    await withImmediateTimers(async () => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/installation") {
+              installationLookups++;
+              return installationLookups <= 5
+                ? jsonResponse(503, { message: "No server is currently available." })
+                : jsonResponse(200, { id: 42 });
+            }
+            if (parsed.pathname === "/app/installations/42/access_tokens") {
+              return jsonResponse(201, {
+                token: "ghs-installation-token",
+                expires_at: "2999-01-01T00:00:00.000Z"
+              });
+            }
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              if (options.method === "PUT") {
+                wrote = true;
+                return jsonResponse(200, { content: { sha: "state-after-release" } });
+              }
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: "state-before-release"
+              });
+            }
+            return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+          }, async () => {
+            await release({
+              token: createGitHubAppAuth({
+                appId: "12345",
+                privateKey: testAppPrivateKey,
+                owner: "o",
+                repository: "r",
+                repositories: ["r"],
+                permissions: { contents: "write" }
+              }),
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json",
+              resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+            });
+          });
+        }
+      );
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs.released, "true");
+  });
+
+  assert.equal(wrote, true);
+  assert.equal(
+    installationLookups,
+    6,
+    "minting must inherit the release deadline instead of stopping at its own 3-attempt budget"
+  );
+});
+
 // An out-of-range ceiling is already reported and ignored by the retry budget, so
 // release must not also announce it as a bound that took effect.
 test("release does not report an attempt ceiling the retry budget ignores", async () => {

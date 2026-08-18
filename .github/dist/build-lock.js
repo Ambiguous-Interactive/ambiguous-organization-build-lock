@@ -312,29 +312,30 @@ function createGitHubAppAuth({
   let cachedToken = null;
   let sharedRefresh = null;
 
-  async function jwtApi(method, path, body, signal) {
-    return api(method, path, body, createAppJwt(appId, keyObject, now()), {
-      ...apiOptions,
-      // The small inner budget exists so a healthy run mints quickly. When the
-      // caller supplies a wall-clock deadline it governs minting too, otherwise a
-      // three-attempt credential failure would end an operation whose own budget
-      // is still almost entirely unspent.
-      maxAttempts:
-        apiOptions.maxAttempts === undefined && !Number.isFinite(apiOptions.deadlineAt)
-          ? 3
-          : apiOptions.maxAttempts,
-      signal: signal || apiOptions.signal
-    });
+  async function jwtApi(method, path, body, signal, deadlineAt) {
+    const overrides = { ...apiOptions, signal: signal || apiOptions.signal };
+    if (Number.isFinite(deadlineAt)) {
+      // Minting runs inside the call the caller is spending its budget on, so it
+      // inherits that budget. A fixed inner budget would end an operation whose
+      // own wall-clock deadline is almost entirely unspent, and a budget wider
+      // than the calling phase's would let minting starve the call it serves.
+      overrides.deadlineAt = deadlineAt;
+    } else if (overrides.maxAttempts === undefined) {
+      // Otherwise keep the small inner budget so a healthy run mints quickly.
+      overrides.maxAttempts = 3;
+    }
+    return api(method, path, body, createAppJwt(appId, keyObject, now()), overrides);
   }
 
-  async function lookupInstallation(signal) {
+  async function lookupInstallation(signal, deadlineAt) {
     const installation = await jwtApi(
       "GET",
       repository
         ? `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`
         : `/orgs/${encodeURIComponent(owner)}/installation`,
       undefined,
-      signal
+      signal,
+      deadlineAt
     );
     installationId = installation && installation.id;
     if (!installationId) {
@@ -342,9 +343,9 @@ function createGitHubAppAuth({
     }
   }
 
-  async function mintToken(signal) {
+  async function mintToken(signal, deadlineAt) {
     if (!installationId) {
-      await lookupInstallation(signal);
+      await lookupInstallation(signal, deadlineAt);
     }
     let result;
     try {
@@ -352,18 +353,18 @@ function createGitHubAppAuth({
         ...(repositories ? { repositories: [...repositories] } : {}),
         ...(permissions ? { permissions: { ...permissions } } : {})
       };
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal, deadlineAt);
     } catch (error) {
       if (error.status !== 404) {
         throw error;
       }
       installationId = null;
-      await lookupInstallation(signal);
+      await lookupInstallation(signal, deadlineAt);
       const tokenRequest = {
         ...(repositories ? { repositories: [...repositories] } : {}),
         ...(permissions ? { permissions: { ...permissions } } : {})
       };
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal, deadlineAt);
     }
     const expiresAt = Date.parse(result && result.expires_at);
     if (!result || !result.token || !Number.isFinite(expiresAt) || expiresAt <= now()) {
@@ -431,7 +432,7 @@ function createGitHubAppAuth({
       }
       if (!sharedRefresh) {
         const refresh = { controller: new AbortController(), promise: null, waiters: 0 };
-        refresh.promise = mintToken(refresh.controller.signal).finally(() => {
+        refresh.promise = mintToken(refresh.controller.signal, options.deadlineAt).finally(() => {
           if (sharedRefresh === refresh) {
             sharedRefresh = null;
           }
@@ -448,7 +449,7 @@ function createGitHubAppAuth({
   };
 }
 
-function credential(lockRepo, apiOptions = {}) {
+function credential(lockRepo) {
   const appId = String(process.env.BUILD_LOCK_APP_ID || "").trim();
   const privateKey = process.env.BUILD_LOCK_APP_PRIVATE_KEY || "";
   if (Boolean(appId) !== Boolean(privateKey)) {
@@ -461,8 +462,7 @@ function credential(lockRepo, apiOptions = {}) {
       owner: lockRepo.owner,
       repository: lockRepo.repo,
       repositories: [lockRepo.repo],
-      permissions: { contents: "write" },
-      apiOptions
+      permissions: { contents: "write" }
     });
   }
   throw new Error("Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY.");
@@ -687,6 +687,10 @@ function effectiveApiRetryEnvironment(name) {
   return integerEnvironment(name, null, knob.minimum, knob.maximum);
 }
 
+function definedEntries(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
 function apiRetryOptions(overrides = {}) {
   const retrySleep = overrides.sleep || sleep;
   const signal = overrides.signal;
@@ -705,7 +709,10 @@ function apiRetryOptions(overrides = {}) {
     fullJitter: false,
     now: Date.now,
     random: Math.random,
-    ...overrides,
+    // Only defined overrides win. An explicit `undefined` from a caller building
+    // options conditionally must not clobber a computed default and leave the
+    // retry loop with no bound at all.
+    ...definedEntries(overrides),
     sleep: (ms) => retrySleep(ms, { signal })
   };
 }
@@ -1019,7 +1026,7 @@ async function api(method, path, body, authToken, options = {}) {
       throwIfAborted(retry.signal);
       let requestToken =
         authToken && typeof authToken.getToken === "function"
-          ? await authToken.getToken({ signal: retry.signal })
+          ? await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt })
           : authToken;
       let result = await fetchApi(method, path, body, requestToken, retry);
       if (
@@ -1031,7 +1038,7 @@ async function api(method, path, body, authToken, options = {}) {
       ) {
         renewableRefreshUsed = true;
         authToken.invalidateToken(requestToken);
-        requestToken = await authToken.getToken({ signal: retry.signal });
+        requestToken = await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt });
         result = await fetchApi(method, path, body, requestToken, retry);
       }
       const { response, data, text } = result;
@@ -3324,17 +3331,11 @@ function releaseRetryApiOptions(config, now = Date.now()) {
   if (seconds <= 0) {
     return { seconds, preparation: undefined, cleanup: undefined };
   }
-  // Prefer the deadline anchored at configuration time so the credential provider
-  // and the release share one budget instead of two consecutive ones.
-  const deadlineAt = Number.isFinite(config.releaseRetryDeadlineAt)
-    ? config.releaseRetryDeadlineAt
-    : now + seconds * 1000;
-  const startedAt = deadlineAt - seconds * 1000;
   const preparationSeconds = Math.max(1, Math.ceil(seconds * RELEASE_PREPARATION_BUDGET_SHARE));
   return {
     seconds,
-    preparation: { deadlineAt: startedAt + preparationSeconds * 1000 },
-    cleanup: { deadlineAt }
+    preparation: { deadlineAt: now + preparationSeconds * 1000 },
+    cleanup: { deadlineAt: now + seconds * 1000 }
   };
 }
 
@@ -4127,18 +4128,7 @@ function config() {
     0,
     3600
   );
-  // Anchor the release budget once, here, and share the same absolute deadline with
-  // the credential provider. Token minting happens inside the calls the budget is
-  // meant to protect, so leaving it on its own small budget would let a credential
-  // outage end a release whose deadline is almost entirely unspent.
-  const releaseRetryDeadlineAt =
-    MODE === "release" && releaseRetryDeadlineSeconds > 0
-      ? Date.now() + releaseRetryDeadlineSeconds * 1000
-      : null;
-  const token = credential(
-    lockRepo,
-    releaseRetryDeadlineAt === null ? {} : { deadlineAt: releaseRetryDeadlineAt }
-  );
+  const token = credential(lockRepo);
   const operation = input("operation", "reap");
   const resourceReportResolution = MODE === "release"
     ? resolveReleaseReport({
@@ -4192,7 +4182,6 @@ function config() {
       86400
     ),
     releaseRetryDeadlineSeconds,
-    releaseRetryDeadlineAt,
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
 }

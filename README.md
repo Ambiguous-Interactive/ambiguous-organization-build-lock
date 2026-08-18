@@ -602,10 +602,11 @@ A primary rate limit sends no `Retry-After`, so its `x-ratelimit-reset` is read
 the same way: a window that reopens after the budget ends is waited on and then
 abandoned, rather than retried against for the whole deadline.
 
-The deadline is anchored once, when the action reads its inputs, and covers
-minting the GitHub App token as well as the lock-state calls. Token minting
-otherwise runs on a small fixed budget of its own, which would end a release whose
-deadline was almost entirely unspent.
+Minting the GitHub App token inherits the budget of the call it serves, so a
+credential outage during preparation is bounded by the preparation slice and one
+during the lock-state write by the write's remainder. Minting otherwise runs on a
+small fixed budget of its own, which would end a release whose deadline was almost
+entirely unspent, and a wider one would let minting starve the call it serves.
 
 The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
 (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
