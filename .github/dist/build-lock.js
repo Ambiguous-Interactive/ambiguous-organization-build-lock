@@ -26,6 +26,9 @@ const DEFAULT_API_RETRY_MAX_MS = 10000;
 // while failing costs the consumer a full matrix re-run. The release path is
 // therefore bounded by wall clock instead of by a fixed attempt count.
 const DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS = 120;
+// Share of the release budget the preparatory calls may spend before the
+// lock-state read and write, which keep the remainder.
+const RELEASE_PREPARATION_BUDGET_SHARE = 0.25;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
@@ -77,9 +80,7 @@ const API_RETRY_INPUTS = [
   { input: "api-retry-base-ms", environment: "BUILD_LOCK_API_RETRY_BASE_MS", minimum: 100, maximum: 60000 },
   { input: "api-retry-max-ms", environment: "BUILD_LOCK_API_RETRY_MAX_MS", minimum: 1000, maximum: 300000 }
 ];
-const API_RETRY_MINIMUMS = new Map(
-  API_RETRY_INPUTS.map((knob) => [knob.environment, knob.minimum])
-);
+const API_RETRY_KNOBS = new Map(API_RETRY_INPUTS.map((knob) => [knob.environment, knob]));
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -609,18 +610,19 @@ function isAbortError(error, signal) {
   );
 }
 
-function integerEnvironment(name, fallback, minimum = 0) {
+function integerEnvironment(name, fallback, minimum = 0, maximum = Number.POSITIVE_INFINITY) {
   const raw = process.env[name];
   if (raw === undefined || raw === "") {
     return fallback;
   }
+  const range = Number.isFinite(maximum) ? `between ${minimum} and ${maximum}` : `>= ${minimum}`;
   if (!/^[0-9]+$/.test(raw)) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer ${range}.`);
     return fallback;
   }
   const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || value < minimum) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer ${range}.`);
     return fallback;
   }
   return value;
@@ -649,6 +651,15 @@ function applyApiRetryInputs() {
   }
 }
 
+// The environment channel carries the same ranges as the action inputs, so a knob
+// cannot be widened past its contract by sidestepping the input. It warns and falls
+// back to the default instead of failing, which is the established behavior for
+// every other environment override in this runtime.
+function apiRetryEnvironment(name, fallback) {
+  const knob = API_RETRY_KNOBS.get(name);
+  return integerEnvironment(name, fallback, knob.minimum, knob.maximum);
+}
+
 function apiRetryOptions(overrides = {}) {
   const retrySleep = overrides.sleep || sleep;
   const signal = overrides.signal;
@@ -657,24 +668,12 @@ function apiRetryOptions(overrides = {}) {
   // number of backoffs. An explicitly configured attempt ceiling still wins.
   const timeBounded = Number.isFinite(overrides.deadlineAt);
   return {
-    maxAttempts: integerEnvironment(
+    maxAttempts: apiRetryEnvironment(
       "BUILD_LOCK_API_MAX_ATTEMPTS",
-      timeBounded ? Number.POSITIVE_INFINITY : DEFAULT_API_MAX_ATTEMPTS,
-      1
+      timeBounded ? Number.POSITIVE_INFINITY : DEFAULT_API_MAX_ATTEMPTS
     ),
-    // The environment carries the same floors as the action inputs: a zero backoff
-    // under an active deadline would retry without pause for the whole budget, so
-    // neither channel may configure one.
-    baseDelayMs: integerEnvironment(
-      "BUILD_LOCK_API_RETRY_BASE_MS",
-      DEFAULT_API_RETRY_BASE_MS,
-      API_RETRY_MINIMUMS.get("BUILD_LOCK_API_RETRY_BASE_MS")
-    ),
-    maxDelayMs: integerEnvironment(
-      "BUILD_LOCK_API_RETRY_MAX_MS",
-      DEFAULT_API_RETRY_MAX_MS,
-      API_RETRY_MINIMUMS.get("BUILD_LOCK_API_RETRY_MAX_MS")
-    ),
+    baseDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
+    maxDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
     deadlineAt: null,
     fullJitter: false,
     now: Date.now,
@@ -3252,13 +3251,25 @@ async function acquire(config) {
 // bookkeeping: the licensed resource has already been returned. Bound it by wall
 // clock so a transient GitHub outage that outlasts a handful of backoffs cannot red
 // an otherwise successful consumer matrix. `0` restores the attempt-bounded budget.
-// The deadline covers only the lock-state read and write. The preparatory calls
-// keep the shared attempt budget on purpose: a long outage on those must not spend
-// the budget that exists to protect the write itself.
+//
+// The budget is split rather than shared. The preparatory state-branch and
+// lock-config calls need their own share, because an outage broad enough to matter
+// hits them first and they would otherwise fail the release before the write is
+// ever attempted. They get a bounded slice so they cannot spend the budget that
+// exists to protect the write, and both phases end no later than the one deadline
+// the caller configured.
 function releaseRetryApiOptions(config, now = Date.now()) {
-  const seconds = config.releaseRetryDeadlineSeconds;
-  const effective = Number.isInteger(seconds) ? seconds : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
-  return effective > 0 ? { deadlineAt: now + effective * 1000 } : undefined;
+  const seconds = Number.isInteger(config.releaseRetryDeadlineSeconds)
+    ? config.releaseRetryDeadlineSeconds
+    : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
+  if (seconds <= 0) {
+    return { preparation: undefined, cleanup: undefined };
+  }
+  const preparationSeconds = Math.max(1, Math.ceil(seconds * RELEASE_PREPARATION_BUDGET_SHARE));
+  return {
+    preparation: { deadlineAt: now + preparationSeconds * 1000 },
+    cleanup: { deadlineAt: now + seconds * 1000 }
+  };
 }
 
 // A release whose record cannot be confirmed after confirmed cleanup is not a lock
@@ -3308,17 +3319,18 @@ async function release(config) {
     health: "healthy",
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
+  const retryBudget = releaseRetryApiOptions(config);
   let result;
   try {
-    await ensureStateBranch(config);
-    const lockConfig = await readLockConfig(config);
+    await ensureStateBranch(config, { apiOptions: retryBudget.preparation });
+    const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.preparation });
     result = await cleanupIdentity(config, identity, {
       resourceSafe: resourceReport.cleanupStatus === "confirmed",
       resourceHealth: resourceReport.health,
       resourceReason: resourceReport.reason,
       releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
       reason: resourceReport.reason,
-      apiOptions: releaseRetryApiOptions(config)
+      apiOptions: retryBudget.cleanup
     });
   } catch (error) {
     if (

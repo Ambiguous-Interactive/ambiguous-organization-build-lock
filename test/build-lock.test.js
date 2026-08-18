@@ -4188,18 +4188,31 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
 });
 
 // A zero backoff under an active deadline would retry without pause for the whole
-// budget, so the environment channel carries the same floors as the action inputs.
-test("the retry backoff floors apply to the environment channel too", async (t) => {
+// budget, and a ten-minute ceiling would outlast the calling step. The environment
+// channel therefore carries the same ranges as the action inputs.
+test("the retry budget ranges apply to the environment channel too", async (t) => {
   const cases = [
     {
       name: "zero backoff ceiling",
       environment: { BUILD_LOCK_API_RETRY_MAX_MS: "0" },
-      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_MAX_MS=0; expected an integer >= 1000/
+      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_MAX_MS=0; expected an integer between 1000 and 300000/
     },
     {
       name: "zero base backoff",
       environment: { BUILD_LOCK_API_RETRY_BASE_MS: "0" },
-      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_BASE_MS=0; expected an integer >= 100/
+      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_BASE_MS=0; expected an integer between 100 and 60000/
+    },
+    {
+      // A ten-minute backoff on an attempt-bounded path would outlast the calling
+      // step, so the environment carries the input ceilings as well as its floors.
+      name: "oversized backoff ceiling",
+      environment: { BUILD_LOCK_API_RETRY_MAX_MS: "600000" },
+      warning: /Ignoring invalid BUILD_LOCK_API_RETRY_MAX_MS=600000; expected an integer between 1000 and 300000/
+    },
+    {
+      name: "oversized attempt ceiling",
+      environment: { BUILD_LOCK_API_MAX_ATTEMPTS: "101" },
+      warning: /Ignoring invalid BUILD_LOCK_API_MAX_ATTEMPTS=101; expected an integer between 1 and 100/
     }
   ];
 
@@ -4533,9 +4546,10 @@ test("release retry knobs are configurable through action inputs", async (t) => 
   }
 });
 
-// A long outage on the preparatory calls must not spend the budget that exists to
-// protect the lock-state write itself.
-test("the release deadline is not consumed by the preparatory lock-config read", async () => {
+// The preparatory calls need their own retry budget, because a broad outage hits
+// them first and would otherwise fail the release before the write is attempted.
+// They must not spend the budget that exists to protect the write itself.
+test("release splits its retry budget between preparation and the lock-state write", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
     holder: {
@@ -4551,6 +4565,7 @@ test("the release deadline is not consumed by the preparatory lock-config read",
       expiresAt: "2999-01-01T00:00:00.000Z"
     }
   };
+  let branchChecks = 0;
   let configReads = 0;
   let writeAttempts = 0;
 
@@ -4570,11 +4585,16 @@ test("the release deadline is not consumed by the preparatory lock-config read",
             await withMockedFetch(async (url, options = {}) => {
               const parsed = new URL(url);
               if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
-                return jsonResponse(200, { object: { sha: "branch-sha" } });
+                branchChecks++;
+                return branchChecks <= 7
+                  ? jsonResponse(503, { message: "No server is currently available." })
+                  : jsonResponse(200, { object: { sha: "branch-sha" } });
               }
               if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json") {
                 configReads++;
-                return jsonResponse(503, { message: "No server is currently available." });
+                return configReads <= 7
+                  ? jsonResponse(503, { message: "No server is currently available." })
+                  : jsonResponse(404, { message: "Not Found" });
               }
               if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
                 if (options.method === "PUT") {
@@ -4611,8 +4631,9 @@ test("the release deadline is not consumed by the preparatory lock-config read",
     assert.equal(outputs["cleanup-result"], "released");
   });
 
-  assert.equal(configReads, 5, "the lock-config read keeps the shared attempt budget");
-  assert.equal(writeAttempts, 9, "the write keeps its full time-bounded budget");
+  assert.equal(branchChecks, 8, "the state-branch check outlasts the 5-attempt ceiling");
+  assert.equal(configReads, 8, "the lock-config read outlasts the 5-attempt ceiling");
+  assert.equal(writeAttempts, 9, "the write still gets its own time-bounded budget");
 });
 
 // Compare-and-swap exhaustion means reads and writes succeeded but lost a

@@ -51,13 +51,13 @@ an outcome that has already happened.
    last attempt starts inside the budget rather than being skipped by a long
    backoff. Callers without a deadline are unchanged. The clamp reuses the
    existing acquire helper, generalized to `boundedRetryDelayMs`.
-2. **Release bounds the lock-state read and write by wall clock.** `release`
-   derives a deadline from the new `release-retry-deadline-seconds` input
-   (default 120, maximum 3600, `0` restores the attempt-bounded budget) and
-   applies it to the cleanup read/write only. The preparatory state-branch and
-   lock-config calls keep the shared attempt budget on purpose, so a long outage
-   on those cannot spend the budget that exists to protect the write. This is
-   the change that would have absorbed the reported incident.
+2. **Release bounds itself by wall clock.** `release` derives a deadline from
+   the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
+   `0` restores the attempt-bounded budget) and splits it: the preparatory
+   state-branch and lock-config calls get the first quarter, and the lock-state
+   read and write keep the remainder. Neither phase can starve the other, and
+   both end no later than the one configured deadline. This is the change that
+   would have absorbed the reported incident.
 3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
    (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
    (1000-300000) are declared release-action inputs. An explicit input wins over
@@ -85,7 +85,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 739 tests, 737 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 741 tests, 739 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -178,6 +178,26 @@ was rejected with reasoning.
    token. A `Retry-After` is now honored in full whenever a deadline bounds the
    total wait, and the deadline still clamps an instruction that would overrun
    it. The attempt-bounded paths keep the cap and remain #200's scope.
+
+A fourth independent review raised two findings; both were remediated.
+
+1. **Confirmed defect — the budget never reached the call it protects.** Round
+   three's fix left `ensureStateBranch` attempt-bounded, and unlike
+   `readLockConfig` it rethrows instead of degrading to safe defaults. An outage
+   broad enough to matter hits it first, so the release would fail after roughly
+   fifteen seconds with the deadline unspent — the exact failure the change
+   targets. Both earlier deadline tests masked it by always answering the
+   state-branch ref with 200. The budget is now split rather than shared: the
+   preparatory calls get the first quarter and the lock-state read and write keep
+   the remainder, so neither phase can starve the other and both end no later
+   than the one configured deadline. A test now drives the state-branch check,
+   the lock-config read, and the write past the five-attempt ceiling together.
+2. **Confirmed defect — floors without ceilings.** The environment channel gained
+   the input minimums but not the maximums, while the README claimed both applied.
+   `BUILD_LOCK_API_RETRY_MAX_MS=600000` was silently accepted, letting a single
+   retryable 503 sleep ten minutes on an attempt-bounded path.
+   `integerEnvironment` now takes a maximum, the three retry knobs read their
+   range from one shared definition, and the warning names the range it enforced.
 
 ## Safety review
 
