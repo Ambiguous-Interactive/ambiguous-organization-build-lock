@@ -625,12 +625,12 @@ function integerEnvironment(name, fallback, minimum = 0, maximum = Number.POSITI
   }
   const range = Number.isFinite(maximum) ? `between ${minimum} and ${maximum}` : `>= ${minimum}`;
   if (!/^[0-9]+$/.test(raw)) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer ${range}.`);
+    console.log(`::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer ${range}.`);
     return fallback;
   }
   const value = Number.parseInt(raw, 10);
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer ${range}.`);
+    console.log(`::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer ${range}.`);
     return fallback;
   }
   return value;

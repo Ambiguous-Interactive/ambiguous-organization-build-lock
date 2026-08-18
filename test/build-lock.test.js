@@ -4099,6 +4099,26 @@ test("release reports noop with holder context when this run has no state to cle
 // Issue #198: a 503 on the final release write cost a consumer its whole Unity
 // matrix because five attempts of exponential backoff are over in ~15 seconds.
 // A caller that supplies a deadline retries on wall clock instead.
+// Retry knobs can arrive from an organization or repository variable, so the
+// notice that rejects one must not let that value break out of the command it is
+// reported in. A runner only interprets a command that starts a line.
+test("a rejected retry knob cannot inject workflow commands", async () => {
+  await withEnvironment(
+    { BUILD_LOCK_API_MAX_ATTEMPTS: "3\n::error::spoofed\n%injected" },
+    async () => {
+      await withMockedFetch(async () => jsonResponse(200, { ok: true }), async (logs) => {
+        await api("GET", "/repos/o/r/contents/locks/x.json", undefined, "token");
+
+        const warnings = logs.filter((line) => line.includes("Ignoring invalid BUILD_LOCK_API_MAX_ATTEMPTS"));
+        assert.equal(warnings.length, 1);
+        assert.doesNotMatch(warnings[0], /\r|\n/);
+        assert.doesNotMatch(warnings[0], /^::error::/m);
+        assert.match(warnings[0], /%25injected/);
+      });
+    }
+  );
+});
+
 test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", async (t) => {
   const startedAt = 1_800_000_000_000;
 

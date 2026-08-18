@@ -93,7 +93,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 758 tests, 756 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 759 tests, 757 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -466,6 +466,22 @@ and both remediated.
    to safe defaults whatever its last status was, which is the conservative
    direction in both modes: acquire loses the parallelism and lifecycle it would
    have to prove, and release holds freed capacity longer.
+
+A sixteenth independent review raised one finding, which was remediated. Every
+other path it probed — budget plumbing, `retryDelayMs` precedence, the
+unrecorded-release code's reachability from a blocked-account report, the degraded
+state-branch guard, and consumer allowlists — it could not construct a failure for.
+
+1. **Confirmed defect — an unsanitized workflow command.** `integerEnvironment`
+   interpolated a rejected environment value into a `::warning::` without
+   `workflowCommandData`, so a retry knob arriving from an organization or
+   repository variable could carry a line break and start a workflow command of
+   its own, repeated on every API call. The defect predates this change, but the
+   change touches that line and widens the knobs' exposure, so it is swept here:
+   the value is sanitized, and a test proves the notice keeps no line break and
+   escapes percent sequences. The rest of the runtime's workflow commands were
+   swept too; every other interpolation is a validated lock name, a run identity
+   from the Actions environment, an internal literal, or already JSON-escaped.
 
 ## Safety review
 
