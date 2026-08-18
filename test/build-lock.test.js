@@ -4960,6 +4960,60 @@ test("the release budget gives every phase a share strictly inside the total", a
     assert.equal(budget.stateBranch.deadlineAt - now, 15_000);
     assert.equal(budget.lockConfig.deadlineAt - now, 30_000);
     assert.equal(budget.cleanup.deadlineAt - now, 120_000);
+    // A deadline consulted only between attempts cannot bound a stalled request.
+    for (const phase of [budget.stateBranch, budget.lockConfig, budget.cleanup]) {
+      assert.ok(phase.signal instanceof AbortSignal, "every phase deadline needs a matching abort signal");
+      assert.equal(phase.signal.aborted, false);
+    }
+  });
+
+  await t.test("a phase deadline that fires mid-request reports an unrecorded release", async () => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            // Never answers. Only the abort signal can end this request.
+            return new Promise((_resolve, reject) => {
+              options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+            });
+          }, async () => {
+            await assert.rejects(
+              () =>
+                release({
+                  token: "token",
+                  lockName: "wallstop-organization-builds",
+                  holderIdSuffix: "playmode",
+                  lockRepository: "o/r",
+                  lockRepo: { owner: "o", repo: "r" },
+                  stateBranch: "lock-state",
+                  statePath: "locks/wallstop-organization-builds.json",
+                  configPath: "locks/wallstop-organization-builds.config.json",
+                  releaseRetryDeadlineSeconds: 1,
+                  resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+                }),
+              /Could not confirm the release of wallstop-organization-builds/
+            );
+          });
+        }
+      );
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, releaseOutputNames);
+      assert.equal(outputs["cleanup-result"], "lock-release-unreachable");
+      assert.equal(outputs.released, "false");
+    });
   });
 
   await t.test("a disabled budget hands every phase the attempt-bounded default", () => {

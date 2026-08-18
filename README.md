@@ -577,7 +577,10 @@ back to default lock configuration, which would apply the default release cooldo
 to freed capacity instead of the configured one. Both preparatory calls degrade
 rather than fail, because an outage broad enough to matter hits them first and
 neither may red a release before the write is attempted. Every deadline is
-absolute, so a phase that finishes early hands its remainder forward. Each phase's deadline
+absolute, so a phase that finishes early hands its remainder forward, and each one
+carries a matching abort signal: a deadline consulted only between attempts cannot
+stop a connection that stalls inside a single request, which would outlast the
+whole budget and take the step's timeout with it. Each phase's deadline
 bounds the API retries inside it and does not restart per call; the cleanup's
 compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
 just past the deadline.

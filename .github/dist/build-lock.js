@@ -1702,14 +1702,6 @@ function configReadCanFailClosed(error, options = {}) {
   if (isAbortError(error, options.apiOptions && options.apiOptions.signal)) {
     return false;
   }
-  // An exhausted retry budget means the configuration could not be read at all,
-  // whatever its last status was. Safe defaults are the conservative direction in
-  // both modes - acquire loses the parallelism and lifecycle it would have to
-  // prove, release holds freed capacity longer - so an unreachable config must
-  // never be the reason an operation fails.
-  if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
-    return true;
-  }
   return (
     !error.status ||
     error.status === 401 ||
@@ -3368,11 +3360,15 @@ function releaseRetryApiOptions(config, now = Date.now()) {
     Math.min(Math.round(totalMs * RELEASE_PREPARATION_BUDGET_SHARE), totalMs - 1)
   );
   const stateBranchMs = Math.max(1, Math.round(preparationMs / 2));
+  // Pair every deadline with an abort signal. A deadline consulted only between
+  // attempts is not a wall-clock bound: one connection that stalls inside fetch
+  // would outlast the whole budget and take the step's timeout with it, losing the
+  // typed outputs this change exists to produce. The reaper already works this way.
   return {
     seconds,
-    stateBranch: { deadlineAt: now + stateBranchMs },
-    lockConfig: { deadlineAt: now + preparationMs },
-    cleanup: { deadlineAt: now + totalMs }
+    stateBranch: { deadlineAt: now + stateBranchMs, signal: AbortSignal.timeout(stateBranchMs) },
+    lockConfig: { deadlineAt: now + preparationMs, signal: AbortSignal.timeout(preparationMs) },
+    cleanup: { deadlineAt: now + totalMs, signal: AbortSignal.timeout(totalMs) }
   };
 }
 
@@ -3388,7 +3384,11 @@ function releaseRetryApiOptions(config, now = Date.now()) {
 function isUnrecordedReleaseError(error) {
   return (
     Boolean(error) &&
-    (error.code === "GITHUB_API_RETRY_EXHAUSTED" || error.code === "LOCK_STATE_UNVERIFIED")
+    (error.code === "GITHUB_API_RETRY_EXHAUSTED" ||
+      error.code === "LOCK_STATE_UNVERIFIED" ||
+      // A phase deadline that fires mid-request aborts it. Same meaning as an
+      // exhausted budget: the file was not reached inside the time allowed.
+      error.name === "TimeoutError")
   );
 }
 
@@ -3461,7 +3461,23 @@ async function release(config) {
           "continuing to the lock-state read and write."
       );
     }
-    const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.lockConfig });
+    let lockConfig;
+    try {
+      lockConfig = await readLockConfig(config, { apiOptions: retryBudget.lockConfig });
+    } catch (error) {
+      // readLockConfig degrades for the statuses it enumerates, but not for an
+      // exhausted budget or an elapsed phase deadline. Release must not fail on
+      // either: safe defaults hold freed capacity longer, which is the direction
+      // that cannot over-run a license.
+      if (!isUnrecordedReleaseError(error)) {
+        throw error;
+      }
+      console.log(
+        `::warning::Unable to read lock config for ${config.lockName} ` +
+          `(${workflowCommandData(error.message)}); using safe defaults (${defaultLockConfigSummary()}).`
+      );
+      lockConfig = defaultLockConfig();
+    }
     result = await cleanupIdentity(config, identity, {
       resourceSafe: resourceReport.cleanupStatus === "confirmed",
       resourceHealth: resourceReport.health,

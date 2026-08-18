@@ -56,7 +56,8 @@ an outcome that has already happened.
    `0` restores the attempt-bounded budget) and splits it three ways: the
    state-branch check takes the first eighth, the lock-config read the rest of
    the first quarter, and the lock-state read and write the remainder, so no
-   phase can starve another.
+   phase can starve another. Each phase deadline carries a matching abort signal,
+   because a bound consulted only between attempts cannot stop a stalled request.
    Both preparatory calls degrade rather than fail, so neither can red a release
    before the write is attempted. The deadline and `api-max-attempts` are both
    ceilings, whichever binds first, with no per-call attempt floor underneath:
@@ -93,7 +94,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 759 tests, 757 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 760 tests, 758 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -482,6 +483,27 @@ state-branch guard, and consumer allowlists — it could not construct a failure
    escapes percent sequences. The rest of the runtime's workflow commands were
    swept too; every other interpolation is a validated lock name, a run identity
    from the Actions environment, an internal literal, or already JSON-escaped.
+
+A seventeenth independent review raised one finding, which was remediated.
+
+1. **Confirmed defect — the wall-clock bound was only checked between attempts.**
+   Each phase carried a deadline but no abort signal, so a connection that stalls
+   inside a single `fetch` outlasts the whole budget: with the README's own
+   `timeout-minutes` sizing, one stalled request could consume the step and be
+   killed before the lock-state write was attempted and before any output was
+   written, losing exactly the typed reporting this change exists to produce. The
+   limitation predates the change — `main`'s release has no signal either — but
+   the change is what promises a wall-clock bound, so it has to hold it. Every
+   phase deadline now carries a matching `AbortSignal.timeout`, the pattern the
+   scheduled reaper already uses, and an elapsed phase deadline is classified like
+   an exhausted budget so the outputs are still written.
+
+   Two consequences were handled with it. `readLockConfig` now degrades through an
+   explicit release-local catch rather than through the shared status list, which
+   also lets the fifteenth review's `configReadCanFailClosed` change be reverted:
+   an aborted read is indistinguishable from the reaper's fail-closed scan
+   deadline at that layer, so the policy belongs where the intent is known.
+   Acquire and reap keep exactly their `main` behavior.
 
 ## Safety review
 
