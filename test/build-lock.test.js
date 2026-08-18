@@ -4486,6 +4486,40 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
     assert.deepEqual(delays, [120_000], "the reset is clamped to the deadline, not retried against");
     assert.equal(calls, 2, "a window that reopens after the budget is not worth retrying against");
   });
+
+  // A reset already in the past carries no waiting information; taking it as a
+  // zero-length instruction would replace backoff with a constant minimum wait.
+  await t.test("an already-elapsed reset keeps exponential backoff", async () => {
+    let calls = 0;
+    let now = startedAt;
+    const delays = [];
+
+    await withMockedFetch(async () => {
+      calls++;
+      return calls <= 3
+        ? jsonResponse(
+            403,
+            { message: "API rate limit exceeded" },
+            { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(startedAt / 1000) - 60) }
+          )
+        : jsonResponse(200, { ok: true });
+    }, async () => {
+      await api("GET", "/repos/o/r/contents/locks/x.json", undefined, "token", {
+        deadlineAt: startedAt + 120_000,
+        now: () => now,
+        sleep: async (ms) => {
+          delays.push(ms);
+          now += ms;
+        }
+      });
+    });
+
+    assert.equal(calls, 4);
+    assert.ok(
+      delays[1] > delays[0] && delays[2] > delays[1],
+      `expected exponential growth, saw ${delays.join()}`
+    );
+  });
 });
 
 test("release records a holder removal that needs more than the attempt-bounded budget", async () => {

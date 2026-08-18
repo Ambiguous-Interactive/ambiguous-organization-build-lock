@@ -3786,6 +3786,13 @@ func fallbackReleaseSource(step, job *yaml.Node) (string, string, bool) {
 			"resource-reason":         true,
 			"lock-repository":         true,
 			"state-branch":            true,
+			// Retry tuning only. These change how long a transient GitHub failure
+			// is retried, never what the release claims about licensed cleanup, so
+			// they are allowed alongside the evidence keys this check pins.
+			"release-retry-deadline-seconds": true,
+			"api-max-attempts":               true,
+			"api-retry-base-ms":              true,
+			"api-retry-max-ms":               true,
 		}) {
 		return "", "", false
 	}

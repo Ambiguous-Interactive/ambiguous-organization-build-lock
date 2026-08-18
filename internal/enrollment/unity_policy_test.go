@@ -3870,6 +3870,34 @@ jobs:
 			}
 		})
 	}
+
+	// The release retry knobs are documented consumer inputs. Rejecting a fallback
+	// release for setting one would make the documentation unfollowable.
+	t.Run("retry tuning inputs are accepted", func(t *testing.T) {
+		tuned := strings.Replace(
+			base,
+			"          resource-reason: return-terminated\n",
+			"          resource-reason: return-terminated\n"+
+				"          release-retry-deadline-seconds: \"240\"\n"+
+				"          api-max-attempts: \"12\"\n"+
+				"          api-retry-base-ms: \"500\"\n"+
+				"          api-retry-max-ms: \"20000\"\n",
+			1,
+		)
+		if tuned == base {
+			t.Fatal("fixture did not receive the retry tuning inputs")
+		}
+		result, err := AnalyzeUnityEnrollment(
+			unityFixture(map[string]string{".github/workflows/unity.yml": tuned}),
+			unityAuditPolicy(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(findingCodes(result.Findings), "invalid-fallback-release") {
+			t.Fatalf("retry tuning must not invalidate the fallback release: %#v", result.Findings)
+		}
+	})
 }
 
 func TestUnityEnrollmentDoesNotDowngradeLicensedWorkToFallbackCleanup(t *testing.T) {

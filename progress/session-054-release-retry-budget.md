@@ -94,7 +94,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 760 tests, 758 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 761 tests, 759 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -504,6 +504,25 @@ A seventeenth independent review raised one finding, which was remediated.
    an aborted read is indistinguishable from the reaper's fail-closed scan
    deadline at that layer, so the policy belongs where the intent is known.
    Acquire and reap keep exactly their `main` behavior.
+
+An eighteenth independent review raised two findings; both were remediated.
+
+1. **Confirmed defect — the Go enrollment policy rejected the new inputs.** The
+   consumer-enrollment analyzer pins the hosted fallback release step to a strict
+   key allowlist, so a consumer following the new README section and setting any
+   of the four retry inputs on it would be reported as `invalid-fallback-release`.
+   Documentation that the audit refuses is worse than no documentation. The four
+   keys are allowed there now, with a Go test proving it, and the comment records
+   why they are safe alongside the evidence keys the check pins: they change how
+   long a transient failure is retried, never what the release claims about
+   licensed cleanup. This is the cross-language half of the contract the JavaScript
+   changes opened, and no other allowlist in the analyzer covers release inputs.
+2. **Confirmed defect — an elapsed rate-limit reset became a constant wait.** A
+   reset already in the past made `rateLimitResetMs` return zero, which is not
+   null, so every retry took the instruction branch and waited the minimum backoff
+   instead of growing — roughly ninety requests over the default cleanup slice
+   against an endpoint that had just limited us. An elapsed reset now carries no
+   instruction and exponential backoff applies.
 
 ## Safety review
 

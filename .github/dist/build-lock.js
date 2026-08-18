@@ -927,7 +927,14 @@ function rateLimitResetMs(response, now = Date.now) {
     return null;
   }
   const resetAt = Number(reset) * 1000;
-  return Number.isFinite(resetAt) ? Math.max(0, resetAt - now()) : null;
+  if (!Number.isFinite(resetAt)) {
+    return null;
+  }
+  // A reset already in the past carries no waiting information. Treating it as a
+  // zero-length instruction would replace exponential backoff with a constant
+  // minimum wait for the whole budget, against an endpoint that just limited us.
+  const waitMs = resetAt - now();
+  return waitMs > 0 ? waitMs : null;
 }
 
 function retryDelayMs(response, attempt, options) {
