@@ -4168,9 +4168,10 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
     assert.ok(now < deadlineAt + 10_000, "expected the last wait to be clamped to the deadline");
   });
 
-  // A budget that is spent must not leave later calls worse off than they would
-  // have been with no deadline at all.
-  await t.test("still gives the ordinary attempt budget to a call that starts after it", async () => {
+  // There is deliberately no per-call floor under the deadline: one would let each
+  // call spend a fresh attempt budget past it, so a multi-call phase would overrun
+  // the wall-clock bound by a multiple of itself.
+  await t.test("grants no fresh attempts to a call that starts after the deadline", async () => {
     let calls = 0;
     const startedAt = 1_800_000_000_000;
 
@@ -4183,93 +4184,15 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
           api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
             deadlineAt: startedAt - 1000,
             now: () => startedAt,
-            sleep: async () => {}
-          }),
-        /exhausted its bounded GitHub API retry budget after 5 attempt\(s\) because the bounded deadline elapsed/
-      );
-    });
-
-    assert.equal(calls, 5);
-  });
-
-  await t.test("the floor keeps the backoff cap on a server-directed wait", async () => {
-    const startedAt = 1_800_000_000_000;
-    const delays = [];
-    let calls = 0;
-
-    await withMockedFetch(async () => {
-      calls++;
-      return jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "300" });
-    }, async () => {
-      await assert.rejects(
-        () =>
-          api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
-            deadlineAt: startedAt - 1000,
-            now: () => startedAt,
-            sleep: async (ms) => {
-              delays.push(ms);
+            sleep: async () => {
+              assert.fail("a spent budget must not wait");
             }
           }),
-        /exhausted its bounded GitHub API retry budget after 5 attempt\(s\)/
+        /exhausted its bounded GitHub API retry budget after 1 attempt\(s\) because the bounded deadline elapsed/
       );
     });
 
-    assert.equal(calls, 5);
-    assert.deepEqual(delays, [10_000, 10_000, 10_000, 10_000], "a spent deadline no longer bounds the wait");
-  });
-
-  // Two ceilings both bind. The floor guarantees the shared default; it never
-  // raises a ceiling the caller set above it.
-  await t.test("a deadline still bounds an attempt ceiling configured above the floor", async () => {
-    const startedAt = 1_800_000_000_000;
-    let now = startedAt;
-    let calls = 0;
-
-    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "20" }, async () => {
-      await withMockedFetch(async () => {
-        calls++;
-        return jsonResponse(503, { message: "No server is currently available." });
-      }, async () => {
-        await assert.rejects(
-          () =>
-            api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
-              deadlineAt: startedAt + 60_000,
-              now: () => now,
-              sleep: async (ms) => {
-                now += ms;
-              }
-            }),
-          /because the bounded deadline elapsed/
-        );
-      });
-    });
-
-    assert.ok(calls > 5 && calls < 20, `expected the deadline to bind before the ceiling, saw ${calls}`);
-    assert.ok(now >= startedAt + 60_000);
-  });
-
-  await t.test("an explicit attempt ceiling still wins over the spent-deadline floor", async () => {
-    let calls = 0;
-    const startedAt = 1_800_000_000_000;
-
-    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
-      await withMockedFetch(async () => {
-        calls++;
-        return jsonResponse(503, { message: "No server is currently available." });
-      }, async () => {
-        await assert.rejects(
-          () =>
-            api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
-              deadlineAt: startedAt - 1000,
-              now: () => startedAt,
-              sleep: async () => {}
-            }),
-          /exhausted its bounded GitHub API retry budget after 2 attempt\(s\)/
-        );
-      });
-    });
-
-    assert.equal(calls, 2);
+    assert.equal(calls, 1);
   });
 
   await t.test("leaves the attempt-bounded budget unchanged without a deadline", async () => {
@@ -4848,8 +4771,13 @@ test("release degrades unreachable preparatory calls instead of failing on them"
   });
 
   assert.ok(
-    warned.some((line) => /BUILD_LOCK_API_MAX_ATTEMPTS=2 caps the 120s release retry deadline/.test(line)),
+    warned.some((line) => /An attempt ceiling of 2 bounds the 120s release retry deadline/.test(line)),
     `expected an inherited attempt ceiling to be reported, saw ${warned.join(" | ")}`
+  );
+  assert.equal(
+    warned.filter((line) => /attempt ceiling of/.test(line)).length,
+    1,
+    "the ceiling notice belongs on the release, not on every API call"
   );
   assert.equal(wrote, true, "the lock-state write must still be attempted");
   assert.ok(
@@ -4859,6 +4787,60 @@ test("release degrades unreachable preparatory calls instead of failing on them"
   assert.ok(
     warned.some((line) => /Unable to read lock config/.test(line)),
     `expected a degraded lock-config warning, saw ${warned.join(" | ")}`
+  );
+});
+
+// An out-of-range ceiling is already reported and ignored by the retry budget, so
+// release must not also announce it as a bound that took effect.
+test("release does not report an attempt ceiling the retry budget ignores", async () => {
+  const state = emptyState("wallstop-organization-builds");
+  let warned = [];
+
+  await withTempFile(async (outputFile) => {
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "500" }, async () => {
+      await withActionEnv(
+        {
+          GITHUB_REPOSITORY: "owner/repo",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GITHUB_WORKFLOW: "Perf",
+          GITHUB_JOB: "perf-benchmarks",
+          GITHUB_OUTPUT: outputFile
+        },
+        async () => {
+          await withMockedFetch(async (url) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+              return jsonResponse(200, {
+                content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                sha: "state-sha"
+              });
+            }
+            return jsonResponse(404, { message: "Not Found" });
+          }, async (logs) => {
+            await release({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json",
+              resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+            });
+            warned = logs.filter((line) => line.startsWith("::warning::"));
+          });
+        }
+      );
+    });
+  });
+
+  assert.ok(
+    !warned.some((line) => /attempt ceiling of/.test(line)),
+    `an ignored ceiling must not be reported as effective, saw ${warned.join(" | ")}`
   );
 });
 

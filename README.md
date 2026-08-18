@@ -578,17 +578,20 @@ compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
 just past the deadline.
 
 The deadline and `api-max-attempts` are both ceilings: whichever a call reaches
-first ends its budget. Under them sits a floor, so a deadline never leaves a call
-with fewer attempts than the shared five-attempt default it would have had with
-no deadline at all, and no single request is worse off for the deadline existing.
-The floor never raises an explicitly configured ceiling, and attempts spent on it
-past the deadline behave exactly like an attempt-bounded budget, backoff cap
-included. Those floor attempts are why a release can overrun its deadline by up
-to one attempt budget — roughly fifteen seconds at the defaults — which is the
-headroom the `timeout-minutes` guidance above accounts for. An attempt ceiling
-inherited from the job environment caps the deadline the same way one set on the
-step does; release warns when it finds one, because an inherited value is
-otherwise invisible in the log.
+first ends its budget, and a spent deadline ends it for every call that follows.
+There is deliberately no per-call attempt floor underneath — one would let each
+call spend a fresh attempt budget past the deadline, so a phase with several
+calls would overrun by a multiple of the budget, which is the opposite of a
+wall-clock bound. The guarantee holds at the level that matters: a release with
+the default deadline gets roughly eight times the total retry time of the
+five-attempt budget it replaces, even though an individual call that starts with
+the budget already spent gets a single attempt.
+
+An attempt ceiling inherited from the job or organization environment caps the
+deadline the same way one set on the step does. Release warns when it finds a
+ceiling that will take effect, because an inherited value is otherwise invisible
+in the log; a value outside the documented range is reported and ignored by the
+retry budget itself, so it is not reported here as if it applied.
 
 While a deadline is active, a `Retry-After` from GitHub is honored in full rather
 than truncated to the backoff cap, because the deadline already bounds the total

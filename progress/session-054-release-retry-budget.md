@@ -58,9 +58,9 @@ an outcome that has already happened.
    read and write keep the remainder, so neither phase can starve the other.
    Both preparatory calls degrade rather than fail, so neither can red a release
    before the write is attempted. The deadline and `api-max-attempts` are both
-   ceilings, whichever binds first, over a floor that guarantees the shared
-   five-attempt default. This is the change that would have absorbed the
-   reported incident.
+   ceilings, whichever binds first, with no per-call attempt floor underneath:
+   a bound that each call could re-spend is not a wall-clock bound. This is the
+   change that would have absorbed the reported incident.
 3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
    (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
    (1000-300000) are declared release-action inputs. An explicit input wins over
@@ -88,7 +88,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 750 tests, 748 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 748 tests, 746 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -277,17 +277,41 @@ Two were remediated and one was deferred with a filed issue.
    against double-writes. That is a separate, riskier change than this one, so it
    is filed with the exact distinguishing signal (`error.path`), the
    ambiguous-write hazard, and its acceptance evidence.
-2. **Documented — the floor can overrun the deadline.** The review's worst case
-   assumed many sequential exhausted calls inside `cleanupIdentity`; the control
-   flow does not allow it, because any exhausted read or write leaves the loop
-   immediately. The reachable overrun is about one attempt budget, roughly fifteen
-   seconds at the defaults, which the README now states alongside the existing
-   `timeout-minutes` guidance.
+2. **Documented, then disproved and fixed in round nine.** This round's overrun
+   finding was answered by arguing the control flow bounded it to about one
+   attempt budget. That analysis only considered `cleanupIdentity` and was wrong;
+   see finding 1 of the ninth review below.
 3. **Confirmed defect — an inherited attempt ceiling silently voided the
    deadline.** A job-level or organization `BUILD_LOCK_API_MAX_ATTEMPTS` caps the
    deadline exactly as a value set on the step does, but an inherited value never
    appears in the log. Release now warns once, naming the value and the deadline
    it caps, and the README says so.
+
+A ninth independent review raised two findings, both verified against the
+committed runtime with a virtual clock, and both remediated.
+
+1. **Confirmed defect — the per-call floor multiplied the budget.** The floor
+   added in round five granted a fresh attempt budget to *every* API call once the
+   deadline was spent. The preparation phase alone makes several calls, so at a
+   30-second deadline preparation finished at 33.8 seconds — past the entire
+   cleanup deadline — and the step ended at 51.9 seconds; at 10 seconds it ended
+   at 51.7, five times the configured budget. The eighth round's contrary analysis
+   considered only `cleanupIdentity` and missed the preparation phase.
+   The floor is removed rather than patched: it was the mechanism behind three
+   consecutive findings, and a wall-clock budget whose bound can be multiplied by
+   the number of calls is not a wall-clock budget. The guarantee that a caller
+   actually depends on holds at the operation level without it — a release with
+   the default deadline gets roughly eight times the total retry time of the
+   five-attempt budget it replaces — while an individual call that starts with the
+   budget already spent now gets a single attempt, which is what a spent budget
+   should mean. Removing it also retires the round-six hazard of an unbounded wait
+   on the floor branch.
+2. **Confirmed defect — a warning for a value that was ignored.** The
+   inherited-ceiling notice fired on any non-empty
+   `BUILD_LOCK_API_MAX_ATTEMPTS`, including out-of-range values the retry budget
+   rejects, so it announced a bound that did not exist. It now reports only a
+   ceiling that will take effect, and its wording no longer tells an operator to
+   clear an environment variable they may never have set.
 
 ## Safety review
 

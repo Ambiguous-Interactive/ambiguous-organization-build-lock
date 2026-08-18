@@ -660,6 +660,14 @@ function apiRetryEnvironment(name, fallback) {
   return integerEnvironment(name, fallback, knob.minimum, knob.maximum);
 }
 
+// The configured value for a retry knob when it is one the budget will honor, and
+// null when it is unset or out of range. Reporting an ignored value as if it took
+// effect would be worse than saying nothing.
+function effectiveApiRetryEnvironment(name) {
+  const knob = API_RETRY_KNOBS.get(name);
+  return integerEnvironment(name, null, knob.minimum, knob.maximum);
+}
+
 function apiRetryOptions(overrides = {}) {
   const retrySleep = overrides.sleep || sleep;
   const signal = overrides.signal;
@@ -689,11 +697,14 @@ function apiRetryOptions(overrides = {}) {
 // starts inside the deadline instead of being skipped by a long backoff.
 //
 // The deadline and `maxAttempts` are both ceilings: whichever is reached first
-// ends the budget. Under them sits a floor, so a deadline never leaves a call with
-// fewer attempts than the shared default it would have had with no deadline at
-// all. The floor never raises an explicitly configured ceiling. Attempts spent on
-// the floor past the deadline behave exactly like an attempt-bounded budget,
-// backoff cap included: nothing bounds their wait any more.
+// ends the budget, and a spent deadline ends it for every call that follows.
+//
+// There is deliberately no per-call attempt floor under the deadline. One would
+// mean each call could spend a fresh attempt budget past the deadline, so a phase
+// with several calls would overrun the budget by a multiple of it - the opposite
+// of a wall-clock bound. The guarantee that matters is at the operation level and
+// still holds: a release with the default deadline gets roughly eight times the
+// total retry time of the attempt-bounded budget it replaces.
 function apiRetryBudget(retry, attempt, proposeDelayMs) {
   if (attempt >= retry.maxAttempts) {
     return { exhausted: true, delayMs: 0, deadlineReason: null };
@@ -702,21 +713,18 @@ function apiRetryBudget(retry, attempt, proposeDelayMs) {
     return { exhausted: false, delayMs: proposeDelayMs(retry), deadlineReason: null };
   }
   const now = retry.now();
-  if (now < retry.deadlineAt) {
-    return {
-      exhausted: false,
-      delayMs: boundedRetryDelayMs(proposeDelayMs(retry), retry.deadlineAt, now),
-      deadlineReason: null
-    };
-  }
-  if (attempt >= Math.min(retry.maxAttempts, DEFAULT_API_MAX_ATTEMPTS)) {
+  if (now >= retry.deadlineAt) {
     return {
       exhausted: true,
       delayMs: 0,
       deadlineReason: `deadline ${new Date(retry.deadlineAt).toISOString()}`
     };
   }
-  return { exhausted: false, delayMs: proposeDelayMs({ ...retry, deadlineAt: null }), deadlineReason: null };
+  return {
+    exhausted: false,
+    delayMs: boundedRetryDelayMs(proposeDelayMs(retry), retry.deadlineAt, now),
+    deadlineReason: null
+  };
 }
 
 // Name the budget the next attempt is spending, so a retry warning stays readable
@@ -3340,14 +3348,16 @@ async function release(config) {
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
   const retryBudget = releaseRetryApiOptions(config);
-  // Both bounds bind, so an attempt ceiling inherited from the job environment
-  // silently caps the deadline the caller configured. Say so once: a value that is
-  // not on the step is otherwise invisible in the log.
-  if (retryBudget.cleanup && process.env.BUILD_LOCK_API_MAX_ATTEMPTS) {
+  // Both bounds bind, so a configured attempt ceiling caps the deadline. Say so
+  // once, and only when the value is one that actually takes effect: an inherited
+  // environment value is otherwise invisible in the log, while an out-of-range one
+  // is already reported and ignored by the retry budget itself.
+  const attemptCeiling = effectiveApiRetryEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS");
+  if (retryBudget.cleanup && attemptCeiling !== null) {
     console.log(
-      `::warning::BUILD_LOCK_API_MAX_ATTEMPTS=${workflowCommandData(process.env.BUILD_LOCK_API_MAX_ATTEMPTS)} ` +
-        `caps the ${retryBudget.seconds}s release retry deadline; ` +
-        "clear it to let the deadline be the only bound."
+      `::warning::An attempt ceiling of ${attemptCeiling} bounds the ${retryBudget.seconds}s release retry ` +
+        "deadline; whichever is reached first ends the budget. Unset api-max-attempts, or the inherited " +
+        "BUILD_LOCK_API_MAX_ATTEMPTS, to let the deadline be the only bound."
     );
   }
   let result;
