@@ -4370,6 +4370,67 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
 
     assert.equal(delay, 1000, "an attempt-bounded wait must never exceed the configured cap");
   });
+
+  await t.test("a deadline lifts the cap for the server's number, not for our floor", async () => {
+    let calls = 0;
+    let delay = null;
+
+    await withEnvironment(
+      { BUILD_LOCK_API_RETRY_BASE_MS: "60000", BUILD_LOCK_API_RETRY_MAX_MS: "1000" },
+      async () => {
+        await withMockedFetch(async () => {
+          calls++;
+          return calls === 1
+            ? jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "1" })
+            : jsonResponse(200, { ok: true });
+        }, async () => {
+          await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            deadlineAt: startedAt + 120_000,
+            now: () => startedAt,
+            sleep: async (ms) => {
+              delay = ms;
+            }
+          });
+        });
+      }
+    );
+
+    assert.equal(delay, 1000, "our own floor stays capped even when the deadline lifts the cap");
+  });
+
+  // A primary rate limit sends no Retry-After, only the hourly reset. Without
+  // reading it, a time-bounded budget spends itself on requests that cannot
+  // succeed yet.
+  await t.test("a primary rate limit waits for its reset instead of retrying blind", async () => {
+    let calls = 0;
+    let now = startedAt;
+    const delays = [];
+
+    await withMockedFetch(async () => {
+      calls++;
+      return jsonResponse(
+        403,
+        { message: "API rate limit exceeded" },
+        { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.floor(startedAt / 1000) + 2400) }
+      );
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("GET", "/repos/o/r/contents/locks/x.json", undefined, "token", {
+            deadlineAt: startedAt + 120_000,
+            now: () => now,
+            sleep: async (ms) => {
+              delays.push(ms);
+              now += ms;
+            }
+          }),
+        /exhausted its bounded GitHub API retry budget/
+      );
+    });
+
+    assert.deepEqual(delays, [120_000], "the reset is clamped to the deadline, not retried against");
+    assert.equal(calls, 2, "a window that reopens after the budget is not worth retrying against");
+  });
 });
 
 test("release records a holder removal that needs more than the attempt-bounded budget", async () => {

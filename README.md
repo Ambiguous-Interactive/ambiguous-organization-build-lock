@@ -595,8 +595,17 @@ retry budget itself, so it is not reported here as if it applied.
 
 While a deadline is active, a `Retry-After` from GitHub is honored in full rather
 than truncated to the backoff cap, because the deadline already bounds the total
-wait and retrying early only re-triggers the same secondary rate limit. The
-backoff cap still applies on the attempt-bounded paths.
+wait and retrying early only re-triggers the same secondary rate limit. Only the
+server's own number may exceed the cap; backoff the action generates itself stays
+capped either way, and the backoff cap still applies on the attempt-bounded paths.
+A primary rate limit sends no `Retry-After`, so its `x-ratelimit-reset` is read
+the same way: a window that reopens after the budget ends is waited on and then
+abandoned, rather than retried against for the whole deadline.
+
+The deadline is anchored once, when the action reads its inputs, and covers
+minting the GitHub App token as well as the lock-state calls. Token minting
+otherwise runs on a small fixed budget of its own, which would end a release whose
+deadline was almost entirely unspent.
 
 The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
 (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —

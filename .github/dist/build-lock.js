@@ -315,7 +315,14 @@ function createGitHubAppAuth({
   async function jwtApi(method, path, body, signal) {
     return api(method, path, body, createAppJwt(appId, keyObject, now()), {
       ...apiOptions,
-      maxAttempts: apiOptions.maxAttempts === undefined ? 3 : apiOptions.maxAttempts,
+      // The small inner budget exists so a healthy run mints quickly. When the
+      // caller supplies a wall-clock deadline it governs minting too, otherwise a
+      // three-attempt credential failure would end an operation whose own budget
+      // is still almost entirely unspent.
+      maxAttempts:
+        apiOptions.maxAttempts === undefined && !Number.isFinite(apiOptions.deadlineAt)
+          ? 3
+          : apiOptions.maxAttempts,
       signal: signal || apiOptions.signal
     });
   }
@@ -441,7 +448,7 @@ function createGitHubAppAuth({
   };
 }
 
-function credential(lockRepo) {
+function credential(lockRepo, apiOptions = {}) {
   const appId = String(process.env.BUILD_LOCK_APP_ID || "").trim();
   const privateKey = process.env.BUILD_LOCK_APP_PRIVATE_KEY || "";
   if (Boolean(appId) !== Boolean(privateKey)) {
@@ -454,7 +461,8 @@ function credential(lockRepo) {
       owner: lockRepo.owner,
       repository: lockRepo.repo,
       repositories: [lockRepo.repo],
-      permissions: { contents: "write" }
+      permissions: { contents: "write" },
+      apiOptions
     });
   }
   throw new Error("Provide BUILD_LOCK_APP_ID with BUILD_LOCK_APP_PRIVATE_KEY.");
@@ -883,8 +891,23 @@ function isUnknownOutcomeMutationResponse(response) {
   return response.status === 408 || response.status >= 500;
 }
 
+// A primary rate limit sends no Retry-After, only the epoch second the hourly
+// window resets. Without it a time-bounded budget spends its whole deadline on
+// requests that cannot succeed yet, so read the reset as a server-directed wait.
+function rateLimitResetMs(response, now = Date.now) {
+  if (header(response, "x-ratelimit-remaining") !== "0") {
+    return null;
+  }
+  const reset = String(header(response, "x-ratelimit-reset") || "").trim();
+  if (!/^[0-9]+$/.test(reset)) {
+    return null;
+  }
+  const resetAt = Number(reset) * 1000;
+  return Number.isFinite(resetAt) ? Math.max(0, resetAt - now()) : null;
+}
+
 function retryDelayMs(response, attempt, options) {
-  const retryAfter = retryAfterMs(response, options.now);
+  const retryAfter = retryAfterMs(response, options.now) ?? rateLimitResetMs(response, options.now);
   if (retryAfter !== null) {
     // maxDelayMs exists to stop our own exponential backoff from growing without
     // bound. A Retry-After is a server instruction, not backoff: truncating it
@@ -894,9 +917,10 @@ function retryDelayMs(response, attempt, options) {
     // The instruction may lengthen our backoff, never shorten it below the
     // configured base. GitHub sometimes sends 0 or an already-past HTTP date, which
     // would otherwise turn a time-bounded budget into an unthrottled retry loop.
-    // The cap stays outermost so it bounds the floor too, whatever the two are
-    // configured to relative to each other.
-    const instructed = Math.max(retryAfter, options.baseDelayMs);
+    // Only the server's own number may exceed maxDelayMs, and only while a deadline
+    // bounds it; our floor is capped like any other backoff we generate.
+    const floor = Math.min(options.baseDelayMs, options.maxDelayMs);
+    const instructed = Math.max(retryAfter, floor);
     return Number.isFinite(options.deadlineAt) ? instructed : Math.min(instructed, options.maxDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
@@ -3300,11 +3324,17 @@ function releaseRetryApiOptions(config, now = Date.now()) {
   if (seconds <= 0) {
     return { seconds, preparation: undefined, cleanup: undefined };
   }
+  // Prefer the deadline anchored at configuration time so the credential provider
+  // and the release share one budget instead of two consecutive ones.
+  const deadlineAt = Number.isFinite(config.releaseRetryDeadlineAt)
+    ? config.releaseRetryDeadlineAt
+    : now + seconds * 1000;
+  const startedAt = deadlineAt - seconds * 1000;
   const preparationSeconds = Math.max(1, Math.ceil(seconds * RELEASE_PREPARATION_BUDGET_SHARE));
   return {
     seconds,
-    preparation: { deadlineAt: now + preparationSeconds * 1000 },
-    cleanup: { deadlineAt: now + seconds * 1000 }
+    preparation: { deadlineAt: startedAt + preparationSeconds * 1000 },
+    cleanup: { deadlineAt }
   };
 }
 
@@ -4091,7 +4121,24 @@ function config() {
   authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE });
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
-  const token = credential(lockRepo);
+  const releaseRetryDeadlineSeconds = toleratedIntegerInput(
+    "release-retry-deadline-seconds",
+    DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
+    0,
+    3600
+  );
+  // Anchor the release budget once, here, and share the same absolute deadline with
+  // the credential provider. Token minting happens inside the calls the budget is
+  // meant to protect, so leaving it on its own small budget would let a credential
+  // outage end a release whose deadline is almost entirely unspent.
+  const releaseRetryDeadlineAt =
+    MODE === "release" && releaseRetryDeadlineSeconds > 0
+      ? Date.now() + releaseRetryDeadlineSeconds * 1000
+      : null;
+  const token = credential(
+    lockRepo,
+    releaseRetryDeadlineAt === null ? {} : { deadlineAt: releaseRetryDeadlineAt }
+  );
   const operation = input("operation", "reap");
   const resourceReportResolution = MODE === "release"
     ? resolveReleaseReport({
@@ -4144,12 +4191,8 @@ function config() {
       0,
       86400
     ),
-    releaseRetryDeadlineSeconds: toleratedIntegerInput(
-      "release-retry-deadline-seconds",
-      DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
-      0,
-      3600
-    ),
+    releaseRetryDeadlineSeconds,
+    releaseRetryDeadlineAt,
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
 }

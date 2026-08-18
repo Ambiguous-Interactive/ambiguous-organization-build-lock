@@ -51,8 +51,8 @@ an outcome that has already happened.
    last attempt starts inside the budget rather than being skipped by a long
    backoff. Callers without a deadline are unchanged. The clamp reuses the
    existing acquire helper, generalized to `boundedRetryDelayMs`.
-2. **Release bounds itself by wall clock.** `release` derives a deadline from
-   the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
+2. **Release bounds itself by wall clock.** The deadline is anchored once, when
+   the action reads its inputs, from the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
    `0` restores the attempt-bounded budget) and splits it: the preparatory
    state-branch and lock-config calls get the first quarter, and the lock-state
    read and write keep the remainder, so neither phase can starve the other.
@@ -90,7 +90,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 749 tests, 747 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 751 tests, 749 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -342,6 +342,34 @@ the README implies, because a broad outage that reaches App token minting bypass
 the deadline in about three seconds. That is recorded in #201 and remains the
 right scope boundary for this change.
 
+An eleventh independent review raised three findings; all three were remediated,
+including the one previously deferred.
+
+1. **Fixed here after all — the deadline now covers token minting.** Two reviews
+   in a row identified App token minting as the dominant real-world way the new
+   budget is bypassed, since every release mints before its first call and the
+   minting budget is a fixed three attempts. The deferral in issue #201 assumed
+   the only fix was to change `api()`'s nested-exhaustion handling for every mode,
+   which would have touched the ambiguous-mutation bookkeeping. A narrower one
+   exists: anchor the release deadline once when the action reads its inputs and
+   hand the same absolute deadline to the credential provider, which then governs
+   minting instead of the fixed inner budget. Acquire and reap pass no deadline
+   and are untouched, and `api()`'s error handling is unchanged. Issue #201 stays
+   open for the general case.
+2. **Confirmed defect — our own floor escaped the backoff cap.** Lifting the cap
+   under a deadline was meant to let the *server's* number through, but it also
+   let the `Retry-After` floor through, so `api-retry-base-ms: 60000` with
+   `api-retry-max-ms: 1000` waited sixty seconds. The floor is now capped like any
+   other backoff the action generates; only the server's number may exceed it, and
+   only while a deadline bounds it.
+3. **Confirmed defect — primary rate limits were retried blind.** A primary limit
+   sends `x-ratelimit-reset` and no `Retry-After`, so the exponential path capped
+   at ten seconds and the time-bounded budget spent its whole deadline on requests
+   that could not succeed until the hourly window reopened — about thirteen
+   requests per release where the old budget made five, multiplied across a
+   matrix. The reset is now read as a server-directed wait, so a window that
+   reopens after the budget ends is waited on once and then abandoned.
+
 ## Safety review
 
 No fail-closed path was weakened. Both consumer gates continue to refuse a run
@@ -372,8 +400,11 @@ leaving it would have amplified the harm there; the attempt-bounded acquire and
 reap paths remain #200's scope, since fixing them changes admission timing.
 
 A second follow-up, issue #201, records that App token minting runs on its own
-three-attempt budget that no caller can widen and whose exhaustion short-circuits
-the caller's budget, so a broad outage bypasses the release deadline entirely.
+three-attempt budget whose exhaustion short-circuits the caller's budget. The
+release path no longer suffers from it — the eleventh review's finding 1 closed
+that case by handing the credential provider the same anchored deadline — but
+acquire and reap still do, and the general fix to `api()`'s nested-exhaustion
+handling remains #201's scope.
 
 Continuous-improvement disposition: the retry asymmetry between acquire and
 release is now executable in the runtime, its inputs, and the tests, and is
