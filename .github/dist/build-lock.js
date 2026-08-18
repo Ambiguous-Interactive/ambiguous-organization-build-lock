@@ -685,8 +685,10 @@ function apiRetryEnvironment(name, fallback) {
 // the rejection itself, so this check stays silent.
 function effectiveApiRetryEnvironment(name) {
   const knob = API_RETRY_KNOBS.get(name);
-  const raw = String(process.env[name] || "").trim();
-  if (!/^[0-9]+$/.test(raw)) {
+  // Matches integerEnvironment exactly, whitespace included: reporting a ceiling
+  // the budget then rejects would be a contradiction in the same log.
+  const raw = process.env[name];
+  if (raw === undefined || !/^[0-9]+$/.test(raw)) {
     return null;
   }
   const value = Number.parseInt(raw, 10);
@@ -907,6 +909,9 @@ function isUnknownOutcomeMutationResponse(response) {
 // A primary rate limit sends no Retry-After, only the epoch second the hourly
 // window resets. Without it a time-bounded budget spends its whole deadline on
 // requests that cannot succeed yet, so read the reset as a server-directed wait.
+// Only for a time-bounded caller: on the attempt-bounded paths this would replace
+// exponential backoff with the capped reset wait and change admission and reaping
+// timing, which this change deliberately leaves alone (issue #200).
 function rateLimitResetMs(response, now = Date.now) {
   if (header(response, "x-ratelimit-remaining") !== "0") {
     return null;
@@ -920,7 +925,9 @@ function rateLimitResetMs(response, now = Date.now) {
 }
 
 function retryDelayMs(response, attempt, options) {
-  const retryAfter = retryAfterMs(response, options.now) ?? rateLimitResetMs(response, options.now);
+  const retryAfter = Number.isFinite(options.deadlineAt)
+    ? retryAfterMs(response, options.now) ?? rateLimitResetMs(response, options.now)
+    : retryAfterMs(response, options.now);
   if (retryAfter !== null) {
     // maxDelayMs exists to stop our own exponential backoff from growing without
     // bound. A Retry-After is a server instruction, not backoff: truncating it

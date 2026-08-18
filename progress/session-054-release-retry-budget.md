@@ -424,6 +424,29 @@ the invariant directly across the legal range. The review's cosmetic note about 
 duplicated warning was taken as well: the ceiling check no longer re-reports a
 rejection the retry budget already reports.
 
+A fourteenth independent review raised three findings; two were remediated and
+one was declined on the facts.
+
+1. **Confirmed defect — a scope violation.** The primary rate-limit reset was read
+   on every path, not only the deadline-bearing one, so a 403 with a far reset
+   pinned each acquire wait to the backoff cap instead of exponential growth: 40
+   seconds per call against 17 on `main`. This change is meant to leave admission
+   and reaping timing alone. The reset is now read only when a deadline is
+   present, matching how the `Retry-After` uncapping is already gated.
+2. **Confirmed defect — a self-contradicting log.** The ceiling notice trimmed its
+   value before validating while the retry budget does not, so
+   `BUILD_LOCK_API_MAX_ATTEMPTS=" 3"` announced a ceiling of 3 in the same log
+   that rejected it four times, while actually running with no ceiling. The notice
+   now validates exactly as the budget does, whitespace included.
+3. **Declined — the reconciliation handle is not lost.** The review reported that
+   an ambiguous accepted write followed by budget exhaustion drops the reservation
+   ID an operator needs. The reservation outputs are indeed empty there, correctly,
+   because no reservation was confirmed. But every reservation carries the holder
+   identity that produced it, and `holder-id` is always written, so the handle is
+   present. Carrying the unconfirmed identity out on the error would have meant
+   re-indenting the whole compare-and-swap loop for a compound scenario whose
+   answer is already in the outputs. The README now states where to look.
+
 ## Safety review
 
 No fail-closed path was weakened. Both consumer gates continue to refuse a run

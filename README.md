@@ -638,7 +638,10 @@ holder entry, which keeps consuming lock capacity until an acquire on the same
 physical runner reclaims it or an operator runs the central recovery runbook — so
 this is a real failure worth waiting to avoid, not a self-healing one. The
 `require-confirmed-unity-cleanup` gate renders the same code so one diagnostic
-line distinguishes it from a genuinely unsafe cleanup. Compare-and-swap
+line distinguishes it from a genuinely unsafe cleanup. The reservation outputs are
+empty on this path because no reservation was confirmed; if a write GitHub
+accepted without acknowledging did create one, `holder-id` identifies it, because
+every reservation carries the holder identity that produced it. Compare-and-swap
 exhaustion under contention and cleanup evidence that was never confirmed both
 keep the raw failure, and no such claim is made for either.
 
