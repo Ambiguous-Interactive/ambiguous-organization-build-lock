@@ -4168,6 +4168,54 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
     assert.ok(now < deadlineAt + 10_000, "expected the last wait to be clamped to the deadline");
   });
 
+  // A budget that is spent must not leave later calls worse off than they would
+  // have been with no deadline at all.
+  await t.test("still gives the ordinary attempt budget to a call that starts after it", async () => {
+    let calls = 0;
+    const startedAt = 1_800_000_000_000;
+
+    await withMockedFetch(async () => {
+      calls++;
+      return jsonResponse(503, { message: "No server is currently available." });
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            deadlineAt: startedAt - 1000,
+            now: () => startedAt,
+            sleep: async () => {}
+          }),
+        /exhausted its bounded GitHub API retry budget after 5 attempt\(s\) because the bounded deadline elapsed/
+      );
+    });
+
+    assert.equal(calls, 5);
+  });
+
+  await t.test("an explicit attempt ceiling still wins over the spent-deadline floor", async () => {
+    let calls = 0;
+    const startedAt = 1_800_000_000_000;
+
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
+      await withMockedFetch(async () => {
+        calls++;
+        return jsonResponse(503, { message: "No server is currently available." });
+      }, async () => {
+        await assert.rejects(
+          () =>
+            api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+              deadlineAt: startedAt - 1000,
+              now: () => startedAt,
+              sleep: async () => {}
+            }),
+          /exhausted its bounded GitHub API retry budget after 2 attempt\(s\)/
+        );
+      });
+    });
+
+    assert.equal(calls, 2);
+  });
+
   await t.test("leaves the attempt-bounded budget unchanged without a deadline", async () => {
     let calls = 0;
 
@@ -4634,6 +4682,94 @@ test("release splits its retry budget between preparation and the lock-state wri
   assert.equal(branchChecks, 8, "the state-branch check outlasts the 5-attempt ceiling");
   assert.equal(configReads, 8, "the lock-config read outlasts the 5-attempt ceiling");
   assert.equal(writeAttempts, 9, "the write still gets its own time-bounded budget");
+});
+
+// Neither preparatory call may red a release before the lock-state write is
+// attempted: an outage broad enough to matter reaches them first.
+test("release degrades unreachable preparatory calls instead of failing on them", async () => {
+  const state = {
+    ...emptyState("wallstop-organization-builds"),
+    holder: {
+      holderId: "owner/repo:123:perf-benchmarks:playmode",
+      repository: "owner/repo",
+      workflow: "Perf",
+      job: "perf-benchmarks",
+      runId: "123",
+      runAttempt: "1",
+      runUrl: "https://github.com/owner/repo/actions/runs/123",
+      queuedAt: "2026-06-06T00:00:00.000Z",
+      acquiredAt: "2026-06-06T00:00:00.000Z",
+      expiresAt: "2999-01-01T00:00:00.000Z"
+    }
+  };
+  let wrote = false;
+  let warned = [];
+
+  await withTempFile(async (outputFile) => {
+    await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
+      await withImmediateTimers(async () => {
+        await withActionEnv(
+          {
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "1",
+            GITHUB_WORKFLOW: "Perf",
+            GITHUB_JOB: "perf-benchmarks",
+            GITHUB_OUTPUT: outputFile
+          },
+          async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (
+                parsed.pathname === "/repos/o/r/git/ref/heads/lock-state" ||
+                parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.config.json"
+              ) {
+                return jsonResponse(503, { message: "No server is currently available." });
+              }
+              if (parsed.pathname === "/repos/o/r/contents/locks/wallstop-organization-builds.json") {
+                if (options.method === "PUT") {
+                  wrote = true;
+                  return jsonResponse(200, { content: { sha: "state-after-release" } });
+                }
+                return jsonResponse(200, {
+                  content: Buffer.from(JSON.stringify(state), "utf8").toString("base64"),
+                  sha: "state-before-release"
+                });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await release({
+                token: "token",
+                lockName: "wallstop-organization-builds",
+                holderIdSuffix: "playmode",
+                lockRepository: "o/r",
+                lockRepo: { owner: "o", repo: "r" },
+                stateBranch: "lock-state",
+                statePath: "locks/wallstop-organization-builds.json",
+                configPath: "locks/wallstop-organization-builds.config.json",
+                resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+              });
+              warned = logs.filter((line) => line.startsWith("::warning::"));
+            });
+          }
+        );
+      });
+    });
+
+    const outputs = readEnvironmentFile(outputFile);
+    assert.equal(outputs["cleanup-result"], "released");
+    assert.equal(outputs.released, "true");
+  });
+
+  assert.equal(wrote, true, "the lock-state write must still be attempted");
+  assert.ok(
+    warned.some((line) => /Could not verify the lock-state branch/.test(line)),
+    `expected a degraded state-branch warning, saw ${warned.join(" | ")}`
+  );
+  assert.ok(
+    warned.some((line) => /Unable to read lock config/.test(line)),
+    `expected a degraded lock-config warning, saw ${warned.join(" | ")}`
+  );
 });
 
 // Compare-and-swap exhaustion means reads and writes succeeded but lost a

@@ -569,11 +569,18 @@ to restore the attempt-bounded budget. Keep it below the calling step's
 `timeout-minutes`.
 
 The budget is split, not shared. The preparatory state-branch and lock-config
-calls get the first quarter of it, because an outage broad enough to matter hits
-them first and they would otherwise fail the release before the write is ever
-attempted; the lock-state read and write keep the remainder. Each phase's
-deadline covers all of its retries, including the cleanup's compare-and-swap
-rounds, and neither restarts per attempt.
+calls get the first quarter of it and the lock-state read and write keep the
+remainder, so neither phase can starve the other. Both preparatory calls also
+degrade rather than fail: an outage broad enough to matter hits them first, and
+neither may red a release before the write is attempted. Each phase's deadline
+bounds the API retries inside it and does not restart per call; the cleanup's
+compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
+just past the deadline.
+
+A deadline may only extend the shared budget, never shorten it. A call that
+starts after the deadline has already been spent still gets the ordinary
+five-attempt budget, so no single request is worse off than it would be with no
+deadline at all.
 
 While a deadline is active, a `Retry-After` from GitHub is honored in full rather
 than truncated to the backoff cap, because the deadline already bounds the total

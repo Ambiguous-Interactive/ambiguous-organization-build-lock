@@ -55,9 +55,11 @@ an outcome that has already happened.
    the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
    `0` restores the attempt-bounded budget) and splits it: the preparatory
    state-branch and lock-config calls get the first quarter, and the lock-state
-   read and write keep the remainder. Neither phase can starve the other, and
-   both end no later than the one configured deadline. This is the change that
-   would have absorbed the reported incident.
+   read and write keep the remainder, so neither phase can starve the other.
+   Both preparatory calls degrade rather than fail, so neither can red a release
+   before the write is attempted. A deadline only ever extends the shared
+   budget: past it, the ordinary five-attempt budget still applies. This is the
+   change that would have absorbed the reported incident.
 3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
    (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
    (1000-300000) are declared release-action inputs. An explicit input wins over
@@ -85,7 +87,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 741 tests, 739 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 744 tests, 742 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -198,6 +200,28 @@ A fourth independent review raised two findings; both were remediated.
    retryable 503 sleep ten minutes on an attempt-bounded path.
    `integerEnvironment` now takes a maximum, the three retry knobs read their
    range from one shared definition, and the warning names the range it enforced.
+
+A fifth independent review raised two findings; both were remediated with one
+general invariant rather than a special case.
+
+1. **Confirmed defect — a deadline could shorten the budget.** Once the deadline
+   had passed, the next call was declared exhausted on its first attempt, so a
+   request starting after a spent budget got zero retries where the
+   attempt-bounded code guaranteed five. The invariant is now explicit: a
+   deadline may only extend the shared budget, never shorten it. Past the
+   deadline the ordinary five-attempt budget still applies, and an explicitly
+   configured ceiling still wins over both.
+2. **Confirmed defect — a preparatory failure could still red the release.** The
+   budget split made `ensureStateBranch` fail sooner rather than not at all, and
+   unlike the lock-config read it was the one terminal preparatory call. It now
+   degrades the same way: an unreachable check warns and continues to the write,
+   which owns the rest of the budget and reports the real outcome. A genuinely
+   missing branch still surfaces at the write, and no fail-closed decision is
+   made from that call.
+
+The review's documentation note was also taken: the README no longer implies the
+cleanup's compare-and-swap loop is deadline-bounded. Its ten-round ceiling is
+attempt-bounded, so cleanup can finish a round just past the deadline.
 
 ## Safety review
 

@@ -684,9 +684,14 @@ function apiRetryOptions(overrides = {}) {
 }
 
 // Decide whether one more attempt fits in the budget, and how long to wait first.
-// An attempt-bounded budget stops after `maxAttempts`. A time-bounded budget stops
-// when the deadline has passed, and shortens its last wait so the final attempt
-// still starts inside the deadline instead of being skipped by a long backoff.
+// An attempt-bounded budget stops after `maxAttempts`. A time-bounded budget keeps
+// retrying until its deadline and shortens its last wait so the final attempt still
+// starts inside the deadline instead of being skipped by a long backoff.
+//
+// A deadline may only extend the shared budget, never shorten it. A call that
+// starts after an already-spent deadline still gets the ordinary attempt budget,
+// so no single request is ever worse off than it was without a deadline. An
+// explicitly configured `maxAttempts` still wins over both.
 function apiRetryBudget(retry, attempt, proposeDelayMs) {
   if (attempt >= retry.maxAttempts) {
     return { exhausted: true, delayMs: 0, deadlineReason: null };
@@ -695,18 +700,21 @@ function apiRetryBudget(retry, attempt, proposeDelayMs) {
     return { exhausted: false, delayMs: proposeDelayMs(), deadlineReason: null };
   }
   const now = retry.now();
-  if (now >= retry.deadlineAt) {
+  if (now < retry.deadlineAt) {
+    return {
+      exhausted: false,
+      delayMs: boundedRetryDelayMs(proposeDelayMs(), retry.deadlineAt, now),
+      deadlineReason: null
+    };
+  }
+  if (attempt >= DEFAULT_API_MAX_ATTEMPTS) {
     return {
       exhausted: true,
       delayMs: 0,
       deadlineReason: `deadline ${new Date(retry.deadlineAt).toISOString()}`
     };
   }
-  return {
-    exhausted: false,
-    delayMs: boundedRetryDelayMs(proposeDelayMs(), retry.deadlineAt, now),
-    deadlineReason: null
-  };
+  return { exhausted: false, delayMs: proposeDelayMs(), deadlineReason: null };
 }
 
 // Name the budget the next attempt is spending, so a retry warning stays readable
@@ -3322,7 +3330,23 @@ async function release(config) {
   const retryBudget = releaseRetryApiOptions(config);
   let result;
   try {
-    await ensureStateBranch(config, { apiOptions: retryBudget.preparation });
+    // The state branch is a permanent fixture; this call only bootstraps a
+    // repository that has never held lock state. An unreachable check must not
+    // fail the release before the write is attempted, so degrade like the lock
+    // config read does and let the lock-state write - which owns the rest of the
+    // budget - report the real outcome. A genuinely missing branch still surfaces
+    // there, and no fail-closed decision is made from this call.
+    try {
+      await ensureStateBranch(config, { apiOptions: retryBudget.preparation });
+    } catch (error) {
+      if (!isUnrecordedReleaseError(error)) {
+        throw error;
+      }
+      console.log(
+        `::warning::Could not verify the ${config.stateBranch} branch (${workflowCommandData(error.message)}); ` +
+          "continuing to the lock-state write."
+      );
+    }
     const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.preparation });
     result = await cleanupIdentity(config, identity, {
       resourceSafe: resourceReport.cleanupStatus === "confirmed",
