@@ -4342,6 +4342,34 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
       });
     }
   });
+
+  // The floor must not escape the cap: base and max are configured independently
+  // and nothing requires base <= max.
+  await t.test("the backoff cap still bounds the floor when base exceeds it", async () => {
+    let calls = 0;
+    let delay = null;
+
+    await withEnvironment(
+      { BUILD_LOCK_API_RETRY_BASE_MS: "60000", BUILD_LOCK_API_RETRY_MAX_MS: "1000" },
+      async () => {
+        await withMockedFetch(async () => {
+          calls++;
+          return calls === 1
+            ? jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "1" })
+            : jsonResponse(200, { ok: true });
+        }, async () => {
+          await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            now: () => startedAt,
+            sleep: async (ms) => {
+              delay = ms;
+            }
+          });
+        });
+      }
+    );
+
+    assert.equal(delay, 1000, "an attempt-bounded wait must never exceed the configured cap");
+  });
 });
 
 test("release records a holder removal that needs more than the attempt-bounded budget", async () => {
@@ -4572,23 +4600,37 @@ test("release retry knobs are configurable through action inputs", async (t) => 
     );
   });
 
-  // A zero backoff under an active deadline would retry without pause for the whole
-  // budget and would also discard every server-directed Retry-After wait, so the
-  // public inputs reject out-of-range values instead of quietly running a different
-  // budget than the caller asked for.
-  const rejected = [
-    ["zero backoff ceiling", "INPUT_API-RETRY-MAX-MS", "0", /api-retry-max-ms must be between 1000 and 300000/],
-    ["zero base backoff", "INPUT_API-RETRY-BASE-MS", "0", /api-retry-base-ms must be between 100 and 60000/],
-    ["zero attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "0", /api-max-attempts must be between 1 and 100/],
-    ["oversized attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "101", /api-max-attempts must be between 1 and 100/],
-    ["non-numeric backoff", "INPUT_API-RETRY-BASE-MS", "1e3", /api-retry-base-ms must be an integer/],
-    ["oversized release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "3601", /must be <= 3600/]
+  // These knobs only change how long a retry waits. Refusing to run over one would
+  // abandon the holder cleanup the release exists to perform and pin a licensed
+  // seat, so an out-of-range value is reported and ignored rather than fatal - the
+  // same way invalid cleanup evidence degrades instead of aborting.
+  const ignored = [
+    ["zero backoff ceiling", "INPUT_API-RETRY-MAX-MS", "0", /api-retry-max-ms=0; expected an integer between 1000 and 300000/],
+    ["zero base backoff", "INPUT_API-RETRY-BASE-MS", "0", /api-retry-base-ms=0; expected an integer between 100 and 60000/],
+    ["zero attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "0", /api-max-attempts=0; expected an integer between 1 and 100/],
+    ["oversized attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "101", /api-max-attempts=101; expected an integer between 1 and 100/],
+    ["non-numeric backoff", "INPUT_API-RETRY-BASE-MS", "1e3", /api-retry-base-ms=1e3; expected an integer between 100 and 60000/],
+    ["oversized release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "3601", /release-retry-deadline-seconds=3601; expected an integer between 0 and 3600/]
   ];
 
-  for (const [name, inputName, value, expected] of rejected) {
-    await t.test(`rejects ${name}`, async () => {
+  for (const [name, inputName, value, expected] of ignored) {
+    await t.test(`reports and ignores ${name}`, async () => {
       await withEnvironment({ ...baseEnvironment, [inputName]: value }, () => {
-        assert.throws(() => config(), expected);
+        const logs = [];
+        const previousLog = console.log;
+        console.log = (line) => logs.push(String(line));
+        let parsed;
+        try {
+          parsed = config();
+        } finally {
+          console.log = previousLog;
+        }
+
+        assert.equal(parsed.releaseRetryDeadlineSeconds, 120, "the release must still run its default budget");
+        assert.ok(
+          logs.some((line) => expected.test(line)),
+          `expected the ignored value to be reported, saw ${logs.join(" | ")}`
+        );
         assert.deepEqual(
           [
             process.env.BUILD_LOCK_API_MAX_ATTEMPTS,
@@ -4596,7 +4638,7 @@ test("release retry knobs are configurable through action inputs", async (t) => 
             process.env.BUILD_LOCK_API_RETRY_MAX_MS
           ],
           [undefined, undefined, undefined],
-          "a rejected input must not reach the retry environment"
+          "an ignored input must not reach the retry environment"
         );
       });
     });

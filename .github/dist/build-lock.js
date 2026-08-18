@@ -628,26 +628,37 @@ function integerEnvironment(name, fallback, minimum = 0, maximum = Number.POSITI
   return value;
 }
 
+// Resolve a pure-tuning input, reporting and ignoring a value outside its range
+// instead of failing. These knobs only change how long a retry waits; refusing to
+// run over one would abandon the holder cleanup that the release exists to
+// perform, pinning a licensed seat until the reaper quarantines it. Safety
+// evidence is validated strictly elsewhere - a tuning typo must not be punished
+// harder than bad cleanup evidence, which already degrades rather than aborts.
+function toleratedIntegerInput(name, fallback, minimum, maximum) {
+  const raw = input(name);
+  if (raw === "") {
+    return fallback;
+  }
+  const value = /^[0-9]+$/.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    console.log(
+      `::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer between ` +
+        `${minimum} and ${maximum}.`
+    );
+    return fallback;
+  }
+  return value;
+}
+
 // The retry budget is read from the environment deep inside every API call, so an
 // action input that names the same knob is applied to that environment once, at
 // configuration time. An explicit input wins over an inherited environment value.
-// Unlike the environment variables, an out-of-range input fails the action rather
-// than being ignored: it is a public contract, and silently continuing with a
-// different budget than the caller asked for is not a safe success.
 function applyApiRetryInputs() {
   for (const knob of API_RETRY_INPUTS) {
-    const raw = input(knob.input);
-    if (raw === "") {
-      continue;
+    const value = toleratedIntegerInput(knob.input, null, knob.minimum, knob.maximum);
+    if (value !== null) {
+      process.env[knob.environment] = String(value);
     }
-    if (!/^[0-9]+$/.test(raw)) {
-      throw new Error(`Input ${knob.input} must be an integer.`);
-    }
-    const value = Number.parseInt(raw, 10);
-    if (!Number.isSafeInteger(value) || value < knob.minimum || value > knob.maximum) {
-      throw new Error(`Input ${knob.input} must be between ${knob.minimum} and ${knob.maximum}.`);
-    }
-    process.env[knob.environment] = String(value);
   }
 }
 
@@ -880,13 +891,13 @@ function retryDelayMs(response, attempt, options) {
     // retries back into the same secondary rate limit. Honor it in full whenever a
     // deadline already bounds the total wait, and fall back to the backoff cap only
     // when nothing else would bound it (tracked for the other paths by issue #200).
-    const bounded = Number.isFinite(options.deadlineAt)
-      ? retryAfter
-      : Math.min(retryAfter, options.maxDelayMs);
     // The instruction may lengthen our backoff, never shorten it below the
     // configured base. GitHub sometimes sends 0 or an already-past HTTP date, which
     // would otherwise turn a time-bounded budget into an unthrottled retry loop.
-    return Math.max(bounded, options.baseDelayMs);
+    // The cap stays outermost so it bounds the floor too, whatever the two are
+    // configured to relative to each other.
+    const instructed = Math.max(retryAfter, options.baseDelayMs);
+    return Number.isFinite(options.deadlineAt) ? instructed : Math.min(instructed, options.maxDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
   if (options.fullJitter) {
@@ -4133,9 +4144,10 @@ function config() {
       0,
       86400
     ),
-    releaseRetryDeadlineSeconds: nonNegativeIntegerInput(
+    releaseRetryDeadlineSeconds: toleratedIntegerInput(
       "release-retry-deadline-seconds",
       DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
+      0,
       3600
     ),
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"

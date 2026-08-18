@@ -591,7 +591,8 @@ test("README documents the time-bounded release retry budget", () => {
   assert.match(readme, /quarantines the stale\s+holder entry/);
   assert.doesNotMatch(readme, /reclaimed by the lock's own lease\s+timeout/);
   assert.match(readme, /`Retry-After` from GitHub is honored in full/);
-  assert.match(readme, /neither channel may configure a zero backoff/);
+  assert.match(readme, /neither may configure a zero backoff/);
+  assert.match(readme, /an out-of-range one is never fatal/);
   assert.match(readme, /The budget is split, not shared\./);
   assert.match(readme, /are both ceilings: whichever a call reaches\s+first ends its budget/);
   assert.match(readme, /deliberately no per-call attempt floor underneath/);

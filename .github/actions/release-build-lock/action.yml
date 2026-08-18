@@ -40,24 +40,26 @@ inputs:
       transient GitHub API failure until this deadline instead of stopping after
       a fixed attempt count, because the licensed resource is already returned by
       then. Maximum 3600; use 0 to restore the shared attempt-bounded budget.
-      Keep it below the calling step's timeout-minutes.
+      Keep it below the calling step's timeout-minutes. An out-of-range value is
+      reported and ignored rather than failing the release.
     required: false
     default: "120"
   api-max-attempts:
     description: >-
       Attempt ceiling for the shared GitHub API retry budget, 1-100. Unset means
       5 for attempt-bounded calls and no ceiling while the release deadline is
-      active. Out-of-range values fail the action.
+      active. Out-of-range values are reported and ignored.
     required: false
   api-retry-base-ms:
     description: >-
       Initial GitHub API retry backoff in milliseconds, 100-60000. Unset means
-      1000. Out-of-range values fail the action.
+      1000. Out-of-range values are reported and ignored.
     required: false
   api-retry-max-ms:
     description: >-
       Maximum GitHub API retry backoff in milliseconds, 1000-300000. Unset means
-      10000. Out-of-range values fail the action.
+      10000. It bounds the initial backoff too, whatever the two are set to
+      relative to each other.
     required: false
 outputs:
   released:

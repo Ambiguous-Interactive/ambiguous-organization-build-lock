@@ -64,8 +64,10 @@ an outcome that has already happened.
 3. **Discoverable knobs.** `release-retry-deadline-seconds`, `api-max-attempts`
    (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms`
    (1000-300000) are declared release-action inputs. An explicit input wins over
-   an inherited environment value, and an out-of-range input fails the action
-   rather than silently running a different budget than the caller requested.
+   an inherited environment value. Both channels report and ignore an
+   out-of-range value: these knobs only change how long a retry waits, and
+   failing a release over a tuning typo would abandon the holder cleanup it
+   exists to perform.
 4. **An unreachable record is named, not conflated with an unknown lock.** When
    confirmed, non-degraded cleanup evidence cannot be recorded because the
    lock-state file stayed unreachable for the whole budget, release emits
@@ -88,7 +90,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 748 tests, 746 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 749 tests, 747 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -313,6 +315,33 @@ committed runtime with a virtual clock, and both remediated.
    ceiling that will take effect, and its wording no longer tells an operator to
    clear an environment variable they may never have set.
 
+A tenth independent review raised three findings; all three were remediated.
+
+1. **Confirmed defect — a tuning typo abandoned the cleanup.** An out-of-range
+   value for one of the pure-tuning inputs threw from `config()`, so the release
+   never ran: no holder cleanup attempted, no outputs written, and a licensed seat
+   pinned until the reaper quarantines it. Invalid *safety evidence* already
+   degrades rather than aborts, so a typo in a backoff knob was punished harder
+   than bad cleanup evidence. All four tuning inputs, including
+   `release-retry-deadline-seconds`, now report and ignore an out-of-range value
+   through one shared resolver, matching the environment channel. The first
+   review's objection that ignoring is "silent" is answered by the warning, which
+   names the rejected value and the range.
+2. **Confirmed defect — the backoff floor could escape its cap.** The
+   `Retry-After` floor was applied after the cap, and nothing requires
+   `api-retry-base-ms <= api-retry-max-ms`. With base 60000 and max 1000 an
+   attempt-bounded wait returned sixty times the configured ceiling. The cap is
+   now outermost, so it bounds the floor whatever the two are set to.
+3. **Confirmed defect — this record contradicted itself.** The safety review still
+   asserted the lease-timeout reclaim that finding 1 of the first review
+   disproves. A test guards the README against that phrasing; nothing guarded the
+   audit record, so it was corrected by hand and swept for elsewhere.
+
+The review also noted that issue #201 leaves the headline guarantee weaker than
+the README implies, because a broad outage that reaches App token minting bypasses
+the deadline in about three seconds. That is recorded in #201 and remains the
+right scope boundary for this change.
+
 ## Safety review
 
 No fail-closed path was weakened. Both consumer gates continue to refuse a run
@@ -320,8 +349,10 @@ whose release did not remove holder ownership; the new code is added to their
 diagnostic allowlists only, never to a safe-result set. Acquire keeps its
 fail-fast attempt budget, because waiting there holds a runner and delays the
 queue before any work has started. Retrying a release longer cannot over-run a
-license: the resource is already returned before release runs, and a holder
-entry that is never removed is reclaimed by the lock's own lease timeout.
+license: the resource is already returned before release runs, and a holder entry
+that is never removed is quarantined by the scheduled reaper, which holds
+capacity rather than releasing it. That is the cost this change exists to avoid,
+not a safety hole — see finding 1 of the first review below.
 
 ## Out of scope
 

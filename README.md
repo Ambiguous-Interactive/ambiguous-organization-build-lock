@@ -602,13 +602,15 @@ The shared backoff knobs are also exposed as release inputs — `api-max-attempt
 (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
 which set `BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
 `BUILD_LOCK_API_RETRY_MAX_MS` for the action. An explicit input wins over an
-inherited environment value, and an out-of-range input fails the action rather
-than silently running a different budget than the caller asked for. The same
-ranges apply to those environment variables, which warn and fall back to the
-defaults instead: neither channel may configure a zero backoff, which under an
-active deadline would retry without pause for the whole budget, nor a ceiling
-long enough to outlast the calling step. Leaving
-`api-max-attempts` unset means the release deadline is the only bound.
+inherited environment value. The same ranges apply to both channels, and both
+report and ignore a value outside them: neither may configure a zero backoff,
+which under an active deadline would retry without pause for the whole budget,
+nor a ceiling long enough to outlast the calling step. These knobs only change
+how long a retry waits, so an out-of-range one is never fatal — failing a release
+over a tuning typo would abandon the holder cleanup it exists to perform and pin
+a licensed seat. `api-retry-max-ms` bounds `api-retry-base-ms` as well, whatever
+the two are set to relative to each other. Leaving `api-max-attempts` unset means
+the release deadline is the only bound.
 
 When confirmed external cleanup cannot be confirmed as recorded because the
 lock-state file stayed unreachable for the whole budget, the release step still
