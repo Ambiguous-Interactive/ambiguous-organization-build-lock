@@ -681,10 +681,16 @@ function apiRetryEnvironment(name, fallback) {
 
 // The configured value for a retry knob when it is one the budget will honor, and
 // null when it is unset or out of range. Reporting an ignored value as if it took
-// effect would be worse than saying nothing.
+// effect would be worse than saying nothing, and the retry budget already reports
+// the rejection itself, so this check stays silent.
 function effectiveApiRetryEnvironment(name) {
   const knob = API_RETRY_KNOBS.get(name);
-  return integerEnvironment(name, null, knob.minimum, knob.maximum);
+  const raw = String(process.env[name] || "").trim();
+  if (!/^[0-9]+$/.test(raw)) {
+    return null;
+  }
+  const value = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(value) && value >= knob.minimum && value <= knob.maximum ? value : null;
 }
 
 function definedEntries(values) {
@@ -3318,24 +3324,34 @@ async function acquire(config) {
 // clock so a transient GitHub outage that outlasts a handful of backoffs cannot red
 // an otherwise successful consumer matrix. `0` restores the attempt-bounded budget.
 //
-// The budget is split rather than shared. The preparatory state-branch and
-// lock-config calls need their own share, because an outage broad enough to matter
-// hits them first and they would otherwise fail the release before the write is
-// ever attempted. They get a bounded slice so they cannot spend the budget that
-// exists to protect the write, and both phases end no later than the one deadline
-// the caller configured.
+// The budget is split, never shared, because every call here degrades on failure
+// and a shared deadline lets whichever runs first consume the others' budget. The
+// preparatory calls need a share at all because an outage broad enough to matter
+// hits them first, and the lock-config read needs its own share within that: left
+// with nothing it silently falls back to default lock configuration, which applies
+// the default release cooldown to freed capacity instead of the configured one.
+// Every deadline is absolute, so a phase that finishes early hands its remainder
+// forward, and all of them end no later than the one deadline the caller set.
 function releaseRetryApiOptions(config, now = Date.now()) {
   const seconds = Number.isInteger(config.releaseRetryDeadlineSeconds)
     ? config.releaseRetryDeadlineSeconds
     : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
   if (seconds <= 0) {
-    return { seconds, preparation: undefined, cleanup: undefined };
+    return { seconds, stateBranch: undefined, lockConfig: undefined, cleanup: undefined };
   }
-  const preparationSeconds = Math.max(1, Math.ceil(seconds * RELEASE_PREPARATION_BUDGET_SHARE));
+  const totalMs = seconds * 1000;
+  // Computed in milliseconds and kept strictly inside the total so the smallest
+  // legal deadline still leaves the lock-state write the larger share.
+  const preparationMs = Math.max(
+    1,
+    Math.min(Math.round(totalMs * RELEASE_PREPARATION_BUDGET_SHARE), totalMs - 1)
+  );
+  const stateBranchMs = Math.max(1, Math.round(preparationMs / 2));
   return {
     seconds,
-    preparation: { deadlineAt: now + preparationSeconds * 1000 },
-    cleanup: { deadlineAt: now + seconds * 1000 }
+    stateBranch: { deadlineAt: now + stateBranchMs },
+    lockConfig: { deadlineAt: now + preparationMs },
+    cleanup: { deadlineAt: now + totalMs }
   };
 }
 
@@ -3413,7 +3429,7 @@ async function release(config) {
     // guard below refuses rather than reporting as "nothing to release".
     let stateBranchVerified = true;
     try {
-      await ensureStateBranch(config, { apiOptions: retryBudget.preparation });
+      await ensureStateBranch(config, { apiOptions: retryBudget.stateBranch });
     } catch (error) {
       if (!isUnrecordedReleaseError(error)) {
         throw error;
@@ -3424,7 +3440,7 @@ async function release(config) {
           "continuing to the lock-state read and write."
       );
     }
-    const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.preparation });
+    const lockConfig = await readLockConfig(config, { apiOptions: retryBudget.lockConfig });
     result = await cleanupIdentity(config, identity, {
       resourceSafe: resourceReport.cleanupStatus === "confirmed",
       resourceHealth: resourceReport.health,
@@ -4241,6 +4257,7 @@ module.exports = {
   readerCredentialRequired,
   readState,
   release,
+  releaseRetryApiOptions,
   reap,
   reapDeadlineBudgets,
   resolveCurrentJobId,

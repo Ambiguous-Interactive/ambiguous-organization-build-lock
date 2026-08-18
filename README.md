@@ -568,11 +568,16 @@ ceiling, which exponential backoff exhausts in roughly 15 seconds. Set it to `0`
 to restore the attempt-bounded budget. Keep it below the calling step's
 `timeout-minutes`.
 
-The budget is split, not shared. The preparatory state-branch and lock-config
-calls get the first quarter of it and the lock-state read and write keep the
-remainder, so neither phase can starve the other. Both preparatory calls also
-degrade rather than fail: an outage broad enough to matter hits them first, and
-neither may red a release before the write is attempted. Each phase's deadline
+The budget is split, never shared. The state-branch check gets the first eighth,
+the lock-config read the rest of the first quarter, and the lock-state read and
+write the remainder, so no phase can starve another — every one of them degrades
+on failure, and a shared deadline would let whichever ran first consume the rest.
+The lock-config read needs its own share in particular: left with nothing it falls
+back to default lock configuration, which would apply the default release cooldown
+to freed capacity instead of the configured one. Both preparatory calls degrade
+rather than fail, because an outage broad enough to matter hits them first and
+neither may red a release before the write is attempted. Every deadline is
+absolute, so a phase that finishes early hands its remainder forward. Each phase's deadline
 bounds the API retries inside it and does not restart per call; the cleanup's
 compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
 just past the deadline.

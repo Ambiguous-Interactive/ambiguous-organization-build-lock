@@ -53,9 +53,10 @@ an outcome that has already happened.
    existing acquire helper, generalized to `boundedRetryDelayMs`.
 2. **Release bounds itself by wall clock.** `release` derives a deadline from
    the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
-   `0` restores the attempt-bounded budget) and splits it: the preparatory
-   state-branch and lock-config calls get the first quarter, and the lock-state
-   read and write keep the remainder, so neither phase can starve the other.
+   `0` restores the attempt-bounded budget) and splits it three ways: the
+   state-branch check takes the first eighth, the lock-config read the rest of
+   the first quarter, and the lock-state read and write the remainder, so no
+   phase can starve another.
    Both preparatory calls degrade rather than fail, so neither can red a release
    before the write is attempted. The deadline and `api-max-attempts` are both
    ceilings, whichever binds first, with no per-call attempt floor underneath:
@@ -92,7 +93,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 752 tests, 750 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 756 tests, 754 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -397,6 +398,31 @@ the budget of the call being made, so minting inherits exactly the phase it serv
 and nothing more. `apiRetryOptions` now also ignores undefined-valued overrides,
 so an option built conditionally can never again clobber a computed bound and
 leave the retry loop with none.
+
+A thirteenth independent review raised two findings; both were remediated.
+
+1. **Confirmed defect — a starved lock-config read silently changed release
+   behavior.** The preparation slice was one shared deadline consumed
+   sequentially, so `ensureStateBranch` could spend all of it and leave
+   `readLockConfig` a single attempt. That read fails closed to *default* lock
+   configuration, and the live config sets `releaseCooldownSeconds: 1` against a
+   default of 360 — so during exactly the outage this feature exists to survive, a
+   freed licensed seat would have been parked in a six-minute cooldown. Every
+   phase now holds its own absolute deadline: the state-branch check takes the
+   first eighth, the lock-config read the rest of the first quarter, and the
+   lock-state read and write the remainder. A phase that finishes early still
+   hands its remainder forward.
+2. **Confirmed defect — the share inverted at small deadlines.** Rounding the
+   preparation share up in whole seconds gave preparation the entire budget for
+   any `release-retry-deadline-seconds` of four or less, all legal inputs, leaving
+   the write the feature protects with nothing. The arithmetic is now in
+   milliseconds and clamped strictly inside the total.
+
+The shares are wall-clock arithmetic that no mocked-timer test can observe, which
+is why the earlier split-budget test missed both. A data-driven test now asserts
+the invariant directly across the legal range. The review's cosmetic note about a
+duplicated warning was taken as well: the ceiling check no longer re-reports a
+rejection the retry budget already reports.
 
 ## Safety review
 

@@ -29,6 +29,7 @@ const {
   readerCredential,
   readerCredentialRequired,
   release,
+  releaseRetryApiOptions,
   reap,
   reapDeadlineBudgets,
   resolveCurrentJobId,
@@ -4891,6 +4892,44 @@ test("release degrades unreachable preparatory calls instead of failing on them"
     warned.some((line) => /Unable to read lock config/.test(line)),
     `expected a degraded lock-config warning, saw ${warned.join(" | ")}`
   );
+});
+
+// Every phase here degrades on failure, so a shared deadline lets whichever runs
+// first consume the others' budget. The shares are wall-clock arithmetic that no
+// mocked-timer test can observe, so assert them directly.
+test("the release budget gives every phase a share strictly inside the total", async (t) => {
+  const now = 1_800_000_000_000;
+
+  await t.test("the default budget splits as documented", () => {
+    const budget = releaseRetryApiOptions({ releaseRetryDeadlineSeconds: 120 }, now);
+    assert.equal(budget.seconds, 120);
+    assert.equal(budget.stateBranch.deadlineAt - now, 15_000);
+    assert.equal(budget.lockConfig.deadlineAt - now, 30_000);
+    assert.equal(budget.cleanup.deadlineAt - now, 120_000);
+  });
+
+  await t.test("a disabled budget hands every phase the attempt-bounded default", () => {
+    assert.deepEqual(releaseRetryApiOptions({ releaseRetryDeadlineSeconds: 0 }, now), {
+      seconds: 0,
+      stateBranch: undefined,
+      lockConfig: undefined,
+      cleanup: undefined
+    });
+  });
+
+  await t.test("no legal deadline lets preparation reach the write's share", () => {
+    for (const seconds of [1, 2, 3, 4, 5, 17, 120, 3600]) {
+      const budget = releaseRetryApiOptions({ releaseRetryDeadlineSeconds: seconds }, now);
+      const stateBranch = budget.stateBranch.deadlineAt - now;
+      const lockConfig = budget.lockConfig.deadlineAt - now;
+      const cleanup = budget.cleanup.deadlineAt - now;
+      assert.ok(
+        0 < stateBranch && stateBranch < lockConfig && lockConfig < cleanup,
+        `expected strictly increasing shares at ${seconds}s, saw ${stateBranch}/${lockConfig}/${cleanup}`
+      );
+      assert.equal(cleanup, seconds * 1000);
+    }
+  });
 });
 
 // Production releases always mint an App token first, and minting runs inside the
