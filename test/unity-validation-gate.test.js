@@ -90,13 +90,29 @@ test("validation gate accepts only explicit safe execution matrices", async (t) 
     ["fallback failure", { fallbackResult: "failure" }],
     ["fallback cleaned residue", { fallbackCleanupResult: "queue-cleaned" }],
     ["fallback quarantined residue", { fallbackCleanupResult: "quarantined" }],
-    ["missing fallback cleanup result", { fallbackCleanupResult: "" }]
+    ["missing fallback cleanup result", { fallbackCleanupResult: "" }],
+    ["fallback release unrecorded", {
+      fallbackResult: "failure",
+      fallbackCleanupResult: "lock-release-unreachable"
+    }]
   ];
   for (const [name, patch] of rejected) {
     await t.test(name, () => {
       assert.equal(evaluateValidationGate({ ...licensedSuccess, ...patch }).safe, false);
     });
   }
+
+  // Issue #198: an unrecorded release is a typed result, not an unknown value.
+  await t.test("unrecorded fallback release is named in the diagnostic", () => {
+    const values = {
+      ...licensedSuccess,
+      fallbackResult: "failure",
+      fallbackCleanupResult: "lock-release-unreachable"
+    };
+    const diagnostic = formatDiagnostic(values, evaluateValidationGate(values).reason);
+    assert.match(diagnostic, /fallback-cleanup=lock-release-unreachable/);
+    assert.doesNotMatch(diagnostic, /invalid/);
+  });
 });
 
 test("validation diagnostic exposes only allowlisted typed values", () => {

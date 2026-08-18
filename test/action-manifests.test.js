@@ -339,6 +339,24 @@ test("release accepts the physical runner identity required by schema 3", () => 
   }
 });
 
+// Issue #198: the retry budget was environment-only, so a consumer hitting a
+// transient outage had no discoverable knob and no way to widen the release window.
+test("release exposes its retry budget as documented inputs", () => {
+  const release = readActionManifest("release-build-lock");
+  const inputs = yamlRequiredTopLevelMappingKeys(release, "inputs", "release-build-lock/action.yml");
+
+  for (const name of [
+    "release-retry-deadline-seconds",
+    "api-max-attempts",
+    "api-retry-base-ms",
+    "api-retry-max-ms"
+  ]) {
+    assert.ok(inputs.includes(name), `release-build-lock must expose ${name}`);
+  }
+  assert.match(release, /release-retry-deadline-seconds:[\s\S]*?Accepts 0 or 30-3600[\s\S]*?default:\s*"120"/);
+  assert.match(release, /cleanup-result:[\s\S]*?lock-release-unreachable/);
+});
+
 test("reaper exposes exact confirmed reservation and incident recovery inputs", () => {
   const reaper = readActionManifest("reap-stale-locks");
   const inputs = yamlRequiredTopLevelMappingKeys(reaper, "inputs", "reap-stale-locks/action.yml");
@@ -553,4 +571,31 @@ test("README documents configurable parallelism and transient-auth handling", ()
   assert.match(readme, /locks\/<lock-name>\.config\.json/);
   assert.match(readme, /BUILD_LOCK_AUTH_GRACE_MS/);
   assert.match(readme, /BUILD_LOCK_CONFIG_TTL_MS/);
+});
+
+test("README documents the time-bounded release retry budget", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+  assert.match(readme, /^## Release Retry Budget$/m);
+  assert.match(readme, /`release-retry-deadline-seconds` \(default\s+120, and either 0 or 30-3600\)/);
+  assert.match(readme, /cleanup-result=lock-release-unreachable/);
+  for (const [name, range] of [
+    ["api-max-attempts", "1-100"],
+    ["api-retry-base-ms", "100-60000"],
+    ["api-retry-max-ms", "1000-300000"]
+  ]) {
+    assert.match(readme, new RegExp(`\`${name}\`\\s+\\(${range}\\)`));
+  }
+  // The stale holder entry is quarantined, not lease-expired; the README must not
+  // tell an operator this condition self-heals.
+  assert.match(readme, /quarantines the stale\s+holder entry/);
+  assert.doesNotMatch(readme, /reclaimed by the lock's own lease\s+timeout/);
+  assert.match(readme, /`Retry-After` from GitHub is honored in full/);
+  assert.match(readme, /Minting the GitHub App token inherits the budget of the call it\s+serves/);
+  assert.match(readme, /neither may configure a zero backoff/);
+  assert.match(readme, /an out-of-range one is never fatal/);
+  assert.match(readme, /The budget is split, never shared\./);
+  assert.match(readme, /each one\s+carries a matching abort signal/);
+  assert.match(readme, /are both ceilings: whichever a call reaches\s+first ends its budget/);
+  assert.match(readme, /deliberately no per-call attempt floor underneath/);
 });

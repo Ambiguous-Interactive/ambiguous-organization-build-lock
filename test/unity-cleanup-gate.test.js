@@ -104,6 +104,13 @@ test("gate accepts only coherent confirmed cleanup releases", async (t) => {
     ["cooldown state missing", { reservationState: "", reservationId: "" }],
     ["cooldown id missing", { reservationId: "" }],
     ["direct release has reservation", { cleanupResult: "released" }],
+    ["unrecorded release", {
+      releaseOutcome: "failure",
+      cleanupResult: "lock-release-unreachable",
+      released: "false",
+      reservationState: "",
+      reservationId: ""
+    }],
     ["missing outputs", Object.fromEntries(Object.keys(safeCooldown).map((key) => [key, ""]))]
   ];
 
@@ -131,6 +138,34 @@ test("gate fails ambiguous acquisition state without misdiagnosing cleanup", () 
     assert.match(diagnostic, /lock acquisition state is missing or invalid/);
     assert.doesNotMatch(diagnostic, /cleanup was not confirmed/);
   }
+});
+
+// Issue #198: an unreachable lock-state write used to render as
+// `release=failure/invalid released=invalid release-health=invalid`, which reads as
+// a lock in an unknown state. The resource was returned; only the record was not.
+test("gate names an unrecorded release instead of reporting an unknown lock state", () => {
+  const values = {
+    ...safeCooldown,
+    releaseOutcome: "failure",
+    cleanupResult: "lock-release-unreachable",
+    released: "false",
+    reservationState: "",
+    reservationId: ""
+  };
+  const result = evaluateCleanupGate(values);
+
+  assert.equal(result.safe, false);
+  assert.deepEqual(result.failures, [
+    "the central release step did not succeed",
+    "the central release could not confirm holder removal because the lock-state file stayed unreachable " +
+      "(the licensed resource was returned; if the removal did not land, the scheduled reaper quarantines the " +
+      "stale holder entry and it keeps consuming lock capacity until it is reclaimed or recovered)"
+  ]);
+
+  const diagnostic = formatDiagnostic(values, result.failures);
+  assert.match(diagnostic, /release=failure\/lock-release-unreachable/);
+  assert.match(diagnostic, /released=false release-health=healthy release-reason=cleanup-confirmed/);
+  assert.doesNotMatch(diagnostic, /invalid/);
 });
 
 test("gate diagnostic contains only allowlisted typed values and escapes commands", () => {

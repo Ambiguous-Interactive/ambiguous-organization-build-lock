@@ -34,13 +34,45 @@ inputs:
     description: Branch that stores lock state JSON files.
     required: false
     default: lock-state
+  release-retry-deadline-seconds:
+    description: >-
+      Wall-clock budget for the lock-state read and write. Release retries a
+      transient GitHub API failure until this deadline instead of stopping after
+      a fixed attempt count, because the licensed resource is already returned by
+      then. Accepts 0 or 30-3600: use 0 to restore the shared attempt-bounded
+      budget, and note that a smaller positive budget leaves its narrowest phase
+      too little time to mint a token and make one call. Keep it below the calling
+      step's timeout-minutes. An out-of-range value is reported and ignored rather
+      than failing the release.
+    required: false
+    default: "120"
+  api-max-attempts:
+    description: >-
+      Attempt ceiling for the shared GitHub API retry budget, 1-100. Unset means
+      5 for attempt-bounded calls and no ceiling while the release deadline is
+      active. Out-of-range values are reported and ignored.
+    required: false
+  api-retry-base-ms:
+    description: >-
+      Initial GitHub API retry backoff in milliseconds, 100-60000. Unset means
+      1000. Out-of-range values are reported and ignored.
+    required: false
+  api-retry-max-ms:
+    description: >-
+      Maximum GitHub API retry backoff in milliseconds, 1000-300000. Unset means
+      10000. It bounds the initial backoff too, whatever the two are set to
+      relative to each other.
+    required: false
 outputs:
   released:
     description: "true when this action released a held lock."
   queue-cleaned:
     description: "true when this action removed this run from the wait queue."
   cleanup-result:
-    description: "cooldown-started, quarantined, global-quarantined, released, queue-cleaned, or noop."
+    description: >-
+      cooldown-started, quarantined, global-quarantined, released, queue-cleaned,
+      noop, or lock-release-unreachable when confirmed cleanup could not be
+      recorded because the lock-state file stayed unreachable.
   lock-name:
     description: Target lock name.
   holder-id:

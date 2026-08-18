@@ -19,6 +19,22 @@ const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
+// Acquire and release are not symmetric. Acquire must fail fast because waiting
+// holds a runner and delays the queue before any work has started. Release runs
+// after the guarded work finished and the licensed resource was already returned,
+// so the only thing left is recording it: waiting costs this step's own clock,
+// while failing costs the consumer a full matrix re-run. The release path is
+// therefore bounded by wall clock instead of by a fixed attempt count.
+const DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS = 120;
+// Smallest budget whose phases can still do their work. The narrowest slice is an
+// eighth, so 30 seconds leaves it about 3.75 to mint a token and make one call,
+// and leaves the lock-state write 22.5 - still more than the attempt-bounded
+// budget it replaces. Below that a release performs worse than turning the
+// deadline off entirely, so such a value is reported and ignored.
+const MIN_RELEASE_RETRY_DEADLINE_SECONDS = 30;
+// Share of the release budget the preparatory calls may spend before the
+// lock-state read and write, which keep the remainder.
+const RELEASE_PREPARATION_BUDGET_SHARE = 0.25;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
@@ -56,6 +72,21 @@ const RESOURCE_REASON_CODES = new Set([
   "activation-timeout",
   "activation-terminated"
 ]);
+// Stable cleanup-result code for "the licensed resource was returned but the
+// lock-state write could not be reached". Consumer gates treat it as unsafe like
+// any other non-release result; it exists so the failure text names the condition.
+const UNRECORDED_RELEASE_RESULT = "lock-release-unreachable";
+// Environment overrides for the shared API retry budget, exposed as release action
+// inputs so a consumer hitting a transient outage has a discoverable knob. The
+// public inputs carry ranges the bare environment variables do not: a zero backoff
+// under an active deadline would retry without pause for the whole budget, and a
+// zero ceiling would also discard every server-directed Retry-After wait.
+const API_RETRY_INPUTS = [
+  { input: "api-max-attempts", environment: "BUILD_LOCK_API_MAX_ATTEMPTS", minimum: 1, maximum: 100 },
+  { input: "api-retry-base-ms", environment: "BUILD_LOCK_API_RETRY_BASE_MS", minimum: 100, maximum: 60000 },
+  { input: "api-retry-max-ms", environment: "BUILD_LOCK_API_RETRY_MAX_MS", minimum: 1000, maximum: 300000 }
+];
+const API_RETRY_KNOBS = new Map(API_RETRY_INPUTS.map((knob) => [knob.environment, knob]));
 
 function input(name, fallback = "") {
   const key = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -287,22 +318,30 @@ function createGitHubAppAuth({
   let cachedToken = null;
   let sharedRefresh = null;
 
-  async function jwtApi(method, path, body, signal) {
-    return api(method, path, body, createAppJwt(appId, keyObject, now()), {
-      ...apiOptions,
-      maxAttempts: apiOptions.maxAttempts === undefined ? 3 : apiOptions.maxAttempts,
-      signal: signal || apiOptions.signal
-    });
+  async function jwtApi(method, path, body, signal, deadlineAt) {
+    const overrides = { ...apiOptions, signal: signal || apiOptions.signal };
+    if (Number.isFinite(deadlineAt)) {
+      // Minting runs inside the call the caller is spending its budget on, so it
+      // inherits that budget. A fixed inner budget would end an operation whose
+      // own wall-clock deadline is almost entirely unspent, and a budget wider
+      // than the calling phase's would let minting starve the call it serves.
+      overrides.deadlineAt = deadlineAt;
+    } else if (overrides.maxAttempts === undefined) {
+      // Otherwise keep the small inner budget so a healthy run mints quickly.
+      overrides.maxAttempts = 3;
+    }
+    return api(method, path, body, createAppJwt(appId, keyObject, now()), overrides);
   }
 
-  async function lookupInstallation(signal) {
+  async function lookupInstallation(signal, deadlineAt) {
     const installation = await jwtApi(
       "GET",
       repository
         ? `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`
         : `/orgs/${encodeURIComponent(owner)}/installation`,
       undefined,
-      signal
+      signal,
+      deadlineAt
     );
     installationId = installation && installation.id;
     if (!installationId) {
@@ -310,9 +349,9 @@ function createGitHubAppAuth({
     }
   }
 
-  async function mintToken(signal) {
+  async function mintToken(signal, deadlineAt) {
     if (!installationId) {
-      await lookupInstallation(signal);
+      await lookupInstallation(signal, deadlineAt);
     }
     let result;
     try {
@@ -320,18 +359,18 @@ function createGitHubAppAuth({
         ...(repositories ? { repositories: [...repositories] } : {}),
         ...(permissions ? { permissions: { ...permissions } } : {})
       };
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal, deadlineAt);
     } catch (error) {
       if (error.status !== 404) {
         throw error;
       }
       installationId = null;
-      await lookupInstallation(signal);
+      await lookupInstallation(signal, deadlineAt);
       const tokenRequest = {
         ...(repositories ? { repositories: [...repositories] } : {}),
         ...(permissions ? { permissions: { ...permissions } } : {})
       };
-      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal);
+      result = await jwtApi("POST", `/app/installations/${installationId}/access_tokens`, tokenRequest, signal, deadlineAt);
     }
     const expiresAt = Date.parse(result && result.expires_at);
     if (!result || !result.token || !Number.isFinite(expiresAt) || expiresAt <= now()) {
@@ -399,7 +438,7 @@ function createGitHubAppAuth({
       }
       if (!sharedRefresh) {
         const refresh = { controller: new AbortController(), promise: null, waiters: 0 };
-        refresh.promise = mintToken(refresh.controller.signal).finally(() => {
+        refresh.promise = mintToken(refresh.controller.signal, options.deadlineAt).finally(() => {
           if (sharedRefresh === refresh) {
             sharedRefresh = null;
           }
@@ -585,36 +624,174 @@ function isAbortError(error, signal) {
   );
 }
 
-function integerEnvironment(name, fallback, minimum = 0) {
+function integerEnvironment(name, fallback, minimum = 0, maximum = Number.POSITIVE_INFINITY) {
   const raw = process.env[name];
   if (raw === undefined || raw === "") {
     return fallback;
   }
+  const range = Number.isFinite(maximum) ? `between ${minimum} and ${maximum}` : `>= ${minimum}`;
   if (!/^[0-9]+$/.test(raw)) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+    console.log(`::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer ${range}.`);
     return fallback;
   }
   const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || value < minimum) {
-    console.log(`::warning::Ignoring invalid ${name}=${raw}; expected an integer >= ${minimum}.`);
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    console.log(`::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer ${range}.`);
     return fallback;
   }
   return value;
 }
 
+// Resolve a pure-tuning input, reporting and ignoring a value outside its range
+// instead of failing. These knobs only change how long a retry waits; refusing to
+// run over one would abandon the holder cleanup that the release exists to
+// perform, pinning a licensed seat until the reaper quarantines it. Safety
+// evidence is validated strictly elsewhere - a tuning typo must not be punished
+// harder than bad cleanup evidence, which already degrades rather than aborts.
+function toleratedIntegerInput(name, fallback, minimum, maximum) {
+  const raw = input(name);
+  if (raw === "") {
+    return fallback;
+  }
+  const value = /^[0-9]+$/.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    console.log(
+      `::warning::Ignoring invalid ${name}=${workflowCommandData(raw)}; expected an integer between ` +
+        `${minimum} and ${maximum}.`
+    );
+    return fallback;
+  }
+  return value;
+}
+
+// The retry budget is read from the environment deep inside every API call, so an
+// action input that names the same knob is applied to that environment once, at
+// configuration time. An explicit input wins over an inherited environment value.
+function applyApiRetryInputs() {
+  for (const knob of API_RETRY_INPUTS) {
+    const value = toleratedIntegerInput(knob.input, null, knob.minimum, knob.maximum);
+    if (value !== null) {
+      process.env[knob.environment] = String(value);
+    }
+  }
+}
+
+// The environment channel carries the same ranges as the action inputs, so a knob
+// cannot be widened past its contract by sidestepping the input. It warns and falls
+// back to the default instead of failing, which is the established behavior for
+// every other environment override in this runtime.
+function apiRetryEnvironment(name, fallback) {
+  const knob = API_RETRY_KNOBS.get(name);
+  return integerEnvironment(name, fallback, knob.minimum, knob.maximum);
+}
+
+// The configured value for a retry knob when it is one the budget will honor, and
+// null when it is unset or out of range. Reporting an ignored value as if it took
+// effect would be worse than saying nothing, and the retry budget already reports
+// the rejection itself, so this check stays silent.
+function effectiveApiRetryEnvironment(name) {
+  const knob = API_RETRY_KNOBS.get(name);
+  // Matches integerEnvironment exactly, whitespace included: reporting a ceiling
+  // the budget then rejects would be a contradiction in the same log.
+  const raw = process.env[name];
+  if (raw === undefined || !/^[0-9]+$/.test(raw)) {
+    return null;
+  }
+  const value = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(value) && value >= knob.minimum && value <= knob.maximum ? value : null;
+}
+
+function definedEntries(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
+function releaseRetryDeadlineInput() {
+  const seconds = toleratedIntegerInput(
+    "release-retry-deadline-seconds",
+    DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
+    0,
+    3600
+  );
+  if (seconds === 0 || seconds >= MIN_RELEASE_RETRY_DEADLINE_SECONDS) {
+    return seconds;
+  }
+  console.log(
+    `::warning::Ignoring release-retry-deadline-seconds=${seconds}; a budget below ` +
+      `${MIN_RELEASE_RETRY_DEADLINE_SECONDS} seconds leaves its smallest phase too little time to mint a ` +
+      "token and make one call, which performs worse than no deadline at all. Use 0 for the " +
+      "attempt-bounded budget."
+  );
+  return DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
+}
+
 function apiRetryOptions(overrides = {}) {
   const retrySleep = overrides.sleep || sleep;
   const signal = overrides.signal;
+  // A caller that supplies an absolute deadline is asking for a time-bounded
+  // budget: keep retrying until the deadline instead of stopping after a fixed
+  // number of backoffs. An explicitly configured attempt ceiling still wins.
+  const timeBounded = Number.isFinite(overrides.deadlineAt);
   return {
-    maxAttempts: integerEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS", DEFAULT_API_MAX_ATTEMPTS, 1),
-    baseDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
-    maxDelayMs: integerEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    maxAttempts: apiRetryEnvironment(
+      "BUILD_LOCK_API_MAX_ATTEMPTS",
+      timeBounded ? Number.POSITIVE_INFINITY : DEFAULT_API_MAX_ATTEMPTS
+    ),
+    baseDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
+    maxDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    deadlineAt: null,
     fullJitter: false,
     now: Date.now,
     random: Math.random,
-    ...overrides,
+    // Only defined overrides win. An explicit `undefined` from a caller building
+    // options conditionally must not clobber a computed default and leave the
+    // retry loop with no bound at all.
+    ...definedEntries(overrides),
     sleep: (ms) => retrySleep(ms, { signal })
   };
+}
+
+// Decide whether one more attempt fits in the budget, and how long to wait first.
+// An attempt-bounded budget stops after `maxAttempts`. A time-bounded budget keeps
+// retrying until its deadline and shortens its last wait so the final attempt still
+// starts inside the deadline instead of being skipped by a long backoff.
+//
+// The deadline and `maxAttempts` are both ceilings: whichever is reached first
+// ends the budget, and a spent deadline ends it for every call that follows.
+//
+// There is deliberately no per-call attempt floor under the deadline. One would
+// mean each call could spend a fresh attempt budget past the deadline, so a phase
+// with several calls would overrun the budget by a multiple of it - the opposite
+// of a wall-clock bound. The guarantee that matters is at the operation level and
+// still holds: a release with the default deadline gets roughly eight times the
+// total retry time of the attempt-bounded budget it replaces.
+function apiRetryBudget(retry, attempt, proposeDelayMs) {
+  if (attempt >= retry.maxAttempts) {
+    return { exhausted: true, delayMs: 0, deadlineReason: null };
+  }
+  if (!Number.isFinite(retry.deadlineAt)) {
+    return { exhausted: false, delayMs: proposeDelayMs(retry), deadlineReason: null };
+  }
+  const now = retry.now();
+  if (now >= retry.deadlineAt) {
+    return {
+      exhausted: true,
+      delayMs: 0,
+      deadlineReason: `deadline ${new Date(retry.deadlineAt).toISOString()}`
+    };
+  }
+  return {
+    exhausted: false,
+    delayMs: boundedRetryDelayMs(proposeDelayMs(retry), retry.deadlineAt, now),
+    deadlineReason: null
+  };
+}
+
+// Name the budget the next attempt is spending, so a retry warning stays readable
+// whether the bound is an attempt ceiling or a wall-clock deadline.
+function retryProgress(retry, attempt) {
+  return Number.isFinite(retry.maxAttempts)
+    ? `attempt ${attempt + 1}/${retry.maxAttempts}`
+    : `attempt ${attempt + 1} before ${new Date(retry.deadlineAt).toISOString()}`;
 }
 
 function jitter(ms) {
@@ -634,7 +811,7 @@ function acquirePollDelayMs(baseDelayMs, reservations, now = Date.now(), random 
   return baseDelayMs + Math.floor(random() * Math.max(250, Math.floor(baseDelayMs / 3)));
 }
 
-function acquireRetryDelayMs(proposedDelayMs, deadline, now = Date.now()) {
+function boundedRetryDelayMs(proposedDelayMs, deadline, now = Date.now()) {
   return Math.max(0, Math.min(proposedDelayMs, deadline - now));
 }
 
@@ -754,10 +931,55 @@ function isUnknownOutcomeMutationResponse(response) {
   return response.status === 408 || response.status >= 500;
 }
 
+// A primary rate limit sends no Retry-After, only the epoch second the hourly
+// window resets. Without it a time-bounded budget spends its whole deadline on
+// requests that cannot succeed yet, so read the reset as a server-directed wait.
+// Only for a time-bounded caller: on the attempt-bounded paths this would replace
+// exponential backoff with the capped reset wait and change admission and reaping
+// timing, which this change deliberately leaves alone (issue #200).
+function rateLimitResetMs(response, now = Date.now) {
+  // Only a rate-limit rejection. Any retryable response can carry an exhausted
+  // quota header, and treating a 401 replica lag that clears in about a second as
+  // an hour-long wait would spend a whole budget on one attempt.
+  if (!response || (response.status !== 403 && response.status !== 429)) {
+    return null;
+  }
+  if (header(response, "x-ratelimit-remaining") !== "0") {
+    return null;
+  }
+  const reset = String(header(response, "x-ratelimit-reset") || "").trim();
+  if (!/^[0-9]+$/.test(reset)) {
+    return null;
+  }
+  const resetAt = Number(reset) * 1000;
+  if (!Number.isFinite(resetAt)) {
+    return null;
+  }
+  // A reset already in the past carries no waiting information. Treating it as a
+  // zero-length instruction would replace exponential backoff with a constant
+  // minimum wait for the whole budget, against an endpoint that just limited us.
+  const waitMs = resetAt - now();
+  return waitMs > 0 ? waitMs : null;
+}
+
 function retryDelayMs(response, attempt, options) {
-  const retryAfter = retryAfterMs(response, options.now);
+  const retryAfter = Number.isFinite(options.deadlineAt)
+    ? retryAfterMs(response, options.now) ?? rateLimitResetMs(response, options.now)
+    : retryAfterMs(response, options.now);
   if (retryAfter !== null) {
-    return Math.min(retryAfter, options.maxDelayMs);
+    // maxDelayMs exists to stop our own exponential backoff from growing without
+    // bound. A Retry-After is a server instruction, not backoff: truncating it
+    // retries back into the same secondary rate limit. Honor it in full whenever a
+    // deadline already bounds the total wait, and fall back to the backoff cap only
+    // when nothing else would bound it (tracked for the other paths by issue #200).
+    // The instruction may lengthen our backoff, never shorten it below the
+    // configured base. GitHub sometimes sends 0 or an already-past HTTP date, which
+    // would otherwise turn a time-bounded budget into an unthrottled retry loop.
+    // Only the server's own number may exceed maxDelayMs, and only while a deadline
+    // bounds it; our floor is capped like any other backoff we generate.
+    const floor = Math.min(options.baseDelayMs, options.maxDelayMs);
+    const instructed = Math.max(retryAfter, floor);
+    return Number.isFinite(options.deadlineAt) ? instructed : Math.min(instructed, options.maxDelayMs);
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
   if (options.fullJitter) {
@@ -855,7 +1077,7 @@ async function api(method, path, body, authToken, options = {}) {
       throwIfAborted(retry.signal);
       let requestToken =
         authToken && typeof authToken.getToken === "function"
-          ? await authToken.getToken({ signal: retry.signal })
+          ? await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt })
           : authToken;
       let result = await fetchApi(method, path, body, requestToken, retry);
       if (
@@ -867,7 +1089,7 @@ async function api(method, path, body, authToken, options = {}) {
       ) {
         renewableRefreshUsed = true;
         authToken.invalidateToken(requestToken);
-        requestToken = await authToken.getToken({ signal: retry.signal });
+        requestToken = await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt });
         result = await fetchApi(method, path, body, requestToken, retry);
       }
       const { response, data, text } = result;
@@ -885,14 +1107,15 @@ async function api(method, path, body, authToken, options = {}) {
         if (mutationMethod && isUnknownOutcomeMutationResponse(response)) {
           unknownOutcomeMutationFailure = true;
         }
-        if (attempt >= retry.maxAttempts) {
-          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
+        const budget = apiRetryBudget(retry, attempt, (options) => retryDelayMs(response, attempt, options));
+        if (budget.exhausted) {
+          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
         }
-        const delay = retryDelayMs(response, attempt, retry);
+        const delay = budget.delayMs;
         throwIfAborted(retry.signal);
         console.log(
           `::warning::${method} ${path} returned HTTP ${response.status}; retrying in ${delay} ms ` +
-            `(attempt ${attempt + 1}/${retry.maxAttempts}; ${responseDetails(response, data, text)}).`
+            `(${retryProgress(retry, attempt)}; ${responseDetails(response, data, text)}).`
         );
         await retry.sleep(delay);
         continue;
@@ -922,17 +1145,18 @@ async function api(method, path, body, authToken, options = {}) {
         requestId: "",
         description: `transport error: ${oneLine(error.message)}`
       };
-      if (attempt >= retry.maxAttempts) {
-        throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure);
+      const budget = apiRetryBudget(retry, attempt, (options) => retryDelayMs(null, attempt, options));
+      if (budget.exhausted) {
+        throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
       }
       if (mutationMethod) {
         unknownOutcomeMutationFailure = true;
       }
-      const delay = retryDelayMs(null, attempt, retry);
+      const delay = budget.delayMs;
       throwIfAborted(retry.signal);
       console.log(
         `::warning::${method} ${path} failed before receiving a response; retrying in ${delay} ms ` +
-          `(attempt ${attempt + 1}/${retry.maxAttempts}; ${oneLine(error.message)}).`
+          `(${retryProgress(retry, attempt)}; ${oneLine(error.message)}).`
       );
       await retry.sleep(delay);
     }
@@ -2044,10 +2268,10 @@ function explicitReleaseMessage(cleanupResult, lockName) {
   return `No release needed for ${lockName}.`;
 }
 
-function writeReleaseOutputs(config, identity, result) {
+function writeReleaseOutputs(config, identity, result, cleanupResult = cleanupResultName(result)) {
   writeOutput("released", String(result.released));
   writeOutput("queue-cleaned", String(result.queueCleaned));
-  writeOutput("cleanup-result", cleanupResultName(result));
+  writeOutput("cleanup-result", cleanupResult);
   writeOutput("lock-name", config.lockName);
   writeOutput("holder-id", identity.holderId);
   writeOutput("state-sha", result.sha || "");
@@ -2827,7 +3051,7 @@ async function acquire(config) {
           if (backfillHolderJobId) {
             const write = await writeState(config, sha, state, `Backfill exact job for ${config.lockName}`, { apiOptions });
             if (write.conflict) {
-              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
               continue;
             }
             const verified = await readState(config, { apiOptions });
@@ -2841,7 +3065,7 @@ async function acquire(config) {
               verifiedHolder.runAttempt !== identity.runAttempt ||
               verifiedHolder.jobId !== identity.jobId
             ) {
-              await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+              await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
               continue;
             }
             acquiredStateSha = verified.sha || write.sha;
@@ -3013,7 +3237,7 @@ async function acquire(config) {
                 quarantineRecovered = true;
               }
             }
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           if (canRecoverQuarantine) {
@@ -3037,7 +3261,7 @@ async function acquire(config) {
                 verifiedHolder.runnerId !== identity.runnerId ||
                 verifiedHolder.runAttempt !== identity.runAttempt))
           ) {
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           await revalidatePrHead({ force: true, cleanup: true });
@@ -3066,7 +3290,7 @@ async function acquire(config) {
               lockStateMayNeedCleanup = true;
               recordPostCleanupNeeded();
             }
-            await sleep(acquireRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
+            await sleep(boundedRetryDelayMs(jitter(1000), deadline), { signal: apiOptions.signal });
             continue;
           }
           lockStateMayNeedCleanup = true;
@@ -3075,7 +3299,7 @@ async function acquire(config) {
 
         const pollNow = Date.now();
         const pollDelayMs = acquirePollDelayMs(config.pollSeconds * 1000, reservations, pollNow);
-        await sleep(acquireRetryDelayMs(pollDelayMs, deadline, pollNow), { signal: apiOptions.signal });
+        await sleep(boundedRetryDelayMs(pollDelayMs, deadline, pollNow), { signal: apiOptions.signal });
       } catch (error) {
         if (isCancellationError(error, cancellation)) {
           throw error;
@@ -3101,7 +3325,7 @@ async function acquire(config) {
             );
             const authDeadline = Math.min(deadline, authFailureSince + authGraceMs);
             await sleep(
-              acquireRetryDelayMs(jitter(config.pollSeconds * 1000), authDeadline, now),
+              boundedRetryDelayMs(jitter(config.pollSeconds * 1000), authDeadline, now),
               { signal: apiOptions.signal }
             );
             continue;
@@ -3140,9 +3364,68 @@ async function acquire(config) {
   }
 }
 
+// The lock-state write is the last thing a release does, and it is pure
+// bookkeeping: the licensed resource has already been returned. Bound it by wall
+// clock so a transient GitHub outage that outlasts a handful of backoffs cannot red
+// an otherwise successful consumer matrix. `0` restores the attempt-bounded budget.
+//
+// The budget is split, never shared, because every call here degrades on failure
+// and a shared deadline lets whichever runs first consume the others' budget. The
+// preparatory calls need a share at all because an outage broad enough to matter
+// hits them first, and the lock-config read needs its own share within that: left
+// with nothing it silently falls back to default lock configuration, which applies
+// the default release cooldown to freed capacity instead of the configured one.
+// Every deadline is absolute, so a phase that finishes early hands its remainder
+// forward, and all of them end no later than the one deadline the caller set.
+function releaseRetryApiOptions(config, now = Date.now()) {
+  const seconds = Number.isInteger(config.releaseRetryDeadlineSeconds)
+    ? config.releaseRetryDeadlineSeconds
+    : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
+  if (seconds <= 0) {
+    return { seconds, stateBranch: undefined, lockConfig: undefined, cleanup: undefined };
+  }
+  const totalMs = seconds * 1000;
+  // Computed in milliseconds and kept strictly inside the total so the smallest
+  // legal deadline still leaves the lock-state write the larger share.
+  const preparationMs = Math.max(
+    1,
+    Math.min(Math.round(totalMs * RELEASE_PREPARATION_BUDGET_SHARE), totalMs - 1)
+  );
+  const stateBranchMs = Math.max(1, Math.round(preparationMs / 2));
+  // Pair every deadline with an abort signal. A deadline consulted only between
+  // attempts is not a wall-clock bound: one connection that stalls inside fetch
+  // would outlast the whole budget and take the step's timeout with it, losing the
+  // typed outputs this change exists to produce. The reaper already works this way.
+  return {
+    seconds,
+    stateBranch: { deadlineAt: now + stateBranchMs, signal: AbortSignal.timeout(stateBranchMs) },
+    lockConfig: { deadlineAt: now + preparationMs, signal: AbortSignal.timeout(preparationMs) },
+    cleanup: { deadlineAt: now + totalMs, signal: AbortSignal.timeout(totalMs) }
+  };
+}
+
+// A release whose record cannot be confirmed after confirmed cleanup is not a lock
+// in an unknown state: the licensed resource was returned, and only the bookkeeping
+// is in doubt. Report it under its own stable code so one line tells an operator the
+// resource is safe. Restricted to an exhausted API budget: a mutation that GitHub
+// may have applied without acknowledging is covered by the conditional wording of
+// the failure text, which never asserts that a stale holder entry exists.
+// Compare-and-swap exhaustion is excluded because it means the opposite - reads and
+// writes reached the file but lost a contention race, so another writer is actively
+// changing state and no claim about this run's record is warranted.
+function isUnrecordedReleaseError(error) {
+  return (
+    Boolean(error) &&
+    (error.code === "GITHUB_API_RETRY_EXHAUSTED" ||
+      error.code === "LOCK_STATE_UNVERIFIED" ||
+      // A phase deadline that fires mid-request aborts it. Same meaning as an
+      // exhausted budget: the file was not reached inside the time allowed.
+      error.name === "TimeoutError")
+  );
+}
+
 async function release(config) {
   validateLockName(config.lockName);
-  await ensureStateBranch(config);
   const identity = currentIdentity(config);
   if (config.targetHolderId) {
     const targetHolderId = String(config.targetHolderId).trim();
@@ -3170,19 +3453,115 @@ async function release(config) {
     );
   }
 
-  const lockConfig = await readLockConfig(config);
   const resourceReport = config.resourceReport || {
     cleanupStatus: config.resourceSafe === true ? "confirmed" : "unknown",
     health: "healthy",
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
-  const result = await cleanupIdentity(config, identity, {
-    resourceSafe: resourceReport.cleanupStatus === "confirmed",
-    resourceHealth: resourceReport.health,
-    resourceReason: resourceReport.reason,
-    releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
-    reason: resourceReport.reason
-  });
+  const retryBudget = releaseRetryApiOptions(config);
+  // Both bounds bind, so a configured attempt ceiling caps the deadline. Say so
+  // once, and only when the value is one that actually takes effect: an inherited
+  // environment value is otherwise invisible in the log, while an out-of-range one
+  // is already reported and ignored by the retry budget itself.
+  const attemptCeiling = effectiveApiRetryEnvironment("BUILD_LOCK_API_MAX_ATTEMPTS");
+  if (retryBudget.cleanup && attemptCeiling !== null) {
+    console.log(
+      `::warning::An attempt ceiling of ${attemptCeiling} bounds the ${retryBudget.seconds}s release retry ` +
+        "deadline; whichever is reached first ends the budget. Unset api-max-attempts, or the inherited " +
+        "BUILD_LOCK_API_MAX_ATTEMPTS, to let the deadline be the only bound."
+    );
+  }
+  let result;
+  try {
+    // The state branch is a permanent fixture; this call only bootstraps a
+    // repository that has never held lock state. An unreachable check must not
+    // fail the release before the write is attempted, so degrade like the lock
+    // config read does and let the lock-state read and write report the real
+    // outcome. Degrading here cannot become a false success: an unverified branch
+    // makes an empty read indistinguishable from a missing branch, which the
+    // guard below refuses rather than reporting as "nothing to release".
+    let stateBranchVerified = true;
+    try {
+      await ensureStateBranch(config, { apiOptions: retryBudget.stateBranch });
+    } catch (error) {
+      if (!isUnrecordedReleaseError(error)) {
+        throw error;
+      }
+      stateBranchVerified = false;
+      console.log(
+        `::warning::Could not verify the ${config.stateBranch} branch (${workflowCommandData(error.message)}); ` +
+          "continuing to the lock-state read and write."
+      );
+    }
+    let lockConfig;
+    try {
+      lockConfig = await readLockConfig(config, { apiOptions: retryBudget.lockConfig });
+    } catch (error) {
+      // readLockConfig degrades for the statuses it enumerates, but not for an
+      // exhausted budget or an elapsed phase deadline. Release must not fail on
+      // either: safe defaults hold freed capacity longer, which is the direction
+      // that cannot over-run a license.
+      if (!isUnrecordedReleaseError(error)) {
+        throw error;
+      }
+      console.log(
+        `::warning::Unable to read lock config for ${config.lockName} ` +
+          `(${workflowCommandData(error.message)}); using safe defaults (${defaultLockConfigSummary()}).`
+      );
+      lockConfig = defaultLockConfig();
+    }
+    result = await cleanupIdentity(config, identity, {
+      resourceSafe: resourceReport.cleanupStatus === "confirmed",
+      resourceHealth: resourceReport.health,
+      resourceReason: resourceReport.reason,
+      releaseCooldownSeconds: lockConfig.releaseCooldownSeconds,
+      reason: resourceReport.reason,
+      apiOptions: retryBudget.cleanup
+    });
+    // An empty state SHA means the lock-state file was not there to read. With the
+    // branch unverified that is exactly what a missing or unreachable branch looks
+    // like, so "no lock state to clean" is not provable and must not be reported as
+    // a completed release.
+    if (!stateBranchVerified && !result.sha && cleanupResultName(result) === "noop") {
+      const unverified = new Error(
+        `the ${config.stateBranch} branch could not be verified and no lock state was readable`
+      );
+      unverified.code = "LOCK_STATE_UNVERIFIED";
+      throw unverified;
+    }
+  } catch (error) {
+    if (
+      isUnrecordedReleaseError(error) &&
+      resourceReport.cleanupStatus === "confirmed" &&
+      config.resourceReportDegraded !== true
+    ) {
+      writeReleaseOutputs(
+        config,
+        identity,
+        {
+          released: false,
+          queueCleaned: false,
+          sha: "",
+          heldBy: "",
+          heldByRunUrl: "",
+          globalQuarantined: false,
+          incidentId: "",
+          resourceHealth: resourceReport.health,
+          resourceReason: resourceReport.reason
+        },
+        UNRECORDED_RELEASE_RESULT
+      );
+      throw new Error(
+        `Could not confirm the release of ${config.lockName} for ${identity.holderId}: ${oneLine(error.message)}. ` +
+          "External cleanup was confirmed and the licensed resource is not held; only the lock-state record is in " +
+          `doubt (${UNRECORDED_RELEASE_RESULT}). If the removal did not land, the scheduled reaper quarantines the ` +
+          "stale holder entry, which keeps consuming lock capacity until an acquire on the same physical runner " +
+          "reclaims it or an operator runs the central recovery runbook.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
   writeReleaseOutputs(config, identity, result);
   const cleanupResult = cleanupResultName(result);
   if (result.heldBy) {
@@ -3828,6 +4207,7 @@ function config() {
   authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE });
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
+  const releaseRetryDeadlineSeconds = releaseRetryDeadlineInput();
   const token = credential(lockRepo);
   const operation = input("operation", "reap");
   const resourceReportResolution = MODE === "release"
@@ -3848,6 +4228,7 @@ function config() {
       validationError: ""
     };
   const resourceReport = resourceReportResolution.report;
+  applyApiRetryInputs();
   return {
     token,
     readerToken: readerCredentialRequired(MODE, operation) ? readerCredential(lockRepo.owner) : null,
@@ -3880,6 +4261,7 @@ function config() {
       0,
       86400
     ),
+    releaseRetryDeadlineSeconds,
     registerPostCleanup: process.env.BUILD_LOCK_REGISTER_POST_CLEANUP === "1"
   };
 }
@@ -3917,9 +4299,9 @@ if (require.main === module) {
 module.exports = {
   acquire,
   acquirePollDelayMs,
-  acquireRetryDelayMs,
   api,
   authorizeCaller,
+  boundedRetryDelayMs,
   cleanupIdentity,
   config,
   createAppJwt,
@@ -3939,6 +4321,7 @@ module.exports = {
   readerCredentialRequired,
   readState,
   release,
+  releaseRetryApiOptions,
   reap,
   reapDeadlineBudgets,
   resolveCurrentJobId,

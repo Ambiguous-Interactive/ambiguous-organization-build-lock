@@ -285,6 +285,9 @@ identifies an active account incident while `resource-health` and
 `resource-reason` continue to describe this caller's cleanup report.
 `cleanup-result=released` is also possible before schema 4
 or when an ambiguous schema-4 release is confirmed after its reservation expires.
+`cleanup-result=lock-release-unreachable` is the one failing result: confirmed
+cleanup that could not be recorded, described under
+[Release Retry Budget](#release-retry-budget).
 `released=true` remains the backward-compatible
 indication that holder ownership was removed. `queue-cleaned` means
 the current run was waiting but never held the lock, so no licensed work should
@@ -544,7 +547,108 @@ polling through 401s under a consecutive-failure grace window
 (`BUILD_LOCK_AUTH_GRACE_MS`, default 5 minutes; `0` restores fail-fast).
 Genuinely bad credentials still fail once the grace window is exhausted, and
 the holder-status poll continues to treat post-retry 401s as "status unknown"
-governed by the holder lease.
+governed by the holder lease. On the release path the same 401 retries are
+bounded by that step's wall-clock deadline instead of the attempt ceiling; see
+[Release Retry Budget](#release-retry-budget).
+
+## Release Retry Budget
+
+Acquire and release are deliberately asymmetric. Acquire fails fast: waiting
+holds a runner and delays the queue before any licensed work has started.
+Release is the opposite. By the time it runs the guarded work is finished and
+the licensed resource has already been returned, so the only thing left is
+recording it — waiting costs this step's own clock, while failing costs the
+consumer a full matrix re-run.
+
+The release action therefore bounds its lock-state read and write by wall clock
+instead of by a fixed attempt count. `release-retry-deadline-seconds` (default
+120, and either 0 or 30-3600) is the budget for reaching the lock-state file;
+retries continue for that long rather than stopping after the shared five-attempt
+ceiling, which exponential backoff exhausts in roughly 15 seconds. Set it to `0`
+to restore the attempt-bounded budget. A smaller positive budget is reported and
+ignored, because its narrowest phase would have too little time to mint a token
+and make one call, which performs worse than no deadline at all. Keep it below the
+calling step's `timeout-minutes`.
+
+The budget is split, never shared. The state-branch check gets the first eighth,
+the lock-config read the rest of the first quarter, and the lock-state read and
+write the remainder, so no phase can starve another — every one of them degrades
+on failure, and a shared deadline would let whichever ran first consume the rest.
+The lock-config read needs its own share in particular: left with nothing it falls
+back to default lock configuration, which would apply the default release cooldown
+to freed capacity instead of the configured one. Both preparatory calls degrade
+rather than fail, because an outage broad enough to matter hits them first and
+neither may red a release before the write is attempted. Every deadline is
+absolute, so a phase that finishes early hands its remainder forward, and each one
+carries a matching abort signal: a deadline consulted only between attempts cannot
+stop a connection that stalls inside a single request, which would outlast the
+whole budget and take the step's timeout with it. Each phase's deadline
+bounds the API retries inside it and does not restart per call; the cleanup's
+compare-and-swap loop keeps its own ten-round ceiling, so it can finish a round
+just past the deadline.
+
+The deadline and `api-max-attempts` are both ceilings: whichever a call reaches
+first ends its budget, and a spent deadline ends it for every call that follows.
+There is deliberately no per-call attempt floor underneath — one would let each
+call spend a fresh attempt budget past the deadline, so a phase with several
+calls would overrun by a multiple of the budget, which is the opposite of a
+wall-clock bound. The guarantee holds at the level that matters: a release with
+the default deadline gets roughly eight times the total retry time of the
+five-attempt budget it replaces, even though an individual call that starts with
+the budget already spent gets a single attempt.
+
+An attempt ceiling inherited from the job or organization environment caps the
+deadline the same way one set on the step does. Release warns when it finds a
+ceiling that will take effect, because an inherited value is otherwise invisible
+in the log; a value outside the documented range is reported and ignored by the
+retry budget itself, so it is not reported here as if it applied.
+
+While a deadline is active, a `Retry-After` from GitHub is honored in full rather
+than truncated to the backoff cap, because the deadline already bounds the total
+wait and retrying early only re-triggers the same secondary rate limit. Only the
+server's own number may exceed the cap; backoff the action generates itself stays
+capped either way, and the backoff cap still applies on the attempt-bounded paths.
+A primary rate limit sends no `Retry-After`, so its `x-ratelimit-reset` is read
+the same way: a window that reopens after the budget ends is waited on and then
+abandoned, rather than retried against for the whole deadline.
+
+Minting the GitHub App token inherits the budget of the call it serves, so a
+credential outage during preparation is bounded by the preparation slice and one
+during the lock-state write by the write's remainder. Minting otherwise runs on a
+small fixed budget of its own, which would end a release whose deadline was almost
+entirely unspent, and a wider one would let minting starve the call it serves.
+
+The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
+(1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
+which set `BUILD_LOCK_API_MAX_ATTEMPTS`, `BUILD_LOCK_API_RETRY_BASE_MS`, and
+`BUILD_LOCK_API_RETRY_MAX_MS` for the action. An explicit input wins over an
+inherited environment value. The same ranges apply to both channels, and both
+report and ignore a value outside them: neither may configure a zero backoff,
+which under an active deadline would retry without pause for the whole budget,
+nor a ceiling long enough to outlast the calling step. These knobs only change
+how long a retry waits, so an out-of-range one is never fatal — failing a release
+over a tuning typo would abandon the holder cleanup it exists to perform and pin
+a licensed seat. `api-retry-max-ms` bounds `api-retry-base-ms` as well, whatever
+the two are set to relative to each other. Leaving `api-max-attempts` unset means
+the release deadline is the only bound.
+
+When confirmed external cleanup cannot be confirmed as recorded because the
+lock-state file stayed unreachable for the whole budget, the release step still
+fails, but it reports `cleanup-result=lock-release-unreachable` before failing.
+That is not a lock in an unknown state: the licensed resource was returned and
+only its record is in doubt. A mutation GitHub applies without acknowledging is
+covered by the same code, so the wording never asserts that a stale holder entry
+exists. If the removal did not land, the scheduled reaper quarantines the stale
+holder entry, which keeps consuming lock capacity until an acquire on the same
+physical runner reclaims it or an operator runs the central recovery runbook — so
+this is a real failure worth waiting to avoid, not a self-healing one. The
+`require-confirmed-unity-cleanup` gate renders the same code so one diagnostic
+line distinguishes it from a genuinely unsafe cleanup. The reservation outputs are
+empty on this path because no reservation was confirmed; if a write GitHub
+accepted without acknowledging did create one, `holder-id` identifies it, because
+every reservation carries the holder identity that produced it. Compare-and-swap
+exhaustion under contention and cleanup evidence that was never confirmed both
+keep the raw failure, and no such claim is made for either.
 
 ## Stale Recovery
 
