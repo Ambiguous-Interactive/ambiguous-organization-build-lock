@@ -353,7 +353,7 @@ test("release exposes its retry budget as documented inputs", () => {
   ]) {
     assert.ok(inputs.includes(name), `release-build-lock must expose ${name}`);
   }
-  assert.match(release, /release-retry-deadline-seconds:[\s\S]*?default:\s*"120"/);
+  assert.match(release, /release-retry-deadline-seconds:[\s\S]*?Accepts 0 or 30-3600[\s\S]*?default:\s*"120"/);
   assert.match(release, /cleanup-result:[\s\S]*?lock-release-unreachable/);
 });
 
@@ -577,7 +577,7 @@ test("README documents the time-bounded release retry budget", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
   assert.match(readme, /^## Release Retry Budget$/m);
-  assert.match(readme, /`release-retry-deadline-seconds`\s+\(default\s+120, maximum 3600\)/);
+  assert.match(readme, /`release-retry-deadline-seconds` \(default\s+120, and either 0 or 30-3600\)/);
   assert.match(readme, /cleanup-result=lock-release-unreachable/);
   for (const [name, range] of [
     ["api-max-attempts", "1-100"],

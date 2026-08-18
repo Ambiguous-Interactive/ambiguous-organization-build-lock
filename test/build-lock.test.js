@@ -4760,7 +4760,10 @@ test("release retry knobs are configurable through action inputs", async (t) => 
     ["zero attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "0", /api-max-attempts=0; expected an integer between 1 and 100/],
     ["oversized attempt ceiling", "INPUT_API-MAX-ATTEMPTS", "101", /api-max-attempts=101; expected an integer between 1 and 100/],
     ["non-numeric backoff", "INPUT_API-RETRY-BASE-MS", "1e3", /api-retry-base-ms=1e3; expected an integer between 100 and 60000/],
-    ["oversized release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "3601", /release-retry-deadline-seconds=3601; expected an integer between 0 and 3600/]
+    ["oversized release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "3601", /release-retry-deadline-seconds=3601; expected an integer between 0 and 3600/],
+    // A budget this small leaves its narrowest phase too little time to mint a
+    // token and make one call, so it performs worse than no deadline at all.
+    ["unworkably small release deadline", "INPUT_RELEASE-RETRY-DEADLINE-SECONDS", "5", /Ignoring release-retry-deadline-seconds=5; a budget below 30 seconds/]
   ];
 
   for (const [name, inputName, value, expected] of ignored) {

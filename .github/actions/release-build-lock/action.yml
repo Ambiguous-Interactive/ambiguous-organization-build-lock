@@ -39,9 +39,11 @@ inputs:
       Wall-clock budget for the lock-state read and write. Release retries a
       transient GitHub API failure until this deadline instead of stopping after
       a fixed attempt count, because the licensed resource is already returned by
-      then. Maximum 3600; use 0 to restore the shared attempt-bounded budget.
-      Keep it below the calling step's timeout-minutes. An out-of-range value is
-      reported and ignored rather than failing the release.
+      then. Accepts 0 or 30-3600: use 0 to restore the shared attempt-bounded
+      budget, and note that a smaller positive budget leaves its narrowest phase
+      too little time to mint a token and make one call. Keep it below the calling
+      step's timeout-minutes. An out-of-range value is reported and ignored rather
+      than failing the release.
     required: false
     default: "120"
   api-max-attempts:

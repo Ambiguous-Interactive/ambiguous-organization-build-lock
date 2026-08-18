@@ -562,11 +562,13 @@ consumer a full matrix re-run.
 
 The release action therefore bounds its lock-state read and write by wall clock
 instead of by a fixed attempt count. `release-retry-deadline-seconds` (default
-120, maximum 3600) is the budget for reaching the lock-state file; retries
-continue for that long rather than stopping after the shared five-attempt
+120, and either 0 or 30-3600) is the budget for reaching the lock-state file;
+retries continue for that long rather than stopping after the shared five-attempt
 ceiling, which exponential backoff exhausts in roughly 15 seconds. Set it to `0`
-to restore the attempt-bounded budget. Keep it below the calling step's
-`timeout-minutes`.
+to restore the attempt-bounded budget. A smaller positive budget is reported and
+ignored, because its narrowest phase would have too little time to mint a token
+and make one call, which performs worse than no deadline at all. Keep it below the
+calling step's `timeout-minutes`.
 
 The budget is split, never shared. The state-branch check gets the first eighth,
 the lock-config read the rest of the first quarter, and the lock-state read and

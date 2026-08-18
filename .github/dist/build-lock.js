@@ -26,6 +26,12 @@ const DEFAULT_API_RETRY_MAX_MS = 10000;
 // while failing costs the consumer a full matrix re-run. The release path is
 // therefore bounded by wall clock instead of by a fixed attempt count.
 const DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS = 120;
+// Smallest budget whose phases can still do their work. The narrowest slice is an
+// eighth, so 30 seconds leaves it about 3.75 to mint a token and make one call,
+// and leaves the lock-state write 22.5 - still more than the attempt-bounded
+// budget it replaces. Below that a release performs worse than turning the
+// deadline off entirely, so such a value is reported and ignored.
+const MIN_RELEASE_RETRY_DEADLINE_SECONDS = 30;
 // Share of the release budget the preparatory calls may spend before the
 // lock-state read and write, which keep the remainder.
 const RELEASE_PREPARATION_BUDGET_SHARE = 0.25;
@@ -697,6 +703,25 @@ function effectiveApiRetryEnvironment(name) {
 
 function definedEntries(values) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
+function releaseRetryDeadlineInput() {
+  const seconds = toleratedIntegerInput(
+    "release-retry-deadline-seconds",
+    DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
+    0,
+    3600
+  );
+  if (seconds === 0 || seconds >= MIN_RELEASE_RETRY_DEADLINE_SECONDS) {
+    return seconds;
+  }
+  console.log(
+    `::warning::Ignoring release-retry-deadline-seconds=${seconds}; a budget below ` +
+      `${MIN_RELEASE_RETRY_DEADLINE_SECONDS} seconds leaves its smallest phase too little time to mint a ` +
+      "token and make one call, which performs worse than no deadline at all. Use 0 for the " +
+      "attempt-bounded budget."
+  );
+  return DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
 }
 
 function apiRetryOptions(overrides = {}) {
@@ -4182,12 +4207,7 @@ function config() {
   authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE });
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
-  const releaseRetryDeadlineSeconds = toleratedIntegerInput(
-    "release-retry-deadline-seconds",
-    DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS,
-    0,
-    3600
-  );
+  const releaseRetryDeadlineSeconds = releaseRetryDeadlineInput();
   const token = credential(lockRepo);
   const operation = input("operation", "reap");
   const resourceReportResolution = MODE === "release"

@@ -52,8 +52,8 @@ an outcome that has already happened.
    backoff. Callers without a deadline are unchanged. The clamp reuses the
    existing acquire helper, generalized to `boundedRetryDelayMs`.
 2. **Release bounds itself by wall clock.** `release` derives a deadline from
-   the new `release-retry-deadline-seconds` input (default 120, maximum 3600,
-   `0` restores the attempt-bounded budget) and splits it three ways: the
+   the new `release-retry-deadline-seconds` input (default 120, either 0 or
+   30-3600, where `0` restores the attempt-bounded budget) and splits it three ways: the
    state-branch check takes the first eighth, the lock-config read the rest of
    the first quarter, and the lock-state read and write the remainder, so no
    phase can starve another. Each phase deadline carries a matching abort signal,
@@ -94,7 +94,7 @@ an outcome that has already happened.
   the attempt ceiling, and the `lock-release-unreachable` report); with
   `applyApiRetryInputs` removed, the input-precedence test fails. All pass after
   the change.
-- `node --test test/*.test.js`: 761 tests, 759 passed, 2 hosted-Windows skips.
+- `node --test test/*.test.js`: 762 tests, 760 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0 — harness check, Node contract
   and policy tests, all Go tests, module verification, tidy checks, golangci-lint,
   JavaScript analysis, ShellCheck, `go vet`, race validation, and the
@@ -523,6 +523,21 @@ An eighteenth independent review raised two findings; both were remediated.
    instead of growing — roughly ninety requests over the default cleanup slice
    against an endpoint that had just limited us. An elapsed reset now carries no
    instruction and exponential backoff applies.
+
+A nineteenth independent review raised one finding, which was remediated.
+
+1. **Confirmed defect — a small legal budget performed worse than none.** With
+   `release-retry-deadline-seconds: 5` the state-branch phase held 625 ms, but the
+   first API call also mints the App token — two sequential round-trips — before
+   that phase issues its own request. Both preparatory phases abort, the
+   lock-config read degrades to defaults, and the release applies a 360-second
+   cooldown instead of the configured 1 while still reporting a successful
+   `cooldown-started`. `0` behaved better than `5`, which the documented `0-3600`
+   range gave no hint of. The input now accepts 0 or 30 and above: at 30 the
+   narrowest phase holds about 3.75 seconds, enough to mint and make one call, and
+   the lock-state write keeps 22.5 — still more than the attempt-bounded budget it
+   replaces. A smaller positive value is reported and ignored like any other
+   out-of-range one, and both the input description and the README say so.
 
 ## Safety review
 
