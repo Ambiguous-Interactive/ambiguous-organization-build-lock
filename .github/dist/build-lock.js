@@ -3279,10 +3279,11 @@ function releaseRetryApiOptions(config, now = Date.now()) {
     ? config.releaseRetryDeadlineSeconds
     : DEFAULT_RELEASE_RETRY_DEADLINE_SECONDS;
   if (seconds <= 0) {
-    return { preparation: undefined, cleanup: undefined };
+    return { seconds, preparation: undefined, cleanup: undefined };
   }
   const preparationSeconds = Math.max(1, Math.ceil(seconds * RELEASE_PREPARATION_BUDGET_SHARE));
   return {
+    seconds,
     preparation: { deadlineAt: now + preparationSeconds * 1000 },
     cleanup: { deadlineAt: now + seconds * 1000 }
   };
@@ -3339,6 +3340,16 @@ async function release(config) {
     reason: config.resourceSafe === true ? "cleanup-confirmed" : "cleanup-evidence-unknown"
   };
   const retryBudget = releaseRetryApiOptions(config);
+  // Both bounds bind, so an attempt ceiling inherited from the job environment
+  // silently caps the deadline the caller configured. Say so once: a value that is
+  // not on the step is otherwise invisible in the log.
+  if (retryBudget.cleanup && process.env.BUILD_LOCK_API_MAX_ATTEMPTS) {
+    console.log(
+      `::warning::BUILD_LOCK_API_MAX_ATTEMPTS=${workflowCommandData(process.env.BUILD_LOCK_API_MAX_ATTEMPTS)} ` +
+        `caps the ${retryBudget.seconds}s release retry deadline; ` +
+        "clear it to let the deadline be the only bound."
+    );
+  }
   let result;
   try {
     // The state branch is a permanent fixture; this call only bootstraps a

@@ -583,7 +583,12 @@ with fewer attempts than the shared five-attempt default it would have had with
 no deadline at all, and no single request is worse off for the deadline existing.
 The floor never raises an explicitly configured ceiling, and attempts spent on it
 past the deadline behave exactly like an attempt-bounded budget, backoff cap
-included.
+included. Those floor attempts are why a release can overrun its deadline by up
+to one attempt budget — roughly fifteen seconds at the defaults — which is the
+headroom the `timeout-minutes` guidance above accounts for. An attempt ceiling
+inherited from the job environment caps the deadline the same way one set on the
+step does; release warns when it finds one, because an inherited value is
+otherwise invisible in the log.
 
 While a deadline is active, a `Retry-After` from GitHub is honored in full rather
 than truncated to the backoff cap, because the deadline already bounds the total

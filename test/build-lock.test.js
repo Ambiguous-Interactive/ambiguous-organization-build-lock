@@ -4847,6 +4847,10 @@ test("release degrades unreachable preparatory calls instead of failing on them"
     assert.equal(outputs.released, "true");
   });
 
+  assert.ok(
+    warned.some((line) => /BUILD_LOCK_API_MAX_ATTEMPTS=2 caps the 120s release retry deadline/.test(line)),
+    `expected an inherited attempt ceiling to be reported, saw ${warned.join(" | ")}`
+  );
   assert.equal(wrote, true, "the lock-state write must still be attempted");
   assert.ok(
     warned.some((line) => /Could not verify the lock-state branch/.test(line)),

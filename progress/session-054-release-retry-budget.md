@@ -265,6 +265,30 @@ committed runtime, and both remediated.
    "nothing to release", and the inline comment's false claim that a missing
    branch surfaces at the write was removed.
 
+An eighth independent review raised three findings, none blocking the happy path.
+Two were remediated and one was deferred with a filed issue.
+
+1. **Deferred to issue #201 — App token minting has its own uncapped-by-callers
+   budget.** `jwtApi` is hard-capped at three attempts, and `api()` short-circuits
+   on the exhaustion code that `getToken` raises, so a broad outage fails a
+   release in about three seconds with the whole deadline unspent. It is the same
+   failure mode as #198, but the fix changes `api()`'s error handling for acquire
+   and reap as well, and it touches the ambiguous-mutation bookkeeping that guards
+   against double-writes. That is a separate, riskier change than this one, so it
+   is filed with the exact distinguishing signal (`error.path`), the
+   ambiguous-write hazard, and its acceptance evidence.
+2. **Documented — the floor can overrun the deadline.** The review's worst case
+   assumed many sequential exhausted calls inside `cleanupIdentity`; the control
+   flow does not allow it, because any exhausted read or write leaves the loop
+   immediately. The reachable overrun is about one attempt budget, roughly fifteen
+   seconds at the defaults, which the README now states alongside the existing
+   `timeout-minutes` guidance.
+3. **Confirmed defect — an inherited attempt ceiling silently voided the
+   deadline.** A job-level or organization `BUILD_LOCK_API_MAX_ATTEMPTS` caps the
+   deadline exactly as a value set on the step does, but an inherited value never
+   appears in the log. Release now warns once, naming the value and the deadline
+   it caps, and the README says so.
+
 ## Safety review
 
 No fail-closed path was weakened. Both consumer gates continue to refuse a run
@@ -291,6 +315,10 @@ runner-preflight runtime already works around it by widening `maxDelayMs` to
 60000. This change fixes it for the deadline-bearing release path, because
 leaving it would have amplified the harm there; the attempt-bounded acquire and
 reap paths remain #200's scope, since fixing them changes admission timing.
+
+A second follow-up, issue #201, records that App token minting runs on its own
+three-attempt budget that no caller can widen and whose exhaustion short-circuits
+the caller's budget, so a broad outage bypasses the release deadline entirely.
 
 Continuous-improvement disposition: the retry asymmetry between acquire and
 release is now executable in the runtime, its inputs, and the tests, and is
