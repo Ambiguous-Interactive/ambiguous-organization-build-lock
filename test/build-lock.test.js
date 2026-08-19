@@ -1732,6 +1732,203 @@ test("authorization separates lock-repository reaping from consumer lock operati
   });
 });
 
+// Minting runs on a small budget nested inside every call. Its exhaustion must be a
+// failed attempt, not the end of the caller's budget: the credential subsystem is the
+// one dependency every path shares, so it cannot also be the effective ceiling.
+test("a nested credential outage spends the caller's own budget", async (t) => {
+  const now = Date.parse("2026-07-11T12:00:00Z");
+
+  const mintingOutage = (failedMints, resource) => {
+    const counts = { installations: 0, mints: 0, resource: 0 };
+    return {
+      counts,
+      handler: async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+          counts.installations++;
+          return jsonResponse(200, { id: 987 });
+        }
+        if (parsed.pathname === "/app/installations/987/access_tokens") {
+          counts.mints++;
+          return counts.mints <= failedMints
+            ? jsonResponse(503, { message: "unavailable" })
+            : jsonResponse(201, {
+              token: "installation-token",
+              expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+            });
+        }
+        counts.resource++;
+        return resource(counts.resource, options);
+      }
+    };
+  };
+
+  const appAuth = () =>
+    createGitHubAppAuth({
+      appId: "12345",
+      privateKey: testAppPrivateKey,
+      owner: "Ambiguous-Interactive",
+      now: () => now
+    });
+
+  await t.test("an attempt-bounded caller retries past the inner minting budget", async () => {
+    const outage = mintingOutage(6, () => jsonResponse(200, { ok: true }));
+    await withImmediateTimers(() => withMockedFetch(outage.handler, async () => {
+      assert.deepEqual(
+        await api("GET", "/repos/o/r/contents/lock.json", undefined, appAuth(), {
+          now: () => now,
+          sleep: async () => {}
+        }),
+        { ok: true }
+      );
+    }));
+
+    assert.equal(outage.counts.mints, 7, "each caller attempt re-mints on its own budget");
+    assert.equal(outage.counts.resource, 1);
+  });
+
+  await t.test("a time-bounded caller keeps minting until its deadline", async () => {
+    const outage = mintingOutage(20, () => jsonResponse(200, { ok: true }));
+    let clock = now;
+    await withMockedFetch(outage.handler, async () => {
+      await assert.rejects(
+        () =>
+          api("GET", "/repos/o/r/contents/lock.json", undefined, appAuth(), {
+            deadlineAt: now + 60_000,
+            now: () => clock,
+            sleep: async (ms) => {
+              clock += ms;
+            }
+          }),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.equal(error.path, "/repos/o/r/contents/lock.json");
+          assert.match(error.message, /credential unavailable: /);
+          assert.match(error.message, /access_tokens exhausted its bounded GitHub API retry budget/);
+          return true;
+        }
+      );
+    });
+
+    assert.ok(
+      outage.counts.mints > 3,
+      `the deadline, not the inner three-attempt budget, must bound minting; saw ${outage.counts.mints}`
+    );
+    assert.equal(outage.counts.resource, 0);
+  });
+
+  // The request never left the client, so a later conflict is an ordinary conflict.
+  // Marking it ambiguous would report a write GitHub never saw as possibly applied.
+  await t.test("a minting failure never makes a later conflict look like an accepted write", async () => {
+    const outage = mintingOutage(3, () => jsonResponse(409, { message: "conflict" }));
+    await withImmediateTimers(() => withMockedFetch(outage.handler, async () => {
+      await assert.rejects(
+        () =>
+          api("PUT", "/repos/o/r/contents/lock.json", { a: 1 }, appAuth(), {
+            now: () => now,
+            sleep: async () => {}
+          }),
+        (error) => {
+          assert.equal(error.status, 409);
+          assert.notEqual(error.acceptedWriteAmbiguous, true);
+          return true;
+        }
+      );
+    }));
+  });
+
+  // Acquire's auth grace window keys on a 401, and it must still see one through a
+  // minting outage that outlasts the caller's budget.
+  await t.test("a 401 minting outage still surfaces as a 401 to the caller", async () => {
+    const counts = { mints: 0 };
+    await withImmediateTimers(() => withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+        return jsonResponse(200, { id: 987 });
+      }
+      counts.mints++;
+      return jsonResponse(401, { message: "Bad credentials" });
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("GET", "/repos/o/r/contents/lock.json", undefined, appAuth(), {
+            now: () => now,
+            sleep: async () => {}
+          }),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.equal(error.status, 401);
+          return true;
+        }
+      );
+    }));
+
+    assert.ok(counts.mints > 3, `the caller's budget must re-mint; saw ${counts.mints}`);
+  });
+
+  // Retrying is pointless once the operation itself is over, and the nested error
+  // carries the only description of why the credential could not be minted.
+  await t.test("an aborted operation keeps the credential diagnosis", async () => {
+    const controller = new AbortController();
+    const apiOptions = {
+      signal: controller.signal,
+      now: () => now,
+      sleep: async () => {
+        controller.abort(new DOMException("bounded deadline elapsed", "TimeoutError"));
+        throw controller.signal.reason;
+      }
+    };
+    const auth = createGitHubAppAuth({
+      appId: "12345",
+      privateKey: testAppPrivateKey,
+      owner: "Ambiguous-Interactive",
+      now: () => now,
+      apiOptions
+    });
+
+    await withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      return parsed.pathname === "/orgs/Ambiguous-Interactive/installation"
+        ? jsonResponse(502, { message: "upstream auth unavailable" }, { "x-github-request-id": "mint-abort" })
+        : jsonResponse(200, { ok: true });
+    }, async () => {
+      await assert.rejects(
+        () => api("GET", "/repos/o/r/contents/lock.json", undefined, auth, apiOptions),
+        (error) => {
+          assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+          assert.match(error.message, /\/orgs\/Ambiguous-Interactive\/installation exhausted/);
+          assert.match(error.message, /upstream auth unavailable/);
+          assert.equal(error.message.split("mint-abort").length - 1, 1);
+          return true;
+        }
+      );
+    });
+  });
+
+  // A caller that exhausts its own budget still ends there; only a nested exhaustion
+  // becomes a retryable attempt.
+  await t.test("the caller's own exhaustion still short-circuits", async () => {
+    const outage = mintingOutage(0, () => jsonResponse(503, { message: "unavailable" }));
+    await withImmediateTimers(() => withMockedFetch(outage.handler, async () => {
+      await assert.rejects(
+        () =>
+          api("GET", "/repos/o/r/contents/lock.json", undefined, appAuth(), {
+            now: () => now,
+            sleep: async () => {}
+          }),
+        (error) => {
+          assert.equal(error.path, "/repos/o/r/contents/lock.json");
+          assert.match(error.message, /after 5 attempt\(s\)/);
+          assert.match(error.message, /last failure: HTTP 503/);
+          return true;
+        }
+      );
+    }));
+
+    assert.equal(outage.counts.resource, 5);
+  });
+});
+
 test("state-writer App tokens are limited to the lock repository and contents write", async () => {
   const requests = [];
   await withMockedFetch(async (url, options = {}) => {
@@ -4330,8 +4527,21 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
     assert.equal(await observeFirstDelay({ deadlineAt: startedAt + 20_000 }), 20_000);
   });
 
-  await t.test("an attempt-bounded budget keeps the backoff cap", async () => {
-    assert.equal(await observeFirstDelay({}), 10_000);
+  // maxDelayMs bounds our own backoff. An attempt-bounded path honors the server's
+  // number too, up to its own ceiling, or it retries into the same rate limit.
+  await t.test("an attempt-bounded budget honors the instruction, not the backoff cap", async () => {
+    assert.equal(await observeFirstDelay({}), 45_000);
+  });
+
+  await t.test("an instruction beyond the Retry-After ceiling is capped there", async () => {
+    assert.equal(await observeFirstDelay({ retryAfterMaxMs: 20_000 }), 20_000);
+  });
+
+  await t.test("a caller that wants no waiting is not given the shared ceiling", async () => {
+    assert.equal(
+      await observeFirstDelay({ baseDelayMs: 0, maxDelayMs: 0, retryAfterMaxMs: 0 }),
+      0
+    );
   });
 
   // GitHub sometimes sends 0 or an already-past HTTP date. Honoring that literally
@@ -4364,6 +4574,34 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
     }
   });
 
+  // Widening the instruction ceiling must not widen our own exponential backoff.
+  await t.test("self-generated backoff is still capped by maxDelayMs", async () => {
+    let calls = 0;
+    let now = startedAt;
+    const delays = [];
+
+    await withMockedFetch(async () => {
+      calls++;
+      return calls <= 4 ? jsonResponse(503, { message: "unavailable" }) : jsonResponse(200, { ok: true });
+    }, async () => {
+      await api("GET", "/repos/o/r", undefined, "token", {
+        baseDelayMs: 4000,
+        maxDelayMs: 10_000,
+        now: () => now,
+        sleep: async (ms) => {
+          delays.push(ms);
+          now += ms;
+        }
+      });
+    });
+
+    assert.equal(calls, 5);
+    assert.ok(
+      delays.every((ms) => ms <= 10_000),
+      `exponential backoff must stay under the configured cap, saw ${delays.join()}`
+    );
+  });
+
   // The floor must not escape the cap: base and max are configured independently
   // and nothing requires base <= max.
   await t.test("the backoff cap still bounds the floor when base exceeds it", async () => {
@@ -4390,6 +4628,35 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
     );
 
     assert.equal(delay, 1000, "an attempt-bounded wait must never exceed the configured cap");
+  });
+
+  // retryAfterMaxMs bounds the server's number; it must not cut short a backoff
+  // floor the operator configured above it.
+  await t.test("the instruction ceiling never shortens a configured floor", async () => {
+    let calls = 0;
+    let delay = null;
+
+    await withEnvironment(
+      { BUILD_LOCK_API_RETRY_BASE_MS: "60000", BUILD_LOCK_API_RETRY_MAX_MS: "120000" },
+      async () => {
+        await withMockedFetch(async () => {
+          calls++;
+          return calls === 1
+            ? jsonResponse(429, { message: "secondary rate limit" }, { "retry-after": "1" })
+            : jsonResponse(200, { ok: true });
+        }, async () => {
+          await api("PUT", "/repos/o/r/contents/locks/x.json", { a: 1 }, "token", {
+            retryAfterMaxMs: 20_000,
+            now: () => startedAt,
+            sleep: async (ms) => {
+              delay = ms;
+            }
+          });
+        });
+      }
+    );
+
+    assert.equal(delay, 60_000, "the configured floor must survive a lower instruction ceiling");
   });
 
   await t.test("a deadline lifts the cap for the server's number, not for our floor", async () => {

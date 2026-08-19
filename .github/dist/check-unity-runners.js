@@ -12,6 +12,9 @@ function runnerInventoryApiOptions(signal, overrides = {}) {
   return {
     maxAttempts: 13,
     baseDelayMs: 5000,
+    // Bounds this preflight's own exponential growth only. A server-directed
+    // Retry-After is honored up to the shared retryAfterMaxMs ceiling on every
+    // path now, so this no longer carries that job (issue #200).
     maxDelayMs: 60000,
     fullJitter: true,
     signal,

@@ -573,6 +573,30 @@ test("README documents configurable parallelism and transient-auth handling", ()
   assert.match(readme, /BUILD_LOCK_CONFIG_TTL_MS/);
 });
 
+// Issue #200: a Retry-After longer than the backoff cap was truncated, so the lock
+// retried back into the same secondary rate limit. Issue #201: minting ran on a
+// nested budget no caller could extend. Both contracts are shared by every action,
+// so the README must state them once rather than per action.
+test("README documents the shared server-directed retry contract", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+  assert.match(readme, /^## Server-Directed Retry Waits$/m);
+  for (const claim of [
+    /`Retry-After` is an instruction, not backoff/,
+    /has its own ceiling of 60 seconds -- on every action and every path/,
+    /backoff cap bounds only the waits the action generates itself/,
+    /never shortens the wait below it/,
+    /read only by a\s+deadline-bearing caller -- release/,
+    /can carry a single call past it by up to\s+one attempt budget of waiting/,
+    /never the ceiling for the operation/,
+    /never marks a later 409 or\s+422 on a mutation as a write GitHub may have accepted/
+  ]) {
+    assert.match(readme, claim);
+  }
+  // The preflight's 60-second cap is no longer a preflight-specific behavior.
+  assert.match(readme, /not a\s+preflight-specific behavior/);
+});
+
 test("README documents the time-bounded release retry budget", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
