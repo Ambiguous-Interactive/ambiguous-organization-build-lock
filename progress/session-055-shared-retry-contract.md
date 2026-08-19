@@ -88,6 +88,21 @@ Both reproduced against the committed runtime; see *Verification*.
   caller keeps minting until its deadline`, and `a minting failure never makes a
   later conflict look like an accepted write` all fail against the committed
   runtime and pass after the change.
+- Measured against the built runtime with a virtual clock, one `PUT` answered
+  `503` forever (requests made / total time spent waiting):
+
+  | Budget | No `Retry-After` | `Retry-After: 45` | `Retry-After: 600` |
+  | --- | --- | --- | --- |
+  | Attempt-bounded (default 5) | 5 / 17.5 s | 5 / 180 s | 5 / 240 s |
+  | Release deadline 120 s | 16 / 120 s | 4 / 120 s | 2 / 120 s |
+
+  The first cell is the ~15-second window `unity-helpers#483` reports. The
+  `Retry-After: 45` column is the change: the same five requests now land after
+  the window GitHub asked for instead of inside it. The `600` column is the
+  60-second instruction ceiling, and its 240 seconds is the worst-case
+  attempt-bounded overrun stated in the README. Under a deadline the total is
+  the deadline exactly, and an instruction makes the budget *cheaper* for the
+  limiter -- four requests instead of sixteen for the same 120 seconds.
 - `node --test test/*.test.js`: 774 tests, 772 passed, 2 hosted-Windows skips.
 - `bash .devcontainer/scripts/verify.sh`: exit 0.
 
