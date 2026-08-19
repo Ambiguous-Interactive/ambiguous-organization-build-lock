@@ -19,6 +19,10 @@ const DEFAULT_CONFIG_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_API_MAX_ATTEMPTS = 5;
 const DEFAULT_API_RETRY_BASE_MS = 1000;
 const DEFAULT_API_RETRY_MAX_MS = 10000;
+// A server-directed wait is an instruction, not backoff, so it has its own ceiling.
+// GitHub's secondary rate limits routinely ask for 30-60 seconds; truncating that to
+// the backoff cap retries straight back into the same limit.
+const DEFAULT_API_RETRY_AFTER_MAX_MS = 60000;
 // Acquire and release are not symmetric. Acquire must fail fast because waiting
 // holds a runner and delays the queue before any work has started. Release runs
 // after the guarded work finished and the licensed resource was already returned,
@@ -738,6 +742,7 @@ function apiRetryOptions(overrides = {}) {
     ),
     baseDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_BASE_MS", DEFAULT_API_RETRY_BASE_MS),
     maxDelayMs: apiRetryEnvironment("BUILD_LOCK_API_RETRY_MAX_MS", DEFAULT_API_RETRY_MAX_MS),
+    retryAfterMaxMs: DEFAULT_API_RETRY_AFTER_MAX_MS,
     deadlineAt: null,
     fullJitter: false,
     now: Date.now,
@@ -934,9 +939,10 @@ function isUnknownOutcomeMutationResponse(response) {
 // A primary rate limit sends no Retry-After, only the epoch second the hourly
 // window resets. Without it a time-bounded budget spends its whole deadline on
 // requests that cannot succeed yet, so read the reset as a server-directed wait.
-// Only for a time-bounded caller: on the attempt-bounded paths this would replace
-// exponential backoff with the capped reset wait and change admission and reaping
-// timing, which this change deliberately leaves alone (issue #200).
+// Only for a time-bounded caller. Unlike Retry-After this is inferred, not
+// instructed, and an hourly window cannot reopen inside any attempt-bounded budget:
+// waiting on it there would hold a runner through several minutes of retries that
+// still cannot succeed, so those paths keep exponential backoff and fail fast.
 function rateLimitResetMs(response, now = Date.now) {
   // Only a rate-limit rejection. Any retryable response can carry an exhausted
   // quota header, and treating a 401 replica lag that clears in about a second as
@@ -969,17 +975,20 @@ function retryDelayMs(response, attempt, options) {
   if (retryAfter !== null) {
     // maxDelayMs exists to stop our own exponential backoff from growing without
     // bound. A Retry-After is a server instruction, not backoff: truncating it
-    // retries back into the same secondary rate limit. Honor it in full whenever a
-    // deadline already bounds the total wait, and fall back to the backoff cap only
-    // when nothing else would bound it (tracked for the other paths by issue #200).
+    // retries back into the same secondary rate limit. It therefore has its own
+    // ceiling, retryAfterMaxMs, and a deadline lifts even that because the deadline
+    // already bounds the total wait.
     // The instruction may lengthen our backoff, never shorten it below the
     // configured base. GitHub sometimes sends 0 or an already-past HTTP date, which
     // would otherwise turn a time-bounded budget into an unthrottled retry loop.
-    // Only the server's own number may exceed maxDelayMs, and only while a deadline
-    // bounds it; our floor is capped like any other backoff we generate.
+    // Only the server's own number may exceed maxDelayMs; our floor is capped like
+    // any other backoff we generate, and it is never cut short by the instruction's
+    // ceiling either.
     const floor = Math.min(options.baseDelayMs, options.maxDelayMs);
     const instructed = Math.max(retryAfter, floor);
-    return Number.isFinite(options.deadlineAt) ? instructed : Math.min(instructed, options.maxDelayMs);
+    return Number.isFinite(options.deadlineAt)
+      ? instructed
+      : Math.min(instructed, Math.max(options.retryAfterMaxMs, floor));
   }
   const exponential = options.baseDelayMs * 2 ** (attempt - 1);
   if (options.fullJitter) {
@@ -1072,13 +1081,28 @@ async function api(method, path, body, authToken, options = {}) {
   let unknownOutcomeMutationFailure = false;
   let renewableRefreshUsed = false;
   let lastRetryableFailure = null;
+  // Minting runs on its own budget nested inside this one, and a failure there
+  // never reaches GitHub. Remember the exact error the credential provider threw
+  // so this attempt can tell a credential outage apart from its own exhausted
+  // budget and from a request that did leave the client. Identity, not a flag on
+  // the error: concurrent callers can share one rejected refresh.
+  let credentialError = null;
+  const requestCredential = async () => {
+    if (!(authToken && typeof authToken.getToken === "function")) {
+      return authToken;
+    }
+    try {
+      return await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt });
+    } catch (error) {
+      credentialError = error;
+      throw error;
+    }
+  };
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
+    credentialError = null;
     try {
       throwIfAborted(retry.signal);
-      let requestToken =
-        authToken && typeof authToken.getToken === "function"
-          ? await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt })
-          : authToken;
+      let requestToken = await requestCredential();
       let result = await fetchApi(method, path, body, requestToken, retry);
       if (
         result.response.status === 401 &&
@@ -1089,7 +1113,7 @@ async function api(method, path, body, authToken, options = {}) {
       ) {
         renewableRefreshUsed = true;
         authToken.invalidateToken(requestToken);
-        requestToken = await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt });
+        requestToken = await requestCredential();
         result = await fetchApi(method, path, body, requestToken, retry);
       }
       const { response, data, text } = result;
@@ -1127,8 +1151,41 @@ async function api(method, path, body, authToken, options = {}) {
       }
       throw error;
     } catch (error) {
-      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
+      // Nothing this attempt did reached GitHub if the credential provider is what
+      // failed, whatever kind of error it raised.
+      const fromCredential = Boolean(error) && error === credentialError;
+      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED" && !fromCredential) {
         throw error;
+      }
+      if (fromCredential && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
+        if (isAbortError(error, retry.signal)) {
+          // The whole operation is cancelled or past its deadline, so there is
+          // nothing left to retry, and the nested error carries the richest
+          // diagnosis of why the credential could not be minted.
+          throw error;
+        }
+        // The credential subsystem is the one dependency every path shares, so its
+        // small inner budget must not become the effective ceiling for the whole
+        // operation. Spend this call's own budget instead and re-mint next attempt.
+        // The request never left the client, so the mutation outcome stays known:
+        // unknownOutcomeMutationFailure must not be set here.
+        lastRetryableFailure = {
+          status: error.status,
+          requestId: error.requestId || "",
+          description: `credential unavailable: ${oneLine(error.message)}`
+        };
+        const budget = apiRetryBudget(retry, attempt, (options) => retryDelayMs(null, attempt, options));
+        if (budget.exhausted) {
+          throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
+        }
+        const credentialDelay = budget.delayMs;
+        throwIfAborted(retry.signal);
+        console.log(
+          `::warning::${method} ${path} could not mint a GitHub App token; retrying in ${credentialDelay} ms ` +
+            `(${retryProgress(retry, attempt)}; ${oneLine(error.message)}).`
+        );
+        await retry.sleep(credentialDelay);
+        continue;
       }
       if (isAbortError(error, retry.signal)) {
         const reason = retry.signal && retry.signal.aborted ? abortReason(retry.signal) : error;
@@ -1149,7 +1206,10 @@ async function api(method, path, body, authToken, options = {}) {
       if (budget.exhausted) {
         throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
       }
-      if (mutationMethod) {
+      // Only a request that left the client can have been applied without an
+      // acknowledgement. A credential failure never sent one, so treating it as an
+      // ambiguous write would make a later 409 or 422 look like an accepted write.
+      if (mutationMethod && !fromCredential) {
         unknownOutcomeMutationFailure = true;
       }
       const delay = budget.delayMs;
@@ -2613,6 +2673,9 @@ async function runCancellationCleanup(config, identity, cancellation) {
       maxAttempts: 1,
       baseDelayMs: 0,
       maxDelayMs: 0,
+      // This cleanup has 1.5-5 seconds total; a server-directed wait must not
+      // outlive it even if the attempt ceiling is ever widened.
+      retryAfterMaxMs: 0,
       signal: cleanupAbortController.signal
     }
   };

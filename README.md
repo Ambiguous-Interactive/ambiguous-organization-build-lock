@@ -75,7 +75,9 @@ GitHub App authentication and every paginated runner-inventory read share one
 150-second deadline, leaving diagnostic and step-teardown headroom inside the
 consumers' three-minute preflight job limit. Retryable API responses use bounded
 exponential backoff with full jitter; a valid `Retry-After` delta-seconds or
-HTTP-date value takes precedence, capped at 60 seconds. Ordinary
+HTTP-date value takes precedence, capped at 60 seconds -- the shared contract
+described in [Server-Directed Retry Waits](#server-directed-retry-waits), not a
+preflight-specific behavior. Ordinary
 permission/configuration responses such as non-rate-limited 403 and 404 fail
 immediately. If the bounded retries are exhausted, the action remains nonzero
 but reports an API/auth availability failure explicitly; that result is not
@@ -551,6 +553,52 @@ governed by the holder lease. On the release path the same 401 retries are
 bounded by that step's wall-clock deadline instead of the attempt ceiling; see
 [Release Retry Budget](#release-retry-budget).
 
+Minting the GitHub App installation token is itself an API call, on its own small
+retry budget nested inside the call it serves. That budget is a fast inner loop,
+never the ceiling for the operation: when it is exhausted the calling attempt has
+failed, so the caller's own budget -- attempt-bounded or time-bounded -- decides
+whether to try again, and the next attempt re-mints. The exhausted-budget error
+names the credential failure rather than the last resource status, and because
+the request never left the client, a minting failure never marks a later 409 or
+422 on a mutation as a write GitHub may have accepted.
+
+## Server-Directed Retry Waits
+
+`Retry-After` is an instruction, not backoff. `BUILD_LOCK_API_RETRY_MAX_MS`
+(`api-retry-max-ms`) exists to stop the action's own exponential growth from
+running away; truncating GitHub's number to it retries *before* the window
+GitHub asked for and burns the budget against a limit the action is itself
+re-triggering. A valid `Retry-After` delta-seconds or HTTP-date value therefore
+has a ceiling of its own, 60 seconds, and the backoff cap bounds only the waits
+the action generates itself. That ceiling is the same in every action and on
+every attempt-bounded path; a deadline replaces it, as below.
+
+An instruction shorter than the configured base backoff lengthens nothing and
+never shortens the wait below it: GitHub sometimes sends `0` or an already-past
+HTTP date, which taken literally is an unthrottled retry loop. That floor is
+capped like any other backoff the action generates, and the instruction's own
+ceiling never cuts it short either.
+
+While a deadline is active, a `Retry-After` from GitHub is honored in full,
+because the deadline already bounds the total wait and clamps the last one so
+the final attempt still starts inside the budget. Abort signals win over both.
+
+On an attempt-bounded path nothing clamps the wait to the operation's own
+window, so honoring a long instruction can carry a single call past it by up to
+one attempt budget of waiting -- at the 60-second ceiling and the shared
+five-attempt budget, about four minutes. That is deliberate: the windows it
+could overrun are orders of magnitude larger (the acquire wait is measured in
+hours), the loop re-checks its deadline as soon as the call returns, and
+retrying inside the window GitHub asked us to wait cannot succeed anyway.
+
+A primary rate limit sends no `Retry-After`, only the epoch second its hourly
+window reopens. That is inferred rather than instructed, and an hourly window
+cannot reopen inside any attempt-bounded budget, so it is read only by a
+deadline-bearing caller -- release -- where a window that reopens after the
+budget ends is waited on once and then abandoned. Acquire and reap keep
+exponential backoff there and fail fast rather than holding a runner through
+minutes of retries that still cannot succeed.
+
 ## Release Retry Budget
 
 Acquire and release are deliberately asymmetric. Acquire fails fast: waiting
@@ -603,20 +651,17 @@ ceiling that will take effect, because an inherited value is otherwise invisible
 in the log; a value outside the documented range is reported and ignored by the
 retry budget itself, so it is not reported here as if it applied.
 
-While a deadline is active, a `Retry-After` from GitHub is honored in full rather
-than truncated to the backoff cap, because the deadline already bounds the total
-wait and retrying early only re-triggers the same secondary rate limit. Only the
-server's own number may exceed the cap; backoff the action generates itself stays
-capped either way, and the backoff cap still applies on the attempt-bounded paths.
-A primary rate limit sends no `Retry-After`, so its `x-ratelimit-reset` is read
-the same way: a window that reopens after the budget ends is waited on and then
-abandoned, rather than retried against for the whole deadline.
+An active deadline also changes how a server-directed wait is bounded, and it is
+the only path that waits out a primary rate limit's reset; see
+[Server-Directed Retry Waits](#server-directed-retry-waits).
 
 Minting the GitHub App token inherits the budget of the call it serves, so a
 credential outage during preparation is bounded by the preparation slice and one
 during the lock-state write by the write's remainder. Minting otherwise runs on a
 small fixed budget of its own, which would end a release whose deadline was almost
 entirely unspent, and a wider one would let minting starve the call it serves.
+Exhausting that inner budget fails the calling attempt, not the release, so the
+deadline still decides when to stop.
 
 The shared backoff knobs are also exposed as release inputs — `api-max-attempts`
 (1-100), `api-retry-base-ms` (100-60000), and `api-retry-max-ms` (1000-300000) —
