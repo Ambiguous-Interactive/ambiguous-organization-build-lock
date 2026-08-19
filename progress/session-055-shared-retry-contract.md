@@ -28,6 +28,33 @@ or if the failure is in a nested budget the caller cannot reach (#201). Both are
 repository-contained, carry zero Unity CI churn, and are prerequisites for
 closing #483 rather than follow-ups to it, so both are in this change.
 
+## Remaining open issues, prioritized
+
+Refreshed after `#200`, `#201` closed and `#203` was filed. Ordered by impact per
+unit of Unity CI churn, which is the ordering this objective asks for.
+
+- **P0, repository-contained:** none left. `#203` (the PR-head guard spends two
+  requests against a limiter it cannot outwait) is the only remaining
+  repository-contained defect and is P2: it wastes two requests and still fails
+  closed correctly.
+- **P0, externally constrained:** `#83` (shared entitlement/portal evidence),
+  `#113` (consumer enrollment remediation), `#51` (owner-authorized App and
+  org-secret scope; organization policy is explicitly out of bounds), `#188`
+  (needs a distinct GitHub App client-ID secret only the owner can provision).
+- **P1, externally constrained:** `#44` (consumer rulesets), `#53` (pre-FIFO
+  runner admission), `#49` (measured compatibility-matrix policy), `#60`
+  (re-pinning consumers plus live zero-cooldown canaries), `#99` (consumer
+  retry/timing evidence -- this change is the first hard data for it).
+- **P2, operational/platform:** `#27`, `#29`, `#30`, `#153`, `#203` -- all need
+  live canaries, monitoring, consumer coordination, or new platform authorities,
+  except `#203`, which is small but changes a fail-closed guard.
+- **External dependency:** `#94`, blocked on a compatible upstream actionlint
+  release.
+
+`#60` is the closest follow-on: this session re-pinned the same four consumer
+actions it needs re-pinned, so its remaining work is the release-side allow-0
+code and a live zero-cooldown canary.
+
 ## Hypothesis
 
 Falsifiable claims, each with a red test before the fix:
@@ -164,6 +191,80 @@ knob. The three existing retry knobs exist because a consumer needed to widen a
 budget; nothing yet needs to tune the instruction ceiling, and adding a fourth
 public knob would widen the enrollment-policy allowlist and the release manifest
 for no demonstrated need.
+
+## Release and consumer re-pin
+
+The code fix alone does not close `unity-helpers#483`. Its own triage states the
+remaining condition exactly: "this stays open until a build-lock release contains
+`954d123f`". Two steps closed that gap.
+
+1. **`v1.12.1` published** (`168b8dea`, this session). `main` had been two commits
+   ahead of `v1.12.0` since 2026-08-17: the Monday schedule ran before `#199`
+   merged, and the only other commit was a `chore(ci)` that triggers no release.
+   `Auto release` was dispatched manually after `main` went green; it published
+   `v1.12.1` and moved the `v1` alias. The release carries both `954d123f` and
+   `168b8dea`, so the wall-clock budget and the two follow-ups ship together.
+2. **Consumer re-pinned** in `unity-helpers#499`: `acquire-build-lock`,
+   `release-build-lock`, `check-unity-runner-availability`, and
+   `require-current-pr-head` move from `a00614a` (`v1.9.1`) to `168b8dea`
+   (`v1.12.1`). `v1.9.1` is the release whose attempt-bounded retry budget
+   produced the reported incident.
+
+### What was deliberately left pinned, and why
+
+`classify-unity-cleanup-evidence` and `require-confirmed-unity-cleanup` stay at
+`673eb65e`. Two consumer-side constraints force that, and neither is a defect
+here:
+
+- `unity-helpers/scripts/tests/test-portable-cleanup-classifier.js` resolves the
+  classifier's expected pin from `require-confirmed-unity-cleanup`, so the two
+  actions cannot move independently.
+- At any commit after `673eb65e` the classifier declares `return-log-digest` as
+  `required: true`, and `unity-helpers/.github/actions/return-unity-license` does
+  not emit one. Running that repository's own input-contract gate against a
+  candidate bump reports it before merge, on both call sites.
+
+That is a separate consumer migration on the fail-closed cleanup path that gates
+every licensed leg, whose only conclusive evidence is a real licensed run. It is
+filed as `unity-helpers#498` with the exact digest contract (SHA-256 over the
+whole return-log bytes, which `collectEvidence` either reads whole or refuses).
+`#483` needs none of it: the retry fix is carried entirely by
+`release-build-lock`, and the gate at `673eb65e` still fails closed on a
+`cleanup-result` it does not recognise, which is the correct outcome for a
+release that was not recorded.
+
+This is also why Dependabot `unity-helpers#489` could not close `#483`: it pins
+`release-build-lock` to `v1.12.0`, the release *before* the fix, and pins the two
+cleanup actions to a non-release commit that fails the digest contract. It is
+recorded there and closes with `#499`.
+
+### Consumer verification
+
+Run against a checkout of the exact released commit, before opening the PR:
+
+```text
+[validate-build-lock-action-inputs] OK: 31 call(s) across 5 file(s) match 6 pinned action version(s).
+Central Unity cleanup policy parity passed (11 classifier cases, 9 gate cases).
+[test-build-lock-action-input-parser] 17 assertions passed.
+```
+
+`unity-helpers#499` then went green on all 22 checks and merged, closing `#483`.
+Dependabot `#489` was closed as superseded. The merged run is the production
+evidence this change actually wanted, because it exercises every lock path on the
+released runtime rather than against mocks:
+
+- **Preflight.** `check-unity-runner-availability@168b8dea`: "Unity runner
+  registration preflight passed for 1 required label set(s)."
+- **Acquire and release.** All eight fast-tier legs, four gated standalone legs,
+  two single-threaded legs, and the package-export smoke job acquired and
+  released cleanly, with no retry warning on any of them. The smoke job -- the
+  one whose failed release opened `#483` -- reported
+  `release=success/cooldown-started released=true release-health=healthy
+  reservation=cooldown/present incident=none`.
+- **Reap.** The organization's scheduled reaper succeeded on the new runtime.
+
+No path regressed, which is the claim that matters: this change lengthens how
+long a transient failure is retried and must not alter a healthy run at all.
 
 ## Continuous-improvement disposition
 
