@@ -569,8 +569,9 @@ the request never left the client, a minting failure never marks a later 409 or
 running away; truncating GitHub's number to it retries *before* the window
 GitHub asked for and burns the budget against a limit the action is itself
 re-triggering. A valid `Retry-After` delta-seconds or HTTP-date value therefore
-has its own ceiling of 60 seconds -- on every action and every path -- and the
-backoff cap bounds only the waits the action generates itself.
+has a ceiling of its own, 60 seconds, and the backoff cap bounds only the waits
+the action generates itself. That ceiling is the same in every action and on
+every attempt-bounded path; a deadline replaces it, as below.
 
 An instruction shorter than the configured base backoff lengthens nothing and
 never shortens the wait below it: GitHub sometimes sends `0` or an already-past

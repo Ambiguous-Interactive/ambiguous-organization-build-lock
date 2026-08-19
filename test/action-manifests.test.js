@@ -583,8 +583,9 @@ test("README documents the shared server-directed retry contract", () => {
   assert.match(readme, /^## Server-Directed Retry Waits$/m);
   for (const claim of [
     /`Retry-After` is an instruction, not backoff/,
-    /has its own ceiling of 60 seconds -- on every action and every path/,
-    /backoff cap bounds only the waits the action generates itself/,
+    /has a ceiling of its own, 60 seconds/,
+    /the same in every action and on\s+every attempt-bounded path/,
+    /backoff cap bounds only the waits\s+the action generates itself/,
     /never shortens the wait below it/,
     /read only by a\s+deadline-bearing caller -- release/,
     /can carry a single call past it by up to\s+one attempt budget of waiting/,
