@@ -1837,6 +1837,43 @@ test("a nested credential outage spends the caller's own budget", async (t) => {
     }));
   });
 
+  // Same invariant for a credential failure that is not an exhausted budget: a
+  // malformed token response never sent the mutation either.
+  await t.test("a malformed token response never makes a later conflict look accepted", async () => {
+    let mints = 0;
+    await withImmediateTimers(() => withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+        return jsonResponse(200, { id: 987 });
+      }
+      if (parsed.pathname === "/app/installations/987/access_tokens") {
+        mints++;
+        return mints === 1
+          ? jsonResponse(201, { expires_at: new Date(now + 60 * 60 * 1000).toISOString() })
+          : jsonResponse(201, {
+            token: "installation-token",
+            expires_at: new Date(now + 60 * 60 * 1000).toISOString()
+          });
+      }
+      return jsonResponse(409, { message: "conflict" });
+    }, async () => {
+      await assert.rejects(
+        () =>
+          api("PUT", "/repos/o/r/contents/lock.json", { a: 1 }, appAuth(), {
+            now: () => now,
+            sleep: async () => {}
+          }),
+        (error) => {
+          assert.equal(error.status, 409);
+          assert.notEqual(error.acceptedWriteAmbiguous, true);
+          return true;
+        }
+      );
+    }));
+
+    assert.equal(mints, 2);
+  });
+
   // Acquire's auth grace window keys on a 401, and it must still see one through a
   // minting outage that outlasts the caller's budget.
   await t.test("a 401 minting outage still surfaces as a 401 to the caller", async () => {

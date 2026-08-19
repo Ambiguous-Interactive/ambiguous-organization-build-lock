@@ -1081,10 +1081,12 @@ async function api(method, path, body, authToken, options = {}) {
   let unknownOutcomeMutationFailure = false;
   let renewableRefreshUsed = false;
   let lastRetryableFailure = null;
-  // Minting runs on its own budget nested inside this one. Tag its exhaustion so
-  // this loop can tell a credential outage apart from its own exhausted budget:
-  // an untagged GITHUB_API_RETRY_EXHAUSTED ends this call, a tagged one is just a
-  // failed attempt that the caller's budget may retry.
+  // Minting runs on its own budget nested inside this one, and a failure there
+  // never reaches GitHub. Remember the exact error the credential provider threw
+  // so this attempt can tell a credential outage apart from its own exhausted
+  // budget and from a request that did leave the client. Identity, not a flag on
+  // the error: concurrent callers can share one rejected refresh.
+  let credentialError = null;
   const requestCredential = async () => {
     if (!(authToken && typeof authToken.getToken === "function")) {
       return authToken;
@@ -1092,13 +1094,12 @@ async function api(method, path, body, authToken, options = {}) {
     try {
       return await authToken.getToken({ signal: retry.signal, deadlineAt: retry.deadlineAt });
     } catch (error) {
-      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
-        error.credentialUnavailable = true;
-      }
+      credentialError = error;
       throw error;
     }
   };
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
+    credentialError = null;
     try {
       throwIfAborted(retry.signal);
       let requestToken = await requestCredential();
@@ -1150,10 +1151,13 @@ async function api(method, path, body, authToken, options = {}) {
       }
       throw error;
     } catch (error) {
-      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED" && !error.credentialUnavailable) {
+      // Nothing this attempt did reached GitHub if the credential provider is what
+      // failed, whatever kind of error it raised.
+      const fromCredential = Boolean(error) && error === credentialError;
+      if (error && error.code === "GITHUB_API_RETRY_EXHAUSTED" && !fromCredential) {
         throw error;
       }
-      if (error && error.credentialUnavailable) {
+      if (fromCredential && error.code === "GITHUB_API_RETRY_EXHAUSTED") {
         if (isAbortError(error, retry.signal)) {
           // The whole operation is cancelled or past its deadline, so there is
           // nothing left to retry, and the nested error carries the richest
@@ -1202,7 +1206,10 @@ async function api(method, path, body, authToken, options = {}) {
       if (budget.exhausted) {
         throw apiRetryExhaustedError(method, path, attempt, lastRetryableFailure, budget.deadlineReason);
       }
-      if (mutationMethod) {
+      // Only a request that left the client can have been applied without an
+      // acknowledgement. A credential failure never sent one, so treating it as an
+      // ambiguous write would make a later 409 or 422 look like an accepted write.
+      if (mutationMethod && !fromCredential) {
         unknownOutcomeMutationFailure = true;
       }
       const delay = budget.delayMs;

@@ -112,7 +112,21 @@ Both reproduced against the committed runtime; see *Verification*.
    succeed anyway. Release is unaffected: its phases carry abort signals. Stated
    in the README rather than left implicit.
 
-3. **Confirmed hazard — a caller that wants no waiting would have inherited a
+3. **Confirmed defect, same class, pre-existing — a credential failure was
+   reported as a possibly-accepted write.** `#201` warns that a nested minting
+   failure must not set `unknownOutcomeMutationFailure`, because the request never
+   left the client. The exhausted-budget case was handled, but a credential error
+   that is *not* an exhausted budget — `mintToken` raising "installation token
+   response was missing a valid token or expiry", for instance — fell through to
+   the transport-error branch, which set the flag unconditionally. A later 409 or
+   422 on the same `PUT` was then reported as a write GitHub may have applied,
+   which is the exact misreading that guard exists to prevent. The credential
+   provider's error is now tracked by identity for the current attempt, and the
+   transport branch marks a mutation ambiguous only for a request that actually
+   left the client. Identity rather than a flag on the error, because concurrent
+   callers can share one rejected token refresh.
+
+4. **Confirmed hazard — a caller that wants no waiting would have inherited a
    60-second ceiling.** Acquire's cancellation cleanup has 1.5-5 seconds in total
    and sets `baseDelayMs: 0, maxDelayMs: 0` to express that. It is protected today
    only by `maxAttempts: 1`, which is not where that intent belongs. It now sets
