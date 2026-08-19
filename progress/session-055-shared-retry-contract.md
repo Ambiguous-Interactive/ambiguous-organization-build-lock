@@ -149,3 +149,22 @@ knob. The three existing retry knobs exist because a consumer needed to widen a
 budget; nothing yet needs to tune the instruction ceiling, and adding a fourth
 public knob would widen the enrollment-policy allowlist and the release manifest
 for no demonstrated need.
+
+## Continuous-improvement disposition
+
+Both contracts are now executable in the runtime and pinned by tests, and stated
+once for every action in the README's `Server-Directed Retry Waits` section and
+the `Transient Auth Failures` section, with regression assertions that the README
+cannot drop either claim. No new `.llm` resource is warranted: the durable
+lesson -- "a bound the caller cannot reach is not the caller's bound, and a
+failure that never left the client is not an ambiguous write" -- is narrower and
+more authoritative where it now lives, next to the code it governs, than it
+would be as a general skill.
+
+## Follow-up filed
+
+`#203` -- the PR-head guard truncates a `Retry-After` it cannot honor within its
+30-second budget and spends two more requests against the limiter before failing
+closed, rather than failing closed on the first response with a rate-limit
+diagnosis. Related class, different guard, and it changes a fail-closed runtime's
+request pattern, so it is deliberately not in this change.
