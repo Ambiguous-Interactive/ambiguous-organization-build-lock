@@ -1,5 +1,13 @@
 const assert = require("node:assert/strict");
+const { execFile } = require("node:child_process");
+const { existsSync, mkdtempSync, rmSync } = require("node:fs");
+const { createServer } = require("node:http");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 const test = require("node:test");
+const { promisify } = require("node:util");
+
+const execFileAsync = promisify(execFile);
 
 const {
   requireCurrentPrHead,
@@ -150,6 +158,102 @@ test("current PR head guard retries a transient lookup without a fixed long slee
   assert.equal(attempts, 2);
   assert.equal(discarded, 1);
   assert.deepEqual(sleeps, [0]);
+});
+
+test("current PR head guard fails closed without retrying past its rate-limit budget", async () => {
+  const sleeps = [];
+  const writes = [];
+  let attempts = 0;
+  let discarded = 0;
+
+  await assert.rejects(
+    requireCurrentPrHead({
+      env: guardEnvironment(),
+      appendFile: (_path, value) => writes.push(value),
+      fetchImpl: async () => {
+        attempts += 1;
+        return {
+          ...response(403, {}, { "retry-after": "60" }),
+          body: { cancel: async () => { discarded += 1; } }
+        };
+      },
+      monotonicNow: () => 0,
+      sleep: async (milliseconds) => sleeps.push(milliseconds),
+      timeoutMs: 30_000,
+      log: () => {}
+    }),
+    /rate limited for longer than this guard's remaining retry budget/i
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(discarded, 1);
+  assert.deepEqual(sleeps, []);
+  assert.deepEqual(writes, []);
+});
+
+test("current PR head guard waits and retries when Retry-After fits its remaining budget", async () => {
+  const sleeps = [];
+  let attempts = 0;
+
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return attempts === 1
+        ? response(403, {}, { "retry-after": "15" })
+        : response(200, { state: "open", head: { sha: expectedSha } });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    timeoutMs: 30_000,
+    log: () => {}
+  });
+
+  assert.equal(result.isCurrent, true);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [10_000]);
+});
+
+test("current PR head action exits nonzero without writing outputs when the rate-limit budget is exhausted", async (t) => {
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(403, { "Retry-After": "60" });
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  }));
+
+  const directory = mkdtempSync(join(tmpdir(), "current-pr-head-"));
+  const outputPath = join(directory, "outputs");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const address = server.address();
+  await assert.rejects(
+    execFileAsync(process.execPath, [require.resolve("../.github/dist/require-current-pr-head.js")], {
+      env: {
+        ...process.env,
+        GITHUB_API_URL: `http://127.0.0.1:${address.port}`,
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_OUTPUT: outputPath,
+        GITHUB_REPOSITORY: "Ambiguous-Interactive/example",
+        "INPUT_EXPECTED-HEAD-SHA": expectedSha,
+        "INPUT_GITHUB-TOKEN": "test-token",
+        "INPUT_PULL-REQUEST-NUMBER": "52"
+      }
+    }),
+    (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, /rate limited for longer than this guard's remaining retry budget/i);
+      return true;
+    }
+  );
+
+  assert.equal(requests, 1);
+  assert.equal(existsSync(outputPath), false);
 });
 
 test("current PR head guard honors HTTP-date Retry-After values within its bounded delay", () => {

@@ -1,9 +1,11 @@
 "use strict";
 
 const fs = require("node:fs");
+const { performance } = require("node:perf_hooks");
 const { setTimeout: wait } = require("node:timers/promises");
 
 const MAX_ATTEMPTS = 3;
+const MAX_RETRY_DELAY_MS = 10_000;
 
 function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, " ").trim();
@@ -40,21 +42,31 @@ function retryableResponse(response) {
     (response.headers?.get?.("retry-after") || response.headers?.get?.("x-ratelimit-remaining") === "0");
 }
 
-function retryDelay(response, attempt, now = Date.now()) {
+function retryAfterDelay(response, now = Date.now()) {
   const retryAfterValue = response?.headers?.get?.("retry-after");
   if (typeof retryAfterValue === "string" && retryAfterValue.trim() !== "") {
     const normalized = retryAfterValue.trim();
     if (/^[0-9]+$/.test(normalized)) {
-      return Math.min(10_000, Number(normalized) * 1_000);
+      return Number(normalized) * 1_000;
     }
     if (/^[A-Za-z]/.test(normalized)) {
       const retryAfterDate = Date.parse(normalized);
       if (Number.isFinite(retryAfterDate)) {
-        return Math.min(10_000, Math.max(0, retryAfterDate - now));
+        return Math.max(0, retryAfterDate - now);
       }
     }
   }
-  return 250 * 2 ** (attempt - 1);
+  return null;
+}
+
+function boundedRetryDelay(retryAfterMs, attempt) {
+  return retryAfterMs === null
+    ? 250 * 2 ** (attempt - 1)
+    : Math.min(MAX_RETRY_DELAY_MS, retryAfterMs);
+}
+
+function retryDelay(response, attempt, now = Date.now()) {
+  return boundedRetryDelay(retryAfterDelay(response, now), attempt);
 }
 
 async function discardResponse(response) {
@@ -91,7 +103,10 @@ async function requireCurrentPrHead(options = {}) {
   const token = input(env, "GITHUB-TOKEN");
   const repository = String(env.GITHUB_REPOSITORY || "").trim();
   const apiUrl = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
-  const timeoutSignal = AbortSignal.timeout(options.timeoutMs === undefined ? 30_000 : options.timeoutMs);
+  const timeoutMs = options.timeoutMs === undefined ? 30_000 : options.timeoutMs;
+  const monotonicNow = options.monotonicNow || (() => performance.now());
+  const retryDeadline = monotonicNow() + timeoutMs;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
   const sleep = options.sleep || ((milliseconds) => wait(milliseconds, undefined, { signal }));
 
@@ -130,8 +145,21 @@ async function requireCurrentPrHead(options = {}) {
     if (response.ok || !retryableResponse(response) || attempt === MAX_ATTEMPTS) {
       break;
     }
+    const retryNow = Date.now();
+    const retryAfterMs = retryAfterDelay(response, retryNow);
     await discardResponse(response);
-    await sleep(retryDelay(response, attempt));
+    if (retryAfterMs !== null && retryAfterMs >= retryDeadline - monotonicNow()) {
+      if (response.status === 403 || response.status === 429) {
+        throw new Error(
+          "GitHub pull request lookup was rate limited for longer than this guard's remaining retry budget"
+        );
+      }
+      throw new Error(
+        `GitHub pull request lookup received Retry-After longer than this guard's remaining retry budget ` +
+        `(HTTP ${response.status})`
+      );
+    }
+    await sleep(boundedRetryDelay(retryAfterMs, attempt));
   }
   if (!response.ok) {
     throw new Error(`GitHub pull request lookup failed with HTTP ${response.status}`);

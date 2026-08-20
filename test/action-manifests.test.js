@@ -573,22 +573,29 @@ test("README documents configurable parallelism and transient-auth handling", ()
   assert.match(readme, /BUILD_LOCK_CONFIG_TTL_MS/);
 });
 
-// Issue #200: a Retry-After longer than the backoff cap was truncated, so the lock
-// retried back into the same secondary rate limit. Issue #201: minting ran on a
-// nested budget no caller could extend. Both contracts are shared by every action,
-// so the README must state them once rather than per action.
-test("README documents the shared server-directed retry contract", () => {
+// Issue #200: the shared API client truncated Retry-After to its backoff cap.
+// Issue #203: the standalone PR-head guard lost the raw instruction before its
+// own budget decision. The README must preserve both caller-specific contracts.
+test("README documents caller-specific server-directed retry contracts", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
   assert.match(readme, /^## Server-Directed Retry Waits$/m);
   for (const claim of [
     /`Retry-After` is an instruction, not backoff/,
-    /has a ceiling of its own, 60 seconds/,
-    /the same in every action and on\s+every attempt-bounded path/,
-    /backoff cap bounds only the waits\s+the action generates itself/,
+    /shared build-lock API client's own/,
+    /has a ceiling of its\s+own, 60 seconds/,
+    /backoff cap bounds only the waits the action generates\s+itself/,
+    /ceiling is not universal to every standalone action/,
+    /retain the raw instruction until its semantic and\s+remaining-budget decisions are complete/,
+    /cap only the eventual sleep\s+according to its own contract/,
+    /current-PR-head guard is the\s+intentional exception/,
+    /30-second total\s+budget and 10-second eventual-sleep cap/,
+    /fails after the current response instead of treating\s+the capped sleep as evidence/,
+    /Within the shared client, an instruction shorter/,
     /never shortens the wait below it/,
     /read only by a\s+deadline-bearing caller -- release/,
-    /can carry a single call past it by up to\s+one attempt budget of waiting/,
+    /On a shared-client attempt-bounded path/,
+    /can carry a single call\s+past it by up to one attempt budget of waiting/,
     /never the ceiling for the operation/,
     /never marks a later 409 or\s+422 on a mutation as a write GitHub may have accepted/
   ]) {
@@ -615,7 +622,7 @@ test("README documents the time-bounded release retry budget", () => {
   // tell an operator this condition self-heals.
   assert.match(readme, /quarantines the stale\s+holder entry/);
   assert.doesNotMatch(readme, /reclaimed by the lock's own lease\s+timeout/);
-  assert.match(readme, /`Retry-After` from GitHub is honored in full/);
+  assert.match(readme, /`Retry-After` from GitHub is honored\s+in full/);
   assert.match(readme, /Minting the GitHub App token inherits the budget of the call it\s+serves/);
   assert.match(readme, /neither may configure a zero backoff/);
   assert.match(readme, /an out-of-range one is never fatal/);

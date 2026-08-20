@@ -565,31 +565,42 @@ the request never left the client, a minting failure never marks a later 409 or
 ## Server-Directed Retry Waits
 
 `Retry-After` is an instruction, not backoff. `BUILD_LOCK_API_RETRY_MAX_MS`
-(`api-retry-max-ms`) exists to stop the action's own exponential growth from
-running away; truncating GitHub's number to it retries *before* the window
-GitHub asked for and burns the budget against a limit the action is itself
-re-triggering. A valid `Retry-After` delta-seconds or HTTP-date value therefore
-has a ceiling of its own, 60 seconds, and the backoff cap bounds only the waits
-the action generates itself. That ceiling is the same in every action and on
-every attempt-bounded path; a deadline replaces it, as below.
+(`api-retry-max-ms`) exists to stop the shared build-lock API client's own
+exponential growth from running away; truncating GitHub's number to it retries
+*before* the window GitHub asked for and burns the budget against a limit the
+action is itself re-triggering. On that client's attempt-bounded paths, a valid
+`Retry-After` delta-seconds or HTTP-date value therefore has a ceiling of its
+own, 60 seconds, and the backoff cap bounds only the waits the action generates
+itself. A deadline replaces that ceiling as described below. This shared-client
+ceiling is not universal to every standalone action.
 
-An instruction shorter than the configured base backoff lengthens nothing and
-never shortens the wait below it: GitHub sometimes sends `0` or an already-past
-HTTP date, which taken literally is an unthrottled retry loop. That floor is
-capped like any other backoff the action generates, and the instruction's own
-ceiling never cuts it short either.
+Every caller must retain the raw instruction until its semantic and
+remaining-budget decisions are complete, then cap only the eventual sleep
+according to its own contract. The standalone current-PR-head guard is the
+intentional exception to the shared-client policy: it keeps its 30-second total
+budget and 10-second eventual-sleep cap. If the raw instruction cannot fit the
+remaining budget, the guard fails after the current response instead of treating
+the capped sleep as evidence that another request can succeed; an instruction
+that does fit may still produce a sleep capped at 10 seconds.
 
-While a deadline is active, a `Retry-After` from GitHub is honored in full,
-because the deadline already bounds the total wait and clamps the last one so
-the final attempt still starts inside the budget. Abort signals win over both.
+Within the shared client, an instruction shorter than the configured base
+backoff lengthens nothing and never shortens the wait below it: GitHub sometimes
+sends `0` or an already-past HTTP date, which taken literally is an unthrottled
+retry loop. That floor is capped like any other backoff the action generates,
+and the instruction's own ceiling never cuts it short either.
 
-On an attempt-bounded path nothing clamps the wait to the operation's own
-window, so honoring a long instruction can carry a single call past it by up to
-one attempt budget of waiting -- at the 60-second ceiling and the shared
-five-attempt budget, about four minutes. That is deliberate: the windows it
-could overrun are orders of magnitude larger (the acquire wait is measured in
-hours), the loop re-checks its deadline as soon as the call returns, and
-retrying inside the window GitHub asked us to wait cannot succeed anyway.
+While a shared-client deadline is active, a `Retry-After` from GitHub is honored
+in full, because the deadline already bounds the total wait and clamps the last
+one so the final attempt still starts inside the budget. Abort signals win over
+both.
+
+On a shared-client attempt-bounded path nothing clamps the wait to the
+operation's own window, so honoring a long instruction can carry a single call
+past it by up to one attempt budget of waiting -- at the 60-second ceiling and
+the shared five-attempt budget, about four minutes. That is deliberate: the
+windows it could overrun are orders of magnitude larger (the acquire wait is
+measured in hours), the loop re-checks its deadline as soon as the call returns,
+and retrying inside the window GitHub asked us to wait cannot succeed anyway.
 
 A primary rate limit sends no `Retry-After`, only the epoch second its hourly
 window reopens. That is inferred rather than instructed, and an hourly window
