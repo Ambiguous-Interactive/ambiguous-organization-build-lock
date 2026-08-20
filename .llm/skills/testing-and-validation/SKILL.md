@@ -46,6 +46,19 @@ where mechanically expressible, the narrowest central invariant or validator
 that rejects the entire unsafe shape or class. Avoid example-only coverage when
 one tripwire can prevent all equivalent forms.
 
+## Retry instruction decision order
+
+Keep a raw external retry instruction available until the caller has completed
+its semantic and remaining-budget decisions. A backoff or sleep cap is not
+evidence that the original instruction fits a deadline: compare the uncapped
+instruction with the caller's contract first, then cap only the eventual sleep
+that caller permits. Shared-client retry policy is not automatically the policy
+of a standalone action with a narrower guard budget.
+
+Test the two values separately when they can differ: the raw instruction must
+drive honorability and terminal-diagnostic decisions, while the eventual delay
+must obey that caller's sleep cap, cancellation, and deadline contract.
+
 ## Escalation
 
 1. Syntax-check or run the smallest changed unit.
