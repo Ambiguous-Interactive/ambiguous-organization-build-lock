@@ -1,22 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32340187240:unity-tests:2021.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "32340187240",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32340187240",
-    "queuedAt": "2026-08-20T06:37:51.348Z",
-    "acquiredAt": "2026-08-20T06:37:54.110Z",
-    "expiresAt": "2026-08-20T10:37:54.110Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "96337638215"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "29947142-f562-49f0-8b88-d18df95a4469",
       "holderId": "Ambiguous-Interactive/unity-helpers:32340187240:unity-tests:2021.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
@@ -24,31 +14,12 @@
       "runId": "32340187240",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32340187240",
-      "queuedAt": "2026-08-20T06:37:51.348Z",
-      "acquiredAt": "2026-08-20T06:37:54.110Z",
-      "expiresAt": "2026-08-20T10:37:54.110Z",
       "runnerId": "DAD-MACHINE",
-      "jobId": "96337638215"
-    }
-  ],
-  "queue": [],
-  "reservations": [
-    {
-      "reservationId": "ba5d688d-d167-4362-904f-9f30f24ab83f",
-      "holderId": "Ambiguous-Interactive/DxMessaging:32339876610:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "32339876610",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/32339876610",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-20T06:40:26.371Z",
-      "availableAt": "2026-08-20T06:40:27.371Z"
+      "state": "quarantine",
+      "reason": "return-missing-positive-evidence",
+      "createdAt": "2026-08-20T06:42:01.870Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-20T06:40:26.372Z"
+  "updatedAt": "2026-08-20T06:42:01.870Z"
 }
