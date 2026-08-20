@@ -16,6 +16,93 @@ function runScript(name, operation, environment = {}) {
   });
 }
 
+function writeExecutable(filePath, contents) {
+  fs.writeFileSync(filePath, contents, { mode: 0o755 });
+}
+
+function shellCheckInstallHarness(t, architecture, checksumStatus = "0") {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "shellcheck-install-"));
+  const shims = path.join(temporary, "bin");
+  const runnerTemp = path.join(temporary, "runner");
+  const githubPath = path.join(temporary, "github-path");
+  const curlArguments = path.join(temporary, "curl-arguments");
+  const checksumArguments = path.join(temporary, "checksum-arguments");
+  const checksumInput = path.join(temporary, "checksum-input");
+  const tarArguments = path.join(temporary, "tar-arguments");
+  const events = path.join(temporary, "events");
+  const shellcheckStub = path.join(temporary, "shellcheck-stub");
+
+  fs.mkdirSync(shims);
+  fs.mkdirSync(runnerTemp);
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+
+  writeExecutable(path.join(shims, "uname"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf '%s\\n' \"${TEST_ARCHITECTURE}\""
+  ].join("\n"));
+  writeExecutable(path.join(shims, "curl"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf 'curl\\n' >> \"${TEST_EVENTS}\"",
+    "printf '%s\\n' \"$@\" > \"${TEST_CURL_ARGUMENTS}\"",
+    "while (( $# > 0 )); do",
+    "  if [[ \"$1\" == '--output' ]]; then",
+    "    : > \"$2\"",
+    "    exit 0",
+    "  fi",
+    "  shift",
+    "done",
+    "exit 91"
+  ].join("\n"));
+  writeExecutable(path.join(shims, "sha256sum"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf 'sha256sum\\n' >> \"${TEST_EVENTS}\"",
+    "printf '%s\\n' \"$@\" > \"${TEST_CHECKSUM_ARGUMENTS}\"",
+    "cat > \"${TEST_CHECKSUM_INPUT}\"",
+    "exit \"${TEST_CHECKSUM_STATUS}\""
+  ].join("\n"));
+  writeExecutable(shellcheckStub, [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf 'shellcheck\\n' >> \"${TEST_EVENTS}\""
+  ].join("\n"));
+  writeExecutable(path.join(shims, "tar"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf 'tar\\n' >> \"${TEST_EVENTS}\"",
+    "printf '%s\\n' \"$@\" > \"${TEST_TAR_ARGUMENTS}\"",
+    "mkdir -p \"${TEST_BUNDLE_PATH}\"",
+    "cp \"${TEST_SHELLCHECK_STUB}\" \"${TEST_BUNDLE_PATH}/shellcheck\""
+  ].join("\n"));
+
+  return {
+    temporary,
+    runnerTemp,
+    githubPath,
+    curlArguments,
+    checksumArguments,
+    checksumInput,
+    tarArguments,
+    events,
+    environment: {
+      PATH: `${shims}:${process.env.PATH}`,
+      RUNNER_TEMP: runnerTemp,
+      GITHUB_PATH: githubPath,
+      TEST_ARCHITECTURE: architecture,
+      TEST_CHECKSUM_STATUS: checksumStatus,
+      TEST_CURL_ARGUMENTS: curlArguments,
+      TEST_CHECKSUM_ARGUMENTS: checksumArguments,
+      TEST_CHECKSUM_INPUT: checksumInput,
+      TEST_TAR_ARGUMENTS: tarArguments,
+      TEST_EVENTS: events,
+      TEST_SHELLCHECK_STUB: shellcheckStub,
+      TEST_BUNDLE_PATH: path.join(runnerTemp, "shellcheck-v0.11.0")
+    }
+  };
+}
+
 test("workflow shell entrypoints are syntactically valid and strict", () => {
   const scripts = fs.readdirSync(scriptsRoot).filter((name) => name.endsWith(".sh")).sort();
   assert.deepEqual(scripts, [
@@ -31,6 +118,83 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
     assert.match(text, /^#!\/usr\/bin\/env bash\nset -euo pipefail\n/);
     assert.equal(childProcess.spawnSync("bash", ["-n", path.join(scriptsRoot, script)]).status, 0);
   }
+});
+
+test("ShellCheck installation downloads and verifies the pinned bundle for supported architectures", async (t) => {
+  const cases = [
+    {
+      runnerArchitecture: "x86_64",
+      releaseArchitecture: "x86_64",
+      checksum: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+    },
+    {
+      runnerArchitecture: "aarch64",
+      releaseArchitecture: "aarch64",
+      checksum: "12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588"
+    }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.runnerArchitecture, (subtest) => {
+      const harness = shellCheckInstallHarness(subtest, testCase.runnerArchitecture);
+      const archive = path.join(
+        harness.runnerTemp,
+        `shellcheck-v0.11.0.linux.${testCase.releaseArchitecture}.tar.xz`
+      );
+      const bundle = path.join(harness.runnerTemp, "shellcheck-v0.11.0");
+      const result = runScript("ci.sh", "install-shellcheck", harness.environment);
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(fs.readFileSync(harness.curlArguments, "utf8").trimEnd().split("\n"), [
+        "--proto", "=https",
+        "--tlsv1.2",
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--retry", "3",
+        "--retry-connrefused",
+        "--retry-max-time", "240",
+        "--connect-timeout", "10",
+        "--max-time", "60",
+        "--output", archive,
+        `https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.${testCase.releaseArchitecture}.tar.xz`
+      ]);
+      assert.equal(fs.readFileSync(harness.checksumArguments, "utf8"), "--check\n--status\n");
+      assert.equal(fs.readFileSync(harness.checksumInput, "utf8"), `${testCase.checksum}  ${archive}\n`);
+      assert.deepEqual(fs.readFileSync(harness.tarArguments, "utf8").trimEnd().split("\n"), [
+        "-xJf", archive, "-C", harness.runnerTemp
+      ]);
+      assert.equal(fs.readFileSync(harness.githubPath, "utf8"), `${bundle}\n`);
+      assert.equal(fs.readFileSync(harness.events, "utf8"), "curl\nsha256sum\ntar\nshellcheck\n");
+    });
+  }
+});
+
+test("ShellCheck installation stops before extraction when checksum verification fails", (t) => {
+  const harness = shellCheckInstallHarness(t, "x86_64", "1");
+  fs.writeFileSync(harness.githubPath, "existing-path\n");
+
+  const result = runScript("ci.sh", "install-shellcheck", harness.environment);
+
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.readFileSync(harness.events, "utf8"), "curl\nsha256sum\n");
+  assert.equal(fs.existsSync(harness.tarArguments), false);
+  assert.equal(fs.existsSync(harness.environment.TEST_BUNDLE_PATH), false);
+  assert.equal(fs.readFileSync(harness.githubPath, "utf8"), "existing-path\n");
+});
+
+test("ShellCheck installation rejects unknown architectures before download", (t) => {
+  const harness = shellCheckInstallHarness(t, "riscv64");
+  fs.writeFileSync(harness.githubPath, "existing-path\n");
+
+  const result = runScript("ci.sh", "install-shellcheck", harness.environment);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsupported ShellCheck runner architecture: riscv64/);
+  assert.equal(fs.existsSync(harness.curlArguments), false);
+  assert.equal(fs.existsSync(harness.events), false);
+  assert.equal(fs.readFileSync(harness.githubPath, "utf8"), "existing-path\n");
 });
 
 test("request onboarding rejects non-main refs and writes typed inert evidence", (t) => {
