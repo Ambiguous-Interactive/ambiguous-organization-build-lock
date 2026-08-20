@@ -37,7 +37,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "node tools/llm-harness.mjs check",
       "go -C tools/actionlint run -mod=readonly github.com/rhysd/actionlint/cmd/actionlint -color",
       "bash tools/workflows/ci.sh javascript",
-      "sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck",
+      "bash tools/workflows/ci.sh install-shellcheck",
       "bash tools/workflows/ci.sh shellcheck",
       "node --test test/*.test.js",
       "go test ./...",
@@ -1272,6 +1272,41 @@ test("all checked GitHub workflows expose expected parsable jobs", () => {
       `${workflow} must keep expected job structure visible to repository policy tests`
     );
   }
+});
+
+test("every CI job has a bounded runtime", () => {
+  const jobs = jobSections(readWorkflow("ci.yml"));
+
+  for (const job of jobs) {
+    const lines = job.text.split(/\r?\n/);
+    const properties = new Map(
+      directMappingEntries(lines, 1, lines.length, lineIndent(lines[0]))
+        .map((entry) => [entry.key, yamlScalarValue(entry.value)])
+    );
+
+    assert.equal(
+      properties.get("timeout-minutes"),
+      "15",
+      `ci.yml job ${job.name} must fail within the reviewed 15-minute budget`
+    );
+  }
+});
+
+test("CI installs a pinned ShellCheck release within a step budget", () => {
+  const text = readWorkflow("ci.yml");
+  const steps = workflowJobStepMaps(text, "validate");
+  const install = steps.find((step) => step.name === "Install ShellCheck");
+  const automation = readWorkflowScript("ci.sh");
+
+  assert.ok(install, "ci.yml must keep a named ShellCheck installation step");
+  assert.equal(install["timeout-minutes"], "5");
+  assert.equal(install.run, "bash tools/workflows/ci.sh install-shellcheck");
+  assert.match(automation, /shellcheck_version="v0\.11\.0"/);
+  assert.match(automation, /8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198/);
+  assert.match(automation, /12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588/);
+  assert.match(automation, /curl[^\n]*--retry-max-time 240[^\n]*--connect-timeout 10[^\n]*--max-time 60/);
+  assert.match(automation, /sha256sum --check --status/);
+  assert.doesNotMatch(text, /apt-get/);
 });
 
 function runScriptSignature(section) {
