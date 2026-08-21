@@ -194,6 +194,16 @@ test("active documentation excludes obsolete rollout guidance", () => {
   }
 });
 
+test("active enrollment guidance uses the central editor action without a helper checkout", () => {
+  for (const relativePath of ["consumer-enrollment.md", "operations-runbook.md"]) {
+    const text = fs.readFileSync(path.join(repoRoot, "docs", relativePath), "utf8");
+    assert.match(text, /`ensure-unity-editor` action/);
+    assert.match(text, /`editor-path` output/);
+    assert.doesNotMatch(text, /Checkout trusted Unity editor validator/);
+    assert.doesNotMatch(text, /set-safe-directory: false/);
+  }
+});
+
 test("rollout history cannot be mistaken for the active runbook", () => {
   const history = read(historyPath);
 

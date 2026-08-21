@@ -386,6 +386,43 @@ test("runner registration action requires reader App auth and fail-closed label 
   assert.match(manifest, /main:\s+\.\.\/\.\.\/dist\/check-unity-runners\.js/);
 });
 
+test("Unity editor action exposes the exact vendored validator contract", () => {
+  const manifest = readActionManifest("ensure-unity-editor");
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(manifest, "inputs", "ensure-unity-editor/action.yml"),
+    [
+      "unity-version",
+      "install-root",
+      "provisioning-profile",
+      "diagnostics-path",
+      "ci-managed-only",
+      "require-healthy-existing",
+      "with-windows-il2cpp",
+      "required-editor-payload-relative-path"
+    ]
+  );
+  assert.deepEqual(
+    yamlRequiredTopLevelMappingKeys(manifest, "outputs", "ensure-unity-editor/action.yml"),
+    ["editor-path"]
+  );
+  assert.match(manifest, /using:\s*node24/);
+  assert.match(manifest, /main:\s+\.\.\/\.\.\/dist\/ensure-unity-editor\.js/);
+  for (const relative of ["ensure-editor.ps1", "invoke-ensure-editor.ps1"]) {
+    const payload = path.join(actionsRoot, "ensure-unity-editor", relative);
+    assert.ok(fs.statSync(payload).isFile());
+    assertTrackedFile(payload, `${relative} must be committed with the action`);
+  }
+});
+
+test("organization action pins remain in the Dependabot catch-all group", () => {
+  const dependabot = fs.readFileSync(path.join(repoRoot, ".github", "dependabot.yml"), "utf8");
+  assert.match(
+    dependabot,
+    /other-github-actions:\s*\n\s+patterns:\s*\n\s+- "\*"/,
+    "Dependabot must group consumer-visible organization action pins"
+  );
+});
+
 test("central Unity cleanup actions expose exact Node 24 policy contracts", () => {
   const changeClassifier = readActionManifest("classify-unity-changes");
   assert.deepEqual(
@@ -558,6 +595,9 @@ test("README documents guarded acquire usage and unconditional release cleanup",
   assert.match(readme, /`account-blocked` admission is an intentional nonzero, fail-closed/);
   assert.match(readme, /portal-cleanup-confirmed=true/);
   assert.match(readme, /require-current-pr-head@IMMUTABLE_COMMIT_SHA/);
+  assert.match(readme, /ensure-unity-editor@COMPATIBILITY_COMMIT_SHA/);
+  assert.match(readme, /steps\.ensure-unity-editor\.outputs\.editor-path/);
+  assert.match(readme, /do not check out `unity-helpers`/);
   assert.match(readme, /strategy\.fail-fast: false/);
   assert.match(readme, /github-token: \$\{\{ github\.token \}\}/);
   assert.match(readme, /pull-request-number: \$\{\{ github\.event\.pull_request\.number \}\}/);

@@ -1,0 +1,33 @@
+name: Ensure Unity editor
+description: Validate or provision an exact Unity editor through the organization-owned trusted payload.
+inputs:
+  unity-version:
+    description: Exact final Unity editor version, for example 6000.5.2f1.
+    required: true
+  install-root:
+    description: Editor installation root; defaults to UNITY_EDITOR_INSTALL_ROOT or C:\Unity\Editors.
+    required: false
+  provisioning-profile:
+    description: Required payload profile; EditorOnly, StandaloneWindowsIl2Cpp, Android, or Full.
+    required: false
+  diagnostics-path:
+    description: JSON diagnostics file or destination directory.
+    required: false
+  ci-managed-only:
+    description: Restrict discovery and provisioning to the CI-managed installation root.
+    required: false
+  require-healthy-existing:
+    description: Fail instead of installing or repairing a missing or unhealthy editor.
+    required: false
+  with-windows-il2cpp:
+    description: Alias for the StandaloneWindowsIl2Cpp provisioning profile.
+    required: false
+  required-editor-payload-relative-path:
+    description: Newline-separated editor-relative payload paths that must exist.
+    required: false
+outputs:
+  editor-path:
+    description: Absolute validated Unity executable path from bound diagnostics evidence.
+runs:
+  using: node24
+  main: ../../dist/ensure-unity-editor.js

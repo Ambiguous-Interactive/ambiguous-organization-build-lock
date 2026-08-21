@@ -126,7 +126,40 @@ immutable event identity to acquire for periodic FIFO revalidation:
 Licensed matrix jobs must also set `strategy.fail-fast: false`; GitHub's default
 matrix fail-fast behavior can cancel a sibling while it holds a Unity license.
 
-Validate local secret shape first, acquire immediately before the licensed Unity
+Before exposing credentials or acquiring the lock, validate the runner-owned
+editor through the same immutable repository pin. The action carries the
+organization validator, so consumers do not check out `unity-helpers`; its
+`editor-path` output is already bound to successful diagnostics from the exact
+managed layout and can be passed directly to later steps:
+
+```yaml
+- name: Require manually installed Unity editor
+  id: ensure-unity-editor
+  timeout-minutes: 10
+  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/ensure-unity-editor@COMPATIBILITY_COMMIT_SHA
+  with:
+    unity-version: ${{ matrix.unity-version }}
+    install-root: ${{ runner.tool_cache }}\u6-v3
+    provisioning-profile: EditorOnly
+    diagnostics-path: unity-editor-check.json
+    ci-managed-only: "true"
+    require-healthy-existing: "true"
+```
+
+After acquisition, an existing licensed step can bind
+`UNITY_EDITOR_PATH: ${{ steps.ensure-unity-editor.outputs.editor-path }}`
+directly; no run step needs to parse `unity-editor-check.json`.
+
+The public action also exposes `with-windows-il2cpp` and newline-separated
+`required-editor-payload-relative-path` inputs for the corresponding upstream
+validator parameters. Omitted optional inputs retain the validator defaults.
+Managed-only diagnostics accept only
+`<install-root>/<version>/Editor/Unity.exe` or the reviewed
+`<install-root>/_ci-managed-editors/<version>/Editor/Unity.exe`; missing,
+malformed, contradictory, or unsuccessful evidence leaves `editor-path`
+unwritten and fails the action.
+
+Then validate local secret shape, acquire immediately before the licensed Unity
 section, guard every licensed step on the acquire output, and release with
 `if: always()`:
 

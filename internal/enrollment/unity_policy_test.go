@@ -10,6 +10,7 @@ const (
 	releaseActionRef   = lockActionPrefix + "release-build-lock@" + testSHA
 	changeAction       = lockActionPrefix + "classify-unity-changes@" + testSHA
 	classifierAction   = lockActionPrefix + "classify-unity-cleanup-evidence@" + testSHA
+	editorActionRef    = lockActionPrefix + "ensure-unity-editor@" + testSHA
 	gateAction         = lockActionPrefix + "require-confirmed-unity-cleanup@" + testSHA
 	preflightActionRef = lockActionPrefix + "check-unity-runner-availability@" + testSHA
 	returnActionRef    = lockActionPrefix + "return-unity-license@" + testSHA
@@ -79,26 +80,7 @@ func testEditorBootstrapBlock() string {
 }
 
 func centralReturnSteps() string {
-	return testEditorBootstrapBlock() + `      - name: Checkout trusted Unity editor validator
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        env:
-          GIT_CONFIG_COUNT: 1
-          GIT_CONFIG_KEY_0: core.hooksPath
-          GIT_CONFIG_VALUE_0: /dev/null
-          GIT_CONFIG_NOSYSTEM: 1
-          GIT_CONFIG_GLOBAL: /dev/null
-        with:
-          repository: Ambiguous-Interactive/unity-helpers
-          ref: 76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d
-          path: .ci/unity-helpers
-          persist-credentials: false
-          clean: true
-          set-safe-directory: false
-      - name: Require manually installed Unity editor
-        timeout-minutes: 10
-        shell: ` + trustedEditorShell + `
-        ` + testEditorRun + `
-      - id: acquire
+	return editorGateBlock() + `      - id: acquire
         uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
         with:
           lock-name: wallstop-organization-builds
@@ -152,6 +134,61 @@ func centralReturnSteps() string {
           release-health: ${{ steps.release.outputs.resource-health }}
           release-reason: ${{ steps.release.outputs.resource-reason }}
 `
+}
+
+func editorGateBlock() string {
+	return `      - name: Require manually installed Unity editor
+        id: ensure_unity_editor
+        timeout-minutes: 10
+        uses: ` + editorActionRef + `
+        with:
+          unity-version: 6000.5.2f1
+          install-root: ${{ runner.tool_cache }}\u6-v3
+          provisioning-profile: EditorOnly
+          diagnostics-path: unity-editor-check.json
+          ci-managed-only: true
+          require-healthy-existing: true
+`
+}
+
+func legacyEditorGateBlock() string {
+	indentedBootstrap := "          " + strings.ReplaceAll(
+		trustedEditorBootstrapRun,
+		"\n",
+		"\n          ",
+	)
+	command := trustedEditorGatePrefix + testEditorVersion +
+		trustedEditorGateMiddle + "EditorOnly" + trustedEditorGateSuffix
+	return `      - name: Remove stale Unity editor validator
+        timeout-minutes: 2
+        shell: pwsh -NoProfile -Command ". '{0}'"
+        run: |
+` + indentedBootstrap + `
+      - name: Checkout trusted Unity editor validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
+          GIT_CONFIG_NOSYSTEM: 1
+          GIT_CONFIG_GLOBAL: /dev/null
+        with:
+          repository: Ambiguous-Interactive/unity-helpers
+          ref: 76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d
+          path: .ci/unity-helpers
+          persist-credentials: false
+          clean: true
+          set-safe-directory: false
+      - name: Require manually installed Unity editor
+        timeout-minutes: 10
+        shell: pwsh -NoProfile -NonInteractive -Command ". '{0}'"
+        run: |
+          ` + command + `
+`
+}
+
+func legacyCentralReturnSteps() string {
+	return strings.Replace(centralReturnSteps(), editorGateBlock(), legacyEditorGateBlock(), 1)
 }
 
 func unityFixture(files map[string]string) Snapshot {
@@ -248,6 +285,52 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentAcceptsExactLegacyEditorPrefixDuringMigration(t *testing.T) {
+	base := unityWorkflow(legacyCentralReturnSteps(), safeAggregate())
+	legacyBlock := legacyEditorGateBlock()
+	checkoutIndex := strings.Index(legacyBlock, "      - name: Checkout")
+	if checkoutIndex < 0 {
+		t.Fatal("legacy fixture is missing checkout")
+	}
+	withoutBootstrap := legacyBlock[checkoutIndex:]
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": base,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("exact legacy editor prefix produced findings: %#v", result.Findings)
+	}
+
+	mutations := []struct {
+		name string
+		from string
+		to   string
+	}{
+		{name: "revision", from: trustedEditorRevision, to: testSHA},
+		{name: "repository", from: trustedEditorRepository, to: "attacker/fake-helper"},
+		{name: "safe directory", from: "          set-safe-directory: false", to: "          set-safe-directory: true"},
+		{name: "checkout hook", from: "          GIT_CONFIG_VALUE_0: /dev/null", to: "          GIT_CONFIG_VALUE_0: .ci/hooks"},
+		{name: "bootstrap omitted", from: legacyBlock, to: withoutBootstrap},
+		{name: "intervening step", from: "      - name: Require manually installed Unity editor\n", to: "      - run: Write-Host replace\n      - name: Require manually installed Unity editor\n"},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			workflow := strings.Replace(base, mutation.from, mutation.to, 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-editor-check") {
+				t.Fatalf("unsafe legacy prefix passed: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentAcceptsCurrentHeadGuardBeforeEditorGate(t *testing.T) {
 	headGuard := `      - name: Require current PR head before setup
         timeout-minutes: 2
@@ -322,7 +405,7 @@ func TestUnityEnrollmentAcceptsCurrentHeadGuardBeforeEditorGate(t *testing.T) {
 }
 
 func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
-	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	base := unityWorkflow(legacyCentralReturnSteps(), safeAggregate())
 	bootstrapBlock := testEditorBootstrapBlock()
 	checkoutBlock := `      - name: Checkout trusted Unity editor validator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -863,7 +946,7 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
 }
 
 func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
-	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	base := unityWorkflow(legacyCentralReturnSteps(), safeAggregate())
 	legacy := strings.Replace(
 		base,
 		"          set-safe-directory: false\n",
@@ -929,6 +1012,54 @@ func TestUnityEnrollmentCheckoutSafeDirectoryTransition(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentRejectsCentralEditorActionMutations(t *testing.T) {
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	mutations := []struct {
+		name string
+		from string
+		to   string
+		code string
+	}{
+		{name: "unapproved action SHA", from: editorActionRef, to: lockActionPrefix + "ensure-unity-editor@89abcdef0123456789abcdef0123456789abcdef", code: "missing-unity-editor-check"},
+		{name: "foreign action", from: editorActionRef, to: "attacker/repository/ensure-unity-editor@" + testSHA, code: "missing-unity-editor-check"},
+		{name: "missing version", from: "          unity-version: 6000.5.2f1\n", to: "", code: "missing-unity-editor-check"},
+		{name: "non-final version", from: "6000.5.2f1", to: "6000.5.2b1", code: "missing-unity-editor-check"},
+		{name: "return version mismatch", from: "          unity-version: 6000.5.2f1\n", to: "          unity-version: 2022.3.45f1\n", code: "missing-unity-editor-check"},
+		{name: "redirected install root", from: trustedEditorInstallRoot, to: `D:\attacker`, code: "missing-unity-editor-check"},
+		{name: "widened profile", from: "          provisioning-profile: EditorOnly", to: "          provisioning-profile: Full", code: "missing-unity-editor-check"},
+		{name: "different diagnostics", from: trustedEditorDiagnostics, to: "other.json", code: "missing-unity-editor-check"},
+		{name: "managed-only omitted", from: "          ci-managed-only: true\n", to: "", code: "missing-unity-editor-check"},
+		{name: "managed-only expression", from: "          ci-managed-only: true", to: "          ci-managed-only: ${{ true }}", code: "missing-unity-editor-check"},
+		{name: "healthy-existing disabled", from: "          require-healthy-existing: true", to: "          require-healthy-existing: false", code: "missing-unity-editor-check"},
+		{name: "extra provisioning input", from: "          require-healthy-existing: true", to: "          require-healthy-existing: true\n          with-windows-il2cpp: true", code: "missing-unity-editor-check"},
+		{name: "step environment preloads Node", from: "        with:\n", to: "        env:\n          NODE_OPTIONS: --require=.ci/attacker.js\n        with:\n", code: "missing-unity-editor-check"},
+		{name: "gate skipped", from: "        timeout-minutes: 10\n", to: "        timeout-minutes: 10\n        if: ${{ false }}\n", code: "missing-unity-editor-check"},
+		{name: "failure ignored", from: "        timeout-minutes: 10\n", to: "        timeout-minutes: 10\n        continue-on-error: true\n", code: "unsafe-unity-editor-check"},
+		{name: "timeout removed", from: "        timeout-minutes: 10\n", to: "", code: "unbounded-unity-editor-check"},
+		{name: "action after acquire", from: editorGateBlock(), to: "", code: "missing-unity-editor-check"},
+		{name: "step before gate", from: editorGateBlock(), to: "      - run: Write-Host attacker\n" + editorGateBlock(), code: "missing-unity-editor-check"},
+		{name: "workflow environment", from: "jobs:\n", to: "env:\n  NODE_OPTIONS: --require=.ci/attacker.js\njobs:\n", code: "missing-unity-editor-check"},
+		{name: "job environment", from: "    strategy:\n", to: "    env:\n      NODE_OPTIONS: --require=.ci/attacker.js\n    strategy:\n", code: "missing-unity-editor-check"},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			workflow := strings.Replace(base, mutation.from, mutation.to, 1)
+			if workflow == base {
+				t.Fatal("mutation did not change workflow")
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), mutation.code) {
+				t.Fatalf("missing %s finding: %#v", mutation.code, result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentWorkingDirectoryDoesNotRejectExactGate(t *testing.T) {
 	workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
 	workflow = strings.Replace(
@@ -962,8 +1093,12 @@ func TestUnityEnrollmentWorkingDirectoryDoesNotRejectExactGate(t *testing.T) {
 func TestUnityEnrollmentRejectsSameNamedFakeEditorGate(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
-		testEditorRun,
-		"run: ./scripts/fake/ensure-editor.ps1 -CiManagedOnly -RequireHealthyExisting",
+		editorGateBlock(),
+		`      - name: Fake editor check
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/fake/ensure-editor.ps1 -CiManagedOnly -RequireHealthyExisting
+`,
 		1,
 	)
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
@@ -1115,8 +1250,12 @@ func TestUnityEnrollmentDetectsUnityActivationCommandPositions(t *testing.T) {
 func TestUnityEnrollmentAuditsDelegatedEditorChecks(t *testing.T) {
 	workflow := unityWorkflow(strings.Replace(
 		centralReturnSteps(),
-		testEditorRun,
-		"run: ./scripts/ci/wrapper.ps1 -Operation RequireEditor",
+		editorGateBlock(),
+		`      - name: Delegated editor check
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/ci/wrapper.ps1 -Operation RequireEditor
+`,
 		1,
 	), safeAggregate())
 	wrapperScript := `param([string]$Operation)
@@ -1255,7 +1394,7 @@ if ($Operation -eq 'RequireEditor') {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(findingCodes(result.Findings), "unsafe-unity-editor-provisioning") {
+		if !strings.Contains(findingCodes(result.Findings), "missing-unity-editor-check") {
 			t.Fatalf("unresolved delegated invocation passed: %#v", result.Findings)
 		}
 	})
@@ -2220,8 +2359,12 @@ $command = './scripts/unity/ensure-' + 'editor.ps1'
 	t.Run("non-running delegated path string is not a gate", func(t *testing.T) {
 		workflow := unityWorkflow(strings.Replace(
 			centralReturnSteps(),
-			testEditorRun,
-			"run: Write-Host './scripts/ci/wrapper.ps1'",
+			editorGateBlock(),
+			`      - name: Editor path string
+        timeout-minutes: 10
+        shell: pwsh
+        run: Write-Host './scripts/ci/wrapper.ps1'
+`,
 			1,
 		), safeAggregate())
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
@@ -2237,17 +2380,12 @@ $command = './scripts/unity/ensure-' + 'editor.ps1'
 	})
 
 	t.Run("composite control flow is not a direct workflow gate", func(t *testing.T) {
-		gate := `      - name: Require manually installed Unity editor
-        timeout-minutes: 10
-        shell: ` + trustedEditorShell + `
-        ` + testEditorRun + `
-`
 		compositeGate := `      - name: Require manually installed Unity editor
         timeout-minutes: 10
         uses: ./.github/actions/editor-check
 `
 		workflow := unityWorkflow(
-			strings.Replace(centralReturnSteps(), gate, compositeGate, 1),
+			strings.Replace(centralReturnSteps(), editorGateBlock(), compositeGate, 1),
 			safeAggregate(),
 		)
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
@@ -2485,19 +2623,15 @@ func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T
 		"${{ matrix.mode }}",
 		"${{ matrix.test-mode }}",
 	)
-	workflow = strings.Replace(
+	workflow = strings.ReplaceAll(
 		workflow,
 		"          unity-version: 6000.5.2f1\n",
 		"          unity-version: ${{ matrix.unity-version }}\n",
-		1,
 	)
 	workflow = strings.Replace(
 		workflow,
-		testEditorGateCommand,
-		trustedEditorGateCommandWithProfile(
-			"${{ matrix.unity-version }}",
-			trustedEditorMatrixProfile,
-		),
+		"          provisioning-profile: EditorOnly",
+		"          provisioning-profile: "+trustedEditorMatrixProfile,
 		1,
 	)
 	workflow = strings.ReplaceAll(
@@ -2586,17 +2720,10 @@ func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T
 }
 
 func TestUnityEnrollmentRejectsUnboundedCentralReturnVersionMatrix(t *testing.T) {
-	base := strings.Replace(
+	base := strings.ReplaceAll(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
 		"          unity-version: 6000.5.2f1\n",
 		"          unity-version: ${{ matrix.unity-version }}\n",
-		1,
-	)
-	base = strings.Replace(
-		base,
-		testEditorGateCommand,
-		trustedEditorGateCommand("${{ matrix.unity-version }}"),
-		1,
 	)
 	base = strings.ReplaceAll(
 		base,
@@ -2648,11 +2775,10 @@ func TestUnityEnrollmentRejectsCollidingCentralReturnVersionMatrix(t *testing.T)
 		"        a: [x, xy]\n        b: [yz, z]\n        unity-version: [2022.3.45f1]\n",
 		1,
 	)
-	base = strings.Replace(
+	base = strings.ReplaceAll(
 		base,
 		"          unity-version: 6000.5.2f1\n",
 		"          unity-version: ${{ matrix.unity-version }}\n",
-		1,
 	)
 	tests := []struct {
 		name   string
@@ -2788,7 +2914,12 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 		{
 			name: "tool cache from environment",
 			mutate: func(value string) string {
-				return strings.Replace(value, "${{ runner.tool_cache }}", "${{ env.RUNNER_TOOL_CACHE }}", 1)
+				return strings.Replace(
+					value,
+					"          tool-cache: ${{ runner.tool_cache }}",
+					"          tool-cache: ${{ env.RUNNER_TOOL_CACHE }}",
+					1,
+				)
 			},
 			code: "missing-unity-return",
 		},

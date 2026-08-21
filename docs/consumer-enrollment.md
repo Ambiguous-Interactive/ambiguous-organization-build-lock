@@ -42,49 +42,35 @@ or writer App. The current inventory is recorded in
    require the runner to be online or idle. Make the licensed job depend on the
    preflight so an impossible label set fails instead of queueing forever.
 3. Before referencing Unity credentials or entering the organization FIFO,
-   require the exact manually installed editor with a bounded,
-   failure-propagating call to `ensure-editor.ps1 -CiManagedOnly
-   -RequireHealthyExisting`. A missing, unhealthy, or non-canonical editor is
-   an offline runner-maintenance failure; CI must not install, download,
-   repair, move, quarantine, or otherwise provision an editor. Do not restore
-   `UH_ENSURE_EDITOR_PROVISIONING_BUDGET_SECONDS` or
-   `UH_ENSURE_EDITOR_INSTALL_TIMEOUT_SECONDS`. The enrollment audit follows
-   workflow-reachable checked-in PowerShell scripts to reject hidden
-   provisioning, but only a direct workflow invocation satisfies the mandatory
-   gate because arbitrary wrapper control flow cannot prove that the check ran.
-   Reachable wrappers must use literal checked-in script paths; unresolved
-   script-variable invocation fails closed. The only permitted preceding step
-   is the approved immutable, exact-input current-PR-head guard. Then run the
-   approved bounded, no-profile bootstrap that removes only the exact
-   `.ci/unity-helpers` directory, rejects a reparse-point `.ci` parent, and
-   proves absence. Then, immediately before that gate,
-   check out the approved `unity-helpers` repository, revision, and destination
-   with the approved immutable `actions/checkout` revision,
-   `persist-credentials: false`, `clean: true`, and literal
-   `set-safe-directory: false`; no other checkout input, expression, or value
-   is permitted. The checkout must be
-   unconditional, failure-propagating, and contain no additional inputs; no
-   intervening step may replace the helper tree. Forced recreation prevents
-   persistent local `.git/config` from surviving `clean: true`. Its exact
-   five-entry
-   environment disables system/global Git configuration and pins
-   `core.hooksPath` to `/dev/null`. Workflow- and job-level `env` mappings must
-   be absent: inherited values can inject code into PowerShell/.NET before the
-   first bootstrap command, or redirect Git, hooks, and the checkout action
-   runtime. Put required values in step-local environments after the bootstrap
-   and mandatory editor gate. The gate itself uses the approved exact
-   no-profile shell template and one-line validator command, with a quoted
-   literal editor release, the runner-owned
-   `$env:RUNNER_TOOL_CACHE\u6-v3` root, a closed provisioning profile, no step
-   environment, and no additional commands. The profile is `EditorOnly` unless
-   the reviewed static `matrix.test-mode` map selects
-   `StandaloneWindowsIl2Cpp` for `standalone`. Its version must exactly match the
-   central return version; the only dynamic form is the reviewed static
-   `matrix.unity-version` axis used by both steps.
-   The optional current-head guard, bootstrap, checkout, gate, and acquire must
-   omit `if`, preserving GitHub's implicit `success()` chain; `always()` is
-   prohibited on this prefix because it could continue after provenance
-   rejection.
+   invoke the pinned central `ensure-unity-editor` action with a ten-minute
+   timeout, literal `ci-managed-only: true` and
+   `require-healthy-existing: true`, the runner-owned
+   `${{ runner.tool_cache }}\u6-v3` root, and
+   `diagnostics-path: unity-editor-check.json`. A missing, unhealthy, or
+   non-canonical editor is an offline runner-maintenance failure; CI must not
+   install, download, repair, move, quarantine, or otherwise provision an
+   editor. The action carries the trusted validator payload, invokes it without
+   a command shell, and exposes the validated executable through the
+   `editor-path` output, so
+   consumers need neither a `unity-helpers` checkout nor a diagnostics-binding
+   run step. The profile is `EditorOnly` unless the reviewed static
+   `matrix.test-mode` map selects `StandaloneWindowsIl2Cpp` for `standalone`.
+   Its version must exactly match the central return version; the only dynamic
+   form is the reviewed static `matrix.unity-version` axis used by both actions.
+   The only permitted preceding step is the approved immutable, exact-input
+   current-PR-head guard. Workflow-, job-, and editor-action `env` mappings are
+   absent because inherited values can preload the Node runtime before the
+   immutable action begins. The optional current-head guard, editor action, and
+   acquire omit `if`, preserving GitHub's implicit `success()` chain;
+   `always()` is prohibited on this prefix. Checked-in PowerShell remains
+   audited for hidden editor provisioning but cannot satisfy the mandatory
+   central action gate.
+
+   During rollout, the central audit also recognizes the exact previously
+   approved bootstrap/checkout/script prefix so already-enrolled default
+   branches do not become noncompliant before they can repin. That compatibility
+   shape is closed and must not be copied into new or edited workflows; migrate
+   it to `ensure-unity-editor` at the next central pin update.
 4. Validate local Unity secret shape, then check that a PR run is still the
    current head immediately before expensive setup and again before acquire.
 5. Acquire immediately before the activation-capable section. Pass a stable,
