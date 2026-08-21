@@ -46,7 +46,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/ci.sh verify-modules",
       "bash tools/workflows/ci.sh tidy-modules",
       "go run ./cmd/workflow-credential-audit .",
-      "node --test test/unity-cleanup-evidence.test.js"
+      "node --test test/unity-cleanup-evidence.test.js test/unity-editor-action.test.js"
     ]
   ],
   [

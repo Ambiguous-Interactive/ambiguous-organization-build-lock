@@ -93,8 +93,8 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Run cleanup evidence tests
+      - name: Run Windows action tests
         shell: pwsh
-        run: node --test test/unity-cleanup-evidence.test.js
+        run: node --test test/unity-cleanup-evidence.test.js test/unity-editor-action.test.js
         env:
           UNITY_DELETE_TEST_DIAGNOSTICS: "true"

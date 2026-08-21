@@ -19,11 +19,11 @@ const (
 	cleanupClassifierAction = "classify-unity-cleanup-evidence"
 	cleanupGateAction       = "require-confirmed-unity-cleanup"
 	currentHeadAction       = "require-current-pr-head"
+	editorAction            = "ensure-unity-editor"
 	preflightAction         = "check-unity-runner-availability"
 	releaseAction           = "release-build-lock"
 	returnAction            = "return-unity-license"
 	trustedEditorCheckout   = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-	trustedEditorPath       = ".ci/unity-helpers/scripts/unity/ensure-editor.ps1"
 	trustedEditorRepository = "Ambiguous-Interactive/unity-helpers"
 	trustedEditorRevision   = "76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d"
 	trustedEditorRoot       = ".ci/unity-helpers"
@@ -67,6 +67,8 @@ const (
 	trustedEditorGatePrefix     = `& "$env:GITHUB_WORKSPACE/.ci/unity-helpers/scripts/unity/ensure-editor.ps1" -UnityVersion '`
 	trustedEditorGateMiddle     = `' -InstallRoot "$env:RUNNER_TOOL_CACHE\u6-v3" -ProvisioningProfile `
 	trustedEditorGateSuffix     = ` -DiagnosticsPath unity-editor-check.json -CiManagedOnly -RequireHealthyExisting`
+	trustedEditorInstallRoot    = `${{ runner.tool_cache }}\u6-v3`
+	trustedEditorDiagnostics    = "unity-editor-check.json"
 	trustedEditorMatrixProfile  = `${{ fromJSON('{"editmode":"EditorOnly","playmode":"EditorOnly","standalone":"StandaloneWindowsIl2Cpp"}')[matrix.test-mode] }}`
 	trustedEditorShell          = `pwsh -NoProfile -NonInteractive -Command ". '{0}'"`
 )
@@ -835,9 +837,6 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		}
 
 		run := scalarValue(mappingValue(step.node, "run"))
-		if run == "" {
-			continue
-		}
 		workingDirectory := mappingValue(step.node, "working-directory") != nil ||
 			mappingValue(workflowRunDefaults, "working-directory") != nil ||
 			mappingValue(jobRunDefaults, "working-directory") != nil
@@ -847,8 +846,8 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 		// prohibited provisioning, but require the mandatory gate to be a
 		// direct workflow invocation whose execution conditions are visible in
 		// the workflow AST.
-		candidate := direct.topLevel &&
-			a.trustedEditorGate(run, workflow, job, steps, index) &&
+		candidate := (a.trustedEditorActionGate(workflow, job, steps, index) ||
+			(direct.topLevel && a.trustedLegacyEditorGate(run, workflow, job, steps, index))) &&
 			step.scope == "job" &&
 			len(step.enclosingSteps) == 0
 		delegated := editorSourceAudit{}
@@ -904,19 +903,32 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 	}
 }
 
-func (a *unityPolicyAnalyzer) trustedEditorGate(
-	run string,
+func (a *unityPolicyAnalyzer) trustedEditorActionGate(
 	workflow *yaml.Node,
 	job *yaml.Node,
 	steps []flattenedUnityStep,
 	gateIndex int,
 ) bool {
 	gate := steps[gateIndex]
-	// This body is deliberately exact. A merely present trusted-looking
-	// invocation could be skipped by a custom shell or preceded by a write
-	// that replaces the freshly checked-out validator.
-	gateVersion, gateProfile, validGateBody := trustedEditorGateBody(run)
-	if !validGateBody ||
+	if !exactLockActionReference(stepUses(gate.node), editorAction) ||
+		!a.approved[strings.ToLower(actionRef(stepUses(gate.node)))] ||
+		!trustedLeafExecution(gate.node) {
+		return false
+	}
+	with := mappingValue(gate.node, "with")
+	if !mappingHasOnlyKeys(with, map[string]bool{
+		"unity-version":            true,
+		"install-root":             true,
+		"provisioning-profile":     true,
+		"diagnostics-path":         true,
+		"ci-managed-only":          true,
+		"require-healthy-existing": true,
+	}) {
+		return false
+	}
+	gateVersion := scalarValue(mappingValue(with, "unity-version"))
+	gateProfile := scalarValue(mappingValue(with, "provisioning-profile"))
+	if !trustedEditorVersion(gateVersion) ||
 		!trustedEditorGateProfile(gateProfile, job) ||
 		!trustedEditorGateMatchesReturn(
 			gateVersion,
@@ -924,6 +936,52 @@ func (a *unityPolicyAnalyzer) trustedEditorGate(
 			steps,
 			gateIndex,
 		) ||
+		scalarValue(mappingValue(with, "install-root")) != trustedEditorInstallRoot ||
+		scalarValue(mappingValue(with, "diagnostics-path")) != trustedEditorDiagnostics ||
+		!exactLiteralBoolean(mappingValue(with, "ci-managed-only"), true) ||
+		!exactLiteralBoolean(mappingValue(with, "require-healthy-existing"), true) {
+		return false
+	}
+	switch gateIndex {
+	case 0:
+	case 1:
+		if !a.trustedCurrentHeadGuard(steps[0]) {
+			return false
+		}
+	default:
+		return false
+	}
+	// Workflow and job environment can preload the Node runtime before the
+	// immutable action begins. Keep the trusted prefix closed; later steps use
+	// step-local values.
+	if mappingValue(workflow, "env") != nil || mappingValue(job, "env") != nil {
+		return false
+	}
+	return true
+}
+
+func exactLiteralBoolean(node *yaml.Node, expected bool) bool {
+	return node != nil && node.Kind == yaml.ScalarNode &&
+		scalarValue(node) == strconv.FormatBool(expected)
+}
+
+// trustedLegacyEditorGate preserves the exact pre-action prefix while
+// consumers migrate to ensure-unity-editor. It must not be widened: the extra
+// checkout is the failure mode issue #206 removes, but rejecting it before
+// every enrolled consumer can repin would make the central audit fail closed
+// on otherwise unchanged licensed workflows.
+func (a *unityPolicyAnalyzer) trustedLegacyEditorGate(
+	run string,
+	workflow *yaml.Node,
+	job *yaml.Node,
+	steps []flattenedUnityStep,
+	gateIndex int,
+) bool {
+	gate := steps[gateIndex]
+	gateVersion, gateProfile, validGateBody := trustedLegacyEditorGateBody(run)
+	if !validGateBody ||
+		!trustedEditorGateProfile(gateProfile, job) ||
+		!trustedEditorGateMatchesReturn(gateVersion, job, steps, gateIndex) ||
 		scalarValue(mappingValue(gate.node, "shell")) != trustedEditorShell ||
 		mappingValue(gate.node, "env") != nil {
 		return false
@@ -939,15 +997,9 @@ func (a *unityPolicyAnalyzer) trustedEditorGate(
 	default:
 		return false
 	}
-	if !trustedEditorBootstrap(steps[bootstrapIndex]) {
-		return false
-	}
-	// The bootstrap itself is PowerShell running on .NET. Any inherited
-	// workflow/job environment would let a consumer preload that runtime (for
-	// example with DOTNET_STARTUP_HOOKS or CoreCLR profiler variables) before
-	// the exact bootstrap body can enforce provenance. Keep this contract
-	// closed: values needed by later steps must be step-local.
-	if mappingValue(workflow, "env") != nil || mappingValue(job, "env") != nil {
+	if !trustedEditorBootstrap(steps[bootstrapIndex]) ||
+		mappingValue(workflow, "env") != nil ||
+		mappingValue(job, "env") != nil {
 		return false
 	}
 	checkout := steps[gateIndex-1]
@@ -958,36 +1010,23 @@ func (a *unityPolicyAnalyzer) trustedEditorGate(
 		return false
 	}
 	with := mappingValue(checkout.node, "with")
-	if with == nil || with.Kind != yaml.MappingNode ||
-		len(with.Content) != 12 {
-		return false
-	}
-	allowedCheckoutInputs := map[string]bool{
-		"repository":          true,
-		"ref":                 true,
-		"path":                true,
-		"persist-credentials": true,
-		"clean":               true,
-	}
-	allowedCheckoutInputs["set-safe-directory"] = true
-	// actions/checkout otherwise attempts a global safe.directory write. Under
-	// the intentionally isolated Git configuration that write is both noisy
-	// and impossible, so the checkout must explicitly disable that behavior.
-	// No expression or additional input is accepted.
-	if scalarValue(mappingValue(with, "set-safe-directory")) != "false" {
-		return false
-	}
-	if !mappingHasOnlyKeys(with, allowedCheckoutInputs) {
+	if with == nil || with.Kind != yaml.MappingNode || len(with.Content) != 12 ||
+		!mappingHasOnlyKeys(with, map[string]bool{
+			"repository":          true,
+			"ref":                 true,
+			"path":                true,
+			"persist-credentials": true,
+			"clean":               true,
+			"set-safe-directory":  true,
+		}) {
 		return false
 	}
 	return scalarValue(mappingValue(with, "repository")) == trustedEditorRepository &&
 		scalarValue(mappingValue(with, "ref")) == trustedEditorRevision &&
 		scalarValue(mappingValue(with, "path")) == trustedEditorRoot &&
-		strings.EqualFold(
-			scalarValue(mappingValue(with, "persist-credentials")),
-			"false",
-		) &&
-		strings.EqualFold(scalarValue(mappingValue(with, "clean")), "true")
+		strings.EqualFold(scalarValue(mappingValue(with, "persist-credentials")), "false") &&
+		strings.EqualFold(scalarValue(mappingValue(with, "clean")), "true") &&
+		scalarValue(mappingValue(with, "set-safe-directory")) == "false"
 }
 
 func (a *unityPolicyAnalyzer) trustedCurrentHeadGuard(
@@ -1019,7 +1058,17 @@ func (a *unityPolicyAnalyzer) trustedCurrentHeadGuard(
 		)
 }
 
-func trustedEditorGateBody(run string) (string, string, bool) {
+func trustedEditorVersion(version string) bool {
+	if version == "${{ matrix.unity-version }}" {
+		return true
+	}
+	if !validUnityVersion(version) {
+		return false
+	}
+	return validUnityEditorRelease(version)
+}
+
+func trustedLegacyEditorGateBody(run string) (string, string, bool) {
 	body := strings.TrimSpace(run)
 	if !strings.HasPrefix(body, trustedEditorGatePrefix) ||
 		!strings.HasSuffix(body, trustedEditorGateSuffix) {
@@ -1038,13 +1087,7 @@ func trustedEditorGateBody(run string) (string, string, bool) {
 	if profile != "EditorOnly" && profile != trustedEditorMatrixProfile {
 		return "", "", false
 	}
-	if version == "${{ matrix.unity-version }}" {
-		return version, profile, true
-	}
-	if !validUnityVersion(version) {
-		return "", "", false
-	}
-	return version, profile, validUnityEditorRelease(version)
+	return version, profile, trustedEditorVersion(version)
 }
 
 func trustedEditorGateCommand(version string) string {
@@ -1134,8 +1177,7 @@ func trustedEditorBootstrap(step flattenedUnityStep) bool {
 		len(step.enclosingSteps) == 0 &&
 		successDependentStepRunnable(step) &&
 		requiredBoundedTimeout(step.node, 2) &&
-		scalarValue(mappingValue(step.node, "shell")) ==
-			trustedEditorBootstrapShell &&
+		scalarValue(mappingValue(step.node, "shell")) == trustedEditorBootstrapShell &&
 		strings.TrimSpace(scalarValue(mappingValue(step.node, "run"))) ==
 			trustedEditorBootstrapRun &&
 		mappingValue(step.node, "env") == nil

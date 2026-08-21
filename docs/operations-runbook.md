@@ -166,42 +166,31 @@ reader access. Treat either condition as scope drift.
 1. A hosted preflight proves that the repository can see a registered runner
    with the required labels. Busy and temporarily offline runners both count as
    available infrastructure; the job queues until one accepts it.
-2. Before the licensed job references Unity credentials, it performs a bounded,
-   failure-propagating check for the exact canonical editor using
-   `ensure-editor.ps1 -CiManagedOnly -RequireHealthyExisting`. Missing or
-   unhealthy editor state keeps the job red for manual host maintenance. CI
-   must not install, download, repair, move, quarantine, or provision an
-   editor, and provisioning-budget environment controls are prohibited. The
-   mandatory gate is a direct workflow invocation; reachable checked-in
-   PowerShell wrappers are still audited for hidden provisioning and unresolved
-   script-variable invocation fails closed. An approved immutable, exact-input
-   current-PR-head guard may run first; no other step may precede the approved
-   bounded, no-profile removal bootstrap. It rejects a reparse-point
-   `.ci` parent, removes only `.ci/unity-helpers`, and proves absence. The
-   trusted, immutable `unity-helpers` checkout follows and immediately precedes
-   the gate, is
-   unconditional and failure-propagating, sets `persist-credentials: false`
-   and `clean: true`, plus literal `set-safe-directory: false`. This prevents skipped,
-   stale, or subsequently overwritten helper content from satisfying
-   provenance. Forced recreation prevents persistent local Git configuration
-   from surviving `clean: true`. Its closed environment disables system/global
-   Git configuration and sets `core.hooksPath=/dev/null`. Workflow and job
-   `env` mappings must be absent. Inherited variables can preload PowerShell's
-   .NET runtime before the first bootstrap command, or redirect Git, hooks,
-   and the checkout action runtime. Define required values only on later
-   steps, after the bootstrap and mandatory editor gate. The gate has an exact
-   no-profile shell template and one-line validator command. It supplies a
-   quoted literal editor release, the runner-owned
-   `$env:RUNNER_TOOL_CACHE\u6-v3` root, and a closed profile, with no step-local
-   environment or additional commands. The profile is `EditorOnly`, or the
+2. Before the licensed job references Unity credentials, it invokes the pinned
+   central `ensure-unity-editor` action with a ten-minute timeout, the exact
+   runner-owned `${{ runner.tool_cache }}\u6-v3` root, literal
+   `ci-managed-only: true` and `require-healthy-existing: true`, and a closed
+   provisioning profile. Missing or unhealthy editor state keeps the job red
+   for manual host maintenance. CI must not install, download, repair, move,
+   quarantine, or provision an editor. The central action carries the trusted
+   validator and binds its successful diagnostics to the `editor-path` output;
+   there is no separate `unity-helpers` checkout, bootstrap, or consumer
+   diagnostics parser on the critical path. An approved immutable, exact-input
+   current-head guard may run first; no other step may precede the editor gate.
+   Workflow-, job-, and gate-level `env` mappings are absent so inherited values
+   cannot preload the action's Node runtime. The profile is `EditorOnly`, or the
    reviewed static `matrix.test-mode` map selects
    `StandaloneWindowsIl2Cpp` only for `standalone`. The release must match the
-   central return input; only a bounded static `matrix.unity-version` axis may
-   supply both dynamically.
-   The optional current-head guard, bootstrap, checkout, gate, and acquire omit
-   `if` so each inherits the preceding step's successful status. Never use
-   `always()` on this prefix: provenance rejection must stop checkout and lock
+   editor action's version; only a bounded static `matrix.unity-version` axis
+   may supply both dynamically. The optional current-head guard, editor gate,
+   and acquire omit `if` so each inherits the preceding step's successful
+   status. Never use `always()` on this prefix: editor rejection must stop lock
    acquisition.
+
+   The enrollment audit temporarily accepts the exact previously approved
+   bootstrap/checkout/script prefix for unchanged consumers during rollout.
+   Treat it as migration compatibility, not steady-state guidance, and replace
+   it when advancing the consumer's central action pin.
 3. The licensed job validates local credential shape and verifies that it is
    still the current trusted PR head before entering the organization FIFO.
 4. Acquire records the exact repository, run, job, holder suffix, and physical
