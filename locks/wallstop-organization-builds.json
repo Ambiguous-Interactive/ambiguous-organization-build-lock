@@ -2,34 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32450412778:unity-tests-standalone:6000.3.16f1-standalone",
+    "holderId": "Ambiguous-Interactive/unity-helpers:32450412778:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
     "repository": "Ambiguous-Interactive/unity-helpers",
     "workflow": "Unity Tests",
-    "job": "unity-tests-standalone",
+    "job": "unity-tests-single-threaded",
     "runId": "32450412778",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32450412778",
-    "queuedAt": "2026-08-21T05:48:12.617Z",
-    "acquiredAt": "2026-08-21T05:48:14.410Z",
-    "expiresAt": "2026-08-21T09:48:14.410Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "96681136910"
+    "queuedAt": "2026-08-21T05:48:51.736Z",
+    "acquiredAt": "2026-08-21T05:48:53.609Z",
+    "expiresAt": "2026-08-21T09:48:53.609Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "96681136916"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:32450412778:unity-tests-standalone:6000.3.16f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "32450412778",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32450412778",
-      "queuedAt": "2026-08-21T05:48:12.617Z",
-      "acquiredAt": "2026-08-21T05:48:14.410Z",
-      "expiresAt": "2026-08-21T09:48:14.410Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "96681136910"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:32450412778:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -46,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "852c4299-8b1c-486a-aff3-a65770baade1",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32450412778:unity-tests-standalone:6000.3.16f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests-standalone",
+      "runId": "32450412778",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32450412778",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-21T05:53:07.601Z",
+      "availableAt": "2026-08-21T05:53:08.601Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-21T05:48:53.609Z"
+  "updatedAt": "2026-08-21T05:53:07.601Z"
 }
