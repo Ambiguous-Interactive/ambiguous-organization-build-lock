@@ -86,8 +86,10 @@
   that actionlint 1.7.12 cannot compile against YAML v4 rc.6; that attempted
   dependency update was reverted to the tracked #94-compatible rc.3 pin. The
   next verifier found and corrected one stale exact CI run-step test expectation
-  after the Windows job began running both action suites. Final staged review
-  and the complete verifier found zero unresolved findings.
+  after the Windows job began running both action suites. PR #209's first
+  hosted-Windows run proved the typed adapter passes but exposed Git checkout
+  EOL conversion in the provenance test; hashing normalized source content
+  preserves the repository-blob contract on both LF and CRLF worktrees.
 - Main-thread fallback reason (if applicable): multi-agent delegation was not requested.
 
 ## Knowledge retention

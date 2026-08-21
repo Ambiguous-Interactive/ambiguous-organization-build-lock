@@ -114,6 +114,10 @@ that incompatible dependency preserved the production fix and the compatible
 `go-runewidth` update. The next full pass reached all 819 Node tests and exposed
 one stale exact run-step inventory expectation for the expanded Windows action
 test command; the expectation was synchronized with the reviewed CI command.
+PR #209's first hosted-Windows run then passed the typed adapter contract but
+failed the provenance hash because Git converted the checked-out LF blob to the
+upstream CRLF bytes. The test now hashes LF-normalized source content, preserving
+the approved blob-content assertion across platform checkout policies.
 
 ## Knowledge retention
 
@@ -141,5 +145,10 @@ validation.
 
 ## Publication and post-merge evidence
 
-Pending commit, draft-to-ready PR, CI and reviewer feedback, merge, and
-post-merge `main` verification. This section records no unobserved outcome.
+Commit `3ce7a9f00` opened PR #209 and the PR was marked ready. The first exact-head
+CI run passed every substantive Linux validation step and the hosted-Windows
+typed PowerShell adapter, then found the platform EOL provenance-test defect
+described above. Copilot reported that its review quota was exhausted and
+provided no finding; Cursor Bugbot supplied a summary with no actionable
+thread. The remediation push, green rerun, merge, and post-merge `main`
+verification remain pending.

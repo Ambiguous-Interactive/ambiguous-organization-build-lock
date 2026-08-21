@@ -220,12 +220,12 @@ test("the action remains Windows-only", () => {
 });
 
 test("vendored validator is the approved self-contained upstream payload", () => {
-  const payload = fs.readFileSync(payloadPath);
+  const text = fs.readFileSync(payloadPath, "utf8");
+  const normalizedPayload = Buffer.from(text.replace(/\r\n/g, "\n"), "utf8");
   assert.equal(
-    crypto.createHash("sha256").update(payload).digest("hex"),
+    crypto.createHash("sha256").update(normalizedPayload).digest("hex"),
     "c9a5cea6ad890bc7b2ad189a05a0d1a0514f1b850e45002318b360851289e837"
   );
-  const text = payload.toString("utf8");
   assert.doesNotMatch(text, /\$PSScriptRoot/i);
   assert.doesNotMatch(text, /^\s*\.\s+[^\r\n]+/m);
 });
