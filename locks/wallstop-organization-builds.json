@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32530056357:unity-tests:6000.3.16f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "32530056357",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32530056357",
-    "queuedAt": "2026-08-21T21:57:37.326Z",
-    "acquiredAt": "2026-08-21T21:57:40.159Z",
-    "expiresAt": "2026-08-22T01:57:40.159Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "96920205452"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:32530056357:unity-tests:6000.3.16f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32530056357",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32530056357",
-      "queuedAt": "2026-08-21T21:57:37.326Z",
-      "acquiredAt": "2026-08-21T21:57:40.159Z",
-      "expiresAt": "2026-08-22T01:57:40.159Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "96920205452"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,22 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-08-21T22:00:39.014Z"
+    },
+    {
+      "reservationId": "e4054ed3-cbe3-40b3-85cf-9e8c5cf0a97e",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32530056357:unity-tests:6000.3.16f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "32530056357",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32530056357",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "return-ulf-skipped",
+      "createdAt": "2026-08-21T22:01:09.611Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-21T22:00:39.014Z"
+  "updatedAt": "2026-08-21T22:01:09.611Z"
 }
