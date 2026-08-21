@@ -1,22 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32528665419:unity-tests:6000.5.2f1-editmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "32528665419",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32528665419",
-    "queuedAt": "2026-08-21T21:42:14.145Z",
-    "acquiredAt": "2026-08-21T21:42:17.146Z",
-    "expiresAt": "2026-08-22T01:42:17.146Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "96916160215"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "4df98132-8761-473e-bb7e-e0b74b9e2637",
       "holderId": "Ambiguous-Interactive/unity-helpers:32528665419:unity-tests:6000.5.2f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
@@ -24,31 +14,12 @@
       "runId": "32528665419",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32528665419",
-      "queuedAt": "2026-08-21T21:42:14.145Z",
-      "acquiredAt": "2026-08-21T21:42:17.146Z",
-      "expiresAt": "2026-08-22T01:42:17.146Z",
       "runnerId": "DAD-MACHINE",
-      "jobId": "96916160215"
-    }
-  ],
-  "queue": [],
-  "reservations": [
-    {
-      "reservationId": "8e58949d-d9f5-433b-88cf-853d1a8f7ac0",
-      "holderId": "Ambiguous-Interactive/unity-helpers:32528665419:unity-tests:2022.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32528665419",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32528665419",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-21T21:43:09.629Z",
-      "availableAt": "2026-08-21T21:43:10.629Z"
+      "state": "quarantine",
+      "reason": "return-ulf-skipped",
+      "createdAt": "2026-08-21T21:44:44.633Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-21T21:43:09.630Z"
+  "updatedAt": "2026-08-21T21:44:44.634Z"
 }
