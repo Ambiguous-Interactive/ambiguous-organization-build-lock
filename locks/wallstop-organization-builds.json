@@ -1,40 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:32662597872:unity-tests:2022.3.45f1-playmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "32662597872",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32662597872",
+    "queuedAt": "2026-08-23T20:07:02.391Z",
+    "acquiredAt": "2026-08-23T20:07:05.056Z",
+    "expiresAt": "2026-08-24T00:07:05.056Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "97250977408"
+  },
+  "holders": [
     {
-      "reservationId": "8a291672-3cc1-48b5-aac2-967878eab114",
-      "holderId": "Ambiguous-Interactive/unity-helpers:32662597872:unity-tests:6000.5.2f1-playmode",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32662597872:unity-tests:2022.3.45f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests",
       "runId": "32662597872",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32662597872",
+      "queuedAt": "2026-08-23T20:07:02.391Z",
+      "acquiredAt": "2026-08-23T20:07:05.056Z",
+      "expiresAt": "2026-08-24T00:07:05.056Z",
       "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-23T20:06:36.153Z"
-    },
-    {
-      "reservationId": "11904dbd-efa5-4171-b7e3-dedd03cf501c",
-      "holderId": "Ambiguous-Interactive/DxMessaging:32662323402:unity-tests:6000.5.2f1-all-modes",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32662323402",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/32662323402",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-23T20:06:47.826Z",
-      "availableAt": "2026-08-23T20:06:48.826Z"
+      "jobId": "97250977408"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-23T20:06:47.827Z"
+  "updatedAt": "2026-08-23T20:07:05.056Z"
 }
