@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:32683011751:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "32683011751",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/32683011751",
+    "queuedAt": "2026-08-24T02:26:24.043Z",
+    "acquiredAt": "2026-08-24T02:26:26.576Z",
+    "expiresAt": "2026-08-24T06:26:26.576Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "24b02495-e54f-440c-acf8-9b32d68b7634",
-      "holderId": "Ambiguous-Interactive/DxMessaging:32680966211:unity-tests:6000.3.16f1-all-modes",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32680966211",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/32680966211",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-24T02:19:46.505Z",
-      "availableAt": "2026-08-24T02:19:47.505Z"
+      "holderId": "Ambiguous-Interactive/IshoBoy:32683011751:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "32683011751",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/32683011751",
+      "queuedAt": "2026-08-24T02:26:24.043Z",
+      "acquiredAt": "2026-08-24T02:26:26.576Z",
+      "expiresAt": "2026-08-24T06:26:26.576Z",
+      "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-24T02:19:46.506Z"
+  "updatedAt": "2026-08-24T02:26:26.577Z"
 }
