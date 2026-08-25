@@ -49,6 +49,7 @@ Read only the files relevant to the current task.
 | File | When to read |
 | --- | --- |
 | [.llm/tasks/README.md](./tasks/README.md) | Template for recording bounded tasks, hypotheses, experiments, and validation evidence. |
+| [.llm/tasks/devcontainer-agent-clis.md](./tasks/devcontainer-agent-clis.md) | Install current Codex and OpenCode CLIs without root on every devcontainer start. |
 | [.llm/tasks/issue-113-enrollment-remediation.md](./tasks/issue-113-enrollment-remediation.md) | Remediate organization enrollment drift one consumer at a time with typed central policy. |
 | [.llm/tasks/issue-132-incident-recovery-visibility.md](./tasks/issue-132-incident-recovery-visibility.md) | Task record for publishing active build-lock incident recovery evidence without weakening exact-ID proof. |
 | [.llm/tasks/issue-140-shared-github-issue-client.md](./tasks/issue-140-shared-github-issue-client.md) | Task record for centralizing bounded fail-closed GitHub issue synchronization across three monitors. |
