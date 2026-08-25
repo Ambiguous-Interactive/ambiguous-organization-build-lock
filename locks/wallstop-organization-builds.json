@@ -29,8 +29,12 @@
       "expiresAt": "2026-08-25T23:13:16.032Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "97932366508"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "42fef34c-b5be-469d-b50e-821fcdbef51a",
       "holderId": "Ambiguous-Interactive/IshoBoy:32887329358:render:isho-capture",
       "repository": "Ambiguous-Interactive/IshoBoy",
       "workflow": "Marketing Capture",
@@ -38,14 +42,13 @@
       "runId": "32887329358",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/32887329358",
-      "queuedAt": "2026-08-25T19:14:00.193Z",
-      "acquiredAt": "2026-08-25T19:14:01.749Z",
-      "expiresAt": "2026-08-25T23:14:01.749Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-25T19:15:03.246Z",
+      "availableAt": "2026-08-25T19:15:04.246Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-25T19:14:01.749Z"
+  "updatedAt": "2026-08-25T19:15:03.247Z"
 }
