@@ -71,6 +71,11 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   assert.ok(config.mounts.some((mount) => mount.includes("go-build-cache")));
   assert.ok(config.mounts.some((mount) => mount.includes("node-cache")));
   assert.ok(config.mounts.every((mount) => mount.includes("${devcontainerId}")));
+  assert.equal(
+    config.remoteEnv.PATH,
+    "/home/vscode/.local/bin:${containerEnv:PATH}",
+    "VS Code processes must see user-owned npm executables"
+  );
   assert.match(config.postCreateCommand, /if \[ -f \.devcontainer\/scripts\/post-create\.sh \]/);
   assert.doesNotMatch(config.postCreateCommand, /apt-get install[^;]*\bgh\b/);
   assert.match(
@@ -112,10 +117,15 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
 
 test("dev container lifecycle scripts are committed", async () => {
   await access(".devcontainer/scripts/post-create.sh");
+  await access(".devcontainer/scripts/install-agent-clis.sh");
   await access(".devcontainer/scripts/post-start.sh");
   await access(".devcontainer/scripts/verify.sh");
 
   const postCreate = await readFile(".devcontainer/scripts/post-create.sh", "utf8");
+  const installAgents = await readFile(
+    ".devcontainer/scripts/install-agent-clis.sh",
+    "utf8"
+  );
   const postStart = await readFile(".devcontainer/scripts/post-start.sh", "utf8");
   const safeDirectory = 'git config --global --replace-all safe.directory "${PWD}"';
   assertAppearsBefore(
@@ -140,6 +150,76 @@ test("dev container lifecycle scripts are committed", async () => {
       ),
     /missing prerequisite/
   );
+
+  assert.doesNotMatch(installAgents, /\bsudo\b/, "agent installation must not need sudo");
+  assert.match(installAgents, /npm_prefix="\$\{HOME\}\/\.local"/);
+  assert.match(
+    installAgents,
+    /npm install --global --prefix "\$\{npm_prefix\}"[\s\\]*[\s\S]*@openai\/codex@latest[\s\\]*[\s\S]*opencode-ai@latest/
+  );
+  assert.match(installAgents, /command -v codex/);
+  assert.match(installAgents, /command -v opencode/);
+  assert.match(
+    installAgents,
+    /path_line='export PATH="\$\{HOME\}\/\.local\/bin:\$\{PATH\}"'/
+  );
+  assertAppearsBefore(
+    postStart,
+    "bash .devcontainer/scripts/post-create.sh",
+    "bash .devcontainer/scripts/install-agent-clis.sh",
+    "fallback Node installation must finish before npm installs agent CLIs"
+  );
+});
+
+test("provisioning tolerates transient registry failures with retries", async () => {
+  await access(".devcontainer/scripts/lib.sh");
+  const lib = await readFile(".devcontainer/scripts/lib.sh", "utf8");
+  assert.match(lib, /^retry\(\)\s*\{/m, "lib.sh must define a retry helper");
+
+  const postCreate = await readFile(".devcontainer/scripts/post-create.sh", "utf8");
+  assert.match(postCreate, /^source .+lib\.sh/m, "post-create must load lib.sh");
+  for (const networkStep of [
+    "retry \\d+ sudo apt-get update",
+    "retry \\d+ go mod download",
+    "retry \\d+ go -C tools/actionlint mod download"
+  ]) {
+    assert.match(postCreate, new RegExp(networkStep), `post-create must retry: ${networkStep}`);
+  }
+
+  const installAgents = await readFile(".devcontainer/scripts/install-agent-clis.sh", "utf8");
+  assert.match(
+    installAgents,
+    /retry \d+ npm install --global --prefix "\$\{npm_prefix\}"/,
+    "agent CLI installation must retry transient npm registry failures"
+  );
+});
+
+test("named-volume mount points are owned by the remote user on every start", async () => {
+  const ownershipLine =
+    /sudo install -d -o vscode -g vscode [\s\\]*[\s\S]*?\/home\/vscode\/\.cache\b/;
+
+  const postCreate = await readFile(".devcontainer/scripts/post-create.sh", "utf8");
+  assert.match(
+    postCreate,
+    ownershipLine,
+    "post-create must create ~/.cache itself, not only its subdirectories"
+  );
+
+  const postStart = await readFile(".devcontainer/scripts/post-start.sh", "utf8");
+  assertAppearsBefore(
+    postStart,
+    "install -d -o vscode -g vscode",
+    "if [[ ! -f /home/vscode/.ambiguous-build-lock-post-create.complete ]]; then",
+    "post-start must normalize volume mount-point ownership before any fallback bootstrap"
+  );
+
+  const config = await readJson(".devcontainer/devcontainer.json");
+  for (const homeMount of ["/home/vscode/.cache/go-build", "/home/vscode/.npm"]) {
+    assert.ok(
+      config.mounts.some((mount) => mount.includes(`target=${homeMount}`)),
+      `${homeMount} must stay a named volume`
+    );
+  }
 });
 
 test("hosted CI builds and verifies both native architectures", async () => {

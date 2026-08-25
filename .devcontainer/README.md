@@ -3,7 +3,8 @@
 This repository includes the same development environment for VS Code and
 VSCodium on Linux, macOS, and Windows. It provides Go 1.26, Node.js 24,
 GitHub CLI, zsh, Go editor/debug tools, `actionlint` through the repository's
-tool module, and a focused set of shell, JSON, search, and benchmarking tools.
+tool module, the latest stable OpenAI Codex and OpenCode CLIs from npm, and a
+focused set of shell, JSON, search, and benchmarking tools.
 
 ## Start
 
@@ -18,9 +19,12 @@ layers and named Go/npm caches. Run the complete local CI contract with:
 .devcontainer/scripts/verify.sh
 ```
 
-The lifecycle script downloads module dependencies, preserves command history,
-and leaves repository files owned by the host-compatible non-root `vscode`
-user.
+The lifecycle scripts download module dependencies, preserve command history,
+and leave repository files owned by the host-compatible non-root `vscode`
+user. On every container start, npm updates `@openai/codex@latest` and
+`opencode-ai@latest` under the user-owned `~/.local` prefix. This installation
+does not use `sudo`; `codex` and `opencode` are available on `PATH` in VS Code
+terminals after startup completes.
 
 ### VSCodium launcher compatibility
 
@@ -59,6 +63,9 @@ open-source extension, then run **Devcontainer: Open Folder in Devcontainer
 
 - The image is pinned by a multi-platform manifest digest and supports native
   `linux/amd64` and `linux/arm64`.
+- Linux, Windows, Intel/Apple Silicon macOS hosts all run one of those native
+  Linux container architectures. npm selects the matching CLI binary package
+  inside the container rather than installing a host operating-system binary.
 - Go modules, Go build artifacts, npm downloads, and shell history use named
   volumes. Rebuilding the container does not throw these caches away.
 - Source remains a bind mount so host git tools and editors see changes

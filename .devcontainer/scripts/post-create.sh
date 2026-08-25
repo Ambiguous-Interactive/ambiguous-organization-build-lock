@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sudo apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+retry 5 sudo apt-get update
+retry 3 sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
   bat \
   direnv \
   fd-find \
@@ -19,9 +22,13 @@ sudo rm -rf /var/lib/apt/lists/*
 sudo ln -sf /usr/bin/batcat /usr/local/bin/bat
 sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
+# ~/.cache itself must be user-owned: Docker creates the parent of a named
+# volume mount point as root when the base image lacks it, which breaks every
+# tool that writes under ~/.cache until it is fixed.
 sudo install -d -o vscode -g vscode \
   /commandhistory \
   /go/pkg/mod \
+  /home/vscode/.cache \
   /home/vscode/.cache/go-build \
   /home/vscode/.npm
 
@@ -37,8 +44,8 @@ if ! grep -Fqx "${history_line}" /home/vscode/.zshrc; then
 fi
 
 git config --global --replace-all safe.directory "${PWD}"
-go mod download
-go -C tools/actionlint mod download
+retry 5 go mod download
+retry 5 go -C tools/actionlint mod download
 bash tools/install-git-hooks.sh
 
 touch /home/vscode/.ambiguous-build-lock-post-create.complete
