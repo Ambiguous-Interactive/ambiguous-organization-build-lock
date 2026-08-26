@@ -1,24 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "32946453994",
+    "runAttempt": "2",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32946453994",
+    "queuedAt": "2026-08-26T08:54:54.243Z",
+    "acquiredAt": "2026-08-26T08:54:57.994Z",
+    "expiresAt": "2026-08-26T12:54:57.994Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "98119280383"
+  },
+  "holders": [
     {
-      "reservationId": "0d3826c2-2022-4dab-b9d4-a969142103df",
-      "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:2022.3.45f1-standalone",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
       "job": "unity-tests-standalone",
       "runId": "32946453994",
       "runAttempt": "2",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32946453994",
+      "queuedAt": "2026-08-26T08:54:54.243Z",
+      "acquiredAt": "2026-08-26T08:54:57.994Z",
+      "expiresAt": "2026-08-26T12:54:57.994Z",
       "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-26T08:54:29.288Z"
-    },
+      "jobId": "98119280383"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "6c543caf-1592-4ba0-a9a0-cb3a8db2b58d",
       "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:2021.3.45f1-standalone",
@@ -35,5 +49,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-26T08:54:37.543Z"
+  "updatedAt": "2026-08-26T08:54:57.995Z"
 }
