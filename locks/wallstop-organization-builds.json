@@ -1,24 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:32952580034:unity-tests:6000.3.16f1-editmode",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "32952580034",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32952580034",
+    "queuedAt": "2026-08-26T09:22:27.651Z",
+    "acquiredAt": "2026-08-26T09:22:30.782Z",
+    "expiresAt": "2026-08-26T13:22:30.782Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "98127243425"
+  },
+  "holders": [
     {
-      "reservationId": "3ea84bac-295b-445f-a806-be9b2985431d",
-      "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:6000.3.16f1-standalone",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32952580034:unity-tests:6000.3.16f1-editmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "32946453994",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32946453994",
+      "job": "unity-tests",
+      "runId": "32952580034",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32952580034",
+      "queuedAt": "2026-08-26T09:22:27.651Z",
+      "acquiredAt": "2026-08-26T09:22:30.782Z",
+      "expiresAt": "2026-08-26T13:22:30.782Z",
       "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-26T08:55:39.431Z"
-    },
+      "jobId": "98127243425"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "3554b2aa-164b-4b81-9ccc-345aaa330af0",
       "holderId": "Ambiguous-Interactive/unity-helpers:32946453994:unity-tests-standalone:6000.5.2f1-standalone",
@@ -35,5 +49,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-26T08:59:34.779Z"
+  "updatedAt": "2026-08-26T09:22:30.782Z"
 }
