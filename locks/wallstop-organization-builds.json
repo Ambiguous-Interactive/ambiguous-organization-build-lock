@@ -2,34 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:32938457719:unity-tests:2021.3.45f1-editmode",
+    "holderId": "Ambiguous-Interactive/unity-helpers:32938457719:unity-tests:6000.3.16f1-playmode",
     "repository": "Ambiguous-Interactive/unity-helpers",
     "workflow": "Unity Tests",
     "job": "unity-tests",
     "runId": "32938457719",
     "runAttempt": "1",
     "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32938457719",
-    "queuedAt": "2026-08-26T06:40:28.784Z",
-    "acquiredAt": "2026-08-26T06:40:31.693Z",
-    "expiresAt": "2026-08-26T10:40:31.693Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "98084386384"
+    "queuedAt": "2026-08-26T06:41:40.696Z",
+    "acquiredAt": "2026-08-26T06:41:43.307Z",
+    "expiresAt": "2026-08-26T10:41:43.307Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "98084386412"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:32938457719:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "32938457719",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32938457719",
-      "queuedAt": "2026-08-26T06:40:28.784Z",
-      "acquiredAt": "2026-08-26T06:40:31.693Z",
-      "expiresAt": "2026-08-26T10:40:31.693Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "98084386384"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:32938457719:unity-tests:6000.3.16f1-playmode",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -46,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "c61c18ab-c81e-4564-af2c-b5d7f9d55d1f",
+      "holderId": "Ambiguous-Interactive/unity-helpers:32938457719:unity-tests:2021.3.45f1-editmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "32938457719",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/32938457719",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-26T06:45:11.211Z",
+      "availableAt": "2026-08-26T06:45:12.211Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-26T06:41:43.307Z"
+  "updatedAt": "2026-08-26T06:45:11.212Z"
 }
