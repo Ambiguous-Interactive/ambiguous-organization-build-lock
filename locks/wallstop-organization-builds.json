@@ -1,24 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:33015282410:unity-tests:2022.3.45f1-all-modes",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "33015282410",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33015282410",
+    "queuedAt": "2026-08-26T21:48:55.960Z",
+    "acquiredAt": "2026-08-26T21:48:58.799Z",
+    "expiresAt": "2026-08-27T01:48:58.799Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "98331850817"
+  },
+  "holders": [
     {
-      "reservationId": "f15ce138-baf5-4bce-8edf-604178314851",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33014535866:unity-tests:6000.5.2f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
+      "holderId": "Ambiguous-Interactive/DxMessaging:33015282410:unity-tests:2022.3.45f1-all-modes",
+      "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Unity Tests",
       "job": "unity-tests",
-      "runId": "33014535866",
+      "runId": "33015282410",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33014535866",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33015282410",
+      "queuedAt": "2026-08-26T21:48:55.960Z",
+      "acquiredAt": "2026-08-26T21:48:58.799Z",
+      "expiresAt": "2026-08-27T01:48:58.799Z",
       "runnerId": "DAD-MACHINE",
-      "state": "quarantine",
-      "reason": "return-log-truncated",
-      "createdAt": "2026-08-26T21:47:45.184Z"
-    },
+      "jobId": "98331850817"
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
       "reservationId": "36701d7d-2975-4996-aa5a-41e4668e525e",
       "holderId": "Ambiguous-Interactive/DxMessaging:33015282410:unity-tests:2021.3.45f1-all-modes",
@@ -35,5 +49,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-26T21:48:21.286Z"
+  "updatedAt": "2026-08-26T21:48:58.800Z"
 }
