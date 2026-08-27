@@ -1,24 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:33093908771:unity:qora",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Validation",
+    "job": "unity",
+    "runId": "33093908771",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/33093908771",
+    "queuedAt": "2026-08-27T16:36:56.126Z",
+    "acquiredAt": "2026-08-27T16:36:59.024Z",
+    "expiresAt": "2026-08-27T20:36:59.024Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "98594275319"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/qora-redux:33093908771:unity:qora",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Validation",
+      "job": "unity",
+      "runId": "33093908771",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/33093908771",
+      "queuedAt": "2026-08-27T16:36:56.126Z",
+      "acquiredAt": "2026-08-27T16:36:59.024Z",
+      "expiresAt": "2026-08-27T20:36:59.024Z",
+      "runnerId": "ELI-MACHINE",
+      "jobId": "98594275319"
+    }
+  ],
   "queue": [],
   "reservations": [
-    {
-      "reservationId": "7d03cb61-9658-4229-a8f0-e15200d82720",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33050443415:unity-tests-standalone:2022.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "33050443415",
-      "runAttempt": "3",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33050443415",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-27T16:25:34.185Z"
-    },
     {
       "reservationId": "b34e1fbc-36c3-4917-9c37-e1191163bb17",
       "holderId": "Ambiguous-Interactive/unity-helpers:33050443415:unity-tests-standalone:2021.3.45f1-standalone",
@@ -35,5 +49,5 @@
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-27T16:29:13.134Z"
+  "updatedAt": "2026-08-27T16:36:59.025Z"
 }
