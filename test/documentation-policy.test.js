@@ -56,6 +56,10 @@ test("reaper delivery SLO facts and guidance stay synchronized", () => {
   assert.match(operations, /30-minute delivery threshold/);
   assert.match(operations, /15-minute run-duration threshold/);
   assert.match(operations, /independent `Reaper delivery audit` workflow/);
+  assert.match(
+    operations,
+    /manual dispatch or rerun can reap stale state, but cannot prove\s+scheduled\s+delivery recovered/i
+  );
   assert.match(operations, /run IDs, timestamps,\s+reason codes, and commit SHAs only/);
   assert.match(operations, /separate `Recover build lock` workflow/);
   assert.match(operations, /no automatic concurrency\s+cancellation/);
