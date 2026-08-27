@@ -141,4 +141,10 @@ dispositions remain live, issue-specific evidence rather than agent guidance.
 
 ## Delivery
 
-Pending.
+Pull request [#217](https://github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/pull/217)
+was opened from commit `8d783900854cf8f9884357bca0785a2957dcfda4`.
+Cursor Bugbot reported no actionable findings, the independent final adversarial
+review reported no actionable findings, and no review threads remain open.
+Initial hosted Build lock CI run `33113114890` began against that head. The final
+head result, merge commit, and exact post-merge `main` run remain recorded in the
+pull-request and workflow histories after delivery.
