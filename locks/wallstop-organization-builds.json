@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:33046087063:unity-tests:6000.3.16f1-all-modes",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "33046087063",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33046087063",
-    "queuedAt": "2026-08-27T07:00:47.210Z",
-    "acquiredAt": "2026-08-27T07:00:50.087Z",
-    "expiresAt": "2026-08-27T11:00:50.087Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "98430356127"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:33046087063:unity-tests:6000.3.16f1-all-modes",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "33046087063",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33046087063",
-      "queuedAt": "2026-08-27T07:00:47.210Z",
-      "acquiredAt": "2026-08-27T07:00:50.087Z",
-      "expiresAt": "2026-08-27T11:00:50.087Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "98430356127"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "return-ulf-skipped",
       "createdAt": "2026-08-27T07:02:48.125Z"
+    },
+    {
+      "reservationId": "32220c3c-517b-4e11-95af-6f4ae476387a",
+      "holderId": "Ambiguous-Interactive/DxMessaging:33046087063:unity-tests:6000.3.16f1-all-modes",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "33046087063",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33046087063",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-27T07:02:51.504Z",
+      "availableAt": "2026-08-27T07:02:52.504Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-27T07:02:48.125Z"
+  "updatedAt": "2026-08-27T07:02:51.504Z"
 }
