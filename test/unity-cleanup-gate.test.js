@@ -182,6 +182,23 @@ test("gate diagnostic contains only allowlisted typed values and escapes command
   assert.match(diagnostic, /invalid/);
 });
 
+test("gate diagnostic preserves the bounded return-command failure reason", () => {
+  const values = {
+    ...safeCooldown,
+    cleanupStatus: "unknown",
+    cleanupReason: "return-command-failed",
+    cleanupResult: "quarantined",
+    releaseReason: "return-command-failed",
+    reservationState: "quarantine"
+  };
+  const result = evaluateCleanupGate(values);
+  assert.equal(result.safe, false);
+  const diagnostic = formatDiagnostic(values, result.failures);
+  assert.match(diagnostic, /cleanup-reason=return-command-failed/);
+  assert.match(diagnostic, /release-reason=return-command-failed/);
+  assert.doesNotMatch(diagnostic, /invalid/);
+});
+
 test("GitHub action input environment preserves hyphenated input names", () => {
   assert.deepEqual(environmentValues({
     "INPUT_ACQUIRED": "true",

@@ -25,6 +25,7 @@ const ALLOWED = {
     "return-timeout",
     "return-log-truncated",
     "return-terminated",
+    "return-command-failed",
     "return-missing-positive-evidence",
     "return-ulf-skipped",
     "activation-timeout",

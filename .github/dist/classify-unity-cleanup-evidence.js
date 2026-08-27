@@ -689,6 +689,14 @@ function classifyEvidence({
       reason: "cleanup-confirmed"
     };
   }
+  if (commandCompleted && exitCode !== 0) {
+    return {
+      resourceSafe: false,
+      cleanupStatus: "unknown",
+      health: "healthy",
+      reason: "return-command-failed"
+    };
+  }
   return {
     resourceSafe: false,
     cleanupStatus: "unknown",

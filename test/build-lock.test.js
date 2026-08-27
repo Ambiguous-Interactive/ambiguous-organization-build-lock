@@ -10214,6 +10214,7 @@ test("schema 5 uncertainty reasons remain runner-local and never create account 
     "return-timeout",
     "return-log-truncated",
     "return-terminated",
+    "return-command-failed",
     "return-missing-positive-evidence",
     "return-ulf-skipped",
     "unity-20113-unclassified"
