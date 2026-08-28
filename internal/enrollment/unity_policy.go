@@ -726,7 +726,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		(unityReturn < 0 ||
 			classifier != unityReturn+1 ||
 			release != classifier+1 ||
-			gate != release+1 ||
+			gate <= release ||
 			gate != len(steps)-1) {
 		a.analyzer.add("unsafe-central-return-suffix", workflowPath, jobName)
 	}
@@ -1106,8 +1106,7 @@ func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
 		return profile == "EditorOnly"
 	}
 	if matrix.Kind != yaml.MappingNode ||
-		mappingValue(matrix, "include") != nil ||
-		mappingValue(matrix, "exclude") != nil {
+		mappingValue(matrix, "include") != nil {
 		return false
 	}
 	modes := mappingValue(matrix, "test-mode")
@@ -4029,7 +4028,6 @@ func staticUnityVersionMatrix(
 	matrix := mappingValue(strategy, "matrix")
 	if matrix == nil || matrix.Kind != yaml.MappingNode ||
 		mappingValue(matrix, "include") != nil ||
-		mappingValue(matrix, "exclude") != nil ||
 		acquireIndex < 0 || acquireIndex >= len(steps) ||
 		returnIndex <= acquireIndex || returnIndex > len(steps) {
 		return false
@@ -4046,6 +4044,9 @@ func staticUnityVersionMatrix(
 	for index := 0; index < len(matrix.Content); index += 2 {
 		key := scalarValue(matrix.Content[index])
 		values := matrix.Content[index+1]
+		if key == "exclude" {
+			continue
+		}
 		if matrix.Content[index].Kind != yaml.ScalarNode || key == "" ||
 			values.Kind != yaml.SequenceNode || len(values.Content) == 0 ||
 			!strings.Contains(suffix, "${{ matrix."+key+" }}") {
