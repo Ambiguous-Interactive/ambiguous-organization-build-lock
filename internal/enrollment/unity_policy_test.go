@@ -511,15 +511,6 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
 			code: "missing-unity-editor-check",
 		},
 		{
-			name: "excluded matrix shape",
-			from: "      matrix:\n        mode: [EditMode]\n",
-			to: "      matrix:\n" +
-				"        mode: [EditMode]\n" +
-				"        exclude:\n" +
-				"          - mode: EditMode\n",
-			code: "missing-unity-editor-check",
-		},
-		{
 			name: "untrusted editor helper revision",
 			from: trustedEditorRevision,
 			to:   testSHA,
@@ -2593,6 +2584,24 @@ func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentAcceptsDiagnosticsBetweenReleaseAndFinalGate(t *testing.T) {
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"      - name: Require confirmed cleanup\n",
+		"      - name: Upload post-release diagnostics\n        if: always()\n        uses: actions/upload-artifact@3d3c42e5aac5ba805825da76410c181273ba90b1\n      - name: Require confirmed cleanup\n",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("post-release diagnostics before the final gate produced findings: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentAcceptsReviewedAlternateEditorLayout(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
@@ -2615,7 +2624,7 @@ func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T
 	workflow := strings.Replace(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),
 		"        mode: [EditMode]\n",
-		"        test-mode: [editmode, standalone]\n        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+		"        test-mode: [editmode, standalone]\n        unity-version: [2022.3.45f1, 6000.5.2f1]\n        exclude: ${{ fromJSON(needs.config.outputs.matrix-exclude) }}\n",
 		1,
 	)
 	workflow = strings.ReplaceAll(
@@ -2750,7 +2759,6 @@ func TestUnityEnrollmentRejectsUnboundedCentralReturnVersionMatrix(t *testing.T)
 		{name: "case duplicate version", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1, 6000.5.2F1]\n"},
 		{name: "expression-valued axis", matrix: "        mode: ['${{ matrix.unity-version }}']\n        unity-version: [6000.5.2f1]\n"},
 		{name: "include override", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1]\n        include:\n          - unity-version: latest\n"},
-		{name: "exclude rewrite surface", matrix: "        mode: [EditMode]\n        unity-version: [6000.5.2f1]\n        exclude:\n          - unity-version: 6000.5.2f1\n"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
