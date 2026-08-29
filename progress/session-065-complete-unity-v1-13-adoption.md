@@ -130,12 +130,28 @@ return, digest classification, typed release, and final cleanup gate. The
 subsequent package export smoke and `Unity CI Success` aggregate also passed,
 making protected main fully green on attempt 2.
 
+The final pull-request audit found Dependabot PR #589, a one-line cspell
+10.0.1-to-10.1.1 development-dependency update whose original head predated
+the Unity migration. Dependabot rebased it onto PR #592's protected-main
+commit. Repo lint, contracts, type-checking, both formatters, Bugbot, and the
+truthful Unity aggregate passed on that exact head; licensed tiers correctly
+skipped for the package-only pull-request diff. The PR was then merged.
+Its protected-main push intentionally exercised the full licensed matrix.
+Runner gaps and an older unrelated PR serialized parts of the run, while the
+watchdog correctly distinguished healthy/busy queues from dispatcher stalls.
+All 14 Windows tiers, package export smoke, and `Unity CI Success` passed in
+run `33222055523`; Repo Lint `33222055685` and Local Gates `33222055574` also
+passed.
+
 ## Issue and pull-request disposition
 
 - Unity Helpers #411 closed with PR #592 after the Windows migration and live
   cleanup proof completed its acceptance boundary.
 - Unity Helpers PR #590 was closed as superseded after preserving its safe pin
   updates in #592 and recording the missing-digest RCA.
+- Unity Helpers PR #589 was rebased onto the migrated main branch and merged
+  after its exact one-line cspell update passed the current lint, contract,
+  type-check, formatting, aggregate, and review surface.
 - Central #212 was closed again as a duplicate: #218 authorized v1.13.0, #219
   enabled the safe analyzer shapes, and #592 completed Windows adoption. The
   only remaining platform boundary is central #153 with Unity Helpers #323.
@@ -174,4 +190,6 @@ and adversarial review, so no competing `.llm` rule was added.
 - Unity post-merge validation: Unity Tests `33215639494` (attempt 2), Repo
   Lint `33215638943`, Local Gates `33215639026`, Docs Pages `33215642080`,
   and Docs Wiki `33215639376`
+- Unity dependency update: PR #589
+  (`5fee0dd5bb9221fff2b40df39decd4921fdf4b01`)
 - Final central evidence: this progress record
