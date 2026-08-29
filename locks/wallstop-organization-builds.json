@@ -27,20 +27,6 @@
       "acquiredAt": "2026-08-29T01:19:46.408Z",
       "expiresAt": "2026-08-29T05:19:46.408Z",
       "runnerId": "DAD-MACHINE"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:33221089924:unitypackage-smoke:unitypackage-smoke-33221089924",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "33221089924",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33221089924",
-      "queuedAt": "2026-08-29T01:20:50.815Z",
-      "acquiredAt": "2026-08-29T01:20:53.157Z",
-      "expiresAt": "2026-08-29T05:20:53.157Z",
-      "runnerId": "GitHub Actions 1000251429",
-      "jobId": "99030190696"
     }
   ],
   "queue": [
@@ -57,7 +43,23 @@
       "jobId": "99024324835"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "47fa5b42-4350-4dda-9832-4744810f36c7",
+      "holderId": "Ambiguous-Interactive/unity-helpers:33221089924:unitypackage-smoke:unitypackage-smoke-33221089924",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unitypackage-smoke",
+      "runId": "33221089924",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33221089924",
+      "runnerId": "GitHub Actions 1000251429",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-29T01:23:53.336Z",
+      "availableAt": "2026-08-29T01:23:54.336Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-08-29T01:21:10.531Z"
+  "updatedAt": "2026-08-29T01:23:53.336Z"
 }
