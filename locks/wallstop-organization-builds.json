@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:33243169764:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "33243169764",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/33243169764",
+    "queuedAt": "2026-08-29T08:38:01.279Z",
+    "acquiredAt": "2026-08-29T08:40:54.359Z",
+    "expiresAt": "2026-08-29T12:40:54.359Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:33243169764:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -13,26 +24,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/33243169764",
       "queuedAt": "2026-08-29T08:38:01.279Z",
+      "acquiredAt": "2026-08-29T08:40:54.359Z",
+      "expiresAt": "2026-08-29T12:40:54.359Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "760c7b51-d108-4fe5-934c-bb6056d907fe",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33241539057:unitypackage-smoke:unitypackage-smoke-33241539057",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "33241539057",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33241539057",
-      "runnerId": "GitHub Actions 1000253065",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-29T08:40:47.972Z",
-      "availableAt": "2026-08-29T08:40:48.972Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-29T08:40:47.972Z"
+  "updatedAt": "2026-08-29T08:40:54.359Z"
 }
