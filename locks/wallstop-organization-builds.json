@@ -1,40 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:33328775362:unity-tests-standalone:6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "33328775362",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33328775362",
+    "queuedAt": "2026-08-30T19:33:23.752Z",
+    "acquiredAt": "2026-08-30T19:33:26.681Z",
+    "expiresAt": "2026-08-30T23:33:26.681Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "99309892358"
+  },
+  "holders": [
     {
-      "reservationId": "c3b96cf1-fa52-4449-bd47-8f719982bf7a",
-      "holderId": "Ambiguous-Interactive/DxMessaging:33328441534:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "33328441534",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33328441534",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "unity-return-400006",
-      "createdAt": "2026-08-30T19:29:09.518Z"
-    },
-    {
-      "reservationId": "79ede063-d0d4-461a-8fe9-b5de2ff9a9d6",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33328775362:unity-tests:6000.5.2f1-playmode",
+      "holderId": "Ambiguous-Interactive/unity-helpers:33328775362:unity-tests-standalone:6000.3.16f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
-      "job": "unity-tests",
+      "job": "unity-tests-standalone",
       "runId": "33328775362",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33328775362",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-30T19:32:59.617Z",
-      "availableAt": "2026-08-30T19:33:00.617Z"
+      "queuedAt": "2026-08-30T19:33:23.752Z",
+      "acquiredAt": "2026-08-30T19:33:26.681Z",
+      "expiresAt": "2026-08-30T23:33:26.681Z",
+      "runnerId": "ELI-MACHINE",
+      "jobId": "99309892358"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-08-30T19:32:59.617Z"
+  "updatedAt": "2026-08-30T19:33:26.681Z"
 }
