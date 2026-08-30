@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:33334473584:unity-tests:2022.3.45f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "33334473584",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33334473584",
-    "queuedAt": "2026-08-30T20:50:20.926Z",
-    "acquiredAt": "2026-08-30T20:51:18.425Z",
-    "expiresAt": "2026-08-31T00:51:18.425Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "99318829797"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:33334473584:unity-tests:2022.3.45f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "33334473584",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33334473584",
-      "queuedAt": "2026-08-30T20:50:20.926Z",
-      "acquiredAt": "2026-08-30T20:51:18.425Z",
-      "expiresAt": "2026-08-31T00:51:18.425Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "99318829797"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:33334473584:unity-tests:6000.5.2f1-editmode",
@@ -59,8 +31,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
+    },
+    {
+      "reservationId": "9ec00bbc-aca2-4f70-b52f-7126f9264682",
+      "holderId": "Ambiguous-Interactive/unity-helpers:33334473584:unity-tests:2022.3.45f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "33334473584",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33334473584",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-30T20:52:10.513Z",
+      "availableAt": "2026-08-30T20:52:11.513Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-30T20:51:38.636Z"
+  "updatedAt": "2026-08-30T20:52:10.513Z"
 }
