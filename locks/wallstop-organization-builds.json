@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-single-threaded",
+    "runId": "33335027480",
+    "runAttempt": "2",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
+    "queuedAt": "2026-08-30T23:06:39.851Z",
+    "acquiredAt": "2026-08-30T23:11:11.380Z",
+    "expiresAt": "2026-08-31T03:11:11.380Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "99330681001"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unity-tests-single-threaded:6000.3.16f1-editmode-single-threaded",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,10 +25,13 @@
       "runAttempt": "2",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
       "queuedAt": "2026-08-30T23:06:39.851Z",
+      "acquiredAt": "2026-08-30T23:11:11.380Z",
+      "expiresAt": "2026-08-31T03:11:11.380Z",
       "runnerId": "ELI-MACHINE",
       "jobId": "99330681001"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "ec811b6e-b966-4d45-af0f-51fe10c627d4",
@@ -31,23 +46,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
-    },
-    {
-      "reservationId": "70db744e-5f97-4e45-8cce-e50d8d92cc3c",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unity-tests-standalone:2022.3.45f1-standalone",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-standalone",
-      "runId": "33335027480",
-      "runAttempt": "2",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-30T23:11:05.354Z",
-      "availableAt": "2026-08-30T23:11:06.354Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-30T23:11:05.355Z"
+  "updatedAt": "2026-08-30T23:11:11.380Z"
 }
