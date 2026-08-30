@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:33339298699:unity-tests:6000.3.16f1-all-modes",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "33339298699",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33339298699",
+    "queuedAt": "2026-08-30T23:24:21.807Z",
+    "acquiredAt": "2026-08-30T23:36:46.467Z",
+    "expiresAt": "2026-08-31T03:36:46.467Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "99331917263"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:33339298699:unity-tests:6000.3.16f1-all-modes",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,9 +25,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33339298699",
       "queuedAt": "2026-08-30T23:24:21.807Z",
+      "acquiredAt": "2026-08-30T23:36:46.467Z",
+      "expiresAt": "2026-08-31T03:36:46.467Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "99331917263"
-    },
+    }
+  ],
+  "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:33338717346:unity-tests:6000.5.2f1-all-modes",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -43,23 +59,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
-    },
-    {
-      "reservationId": "0718d144-2215-4511-98a7-599cb52ed7a0",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unitypackage-smoke:unitypackage-smoke-33335027480",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "33335027480",
-      "runAttempt": "3",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
-      "runnerId": "GitHub Actions 1000261567",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-30T23:36:31.191Z",
-      "availableAt": "2026-08-30T23:36:32.191Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-30T23:36:31.191Z"
+  "updatedAt": "2026-08-30T23:36:46.467Z"
 }
