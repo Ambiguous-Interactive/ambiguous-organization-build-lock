@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unity-tests-standalone:2021.3.45f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests-standalone",
+    "runId": "33335027480",
+    "runAttempt": "2",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
+    "queuedAt": "2026-08-30T22:40:16.386Z",
+    "acquiredAt": "2026-08-30T22:43:11.682Z",
+    "expiresAt": "2026-08-31T02:43:11.682Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "99330680971"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:33335027480:unity-tests-standalone:2021.3.45f1-standalone",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -13,10 +25,13 @@
       "runAttempt": "2",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33335027480",
       "queuedAt": "2026-08-30T22:40:16.386Z",
+      "acquiredAt": "2026-08-30T22:43:11.682Z",
+      "expiresAt": "2026-08-31T02:43:11.682Z",
       "runnerId": "ELI-MACHINE",
       "jobId": "99330680971"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "ec811b6e-b966-4d45-af0f-51fe10c627d4",
@@ -31,23 +46,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
-    },
-    {
-      "reservationId": "e358cacc-4958-4724-925a-a7efd7034508",
-      "holderId": "Ambiguous-Interactive/DxMessaging:33338717346:unity-tests:2021.3.45f1-all-modes",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "33338717346",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33338717346",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-30T22:42:56.013Z",
-      "availableAt": "2026-08-30T22:42:57.013Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-30T22:42:56.013Z"
+  "updatedAt": "2026-08-30T22:43:11.682Z"
 }
