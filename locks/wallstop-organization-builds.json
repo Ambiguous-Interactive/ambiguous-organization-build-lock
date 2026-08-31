@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DoxReloaded:33342571717:unity-tests:unity-tests",
-    "repository": "Ambiguous-Interactive/DoxReloaded",
-    "workflow": "Build and Deploy",
-    "job": "unity-tests",
-    "runId": "33342571717",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33342571717",
-    "queuedAt": "2026-08-31T00:03:15.149Z",
-    "acquiredAt": "2026-08-31T00:05:05.236Z",
-    "expiresAt": "2026-08-31T04:05:05.236Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "99340813719"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DoxReloaded:33342571717:unity-tests:unity-tests",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "33342571717",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33342571717",
-      "queuedAt": "2026-08-31T00:03:15.149Z",
-      "acquiredAt": "2026-08-31T00:05:05.236Z",
-      "expiresAt": "2026-08-31T04:05:05.236Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "99340813719"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:33342645614:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
@@ -59,8 +31,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
+    },
+    {
+      "reservationId": "fbe243c1-c60e-4804-8635-3d0d99cd472b",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:33342571717:unity-tests:unity-tests",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
+      "job": "unity-tests",
+      "runId": "33342571717",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33342571717",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-08-31T00:15:35.991Z",
+      "availableAt": "2026-08-31T00:15:36.991Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-31T00:05:27.641Z"
+  "updatedAt": "2026-08-31T00:15:35.992Z"
 }
