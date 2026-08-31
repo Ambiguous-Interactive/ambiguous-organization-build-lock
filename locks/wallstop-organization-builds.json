@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:33342571717:unity-tests:unity-tests",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "33342571717",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33342571717",
+    "queuedAt": "2026-08-31T00:03:15.149Z",
+    "acquiredAt": "2026-08-31T00:05:05.236Z",
+    "expiresAt": "2026-08-31T04:05:05.236Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "99340813719"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:33342571717:unity-tests:unity-tests",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,10 +25,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33342571717",
       "queuedAt": "2026-08-31T00:03:15.149Z",
+      "acquiredAt": "2026-08-31T00:05:05.236Z",
+      "expiresAt": "2026-08-31T04:05:05.236Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "99340813719"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "ec811b6e-b966-4d45-af0f-51fe10c627d4",
@@ -31,23 +46,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-08-30T20:45:35.893Z"
-    },
-    {
-      "reservationId": "9a1a1dba-9ff1-4361-bc34-e74d625281c0",
-      "holderId": "Ambiguous-Interactive/DxMessaging:33342645619:unity-tests:2021.3.45f1-all-modes",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "33342645619",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/33342645619",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-08-31T00:04:54.546Z",
-      "availableAt": "2026-08-31T00:04:55.546Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-08-31T00:04:54.547Z"
+  "updatedAt": "2026-08-31T00:05:05.237Z"
 }
