@@ -2,34 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/qora-redux:33991000664:unity:qora",
-    "repository": "Ambiguous-Interactive/qora-redux",
-    "workflow": "Unity Validation",
-    "job": "unity",
-    "runId": "33991000664",
+    "holderId": "Ambiguous-Interactive/unity-helpers:33991528769:unity-tests:6000.5.2f1-tests",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "33991528769",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/33991000664",
-    "queuedAt": "2026-09-05T20:52:58.456Z",
-    "acquiredAt": "2026-09-05T20:53:01.330Z",
-    "expiresAt": "2026-09-06T00:53:01.330Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "101373487571"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33991528769",
+    "queuedAt": "2026-09-05T20:57:57.115Z",
+    "acquiredAt": "2026-09-05T20:57:59.801Z",
+    "expiresAt": "2026-09-06T00:57:59.801Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "101374557473"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/qora-redux:33991000664:unity:qora",
-      "repository": "Ambiguous-Interactive/qora-redux",
-      "workflow": "Unity Validation",
-      "job": "unity",
-      "runId": "33991000664",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/33991000664",
-      "queuedAt": "2026-09-05T20:52:58.456Z",
-      "acquiredAt": "2026-09-05T20:53:01.330Z",
-      "expiresAt": "2026-09-06T00:53:01.330Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "101373487571"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:33991528769:unity-tests:6000.5.2f1-tests",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -46,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "7c4a55c2-4bc0-43d5-bca4-5fa0e6c0f378",
+      "holderId": "Ambiguous-Interactive/qora-redux:33991000664:unity:qora",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Validation",
+      "job": "unity",
+      "runId": "33991000664",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/33991000664",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-05T21:01:14.795Z",
+      "availableAt": "2026-09-05T21:01:15.795Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-09-05T20:57:59.802Z"
+  "updatedAt": "2026-09-05T21:01:14.796Z"
 }
