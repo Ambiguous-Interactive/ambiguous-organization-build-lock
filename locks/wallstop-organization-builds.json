@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:33992306595:unity-tests:unity-tests",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "33992306595",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33992306595",
+    "queuedAt": "2026-09-05T21:38:27.637Z",
+    "acquiredAt": "2026-09-05T21:40:45.473Z",
+    "expiresAt": "2026-09-06T01:40:45.473Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "101376675707"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DoxReloaded:33992306595:unity-tests:unity-tests",
       "repository": "Ambiguous-Interactive/DoxReloaded",
@@ -13,27 +25,14 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/33992306595",
       "queuedAt": "2026-09-05T21:38:27.637Z",
+      "acquiredAt": "2026-09-05T21:40:45.473Z",
+      "expiresAt": "2026-09-06T01:40:45.473Z",
       "runnerId": "ELI-MACHINE",
       "jobId": "101376675707"
     }
   ],
-  "reservations": [
-    {
-      "reservationId": "c54672c7-5f23-48e0-8b2a-3ffa5df20b9f",
-      "holderId": "Ambiguous-Interactive/unity-helpers:33991567446:unitypackage-smoke:unitypackage-smoke-33991567446",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unitypackage-smoke",
-      "runId": "33991567446",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/33991567446",
-      "runnerId": "GitHub Actions 1000284069",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-05T21:40:39.385Z",
-      "availableAt": "2026-09-05T21:40:40.385Z"
-    }
-  ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-09-05T21:40:39.385Z"
+  "updatedAt": "2026-09-05T21:40:45.473Z"
 }
