@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:34043049226:unity-validation:isho-ci",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-validation",
-    "runId": "34043049226",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34043049226",
-    "queuedAt": "2026-09-06T15:41:12.004Z",
-    "acquiredAt": "2026-09-06T15:45:33.501Z",
-    "expiresAt": "2026-09-06T19:45:33.501Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:34043049226:unity-validation:isho-ci",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-validation",
-      "runId": "34043049226",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34043049226",
-      "queuedAt": "2026-09-06T15:41:12.004Z",
-      "acquiredAt": "2026-09-06T15:45:33.501Z",
-      "expiresAt": "2026-09-06T19:45:33.501Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/doughby-td:34043133121:unity:doughby-td",
@@ -56,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-09-06T14:36:50.814Z"
+    },
+    {
+      "reservationId": "4c47ca32-099e-42e1-a6ff-17fb3a677ff8",
+      "holderId": "Ambiguous-Interactive/IshoBoy:34043049226:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "34043049226",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34043049226",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-06T15:57:00.518Z",
+      "availableAt": "2026-09-06T15:57:01.518Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-06T15:45:51.213Z"
+  "updatedAt": "2026-09-06T15:57:00.518Z"
 }
