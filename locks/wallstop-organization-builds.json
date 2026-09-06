@@ -1,9 +1,21 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DxMessaging:34035927987:unity-tests:6000.5.2f1-all-modes",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "34035927987",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34035927987",
+    "queuedAt": "2026-09-06T15:26:07.719Z",
+    "acquiredAt": "2026-09-06T15:32:40.522Z",
+    "expiresAt": "2026-09-06T19:32:40.522Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "101493892133"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:34035927987:unity-tests:6000.5.2f1-all-modes",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -13,10 +25,13 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34035927987",
       "queuedAt": "2026-09-06T15:26:07.719Z",
+      "acquiredAt": "2026-09-06T15:32:40.522Z",
+      "expiresAt": "2026-09-06T19:32:40.522Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "101493892133"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "ceea97ba-5481-4f58-97bb-edeaec8dc82c",
@@ -31,23 +46,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-09-06T14:36:50.814Z"
-    },
-    {
-      "reservationId": "2b19190a-f91d-47df-a145-17e583027d22",
-      "holderId": "Ambiguous-Interactive/IshoBoy:34041594448:unity-validation:isho-ci",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-validation",
-      "runId": "34041594448",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34041594448",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-06T15:32:39.227Z",
-      "availableAt": "2026-09-06T15:32:40.227Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-06T15:32:39.228Z"
+  "updatedAt": "2026-09-06T15:32:40.522Z"
 }
