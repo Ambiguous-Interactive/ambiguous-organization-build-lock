@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:34046062955:unity-tests:2022.3.45f1-tests",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "34046062955",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34046062955",
-    "queuedAt": "2026-09-06T17:12:02.661Z",
-    "acquiredAt": "2026-09-06T17:19:21.851Z",
-    "expiresAt": "2026-09-06T21:19:21.851Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "101521244859"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:34046062955:unity-tests:2022.3.45f1-tests",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "34046062955",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34046062955",
-      "queuedAt": "2026-09-06T17:12:02.661Z",
-      "acquiredAt": "2026-09-06T17:19:21.851Z",
-      "expiresAt": "2026-09-06T21:19:21.851Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "101521244859"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:34045466880:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
@@ -59,8 +31,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-09-06T14:36:50.814Z"
+    },
+    {
+      "reservationId": "57134249-15de-4289-88cf-938ea20067b6",
+      "holderId": "Ambiguous-Interactive/unity-helpers:34046062955:unity-tests:2022.3.45f1-tests",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "34046062955",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34046062955",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-06T17:33:41.969Z",
+      "availableAt": "2026-09-06T17:33:42.969Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-06T17:20:15.938Z"
+  "updatedAt": "2026-09-06T17:33:41.969Z"
 }
