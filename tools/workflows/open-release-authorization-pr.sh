@@ -29,21 +29,43 @@ fi
 # published. Without an explicit version, authorize the newest published
 # release that the policy does not list yet, so a failed run is retried by
 # the next scheduled or manual run instead of staying silent.
+release_tags=""
 if [[ -z "${RELEASE_VERSION}" ]]; then
+  if ! release_tags="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+    --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))] | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber)) | reverse | .[].tag_name' | tr -d '"')"; then
+    echo "::error::Could not list published releases for authorization discovery." >&2
+    exit 1
+  fi
+  unexamined_tags=0
   while IFS= read -r tag; do
-    git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" >/dev/null 2>&1 || continue
-    candidate_sha="$(git rev-parse "${tag}^{commit}" 2>/dev/null || true)"
-    if [[ "${candidate_sha}" =~ ^[a-f0-9]{40}$ ]] && [[ "$(sha_is_authorized "${candidate_sha}")" != "true" ]]; then
+    if [[ -z "${tag}" ]]; then
+      continue
+    fi
+    if ! git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" >/dev/null 2>&1; then
+      unexamined_tags=1
+      continue
+    fi
+    candidate_sha="$(git rev-parse "${tag}^{commit}" 2>/dev/null)" || {
+      unexamined_tags=1
+      continue
+    }
+    if [[ ! "${candidate_sha}" =~ ^[a-f0-9]{40}$ ]]; then
+      unexamined_tags=1
+      continue
+    fi
+    if [[ "$(sha_is_authorized "${candidate_sha}")" != "true" ]]; then
       RELEASE_VERSION="${tag#v}"
       break
     fi
-  done < <(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
-    --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))] | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber)) | reverse | .[].tag_name' | tr -d '"')
-fi
-
-if [[ -z "${RELEASE_VERSION}" ]]; then
-  echo "Every published release is already authorized."
-  exit 0
+  done <<<"${release_tags}"
+  if [[ -z "${RELEASE_VERSION}" && "${unexamined_tags}" == "1" ]]; then
+    echo "::error::Could not examine every published release tag; refusing to claim all releases are authorized." >&2
+    exit 1
+  fi
+  if [[ -z "${RELEASE_VERSION}" ]]; then
+    echo "Every published release is already authorized."
+    exit 0
+  fi
 fi
 
 git fetch --force origin "refs/tags/v${RELEASE_VERSION}:refs/tags/v${RELEASE_VERSION}"
@@ -82,6 +104,12 @@ if [[ "${open_prs}" != "0" ]]; then
   exit 0
 fi
 
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+# Branch from the live default branch, before any file mutation, so a policy
+# change on main since the release cannot block this retry with a dirty file.
+git checkout -B "${branch}" origin/main
+
 node - "${release_sha}" "${policy_path}" <<'EOF'
 const fs = require("node:fs");
 const [releaseSha, policyPath] = process.argv.slice(2);
@@ -101,9 +129,6 @@ for (const key of ["approvedLockShas", "approvedReturnShas"]) {
 fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
 EOF
 
-git config user.name "github-actions[bot]"
-git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-git checkout -B "${branch}" "${release_sha}"
 git add "${policy_path}"
 git commit -m "chore: authorize v${RELEASE_VERSION} adoption"
 git push --force origin "${branch}"

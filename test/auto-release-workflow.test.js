@@ -53,6 +53,8 @@ test("release authorization stays a reviewed human merge decision", () => {
   assert.match(script, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\?per_page=30"/);
   assert.match(script, /draft == false and \.prerelease == false/);
   assert.match(script, /split\("\."\) \| map\(tonumber\)/);
+  assert.match(script, /Could not list published releases for authorization discovery\./);
+  assert.match(script, /refusing to claim all releases are authorized/);
   assert.match(script, /Every published release is already authorized\./);
   assert.match(script, /git fetch --force origin "refs\/tags\/v\$\{RELEASE_VERSION\}:/);
   assert.match(script, /git rev-parse "v\$\{RELEASE_VERSION\}\^\{commit\}"/);
@@ -60,7 +62,8 @@ test("release authorization stays a reviewed human merge decision", () => {
   assert.match(script, /approvedLockShas/);
   assert.match(script, /approvedReturnShas/);
   assert.match(script, /is already authorized/);
-  assert.match(script, /git checkout -B "\$\{branch\}" "\$\{release_sha\}"/);
+  assert.match(script, /git checkout -B "\$\{branch\}" origin\/main/);
+  assert.match(script, /before any file mutation/);
   assert.match(script, /git commit -m "chore: authorize v\$\{RELEASE_VERSION\} adoption"/);
   assert.match(script, /gh pr create/);
   assert.match(script, /gh workflow run "Build lock CI" --ref "\$\{branch\}"/);
@@ -72,6 +75,10 @@ test("release authorization stays a reviewed human merge decision", () => {
   assert.doesNotMatch(script, /https:\/\/[^\n]*\$\{\{\s*secrets\./);
   const rawTokenUse = script.match(/^\s*(?:(?!GH_TOKEN).)*token/gim) || [];
   assert.deepEqual(rawTokenUse, []);
+  const checkoutLine = script.match(/git checkout -B "\$\{branch\}".*/)[0];
+  const mutationLine = script.indexOf("Release SHA is not a full lowercase commit SHA.");
+  assert.notEqual(mutationLine, -1);
+  assert.ok(script.indexOf(checkoutLine) < mutationLine, "branch checkout must precede policy mutation");
 });
 
 test("authorization opens on every run so a failed attempt is retried", () => {
