@@ -162,12 +162,16 @@ function restoreWindowsFileTimes(filePath, stat) {
   );
 }
 
-function expected(status, health, reason) {
+const LICENSING_CODES_CHECKED = "20111,20113,400006";
+
+function expected(status, health, reason, licensingCodeMatched = "none") {
   return {
     resourceSafe: status === "confirmed",
     cleanupStatus: status,
     health,
-    reason
+    reason,
+    licensingCodesChecked: LICENSING_CODES_CHECKED,
+    licensingCodeMatched
   };
 }
 
@@ -187,13 +191,13 @@ test("classification precedence is fail-closed and proof is return-log scoped", 
     ["bare skip with suffix", 0, `${PROOF}Serial number unavailable for ULF return; skipping operation\n`, [], true, true, expected("unknown", "healthy", "return-ulf-skipped")],
     ["incidental skip phrase", 0, `${PROOF}checking for ${SKIP}\n`, [], true, true, expected("confirmed", "healthy", "cleanup-confirmed")],
     ["supplemental skip", 0, PROOF, [Buffer.from(`${SKIP}\n`)], true, true, expected("confirmed", "healthy", "cleanup-confirmed")],
-    ["400006 vetoes proof", 0, `${PROOF}400006\n`, [], true, true, expected("unknown", "healthy", "unity-return-400006")],
-    ["supplemental 400006", 0, PROOF, [Buffer.from("code 400006\n")], true, true, expected("unknown", "healthy", "unity-return-400006")],
-    ["20113", 0, `${PROOF}20113\n`, [], true, true, expected("unknown", "healthy", "unity-20113-unclassified")],
-    ["supplemental 20113", 0, PROOF, [Buffer.from("code 20113\n")], true, true, expected("unknown", "healthy", "unity-20113-unclassified")],
-    ["20111 beats proof", 0, `${PROOF}20111\n`, [], true, true, expected("unknown", "blocked", "unity-account-limit-20111")],
-    ["supplemental 20111", 0, PROOF, [Buffer.from("code 20111\n")], true, true, expected("unknown", "blocked", "unity-account-limit-20111")],
-    ["20111 beats incomplete capture", 0, "20111\n", [], true, false, expected("unknown", "blocked", "unity-account-limit-20111")],
+    ["400006 vetoes proof", 0, `${PROOF}400006\n`, [], true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["supplemental 400006", 0, PROOF, [Buffer.from("code 400006\n")], true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["20113", 0, `${PROOF}20113\n`, [], true, true, expected("unknown", "healthy", "unity-20113-unclassified", "20113")],
+    ["supplemental 20113", 0, PROOF, [Buffer.from("code 20113\n")], true, true, expected("unknown", "healthy", "unity-20113-unclassified", "20113")],
+    ["20111 beats proof", 0, `${PROOF}20111\n`, [], true, true, expected("unknown", "blocked", "unity-account-limit-20111", "20111")],
+    ["supplemental 20111", 0, PROOF, [Buffer.from("code 20111\n")], true, true, expected("unknown", "blocked", "unity-account-limit-20111", "20111")],
+    ["20111 beats incomplete capture", 0, "20111\n", [], true, false, expected("unknown", "blocked", "unity-account-limit-20111", "20111")],
     ["capture incomplete", 0, PROOF, [], true, false, expected("unknown", "healthy", "return-log-truncated")],
     ["timeout", 124, PROOF, [], true, true, expected("unknown", "healthy", "return-timeout")],
     ["numeric substring is not a code", 0, `${PROOF}x201110\n`, [], true, true, expected("confirmed", "healthy", "cleanup-confirmed")]
@@ -224,6 +228,39 @@ test("classification precedence is fail-closed and proof is return-log scoped", 
       );
     });
   }
+});
+
+test("generic return failure attributes the checked licensing codes without exposing the log", () => {
+  const verdict = classifyEvidence({
+    exitCode: 1,
+    returnLog: Buffer.from("Return command failed.\n"),
+    supplemental: [],
+    commandCompleted: true,
+    captureComplete: true
+  });
+  assert.equal(verdict.reason, "return-command-failed");
+  assert.equal(verdict.licensingCodesChecked, "20111,20113,400006");
+  assert.equal(verdict.licensingCodeMatched, "none");
+  assert.equal(JSON.stringify(verdict).includes("Return command failed"), false);
+});
+
+test("completed classifier outputs carry bounded licensing-code attribution", () => {
+  const t = { after: (hook) => hook() };
+  const item = centralEvidenceFixture(t);
+  fs.writeFileSync(item.returnLog, "Return command failed.\n");
+  const inputs = centralInputs(item);
+  inputs["return-exit-code"] = "1";
+  runClassifier({
+    environment: item.environment,
+    inputs,
+    outputPath: item.outputPath
+  });
+  const outputs = fs.readFileSync(item.outputPath, "utf8");
+  assert.match(outputs, /^resource-reason=return-command-failed$/m);
+  assert.match(outputs, /^licensing-codes-checked=20111,20113,400006$/m);
+  assert.match(outputs, /^licensing-code-matched=none$/m);
+  assert.match(outputs, /^classification-complete=true$/m);
+  assert.doesNotMatch(outputs, /Return command failed/);
 });
 
 test("bounded collection rejects unsafe evidence shapes and produces a stable digest", async (t) => {
