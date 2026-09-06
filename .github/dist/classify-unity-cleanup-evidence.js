@@ -24,6 +24,12 @@ const ULF_SKIPPED_PATTERN =
 const ACCOUNT_BLOCKED_PATTERN = /(?:^|[^0-9])20111(?:$|[^0-9])/;
 const UNCLASSIFIED_20113_PATTERN = /(?:^|[^0-9])20113(?:$|[^0-9])/;
 const RETURN_400006_PATTERN = /(?:^|[^0-9])400006(?:$|[^0-9])/;
+const LICENSING_CODES_CHECKED = "20111,20113,400006";
+const LICENSING_CODES_PRECEDENCE = [
+  ["20111", ACCOUNT_BLOCKED_PATTERN],
+  ["400006", RETURN_400006_PATTERN],
+  ["20113", UNCLASSIFIED_20113_PATTERN]
+];
 const ZERO_DIGEST = "0".repeat(64);
 const EVIDENCE_SUFFIX_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
@@ -608,6 +614,15 @@ function evidenceText(value) {
   return strictText(Buffer.isBuffer(value) ? value : Buffer.from(value));
 }
 
+function firstLicensingCodeMatch(combined) {
+  for (const [code, pattern] of LICENSING_CODES_PRECEDENCE) {
+    if (pattern.test(combined)) {
+      return code;
+    }
+  }
+  return "none";
+}
+
 function classifyEvidence({
   exitCode,
   returnLog,
@@ -618,6 +633,25 @@ function classifyEvidence({
   const returnText = evidenceText(returnLog);
   const supplementalText = supplemental.map(evidenceText);
   const combined = [returnText, ...supplementalText].join("\n");
+  const verdict = classifyEvidenceVerdict({
+    exitCode,
+    returnText,
+    combined,
+    commandCompleted,
+    captureComplete
+  });
+  verdict.licensingCodesChecked = LICENSING_CODES_CHECKED;
+  verdict.licensingCodeMatched = firstLicensingCodeMatch(combined);
+  return verdict;
+}
+
+function classifyEvidenceVerdict({
+  exitCode,
+  returnText,
+  combined,
+  commandCompleted,
+  captureComplete
+}) {
   if (ACCOUNT_BLOCKED_PATTERN.test(combined)) {
     return {
       resourceSafe: false,
@@ -714,6 +748,8 @@ function appendOutputs(outputPath, values) {
     `resource-cleanup-status=${values.cleanupStatus}`,
     `resource-health=${values.health}`,
     `resource-reason=${values.reason}`,
+    `licensing-codes-checked=${values.licensingCodesChecked}`,
+    `licensing-code-matched=${values.licensingCodeMatched}`,
     `classification-complete=${values.classificationComplete ? "true" : "false"}`,
     `evidence-digest=${values.evidenceDigest}`
   ];
@@ -735,6 +771,8 @@ function run({
     cleanupStatus: "unknown",
     health: "healthy",
     reason: "return-log-truncated",
+    licensingCodesChecked: LICENSING_CODES_CHECKED,
+    licensingCodeMatched: "none",
     classificationComplete: false,
     evidenceDigest: ZERO_DIGEST
   };

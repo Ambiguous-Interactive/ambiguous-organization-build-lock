@@ -28,6 +28,10 @@ outputs:
     description: Healthy or blocked account health.
   resource-reason:
     description: Stable allowlisted evidence reason.
+  licensing-codes-checked:
+    description: Fixed closed set of licensing codes the classifier scans for.
+  licensing-code-matched:
+    description: Highest-precedence licensing code present in evidence, or none.
   classification-complete:
     description: True only after bounded classification and verified central return evidence deletion.
   evidence-digest:

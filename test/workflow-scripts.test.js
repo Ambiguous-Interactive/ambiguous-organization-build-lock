@@ -109,6 +109,7 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
     "auto-release.sh",
     "ci.sh",
     "onboard-unity-repository.sh",
+    "open-release-authorization-pr.sh",
     "request-unity-repository-onboarding.sh",
     "unity-enrollment-audit.sh"
   ]);

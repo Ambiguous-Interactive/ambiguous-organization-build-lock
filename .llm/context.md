@@ -42,6 +42,21 @@ indexed knowledge.
 Never weaken a fail-closed path merely to make a check green. Do not edit
 unrelated user changes in a dirty worktree.
 
+## User-facing writing
+
+Use Simplified Technical English (STE) for all copy you present to users:
+pull-request titles, descriptions, and comments, code comments, issue
+comments, commit messages, and review replies.
+
+- Keep it short. Say the needed thing in the fewest clear words.
+- Write short sentences (about 20 words or fewer), one idea each.
+- Use active voice and simple everyday words.
+- No idioms, jokes, marketing words, or filler.
+- In lists, keep one point per bullet.
+
+`progress/` records still keep their required evidence detail, but write even
+those in plain, direct language.
+
 ## Repository map
 
 - `.github/actions/`: public composite and JavaScript action manifests.
