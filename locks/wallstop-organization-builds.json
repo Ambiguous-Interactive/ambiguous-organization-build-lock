@@ -1,9 +1,20 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:34046523240:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "34046523240",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34046523240",
+    "queuedAt": "2026-09-06T17:11:23.634Z",
+    "acquiredAt": "2026-09-06T17:11:46.185Z",
+    "expiresAt": "2026-09-06T21:11:46.185Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:34046523240:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -13,9 +24,12 @@
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34046523240",
       "queuedAt": "2026-09-06T17:11:23.634Z",
+      "acquiredAt": "2026-09-06T17:11:46.185Z",
+      "expiresAt": "2026-09-06T21:11:46.185Z",
       "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
   "reservations": [
     {
       "reservationId": "ceea97ba-5481-4f58-97bb-edeaec8dc82c",
@@ -30,23 +44,8 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-09-06T14:36:50.814Z"
-    },
-    {
-      "reservationId": "77d7d487-c098-454a-bc22-9cac4321a0be",
-      "holderId": "Ambiguous-Interactive/doughby-td:34046673231:unity:doughby-td",
-      "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "34046673231",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/34046673231",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-06T17:11:41.047Z",
-      "availableAt": "2026-09-06T17:11:42.047Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-06T17:11:41.048Z"
+  "updatedAt": "2026-09-06T17:11:46.185Z"
 }
