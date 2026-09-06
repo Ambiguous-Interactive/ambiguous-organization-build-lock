@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:34035928005:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Performance Numbers",
-    "job": "perf-benchmarks",
-    "runId": "34035928005",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34035928005",
-    "queuedAt": "2026-09-06T15:33:15.272Z",
-    "acquiredAt": "2026-09-06T15:37:14.078Z",
-    "expiresAt": "2026-09-06T19:37:14.078Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "101493888950"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:34035928005:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "34035928005",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34035928005",
-      "queuedAt": "2026-09-06T15:33:15.272Z",
-      "acquiredAt": "2026-09-06T15:37:14.078Z",
-      "expiresAt": "2026-09-06T19:37:14.078Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "101493888950"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:34043049226:unity-validation:isho-ci",
@@ -58,8 +30,23 @@
       "state": "quarantine",
       "reason": "return-missing-positive-evidence",
       "createdAt": "2026-09-06T14:36:50.814Z"
+    },
+    {
+      "reservationId": "b406cb52-b12a-4151-be96-c9413e31cda0",
+      "holderId": "Ambiguous-Interactive/DxMessaging:34035928005:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "34035928005",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34035928005",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-06T15:45:30.141Z",
+      "availableAt": "2026-09-06T15:45:31.141Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-06T15:41:13.431Z"
+  "updatedAt": "2026-09-06T15:45:30.142Z"
 }
