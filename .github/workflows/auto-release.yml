@@ -46,7 +46,6 @@ jobs:
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
 
       - name: Open release authorization pull request
-        if: steps.semantic.outputs.new_release_published == 'true' && steps.semantic.outputs.new_release_major_version == '1'
         run: bash tools/workflows/open-release-authorization-pr.sh
         env:
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}

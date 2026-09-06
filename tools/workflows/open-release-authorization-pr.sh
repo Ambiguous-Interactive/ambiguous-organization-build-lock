@@ -6,13 +6,44 @@ set -euo pipefail
 # decision; this script never merges, edits the live policy on main, or
 # approves anything by itself.
 
-RELEASE_VERSION="${RELEASE_VERSION:?RELEASE_VERSION is required}"
+RELEASE_VERSION="${RELEASE_VERSION:-}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 policy_path="unity-enrollment-policy.json"
+
+sha_is_authorized() {
+  local release_sha="$1"
+  node - "${release_sha}" "${policy_path}" <<'EOF'
+const fs = require("node:fs");
+const [releaseSha, policyPath] = process.argv.slice(2);
+const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+process.stdout.write(String(policy.approvedLockShas.includes(releaseSha)));
+EOF
+}
 
 if [[ ! -f "${policy_path}" ]]; then
   echo "::error::Missing ${policy_path}." >&2
   exit 1
+fi
+
+# The step runs on every workflow run, not only when a release was just
+# published. Without an explicit version, authorize the newest published
+# release that the policy does not list yet, so a failed run is retried by
+# the next scheduled or manual run instead of staying silent.
+if [[ -z "${RELEASE_VERSION}" ]]; then
+  while IFS= read -r tag; do
+    git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" >/dev/null 2>&1 || continue
+    candidate_sha="$(git rev-parse "${tag}^{commit}" 2>/dev/null || true)"
+    if [[ "${candidate_sha}" =~ ^[a-f0-9]{40}$ ]] && [[ "$(sha_is_authorized "${candidate_sha}")" != "true" ]]; then
+      RELEASE_VERSION="${tag#v}"
+      break
+    fi
+  done < <(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+    --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))] | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber)) | reverse | .[].tag_name' | tr -d '"')
+fi
+
+if [[ -z "${RELEASE_VERSION}" ]]; then
+  echo "Every published release is already authorized."
+  exit 0
 fi
 
 git fetch --force origin "refs/tags/v${RELEASE_VERSION}:refs/tags/v${RELEASE_VERSION}"
@@ -23,14 +54,7 @@ if [[ ! "${release_sha}" =~ ^[a-f0-9]{40}$ ]]; then
   exit 1
 fi
 
-already_listed="$(node - "${release_sha}" "${policy_path}" <<'EOF'
-const fs = require("node:fs");
-const [releaseSha, policyPath] = process.argv.slice(2);
-const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
-process.stdout.write(String(policy.approvedLockShas.includes(releaseSha)));
-EOF
-)"
-if [[ "${already_listed}" == "true" ]]; then
+if [[ "$(sha_is_authorized "${release_sha}")" == "true" ]]; then
   echo "Release ${RELEASE_VERSION} (${release_sha}) is already authorized."
   exit 0
 fi

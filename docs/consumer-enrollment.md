@@ -39,7 +39,10 @@ usable by consumers until a reviewed pull request adds its exact SHA to
 `unity-enrollment-policy.json`.
 
 After each release, `Auto release` opens an `Authorize vN.N.N release adoption`
-pull request. Merging that pull request is the human authorization decision;
+pull request. Every workflow run, including scheduled runs and manual
+dispatch, proposes the newest release that the policy does not list yet, so a
+failed or missed proposal is retried until the pull request is merged.
+Merging that pull request is the human authorization decision;
 the automation only opens it. Review the diff between the newest previously
 approved SHA and the new release SHA. If the diff touches
 `return-unity-license` or its runtime, review that credential-bearing path
