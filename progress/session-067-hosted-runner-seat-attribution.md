@@ -114,6 +114,7 @@ rule is warranted.
 Local commits on branch `session-067-hosted-seat-attribution`, pushed to
 origin. The branch carries the merged `origin/main` state, the maintainer's
 `.gitattributes` commit, and this session's work as one aggregate pull
-request. Creating the pull request and posting the sanitized issue comment
-on #223 required API credentials this session did not have; the
-pull-request description is prepared in the session handoff.
+request: #225. GitHub API auth came from the VSCode GitHub session through
+the git askpass path; the method is recorded in
+`.llm/tasks/devcontainer-github-auth.md`. The sanitized issue comment for
+#223 stays in the pull-request handoff for posting after merge.
