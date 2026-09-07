@@ -2888,6 +2888,7 @@ func TestUnityEnrollmentAcceptsAuthorizedCentralReturnRunnerPlatforms(t *testing
 		{name: "windows runner", runsOn: "[self-hosted, Windows]", policy: unityAuditPolicy()},
 		{name: "windows runner under darwin-capable policy", runsOn: "[self-hosted, Windows]", policy: darwinAuditPolicy()},
 		{name: "darwin runner with darwin authorization", runsOn: "[self-hosted, macOS]", policy: darwinAuditPolicy()},
+		{name: "darwin runner with uppercase labels", runsOn: "[SELF-HOSTED, MACOS]", policy: darwinAuditPolicy()},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			workflow := strings.Replace(
@@ -2960,6 +2961,20 @@ func TestUnityEnrollmentRejectsDarwinCentralReturnMutations(t *testing.T) {
 			policy: darwinAuditPolicy,
 		},
 		{
+			name: "no self-hosted label",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[macos]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "windows-first dual family",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted, windows, macOS]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
 			name: "scalar runs-on",
 			mutate: func(value string) string {
 				return strings.Replace(value, "runs-on: [self-hosted, macOS]", "runs-on: self-hosted", 1)
@@ -2967,9 +2982,16 @@ func TestUnityEnrollmentRejectsDarwinCentralReturnMutations(t *testing.T) {
 			policy: darwinAuditPolicy,
 		},
 		{
-			name: "expression runs-on label",
+			name: "expression label beside a literal family",
 			mutate: func(value string) string {
-				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted, matrix.platform]", 1)
+				return strings.Replace(value, "[self-hosted, macOS]", `[self-hosted, macos, "${{ matrix.os }}"]`, 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "expression-only family label",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", `[self-hosted, "${{ matrix.os }}"]`, 1)
 			},
 			policy: darwinAuditPolicy,
 		},

@@ -101,9 +101,7 @@ func TestUnityEnrollmentRegistryRequiresBaselineRepositorySet(t *testing.T) {
 			value.ApprovedDarwinReturnSHAs = []string{testSHA, testSHA}
 		}},
 		{"darwin return not return-approved", func(value *UnityEnrollmentRegistry) {
-			value.ApprovedDarwinReturnSHAs = []string{testSHA}
-		}},
-		{"darwin return not approved globally", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedLockSHAs = []string{testSHA, strings.Repeat("b", 40)}
 			value.ApprovedReturnSHAs = []string{testSHA}
 			value.ApprovedDarwinReturnSHAs = []string{strings.Repeat("b", 40)}
 		}},

@@ -5006,9 +5006,9 @@ func centralReturnExecutionIsolated(workflow, job *yaml.Node) bool {
 
 // returnRunnerPlatform reports the one operating-system family a job's
 // literal `runs-on` list declares for the central return action. It returns an
-// empty string when the list is missing, dynamic, or does not name exactly one
-// supported family on the self-hosted fleet, so an unsupported or ambiguous
-// runner fails closed.
+// empty string when the list is missing, scalar, expression-bearing, or does
+// not name exactly one supported family on the self-hosted fleet, so an
+// unsupported or ambiguous runner fails closed.
 func returnRunnerPlatform(job *yaml.Node) string {
 	runsOn := mappingValue(job, "runs-on")
 	if runsOn == nil || runsOn.Kind != yaml.SequenceNode {
@@ -5016,7 +5016,7 @@ func returnRunnerPlatform(job *yaml.Node) string {
 	}
 	selfHosted, family := false, ""
 	for _, label := range runsOn.Content {
-		if label.Kind != yaml.ScalarNode {
+		if label.Kind != yaml.ScalarNode || strings.Contains(label.Value, "${{") {
 			return ""
 		}
 		switch strings.ToLower(label.Value) {

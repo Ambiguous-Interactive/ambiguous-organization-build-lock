@@ -147,19 +147,19 @@ Merging it is the consumer's adoption decision; the automation never merges.
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
    return/classifier/release/gate suffix.
-    Signer rotation requires a reviewed central action release. The immediate
-    signature-check-to-process-start interval assumes no concurrently executing
-    same-account process is mutating the verified editor image; sequential
-    consumer workflow steps are not trusted to establish editor identity.
-    The central return pin must appear in both `approvedLockShas` and the
-    narrower `approvedReturnShas`; older globally approved releases do not
-    authorize this credential-bearing action. The audit admits the central
-    return only on a literal self-hosted Windows or macOS runner. A Darwin
-    return is additionally admitted only when its pin is listed in
-    `approvedDarwinReturnShas`. That list is a separate reviewed authorization
-    added after a Darwin verifier release exists; until then the list is empty
-    and every Darwin return fails closed as
-    `unsafe-return-execution-environment`.
+   Signer rotation requires a reviewed central action release. The immediate
+   signature-check-to-process-start interval assumes no concurrently executing
+   same-account process is mutating the verified editor image; sequential
+   consumer workflow steps are not trusted to establish editor identity.
+   The central return pin must appear in both `approvedLockShas` and the
+   narrower `approvedReturnShas`; older globally approved releases do not
+   authorize this credential-bearing action. The audit admits the central
+   return only on a literal self-hosted Windows or macOS runner. A Darwin
+   return is additionally admitted only when its pin is listed in
+   `approvedDarwinReturnShas`. That list is a separate reviewed authorization
+   added after a Darwin verifier release exists; until then the list is empty
+   and every Darwin return fails closed as
+   `unsafe-return-execution-environment`.
 8. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
    proven. A separate fallback job is classified as `fallback-cleanup`, not as
@@ -200,7 +200,8 @@ two steps below; preflight has exactly one approved preflight action; fallback
 has exactly one approved release action; and the aggregate has exactly one
 validation action. Replace `APPROVED_LOCK_SHA` only with a reviewed SHA listed
 in `approvedLockShas`. A pin used for the central return action must also be
-listed in `approvedReturnShas`.
+listed in `approvedReturnShas`, and for a Darwin runner also in
+`approvedDarwinReturnShas`.
 
 ```yaml
 jobs:

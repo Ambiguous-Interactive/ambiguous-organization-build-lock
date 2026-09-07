@@ -35,12 +35,16 @@ references, no authorization change, synchronized documentation.
   SHA.
 - `windowsSelfHostedJob` was replaced by `returnRunnerPlatform` (exactly one
   supported family: literal `windows` or `macos`, plus literal
-  `self-hosted`; missing, dynamic, dual-family, or scalar lists fail
-  closed) and `centralReturnRunnerApproved` (Windows needs the platform;
-  Darwin additionally needs every return reference in the Darwin
-  allowlist).
+  `self-hosted`; missing, scalar, expression-bearing, dual-family, or
+  family-less lists fail closed) and `centralReturnRunnerApproved` (Windows
+  needs the platform; Darwin additionally needs every return reference in
+  the Darwin allowlist).
 - The check code stays `unsafe-return-execution-environment`. Windows
-  behavior is unchanged; no existing consumer shape moves.
+  behavior is unchanged for every single-family shape. One pathological
+  shape tightens in the fail-closed direction: a dual-family list such as
+  `[self-hosted, windows, macos]` was admitted as Windows before and now
+  fails closed, and an expression-bearing label now poisons the platform
+  instead of being ignored, because the audit cannot resolve it.
 - `cmd/audit-unity-enrollment` now passes the Darwin list into the analysis
   policy. The registry round-trip validates it through the same analyzer
   path, so there is one interpretation of the allowlists.
@@ -67,11 +71,12 @@ requires.
   - accepting `macos-latest` as Darwin reddened exactly
     `hosted_alias_label`.
 - New data-driven coverage: authorized Windows runner under both policies,
-  Darwin runner with authorization, and six fail-closed runner mutations
-  (no authorization, capability-missing SHA, dual family, hosted alias, no
-  family, scalar and expression `runs-on`). Registry mutations cover
-  mutable, duplicate, and non-return-approved Darwin entries, plus
-  round-trip retention.
+  Darwin runner with authorization (including uppercase labels), and ten
+  fail-closed runner mutations (no authorization, capability-missing SHA,
+  dual family in both orders, hosted alias, no family, no self-hosted
+  label, scalar `runs-on`, and expression-bearing labels beside and instead
+  of a literal family). Registry mutations cover mutable, duplicate, and
+  non-return-approved Darwin entries, plus round-trip retention.
 - `test/documentation-policy.test.js` pins the new key's shape and that the
   enrollment contract documents it.
 
