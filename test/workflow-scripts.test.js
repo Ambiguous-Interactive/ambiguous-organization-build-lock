@@ -300,6 +300,246 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
   assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
 });
 
+const revalidateRepositories = [
+  { repository: "Ambiguous-Interactive/example-a", defaultBranch: "main" },
+  { repository: "Ambiguous-Interactive/example-b", defaultBranch: "main" }
+];
+
+function headRevalidationHarness(t, options = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-head-revalidate-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const shims = path.join(root, "shims");
+  const runnerTemp = path.join(root, "runner-temp");
+  fs.mkdirSync(shims);
+  fs.mkdirSync(runnerTemp);
+  fs.mkdirSync(path.join(root, ".policy-consumers", "example-a", ".git"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".policy-consumers", "example-b", ".git"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "unity-enrollment-policy.json"),
+    JSON.stringify({ repositories: revalidateRepositories })
+  );
+  const heads = path.join(root, "heads.tsv");
+  const current = path.join(root, "current.tsv");
+  const events = path.join(root, "events.log");
+  const counter = path.join(root, "counter");
+  const analyzeFixture = path.join(root, "analyze-fixture.json");
+  const auditPath = path.join(root, "audit.json");
+  fs.writeFileSync(heads, "example-a\taaa\nexample-b\tbbb\n");
+  fs.writeFileSync(current, [
+    "Ambiguous-Interactive/example-a\taaa",
+    "Ambiguous-Interactive/example-b\tbbb"
+  ].join("\n"));
+  fs.writeFileSync(counter, "0");
+  const analyzeFixtureContent = {
+    complete: true,
+    repositories: [
+      { repository: "Ambiguous-Interactive/example-a", sha: "aaa" },
+      { repository: "Ambiguous-Interactive/example-b", sha: "bbb" }
+    ],
+    inventory: [],
+    findings: []
+  };
+  if (options.analyzeFindings) {
+    analyzeFixtureContent.findings.push({
+      repository: "Ambiguous-Interactive/example-a",
+      sha: "aaa",
+      code: "unapproved-lock-ref",
+      path: ".github/workflows/unity.yml",
+      job: "unity"
+    });
+  }
+  fs.writeFileSync(analyzeFixture, JSON.stringify(analyzeFixtureContent));
+  fs.writeFileSync(auditPath, fs.readFileSync(analyzeFixture, "utf8"));
+
+  writeExecutable(path.join(shims, "git"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ] && [ "$4" = "HEAD" ]; then',
+    '  name="$(basename "$2")"',
+    '  printf \'git %s\\n\' "${name}" >> "${TEST_EVENTS}"',
+    '  sha="$(awk -F\'\\t\' -v n="${name}" \'$1 == n { print $2; found = 1 } END { if (!found) exit 1 }\' "${TEST_HEADS}")"',
+    '  printf \'%s\\n\' "${sha}"',
+    "  exit 0",
+    "fi",
+    "exit 64"
+  ].join("\n"));
+  writeExecutable(path.join(shims, "gh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'if [ "$1" = "api" ]; then',
+    '  ref="$(printf \'%s\' "$2" | sed -n \'s|^repos/\\([^/]*/[^/]*\\)/git/ref/heads/.*$|\\1|p\')"',
+    '  if [ "${TEST_API_STATUS:-0}" != "0" ]; then',
+    '    exit "${TEST_API_STATUS}"',
+    "  fi",
+    '  if [ "${TEST_API_ADVANCE:-0}" = "1" ] && [ "${ref}" = "${TEST_ADVANCE_REPO}" ]; then',
+    '    count="$(( $(cat "${TEST_COUNTER}") + 1 ))"',
+    '    printf \'%s\' "${count}" > "${TEST_COUNTER}"',
+    '    sha="push${count}"',
+    '    awk -F\'\\t\' -v r="${ref}" -v s="${sha}" \'BEGIN { OFS = "\\t" } $1 == r { print $1, s; next } { print }\' "${TEST_CURRENT}" > "${TEST_CURRENT}.next"',
+    '    mv "${TEST_CURRENT}.next" "${TEST_CURRENT}"',
+    "  else",
+    '    sha="$(awk -F\'\\t\' -v n="${ref}" \'$1 == n { print $2; found = 1 } END { if (!found) exit 1 }\' "${TEST_CURRENT}")"',
+    "  fi",
+    '  printf \'api %s %s\\n\' "${ref}" "${sha}" >> "${TEST_EVENTS}"',
+    '  printf \'%s\\n\' "${sha}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then',
+    '  printf \'clone %s\\n\' "$3" >> "${TEST_EVENTS}"',
+    '  mkdir -p "$4/.git"',
+    '  sha="$(awk -F\'\\t\' -v n="$3" \'$1 == n { print $2; found = 1 } END { if (!found) exit 1 }\' "${TEST_CURRENT}")"',
+    '  awk -F\'\\t\' -v n="$(basename "$4")" -v s="${sha}" \'BEGIN { OFS = "\\t" } $1 == n { print $1, s; next } { print }\' "${TEST_HEADS}" > "${TEST_HEADS}.next"',
+    '  mv "${TEST_HEADS}.next" "${TEST_HEADS}"',
+    "  exit 0",
+    "fi",
+    "exit 64"
+  ].join("\n"));
+  writeExecutable(path.join(shims, "go"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'if [ "$1" = "run" ] && [ "$2" = "./cmd/audit-unity-enrollment" ]; then',
+    '  printf \'analyze\\n\' >> "${TEST_EVENTS}"',
+    '  output=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--output" ]; then output="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  if [ -z "${output}" ]; then exit 64; fi',
+    '  cat "${TEST_ANALYZE_FIXTURE}" > "${output}"',
+    '  if [ "$(jq -r \'.complete // false\' "${output}")" = "true" ] &&',
+    '     [ "$(jq -r \'.findings | length\' "${output}")" = "0" ]; then',
+    "    exit 0",
+    "  fi",
+    "  exit 1",
+    "fi",
+    "exit 64"
+  ].join("\n"));
+
+  return {
+    root,
+    heads,
+    current,
+    events,
+    auditPath,
+    environment: {
+      PATH: `${shims}:${process.env.PATH}`,
+      RUNNER_TEMP: runnerTemp,
+      AUDIT_PATH: auditPath,
+      READER_AUTHORIZATION: "test-reader-token",
+      TEST_HEADS: heads,
+      TEST_CURRENT: current,
+      TEST_EVENTS: events,
+      TEST_COUNTER: counter,
+      TEST_ANALYZE_FIXTURE: analyzeFixture,
+      TEST_API_STATUS: options.apiStatus === undefined ? "0" : String(options.apiStatus),
+      TEST_API_ADVANCE: options.advance ? "1" : "0",
+      TEST_ADVANCE_REPO: "Ambiguous-Interactive/example-a"
+    }
+  };
+}
+
+function runHeadRevalidation(harness) {
+  return childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "unity-enrollment-audit.sh"), "revalidate-heads"],
+    { cwd: harness.root, encoding: "utf8", env: { ...process.env, ...harness.environment } }
+  );
+}
+
+function readHeadRevalidationEvents(harness) {
+  return fs.readFileSync(harness.events, "utf8").split("\n").filter(Boolean);
+}
+
+test("head revalidation passes without refresh when every head matches", (t) => {
+  const harness = headRevalidationHarness(t);
+  const result = runHeadRevalidation(harness);
+  assert.equal(result.status, 0, result.stderr);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, true);
+  assert.deepEqual(audit.findings, []);
+  assert.deepEqual(readHeadRevalidationEvents(harness).filter((event) => /^(clone|analyze)/.test(event)), []);
+});
+
+test("head revalidation re-clones and re-analyzes a snapshot whose branch advanced mid-run", (t) => {
+  const harness = headRevalidationHarness(t);
+  fs.writeFileSync(harness.current, [
+    "Ambiguous-Interactive/example-a\tccc",
+    "Ambiguous-Interactive/example-b\tbbb"
+  ].join("\n"));
+
+  const result = runHeadRevalidation(harness);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /refreshing the stale snapshots/);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, true);
+  assert.deepEqual(audit.findings, []);
+  assert.match(fs.readFileSync(harness.heads, "utf8"), /^example-a\tccc$/m);
+  assert.deepEqual(readHeadRevalidationEvents(harness).filter((event) => /^(clone|analyze)/.test(event)), [
+    "clone Ambiguous-Interactive/example-a",
+    "analyze"
+  ]);
+});
+
+test("head revalidation recovers even when the re-analysis reports consumer findings", (t) => {
+  const harness = headRevalidationHarness(t, { analyzeFindings: true });
+  fs.writeFileSync(harness.current, [
+    "Ambiguous-Interactive/example-a\tccc",
+    "Ambiguous-Interactive/example-b\tbbb"
+  ].join("\n"));
+
+  const result = runHeadRevalidation(harness);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /refreshing the stale snapshots/);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, true);
+  assert.deepEqual(audit.findings, [{
+    repository: "Ambiguous-Interactive/example-a",
+    sha: "aaa",
+    code: "unapproved-lock-ref",
+    path: ".github/workflows/unity.yml",
+    job: "unity"
+  }]);
+});
+
+test("head revalidation fails closed when a branch keeps advancing past every refresh", (t) => {
+  const harness = headRevalidationHarness(t, { advance: true });
+
+  const result = runHeadRevalidation(harness);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fails closed/);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, false);
+  assert.deepEqual(audit.findings, [{
+    repository: "Ambiguous-Interactive/example-a",
+    sha: "push2",
+    code: "default-branch-advanced"
+  }]);
+  const events = readHeadRevalidationEvents(harness);
+  assert.equal(events.filter((event) => event.startsWith("clone ")).length, 2);
+  assert.equal(events.filter((event) => event === "analyze").length, 2);
+});
+
+test("head revalidation fails closed when the head read keeps failing", (t) => {
+  const harness = headRevalidationHarness(t, { apiStatus: 1 });
+
+  const result = runHeadRevalidation(harness);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fails closed/);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, false);
+  assert.equal(audit.findings.length, 2);
+  assert.ok(audit.findings.every((finding) => finding.code === "default-branch-revalidation-incomplete"));
+  assert.deepEqual(
+    audit.findings.map((finding) => finding.repository).sort(),
+    ["Ambiguous-Interactive/example-a", "Ambiguous-Interactive/example-b"]
+  );
+});
+
 test("consumer repin rewrites only lock action references and refuses unauthorized targets", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-consumer-locks-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

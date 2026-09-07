@@ -257,6 +257,10 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
   for (const match of auditCommandSource.matchAll(/Code:\s*"([a-z0-9-]+)"/g)) {
     emitted.add(match[1]);
   }
+  const automationSource = read(path.join(repoRoot, "tools", "workflows", "unity-enrollment-audit.sh"));
+  for (const match of automationSource.matchAll(/record_finding\s+(?:"[^"]*"\s+)+"([a-z0-9-]+)"/g)) {
+    emitted.add(match[1]);
+  }
   const enrollmentDoc = read(path.join(repoRoot, "docs", "consumer-enrollment.md"));
   const section = enrollmentDoc.split(/^## Finding codes$/m)[1].split(/^## /m)[0];
   assert.ok(section, "docs/consumer-enrollment.md must document the finding codes");

@@ -65,7 +65,9 @@ after relevant policy changes reach `main`. It uses the reader App to check out
 each current default branch without persisting credentials, analyzes exact Git
 objects without executing consumer code—including immutable workflows, actions,
 and checked-in PowerShell scripts—and revalidates every default-branch head
-before reporting.
+before reporting. When a consumer pushes while the audit runs, the audit
+re-clones the advanced repository, re-analyzes the refreshed snapshots, and
+fails closed after the bounded refresh attempts.
 
 The audit derives the reader-App token scope, checkout targets, and exact-head
 revalidation set from the validated registry. The required baseline cannot be
