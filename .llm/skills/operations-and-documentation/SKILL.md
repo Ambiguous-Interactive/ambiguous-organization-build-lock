@@ -17,6 +17,9 @@ When behavior or configuration changes:
 4. Avoid turning historical rollout instructions into current guidance.
 5. Run `test/documentation-policy.test.js` and any behavior test that establishes
    the documented claim.
+6. When a reviewed policy entry type can expire, give it a scheduled audit
+   staleness finding in the same change. Registry rejection and a runtime
+   fail-closed gate are not operator-visible surfaces.
 
 Do not infer successful external cleanup from exit zero, incomplete logs, or
 absence of an error. Operational guidance must distinguish proof, uncertainty,
