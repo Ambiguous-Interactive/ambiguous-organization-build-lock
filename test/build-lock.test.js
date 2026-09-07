@@ -5330,20 +5330,33 @@ test("the release budget gives every phase a share strictly inside the total", a
               options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
             });
           }, async () => {
-            await assert.rejects(
-              () =>
-                release({
-                  token: "token",
-                  lockName: "wallstop-organization-builds",
-                  holderIdSuffix: "playmode",
-                  lockRepository: "o/r",
-                  lockRepo: { owner: "o", repo: "r" },
-                  stateBranch: "lock-state",
-                  statePath: "locks/wallstop-organization-builds.json",
-                  configPath: "locks/wallstop-organization-builds.config.json",
-                  releaseRetryDeadlineSeconds: 1,
-                  resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
-                }),
+            let outcome = null;
+            release({
+              token: "token",
+              lockName: "wallstop-organization-builds",
+              holderIdSuffix: "playmode",
+              lockRepository: "o/r",
+              lockRepo: { owner: "o", repo: "r" },
+              stateBranch: "lock-state",
+              statePath: "locks/wallstop-organization-builds.json",
+              configPath: "locks/wallstop-organization-builds.config.json",
+              releaseRetryDeadlineSeconds: 1,
+              resourceReport: { cleanupStatus: "confirmed", health: "healthy", reason: "cleanup-confirmed" }
+            }).then(
+              () => {
+                outcome = "resolved";
+              },
+              (error) => {
+                outcome = error;
+              }
+            );
+            // The phase deadline timers do not keep the loop alive. This ref'd floor
+            // outlives the one second total budget this test configures. Await the
+            // floor only; awaiting the attempt too could drain the loop before the
+            // assertion records a missing deadline as a loud failure.
+            await new Promise((resolve) => setTimeout(resolve, 1_200));
+            assert.match(
+              String(outcome),
               /Could not confirm the release of wallstop-organization-builds/
             );
           });

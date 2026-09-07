@@ -194,7 +194,7 @@ func auditRepository(root string) ([]finding, error) {
 			return nil, readErr
 		}
 		relative, relErr := filepath.Rel(root, path)
-	if relErr != nil {
+		if relErr != nil {
 			_ = contents.Close()
 			return nil, relErr
 		}

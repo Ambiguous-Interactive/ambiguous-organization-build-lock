@@ -276,12 +276,24 @@ test("Authenticode verification is bounded and terminates a hung verifier", asyn
   verifier.kill = () => {
     killed++;
   };
-  await assert.rejects(verifyUnityEditor("E:\\tool cache\\Unity.exe", {
+  const verification = verifyUnityEditor("E:\\tool cache\\Unity.exe", {
     environment: {},
     platform: "win32",
     spawnImpl: () => verifier,
     timeoutMs: 1
-  }), /timed out/);
+  });
+  let outcome = null;
+  verification.then(
+    () => {
+      outcome = "resolved";
+    },
+    (error) => {
+      outcome = error;
+    }
+  );
+  // The verification timeout timer does not keep the loop alive. This ref'd delay does.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(String(outcome), /timed out/);
   assert.equal(killed, 1);
 });
 
