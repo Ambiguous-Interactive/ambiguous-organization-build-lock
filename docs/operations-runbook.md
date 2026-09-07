@@ -127,6 +127,33 @@ literal source identity, a release-only failure-propagating job, and hosted
 aggregate coverage instead of pretending to perform a second paid Unity
 lifecycle.
 
+## Consumer repin automation
+
+The scheduled `Repin consumer lock references` workflow removes the manual
+repin step from consumer adoption. On each run it resolves the repin target
+from the reviewed policy itself: the newest authorized release tag that both
+`approvedLockShas` and `approvedReturnShas` approve. An untagged or
+return-unapproved SHA is never a target, so repins cannot outrun the human
+authorization merge.
+
+For each enrolled repository the workflow clones the default branch, rewrites
+only the `@<sha>` suffix of `uses:` references to this repository's actions
+(plus a matching `# vX.Y.Z` comment), and opens one pull request per
+repository on the stable branch prefix `automation/repin-lock-`. The
+per-repository result is recorded in the run summary; any repository failure
+keeps the run red. Idempotency: a repository with no stale reference is
+skipped, and an open repin pull request for the same target is never
+duplicated.
+
+The workflow mints one installation token per run through the automation App
+(`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by
+operator decision; the token stays scoped to exactly the enrolled repository
+list with Contents write, Pull requests write, and Workflows write
+(workflow-file edits are refused without that permission). The reader App
+never gains write. The automation never merges, never force-pushes, never
+edits a default branch, and never uses a PAT. Merging the repin pull request
+is the consumer's adoption decision.
+
 ## Credential and App boundary
 
 The required steady-state boundary is:
@@ -198,7 +225,9 @@ reader access. Treat either condition as scope drift.
 5. Unity activation and work run only after acquire succeeds. Activation uses
    bounded retry for transient seat handoff.
 6. Unity returns on the same physical identity. Only exact positive return
-   evidence is `confirmed/healthy`.
+   evidence is `confirmed/healthy`. The measured `400006` seat-handoff
+   signature with ULF proof and a completed command is also confirmed
+   (issue #83); a `400006` without ULF proof stays unknown and quarantines.
 7. Release always runs with the acquire identity and typed cleanup evidence.
    Waiting jobs are removed from the queue even when they never acquired.
    Invalid or contradictory evidence is degraded to unknown; under schema 4 or
@@ -218,7 +247,7 @@ runner quarantine.
 | --- | --- | --- |
 | Normal holder | One slot consumed | Let the owning run finish. Do not cancel it merely because a newer commit exists. |
 | Confirmed-cleanup cooldown | One slot consumed until `availableAt` | Wait for expiry. At the live one-second setting this is normally transient. |
-| Runner quarantine | One slot consumed without expiry | Reasons include `return-ulf-skipped`, `unity-return-400006`, `return-command-failed`, timeout, termination, incomplete logs, and missing positive evidence. Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
+| Runner quarantine | One slot consumed without expiry | Reasons include `return-ulf-skipped`, `unity-return-400006` without ULF proof, `return-command-failed`, timeout, termination, incomplete logs, and missing positive evidence. A `400006` whose return log proves the ULF serial return with a completed command is confirmed cleanup and does not quarantine (issue #83). Prefer same-runner reclaim. Otherwise reconcile the Unity portal, then dispatch `recover` with the exact reservation ID and `resource-safe=true`. |
 | Global account incident | All new admission blocked; existing holders finish cleanup. A holder with independently confirmed cleanup may pass its terminal gate with an incident warning. | Stop canaries and follow the sanitized source-run provenance in the acquire error or in the `Build lock incident recovery audit` alert issue, which publishes the exact incident ID and dispatch inputs. If cleanup is unconfirmed, first use supported release/post/fallback cleanup and verify the caller is absent from holders and queue. Reconcile every portal activation, then dispatch `recover-incident` with the exact incident ID or leave it blank to bind the single active incident, plus `portal-cleanup-confirmed=true`. Never edit lock state directly. |
 | Degraded cleanup report | Exact holder/queue cleanup is attempted; under schema 4 or newer, a removed holder becomes a quarantine | Use `report-validation-error` to correct the typed inputs. The rejected value is intentionally not logged. Treat the failed step and unknown cleanup as red, reconcile the resource, and recover only by exact reservation ID when one was created. |
 | Waiting queue entry | No seat consumed, but a runner may be occupied | Let FIFO proceed. If the run terminates before acquire, release/fallback cleanup removes its exact queue entry. |

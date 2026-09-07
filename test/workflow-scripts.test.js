@@ -110,6 +110,7 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
     "ci.sh",
     "onboard-unity-repository.sh",
     "open-release-authorization-pr.sh",
+    "repin-consumer-locks.sh",
     "request-unity-repository-onboarding.sh",
     "unity-enrollment-audit.sh"
   ]);
@@ -297,4 +298,73 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
   const incomplete = runScript("unity-enrollment-audit.sh", "record-counts", environment);
   assert.notEqual(incomplete.status, 0);
   assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
+});
+
+test("consumer repin rewrites only lock action references and refuses unauthorized targets", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-consumer-locks-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${oldSha}`,
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${target} # v1.14.0`,
+      `      - uses: actions/checkout@${oldSha}`,
+      `      - run: echo 'Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${oldSha}'`,
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@168b8dea5351f1cc448ed499e354cb31ad64ef10 # post-v1.10.0`,
+      ""
+    ].join("\n")
+  );
+  const runRewrite = (...args) =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, ...args],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+
+  const result = runRewrite(target, "v1.14.0");
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    changed: 3,
+    files: [{ path: path.join(".github", "workflows", "unity.yml"), lines: 3 }]
+  });
+
+  const lines = fs.readFileSync(path.join(workflows, "unity.yml"), "utf8").split("\n");
+  assert.equal(
+    lines[3],
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`
+  );
+  assert.equal(
+    lines[4],
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target}`
+  );
+  assert.equal(
+    lines[5],
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${target} # v1.14.0`
+  );
+  assert.equal(lines[6], `      - uses: actions/checkout@${oldSha}`);
+  assert.equal(lines[7], `      - run: echo 'Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${oldSha}'`);
+  assert.equal(
+    lines[8],
+    "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@64bac446903115134dca8235410b332bc5a83547 # post-v1.10.0"
+  );
+
+  const rerun = runRewrite(target, "v1.14.0");
+  assert.equal(rerun.status, 0, rerun.stderr);
+  assert.deepEqual(JSON.parse(rerun.stdout), { changed: 0, files: [] });
+
+  const unapproved = runRewrite("0".repeat(40), "v0.0.0");
+  assert.equal(unapproved.status, 1);
+  assert.match(unapproved.stderr, /not authorized in both allowlists/);
+
+  const malformed = runRewrite("64bac446", "v1.14.0");
+  assert.equal(malformed.status, 1);
+  assert.match(malformed.stderr, /40-character commit SHA/);
 });

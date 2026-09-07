@@ -669,6 +669,30 @@ function classifyEvidenceVerdict({
     };
   }
   if (RETURN_400006_PATTERN.test(combined)) {
+    // 400006 means the entitlement server answered that the seat does not
+    // belong to this user, so the seat was already released by a peer. When
+    // the return log also proves the ULF serial return completed with the
+    // command, no license object remains: this is the measured shared-seat
+    // handoff signature from issue #83, and it is confirmed cleanup. Every
+    // weaker shape keeps the fail-closed unknown verdict.
+    const ulfReturned = returnText
+      .replaceAll("\r", "")
+      .split("\n")
+      .map((line) => line.trim())
+      .some((line) => ULF_RETURNED_PATTERN.test(line));
+    if (
+      commandCompleted &&
+      ulfReturned &&
+      !TERMINATED_EXIT_CODES.has(exitCode) &&
+      exitCode !== 124
+    ) {
+      return {
+        resourceSafe: true,
+        cleanupStatus: "confirmed",
+        health: "healthy",
+        reason: "cleanup-confirmed"
+      };
+    }
     return {
       resourceSafe: false,
       cleanupStatus: "unknown",
