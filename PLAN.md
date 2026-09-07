@@ -37,15 +37,18 @@ impact on licensed-resource safety and consumer CI churn.
   entries as `expired-repin-exception` and `stale-repin-exception` findings
   in the drift issue (#234). The repin rewrite keeps its own fail-closed
   gate.
+- The drift issue now links the reviewed per-code fix contract. The 62-code
+  audit vocabulary is test-locked to `docs/consumer-enrollment.md`, so a new
+  reason code cannot ship without its documented fix.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
 - [x] Classifier emits licensing-code attribution (PR #224).
 - [x] Audit names licensed jobs that run outside the self-hosted fleet.
-- [ ] Decide the disposition of the unity-helpers hosted export jobs
-      (`release.yml` `unitypackage`, `unity-tests.yml` `unitypackage-smoke`):
-      move them to the self-hosted fleet or record a reviewed exception.
-      Maintainer decision, tracked in #226.
+- [x] Decide the disposition of the unity-helpers hosted export jobs:
+      unity-helpers moved both jobs to the self-hosted Windows fleet at
+      audited commit `93671a56` (#226 closed 2026-09-07). The audit confirms
+      `unsafe-hosted-unity-runner` no longer appears for that repository.
 - [ ] Determine whether a peer activation can invalidate a live incumbent's
       seat. Needs Unity portal evidence (#223, section 3).
 
@@ -73,6 +76,8 @@ impact on licensed-resource safety and consumer CI churn.
       new App; the reader App stays read-only.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
       edits; this repository supplies the evidence and the contract. The
+      per-reason-code fix contract is published in
+      `docs/consumer-enrollment.md` and linked from the drift issue. The
       first repin run opened the PRs; their merges are consumer decisions:
       DoxReloaded #801 and IshoBoy #855 wait for review, DxMessaging adopted
       the pins in its own PR #554, and unity-helpers #738 was closed in the

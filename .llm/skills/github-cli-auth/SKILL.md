@@ -37,9 +37,20 @@ exists, the fill is answered by the dispatcher and no modal opens.
 
 ## Rules
 
+- Check the cache before any credential work: `[ -s ~/.config/gh/token ]`.
+  While the cache is valid, never run `git credential fill` in the session;
+  the bootstrap step is the only fill.
 - Export `GH_TOKEN` from the cache at session start. Do not call
   `git credential fill` per command; the dispatcher makes it safe, but the
   cache read is cheaper and has no helper dependency.
+- Agent tool calls in this environment run in fresh shells: shell state does
+  not carry between commands. Re-export `GH_TOKEN` from the cache in every
+  command that needs it, or wrap `gh` in a script that reads the cache file.
+  Never re-fill.
+- Never put `git credential fill` inside a per-command wrapper script. That
+  pattern turned one modal into one modal per `gh` call (2026-09-07). A
+  wrapper may read the cache only; seeding stays a manual, once-per-machine
+  step.
 - Never run `git credential fill` twice in one session. Never run it inside a
   loop or a per-command export.
 - Strip the `password=` prefix before use. Piping the raw line gives
@@ -53,9 +64,21 @@ exists, the fill is answered by the dispatcher and no modal opens.
   Redirect the fill output only to the cache file.
 - If the API returns 401, the cached token expired. Re-seed the cache with one
   credential-helper fill.
-- On a devcontainer rebuild the devcontainer rewrites the generic
-  `[credential] helper` line in `~/.gitconfig`. Reinstall the dispatcher path
-  if `git credential fill` starts opening modals again.
+- On a devcontainer rebuild the devcontainer rewrites the credential helper
+  line in `/etc/gitconfig`. A system-level helper runs before the global
+  dispatcher, so every fill hits the VSCode helper first and opens a modal.
+  Repair once with a scoped reset that bypasses the system helper only for
+  `github.com`:
+
+  ```bash
+  git config --global --add credential.https://github.com.helper ""
+  git config --global --add credential.https://github.com.helper \
+    "$HOME/.local/bin/git-credential-dispatch"
+  ```
+
+  Verify the repair once with
+  `printf 'protocol=https\nhost=github.com\n\n' | git credential fill >/dev/null`:
+  it must return from the cache in milliseconds with no modal.
 
 ## Scope limits of this token
 

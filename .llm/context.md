@@ -23,6 +23,10 @@ indexed knowledge.
 
 ## Working method
 
+0. Before any `gh` call or GitHub API use, follow the
+   [github-cli-auth skill](./skills/github-cli-auth/SKILL.md). Read the token
+   cache at `~/.config/gh/token`. Run `git credential fill` only when the
+   cache is missing, never per command.
 1. State the task, safety invariants, and a falsifiable hypothesis.
 2. Inspect current behavior and record a baseline.
 3. Add or identify a failing test that represents the desired behavior.
