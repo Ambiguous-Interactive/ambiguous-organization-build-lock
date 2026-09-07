@@ -97,6 +97,14 @@ Two adversarial review rounds. Round 1 returned one MAJOR (the skill rule
  one was applied (sentence split). The other confirmed both lint files are
  intended for this changeset.
 
+The Bugbot PR review found one more gap in the phase-deadline test: the
+`Promise.all` form still awaited the attempt after the floor fired, so a
+production regression that removed the deadline could drain the loop and
+cancel the test before the assertion. The test now awaits only the ref'd
+floor; the recorded outcome carries the assertion and a missing deadline
+fails loudly. Focused and full-file runs stay green (437/437, 0
+cancelled).
+
 ## Issue dispositions
 
 - #229: the three in-repo suggested improvements are implemented. The
