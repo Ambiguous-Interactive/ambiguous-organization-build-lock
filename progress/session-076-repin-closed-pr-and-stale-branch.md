@@ -134,6 +134,15 @@ Observed on the session branch:
 
 ## Adversarial review disposition
 
+The review loop ran on the main thread after two sub-agent cancellations.
+Findings checked and passed: expansion results with backticks are safe inside
+the pull request body heredoc because bash does not re-scan expansion output;
+every `local` declaration is separate from its fallible assignment; the
+closed-PR check cannot misfire for merged, reverted, or branch-deleted PR
+states; and the recovery path cannot open a PR with foreign content because
+the tree comparison is byte-exact. The full verification suite was re-run
+after the final helper-signature cleanup.
+
 - Does the closed-PR skip hide drift? No. The audit keeps reporting the
   repository's findings, and every run records the skip in the summary and
   the log.
