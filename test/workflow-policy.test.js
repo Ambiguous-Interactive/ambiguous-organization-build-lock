@@ -18,6 +18,7 @@ const expectedWorkflowJobs = new Map([
   ["dx-unity-automation-audit.yml", ["audit"]],
   ["lock-recovery-audit.yml", ["audit"]],
   ["onboard-unity-repository.yml", ["onboard"]],
+  ["repin-consumer-locks.yml", ["repin"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
   ["request-unity-repository-onboarding.yml", ["request"]],
   ["unity-enrollment-audit.yml", ["audit"]],
@@ -87,6 +88,13 @@ const expectedWorkflowRunScriptSignatures = new Map([
     [
       "bash tools/workflows/request-unity-repository-onboarding.sh validate-ref",
       "bash tools/workflows/request-unity-repository-onboarding.sh write-request"
+    ]
+  ],
+  [
+    "repin-consumer-locks.yml",
+    [
+      "bash tools/workflows/repin-consumer-locks.sh resolve-scope",
+      "bash tools/workflows/repin-consumer-locks.sh repin-consumers"
     ]
   ],
   [
@@ -1440,6 +1448,60 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.match(automation, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH[^}]*\}"\)" != "true" \]; then/);
   const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");
   assert.equal(trustedCheckout.with.ref, "main");
+});
+
+test("consumer repin automation is scheduled, least privilege, and never merges", () => {
+  const text = readWorkflow("repin-consumer-locks.yml");
+  const automation = readWorkflowScript("repin-consumer-locks.sh");
+  const facts = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "docs", "operations-facts.json"), "utf8")
+  );
+  const job = jobSections(text).find((candidate) => candidate.name === "repin");
+  const steps = workflowJobStepMaps(text, "repin");
+  const checkout = steps.find((step) => step.name === "Checkout trusted policy repository");
+  const scope = steps.find((step) => step.name === "Resolve enrollment scope from reviewed registry");
+  const token = steps.find((step) => step.name === "Mint consumer-scoped repin token");
+  const repin = steps.find((step) => step.name === "Open consumer repin pull requests");
+  const concurrency = workflowConcurrency(text);
+
+  assert.ok(job);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), false);
+  assert.equal(hasEffectivePermission(text, job.text, "pull_requests", "write"), false);
+  assert.match(text, new RegExp(`cron:\\s*"${escapeRegExp(facts.consumerRepin.schedule)}"`));
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
+  assert.equal(workflowHasTrigger(text, "push"), false);
+  assert.equal(workflowHasTrigger(text, "pull_request"), false);
+  assert.equal(concurrency.group, "repin-consumer-locks");
+  assert.equal(concurrency["cancel-in-progress"], "false");
+
+  assert.ok(checkout);
+  assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+  assert.equal(checkout.with["persist-credentials"], "false");
+  assert.equal(checkout.with.ref, "main");
+  assert.ok(scope);
+  assert.match(token.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_CONSUMER_APP_ID }}");
+  assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_CONSUMER_APP_PRIVATE_KEY }}");
+  assert.equal(token.with["owner"], "Ambiguous-Interactive");
+  assert.equal(token.with.repositories, "${{ steps.repin-scope.outputs.repositories }}");
+  assert.equal(token.with["permission-contents"], "write");
+  assert.equal(token.with["permission-pull-requests"], "write");
+  assert.equal(repin.env.CONSUMER_AUTHORIZATION, "${{ steps.repin-token.outputs.token }}");
+  assert.match(repin.run, /bash tools\/workflows\/repin-consumer-locks\.sh repin-consumers/);
+  assert.doesNotMatch(text, /\$\{\{\s*secrets\..*\}\}[^"']*@(?:api|github)\.com/);
+
+  // The script is the only place consumer write authority is exercised, and
+  // it can only repin to SHAs that both reviewed allowlists authorize.
+  assert.match(automation, /\.approvedLockShas/);
+  assert.match(automation, /approvedReturnShas \| index\(\$sha\)/);
+  assert.match(automation, /not authorized in both allowlists/);
+  assert.match(automation, /gh pr list/);
+  assert.match(automation, /--head "\$\{branch_name\}"/);
+  assert.match(automation, /--state open/);
+  assert.doesNotMatch(automation, /gh pr merge|gh pr .*--merge|push[^\n]*--force/);
+  assert.doesNotMatch(automation, /https:\/\/[^$\s]*@github\.com/);
+  assert.match(automation, /CONSUMER_PUSH_AUTHORIZATION="\$\{authorization\}"/);
 });
 
 test("Unity repository onboarding opens a reviewable registry-only PR from trusted main", () => {
@@ -2866,7 +2928,8 @@ test("scheduled manual workflows declare stable concurrency", () => {
     "dx-unity-automation-audit.yml",
     "lock-recovery-audit.yml",
     "reap-stale-locks.yml",
-    "reaper-delivery-audit.yml"
+    "reaper-delivery-audit.yml",
+    "repin-consumer-locks.yml"
   ]);
 });
 

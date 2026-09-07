@@ -1,0 +1,48 @@
+name: Repin consumer lock references
+
+on:
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repin-consumer-locks
+  cancel-in-progress: false
+
+jobs:
+  repin:
+    name: Open consumer repin pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted policy repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Resolve enrollment scope from reviewed registry
+        id: repin-scope
+        shell: bash
+        run: bash tools/workflows/repin-consumer-locks.sh resolve-scope
+
+      - name: Mint consumer-scoped repin token
+        id: repin-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BUILD_LOCK_CONSUMER_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_CONSUMER_APP_PRIVATE_KEY }}
+          owner: Ambiguous-Interactive
+          repositories: ${{ steps.repin-scope.outputs.repositories }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open consumer repin pull requests
+        env:
+          CONSUMER_AUTHORIZATION: ${{ steps.repin-token.outputs.token }}
+        run: bash tools/workflows/repin-consumer-locks.sh repin-consumers

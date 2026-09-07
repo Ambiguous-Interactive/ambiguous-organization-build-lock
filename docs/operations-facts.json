@@ -21,5 +21,10 @@
     "schedule": "23 8 * * *",
     "onboardingWorkflow": "Request Unity repository onboarding",
     "alertMarker": "unity-enrollment-audit:v1"
+  },
+  "consumerRepin": {
+    "schedule": "37 6 * * *",
+    "appSecretPrefix": "BUILD_LOCK_CONSUMER_APP",
+    "branchPrefix": "automation/repin-lock-"
   }
 }
