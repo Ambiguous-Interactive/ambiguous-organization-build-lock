@@ -81,6 +81,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			ApprovedReturnSHAs:       registry.ApprovedReturnSHAs,
 			ApprovedDarwinReturnSHAs: registry.ApprovedDarwinReturnSHAs,
 			Exceptions:               registry.Exceptions,
+			RepinExceptions:          registry.RepinExceptions,
 			ProtectedBranches:        []string{repository.DefaultBranch},
 			AllowWorkflowDispatch:    repository.AllowWorkflowDispatch,
 			Now:                      time.Now().UTC(),

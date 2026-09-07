@@ -59,7 +59,10 @@ moves the repository's lock action references to the newly authorized release.
 Merging it is the consumer's adoption decision; the automation never merges.
 A workflow file listed in a reviewed `repinExceptions` policy entry keeps its
 current pin; the pull request body names each preserved file and its review
-expiry.
+expiry. The scheduled enrollment audit reports an expired repin exception and
+a repin exception whose protected file no longer exists. The finding codes
+are `expired-repin-exception` and `stale-repin-exception`, and the audit
+drift issue lists them with the repository and path.
 
 ## Workflow contract
 

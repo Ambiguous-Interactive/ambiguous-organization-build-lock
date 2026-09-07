@@ -145,6 +145,7 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 		ApprovedReturnSHAs:       registry.ApprovedReturnSHAs,
 		ApprovedDarwinReturnSHAs: registry.ApprovedDarwinReturnSHAs,
 		Exceptions:               registry.Exceptions,
+		RepinExceptions:          registry.RepinExceptions,
 		ProtectedBranches:        []string{"main"},
 	}
 	// Reuse the snapshot analyzer's strict policy validation without exposing a
