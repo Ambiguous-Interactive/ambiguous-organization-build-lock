@@ -87,7 +87,7 @@ file builds its editor fixture under `os.tmpdir()`, which on macOS resolves bene
 never been runnable on Darwin**, and nobody knew, because nothing had ever run it there.
 
 That is a fixture problem and not an action problem -- production resolves under
-`runner.tool_cache`, not `/var` -- so it is filed rather than fixed here, and the three new cases
+`runner.tool_cache`, not `/var` -- so it is #241 rather than fixed here, and the three new cases
 live in their own file that builds no fixture at all.
 
 The third is the one worth reading twice. The first draft of it asserted that the team clause was

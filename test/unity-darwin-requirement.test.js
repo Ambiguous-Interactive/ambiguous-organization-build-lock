@@ -9,7 +9,7 @@
   action's own `assertNoReparsePath` walk correctly refuses that, so several of
   that file's cases fail on Darwin for a reason that is about the fixture and
   not about the action. Fixing it is a real improvement and it is not this
-  change: see the issue linked from the pull request.
+  change: it is issue #241.
 
   Nothing here builds a fixture. Every case asks the operating system about the
   requirement string the action ships, using `/bin/ls` and the binaries macOS
