@@ -128,53 +128,79 @@ EOF
 }
 
 repin_consumer() {
-  local repository="$1" branch="$2" target_sha="$3" target_version="$4" authorization="$5"
-  local directory="consumers/${repository#*/}"
-  local label="${target_version:-${target_sha:0:7}}"
-  local branch_name="automation/repin-lock-${target_sha:0:7}"
-  rm -rf "${directory}"
-  GH_TOKEN="${authorization}" gh repo clone "${repository}" "${directory}" -- \
-    --branch "${branch}" \
-    --single-branch \
-    --no-tags \
-    --depth 1
-  local report
-  report="$(rewrite_pins "${directory}" "${target_sha}" "${target_version}")"
-  local changed
-  changed="$(printf '%s' "${report}" | jq -r '.changed')"
-  if [ "${changed}" = "0" ]; then
-    printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\` |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
-    return 0
-  fi
-  local open_prs
-  open_prs="$(GH_TOKEN="${authorization}" gh pr list \
-    --repo "${repository}" \
-    --head "${branch_name}" \
-    --state open \
-    --json number \
-    --jq length)"
-  if [ "${open_prs}" != "0" ]; then
-    printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` is already open |" >> "${GITHUB_STEP_SUMMARY}"
-    return 0
-  fi
-  git -C "${directory}" checkout -B "${branch_name}"
-  git -C "${directory}" config user.name "github-actions[bot]"
-  git -C "${directory}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-  git -C "${directory}" add .github
-  if git -C "${directory}" diff --cached --quiet; then
-    echo "::error::${repository}: staged repin is empty but ${changed} lines were rewritten." >&2
-    return 1
-  fi
-  git -C "${directory}" commit -m "chore: repin organization lock actions to ${label}"
-  CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
-    -c credential.helper= \
-    -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
-    push "https://github.com/${repository}.git" "${branch_name}"
-  local body_file
-  body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
-  local file_list
-  file_list="$(printf '%s' "${report}" | jq -r '.files[] | "- `\(.path)` (\(.lines) line\(if .lines == 1 then "" else "s" end))"' )"
-  cat > "${body_file}" <<EOF
+  # The caller inspects this function's result, which makes bash ignore
+  # errexit for the whole body, including subshells. Every fallible command
+  # therefore carries an explicit status guard; a tolerated failure here
+  # would be a false-success repin report.
+  (
+    local repository="$1" branch="$2" target_sha="$3" target_version="$4" authorization="$5"
+    local directory="consumers/${repository#*/}"
+    local label="${target_version:-${target_sha:0:7}}"
+    local branch_name="automation/repin-lock-${target_sha:0:7}"
+    rm -rf "${directory}"
+    if ! GH_TOKEN="${authorization}" gh repo clone "${repository}" "${directory}" -- \
+      --branch "${branch}" \
+      --single-branch \
+      --no-tags \
+      --depth 1; then
+      echo "::error::${repository}: could not clone ${branch}." >&2
+      exit 1
+    fi
+    local report
+    if ! report="$(rewrite_pins "${directory}" "${target_sha}" "${target_version}")"; then
+      echo "::error::${repository}: could not rewrite the lock references." >&2
+      exit 1
+    fi
+    local changed
+    if ! changed="$(printf '%s' "${report}" | jq -er '.changed')"; then
+      echo "::error::${repository}: could not read the rewrite report." >&2
+      exit 1
+    fi
+    if [ "${changed}" = "0" ]; then
+      printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\` |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+      exit 0
+    fi
+    local open_prs
+    if ! open_prs="$(GH_TOKEN="${authorization}" gh pr list \
+      --repo "${repository}" \
+      --head "${branch_name}" \
+      --state open \
+      --json number \
+      --jq length)" || ! [[ "${open_prs}" =~ ^[0-9]+$ ]]; then
+      echo "::error::${repository}: could not list open repin pull requests." >&2
+      exit 1
+    fi
+    if [ "${open_prs}" != "0" ]; then
+      printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` is already open |" >> "${GITHUB_STEP_SUMMARY}"
+      exit 0
+    fi
+    if ! git -C "${directory}" checkout -B "${branch_name}"; then
+      echo "::error::${repository}: could not create ${branch_name}." >&2
+      exit 1
+    fi
+    git -C "${directory}" config user.name "github-actions[bot]"
+    git -C "${directory}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+    git -C "${directory}" add .github
+    if git -C "${directory}" diff --cached --quiet; then
+      echo "::error::${repository}: staged repin is empty but ${changed} lines were rewritten." >&2
+      exit 1
+    fi
+    if ! git -C "${directory}" commit -m "chore: repin organization lock actions to ${label}"; then
+      echo "::error::${repository}: could not commit the repin." >&2
+      exit 1
+    fi
+    if ! CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
+      -c credential.helper= \
+      -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
+      push "https://github.com/${repository}.git" "${branch_name}"; then
+      echo "::error::${repository}: could not push ${branch_name}." >&2
+      exit 1
+    fi
+    local body_file
+    body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
+    local file_list
+    file_list="$(printf '%s' "${report}" | jq -r '.files[] | "- `\(.path)` (\(.lines) line\(if .lines == 1 then "" else "s" end))"' )"
+    cat > "${body_file}" <<EOF
 Repin the organization lock actions to the authorized release ${label}
 (\`${target_sha}\`).
 
@@ -192,20 +218,27 @@ ${file_list}
 This pull request is opened by central automation. It never merges itself and
 never edits a default branch.
 EOF
-  GH_TOKEN="${authorization}" gh pr create \
-    --repo "${repository}" \
-    --head "${branch_name}" \
-    --title "Repin organization lock actions to ${label}" \
-    --body-file "${body_file}"
-  rm -f "${body_file}"
-  printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines) |" >> "${GITHUB_STEP_SUMMARY}"
+    if ! GH_TOKEN="${authorization}" gh pr create \
+      --repo "${repository}" \
+      --head "${branch_name}" \
+      --title "Repin organization lock actions to ${label}" \
+      --body-file "${body_file}"; then
+      echo "::error::${repository}: could not open the repin pull request." >&2
+      exit 1
+    fi
+    rm -f "${body_file}"
+    printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines) |" >> "${GITHUB_STEP_SUMMARY}"
+  )
 }
 
 repin_consumers() {
   local authorization="${CONSUMER_AUTHORIZATION:?CONSUMER_AUTHORIZATION is required}"
   : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
   local target_line target_sha target_version
-  target_line="$(resolve_repin_target)"
+  if ! target_line="$(resolve_repin_target)"; then
+    echo "::error::Could not resolve the repin target from the reviewed policy." >&2
+    exit 1
+  fi
   target_sha="${target_line%%$'\t'*}"
   target_version="${target_line##*$'\t'}"
   local failed=false
