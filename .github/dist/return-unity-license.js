@@ -19,11 +19,30 @@ const UNITY_SIGNER_THUMBPRINTS = new Set([
   "228FB6411B0A144478C86AAA3CD9473C43A8ABA7",
   "BFFD800651947878FCD0DC749C16D57B0D5E397D"
 ]);
-// Apple team identifiers whose Developer ID signature is accepted as Unity's own,
-// and the Darwin counterpart of UNITY_SIGNER_THUMBPRINTS. Empty until a reviewer
-// reads `codesign -dv --verbose=4` on a real installed Unity.app and records the
-// OU there. Empty fails the return closed; it never passes an unpinned binary.
-const UNITY_DARWIN_TEAM_IDS = new Set([]);
+/*
+  Apple team identifiers whose Developer ID signature is accepted as Unity's own,
+  and the Darwin counterpart of UNITY_SIGNER_THUMBPRINTS.
+
+  9QW8UQUTAA was measured rather than recalled. The macOS editor package for the
+  pinned editor -- MacEditorInstaller/Unity.pkg at revision eb73d3b415a1,
+  6000.5.2f1 -- is a xar whose table of contents carries the signing chain in its
+  first few kilobytes. Its leaf reads
+
+    UID = 9QW8UQUTAA
+    CN  = Developer ID Installer: Unity Technologies SF (9QW8UQUTAA)
+    OU  = 9QW8UQUTAA
+    O   = Unity Technologies SF
+
+  issued by Apple's Developer ID Certification Authority under the Apple Root CA.
+  A team identifier names the account rather than the certificate purpose, so the
+  Developer ID Application certificate on Unity.app carries the same OU. That
+  last step is an inference, and the macOS canary is what settles it.
+
+  Being wrong here can only refuse a return, never accept one: the requirement
+  also demands the Apple anchor and the Developer ID Application marker, so a
+  mismatched team fails closed.
+*/
+const UNITY_DARWIN_TEAM_IDS = new Set(["9QW8UQUTAA"]);
 
 function input(env, name) {
   return String(env[`INPUT_${name.toUpperCase()}`] || "").trim();
