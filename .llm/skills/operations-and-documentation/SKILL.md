@@ -21,3 +21,7 @@ When behavior or configuration changes:
 Do not infer successful external cleanup from exit zero, incomplete logs, or
 absence of an error. Operational guidance must distinguish proof, uncertainty,
 and required escalation.
+
+Write all user-facing copy (pull requests, comments, runbooks, code comments)
+in Simplified Technical English: short, active, plain, and to the point. See
+the "User-facing writing" section of `.llm/context.md`.

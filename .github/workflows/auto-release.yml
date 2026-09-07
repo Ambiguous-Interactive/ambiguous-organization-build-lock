@@ -13,6 +13,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  actions: write
 
 jobs:
   release:
@@ -43,3 +44,9 @@ jobs:
         run: bash tools/workflows/auto-release.sh
         env:
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
+
+      - name: Open release authorization pull request
+        run: bash tools/workflows/open-release-authorization-pr.sh
+        env:
+          RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

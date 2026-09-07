@@ -21,8 +21,8 @@ The committed sources of truth are
 - Runner serialization: `enabled`
 - Resource lifecycle: `enabled`
 - Confirmed-cleanup cooldown: `1` second
-- Published compatibility release: `v1.10.0` at
-  `3741b56ceab4a68ba4c09fe7e91e804b53ff2412`
+- Published compatibility release: `v1.14.0` at
+  `64bac446903115134dca8235410b332bc5a83547`
 
 The one-second cooldown remains the live value. Issue #60 tracks literal zero,
 but the concurrent shared-entitlement return collision in issue #83 must be

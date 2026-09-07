@@ -481,6 +481,8 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
       "resource-cleanup-status",
       "resource-health",
       "resource-reason",
+      "licensing-codes-checked",
+      "licensing-code-matched",
       "classification-complete",
       "evidence-digest"
     ]

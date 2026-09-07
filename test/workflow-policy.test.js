@@ -28,7 +28,10 @@ const expectedWorkflowJobs = new Map([
 const expectedWorkflowRunScriptSignatures = new Map([
   [
     "auto-release.yml",
-    ["bash tools/workflows/auto-release.sh"]
+    [
+      "bash tools/workflows/auto-release.sh",
+      "bash tools/workflows/open-release-authorization-pr.sh"
+    ]
   ],
   [
     "ci.yml",

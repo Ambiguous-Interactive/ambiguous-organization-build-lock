@@ -32,6 +32,27 @@ or writer App. The current inventory is recorded in
    it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`;
    reusable workflow calls are audited separately as workflow graph edges.
 
+## Release authorization
+
+Releases are cut by the automatic `Auto release` workflow. Each release is not
+usable by consumers until a reviewed pull request adds its exact SHA to
+`unity-enrollment-policy.json`.
+
+After each release, `Auto release` opens an `Authorize vN.N.N release adoption`
+pull request. Every workflow run, including scheduled runs and manual
+dispatch, proposes the newest release that the policy does not list yet, so a
+failed or missed proposal is retried until the pull request is merged.
+Merging that pull request is the human authorization decision;
+the automation only opens it. Review the diff between the newest previously
+approved SHA and the new release SHA. If the diff touches
+`return-unity-license` or its runtime, review that credential-bearing path
+before merge. Merge adds the SHA to both `approvedLockShas` and
+`approvedReturnShas`.
+
+Until the merge, consumer pins to the new release fail closed as
+`unapproved-lock-ref`. The released-but-unauthorized gap is therefore visible
+as an open pull request, not as a silent absence.
+
 ## Workflow contract
 
 1. Pin every remote action, including transitive local-composite leaves, to a
