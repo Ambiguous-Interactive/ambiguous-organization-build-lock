@@ -70,7 +70,8 @@ Twelve unit cases assert the argv this action builds. **An argv is not a proof t
 inside it means anything to `csreq(5)`**, and nothing anywhere asked the macOS requirement compiler
 whether it does.
 
-Three cases now do, and a `macos-latest` CI job runs them. They need no seat, no credential, and no
+Three cases now do, in `test/unity-darwin-requirement.test.js`, and a `macos-latest` CI job runs
+them. They need no seat, no credential, and no
 Unity install, so they are not the canary and do not stand in for it:
 
 | case | what it is red against |
@@ -78,6 +79,16 @@ Unity install, so they are not the canary and do not stand in for it:
 | the shipped requirement compiles under `csreq -r =<req> -b` | a typo that turns the gate into "always refuse". Paired with a deliberately malformed requirement, so a `csreq` that accepted anything would not pass it |
 | `codesign --verify --strict` passes on `/bin/ls` and the same command with `-R` refuses it | a requirement so loose that an Apple-signed non-Unity binary satisfies it. The refusal is attributable because it is the same binary and the same flags, one added `-R` |
 | the compiled requirement decompiles (`csreq -r <file> -t`) holding `9QW8UQUTAA`, and a different team compiles to different bytes | **a clause `csreq` accepts and discards.** `/bin/ls` cannot expose this: it is a platform binary with no Developer ID chain, so `certificate 1[...6.2.6] exists` refuses it before the identity is ever consulted |
+
+**The job earned its place on its first run, by going red.** Pointed at
+`test/unity-license-return.test.js`, it failed three pre-existing cases -- not the new ones. That
+file builds its editor fixture under `os.tmpdir()`, which on macOS resolves beneath the symlinked
+`/var`, and the action's own `assertNoReparsePath` walk correctly refuses it. So **this suite has
+never been runnable on Darwin**, and nobody knew, because nothing had ever run it there.
+
+That is a fixture problem and not an action problem -- production resolves under
+`runner.tool_cache`, not `/var` -- so it is filed rather than fixed here, and the three new cases
+live in their own file that builds no fixture at all.
 
 The third is the one worth reading twice. The first draft of it asserted that the team clause was
 what refused `/bin/ls`, which is false for exactly that reason -- it was a case that could not go

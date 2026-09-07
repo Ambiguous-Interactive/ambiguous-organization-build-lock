@@ -93,11 +93,11 @@ jobs:
         with:
           node-version: "24"
 
-      # The Darwin cases in this file are skipped everywhere else, because the
-      # requirement compiler they ask is macOS-only. Every other case in it
-      # already runs on ubuntu; this job is here for the three that cannot.
-      - name: Run Darwin return action tests
-        run: node --test test/unity-license-return.test.js
+      # These cases are skipped everywhere else, because the requirement compiler
+      # they ask is macOS-only. They build no editor fixture, so they are the one
+      # part of this action's suite a macOS runner can run today.
+      - name: Run Darwin requirement tests
+        run: node --test test/unity-darwin-requirement.test.js
 
   windows-evidence-deletion:
     name: Validate Windows evidence deletion
