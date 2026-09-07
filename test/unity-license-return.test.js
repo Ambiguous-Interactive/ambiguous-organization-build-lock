@@ -419,16 +419,18 @@ test("an unpinned or malformed darwin identity fails closed rather than verifyin
   }
 });
 
-test("the shipped darwin team set is empty, so an unreviewed editor cannot verify", async () => {
-  assert.equal(UNITY_DARWIN_TEAM_IDS.size, 0);
-  await assert.rejects(
-    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
-      platform: "darwin",
-      spawnImpl: () => {
-        throw new Error("codesign must not be reached without a reviewed team.");
-      }
-    }),
-    /No reviewed Unity Developer ID team is configured/
+test("the shipped darwin team is the one measured off Unity's signed editor package", () => {
+  /*
+    Read from the signing chain in the xar table of contents of
+    MacEditorInstaller/Unity.pkg at revision eb73d3b415a1: OU, UID and the common
+    name all carry 9QW8UQUTAA for Unity Technologies SF, issued under Apple's
+    Developer ID Certification Authority. Pinned as one value, so a second team
+    appearing here is a review decision rather than a drift.
+  */
+  assert.deepEqual([...UNITY_DARWIN_TEAM_IDS], ["9QW8UQUTAA"]);
+  assert.match(
+    darwinDesignatedRequirement(UNITY_DARWIN_TEAM_IDS),
+    /certificate leaf\[subject\.OU\] = "9QW8UQUTAA"/
   );
 });
 
