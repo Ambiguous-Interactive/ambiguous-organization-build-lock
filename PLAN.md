@@ -29,14 +29,25 @@ impact on licensed-resource safety and consumer CI churn.
 
 ## M2: shared-seat capacity decision (#83)
 
-- [ ] Keep fail-closed quarantine for `unity-return-400006` until the
-      organization has independently returnable Unity identities, slot-aware
-      state, and two-order live proof.
-- [ ] Re-evaluate #106 part 2 (normal release on a benign 400006) only after
-      the M2 capacity evidence exists.
+- [x] Release the benign shared-seat handoff normally: the classifier confirms
+      a `400006` return whose log proves the ULF serial return with a
+      completed command (maintainer directive 2026-09-07; implements the
+      re-opened #106 part 2). No quarantine, no red cleanup gate.
+- [ ] Keep fail-closed quarantine for a `400006` without ULF proof, degraded
+      reports, timeouts, truncation, and termination.
+- [ ] Decide holder capacity against real seat capacity: independent
+      returnable Unity identities, slot-aware state, and two-order live proof.
 
 ## M3: consumer enrollment drift (#113)
 
+- [x] Zero-touch repin automation: the central `Repin consumer lock
+      references` workflow opens repin pull requests in enrolled
+      repositories for every newly authorized release (operator directive
+      2026-09-07). Consumers merge; the automation never does.
+- [ ] Grant the `BUILD_LOCK_CONSUMER_APP_*` App its Contents-write and
+      Pull-requests-write installation on the enrolled repositories
+      (maintainer action in App settings); the workflow fails visibly until
+      then.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
       edits; this repository supplies the evidence and the contract.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
