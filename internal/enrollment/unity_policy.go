@@ -693,7 +693,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	// runner on these two, still fails closed.
 	if returnActionCount > 0 &&
 		(!centralReturnExecutionIsolated(workflow, job) ||
-			!(windowsSelfHostedJob(job) || darwinSelfHostedJob(job)) ||
+			(!windowsSelfHostedJob(job) && !darwinSelfHostedJob(job)) ||
 			!optionalTimeoutAtLeast(job, 5)) {
 		a.analyzer.add("unsafe-return-execution-environment", workflowPath, jobName)
 	}
