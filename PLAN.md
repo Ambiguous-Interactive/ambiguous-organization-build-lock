@@ -23,7 +23,7 @@ impact on licensed-resource safety and consumer CI churn.
 - [ ] Decide the disposition of the unity-helpers hosted export jobs
       (`release.yml` `unitypackage`, `unity-tests.yml` `unitypackage-smoke`):
       move them to the self-hosted fleet or record a reviewed exception.
-      Maintainer decision.
+      Maintainer decision, tracked in #226.
 - [ ] Determine whether a peer activation can invalidate a live incumbent's
       seat. Needs Unity portal evidence (#223, section 3).
 
