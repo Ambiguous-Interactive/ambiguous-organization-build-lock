@@ -4403,6 +4403,126 @@ jobs:
 	}
 }
 
+func TestUnityEnrollmentReportsRepinExceptionStaleness(t *testing.T) {
+	protectedFile := ".github/workflows/repin-protected.yml"
+	protectedWorkflow := "on: workflow_dispatch\njobs:\n  fixture:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'no unity reference'\n"
+	tests := []struct {
+		name       string
+		expiresAt  string
+		fileExists bool
+		wantCodes  []string
+	}{
+		{"unexpired with protected file", "2026-07-28T00:00:00Z", true, nil},
+		{"unexpired without protected file", "2026-07-28T00:00:00Z", false,
+			[]string{"stale-repin-exception"}},
+		{"expired with protected file", "2026-07-27T00:00:00Z", true,
+			[]string{"expired-repin-exception"}},
+		{"expired without protected file", "2026-07-27T00:00:00Z", false,
+			[]string{"expired-repin-exception", "stale-repin-exception"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := unityAuditPolicy()
+			policy.RepinExceptions = []UnityRepinException{{
+				Repository: "Ambiguous-Interactive/fixture",
+				Path:       protectedFile,
+				Reason:     "wrapper cannot supply the newest input contract",
+				Owner:      "fixture-maintainers",
+				ExpiresAt:  test.expiresAt,
+			}}
+			files := map[string]string{}
+			if test.fileExists {
+				files[protectedFile] = protectedWorkflow
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(files), policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Findings) != len(test.wantCodes) {
+				t.Fatalf("unexpected findings: %#v", result.Findings)
+			}
+			for _, code := range test.wantCodes {
+				if !strings.Contains(findingCodes(result.Findings), code+":"+protectedFile+":") {
+					t.Fatalf("missing %s finding with the exception path: %#v", code, result.Findings)
+				}
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRepinExceptionIsScopedAndNotAClassificationException(t *testing.T) {
+	policy := unityAuditPolicy()
+	policy.RepinExceptions = []UnityRepinException{{
+		Repository: "Ambiguous-Interactive/other-unity-repository",
+		Path:       ".github/workflows/opaque.yml",
+		Reason:     "wrapper cannot supply the newest input contract",
+		Owner:      "other-maintainers",
+		ExpiresAt:  "2026-07-28T00:00:00Z",
+	}}
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/opaque.yml": `on:
+  push:
+    branches: [main]
+jobs:
+  opaque:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets['UNITY_SERIAL'] }}
+    steps:
+      - run: ./opaque-tool
+`,
+	}), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(result.Findings), "repin-exception") {
+		t.Fatalf("repin exception leaked across repositories: %#v", result.Findings)
+	}
+	if len(result.Inventory) != 1 || result.Inventory[0].Classification != "paid-serial" ||
+		!strings.Contains(findingCodes(result.Findings), "missing-lock-acquire") {
+		t.Fatalf("repin exception hid a paid job from the policy: %#v", result)
+	}
+}
+
+func TestUnityEnrollmentRejectsMalformedRepinException(t *testing.T) {
+	valid := UnityRepinException{
+		Repository: "Ambiguous-Interactive/fixture",
+		Path:       ".github/workflows/repin-protected.yml",
+		Reason:     "wrapper cannot supply the newest input contract",
+		Owner:      "fixture-maintainers",
+		ExpiresAt:  "2026-07-28T00:00:00Z",
+	}
+	tests := []struct {
+		name     string
+		mutate   func(*UnityRepinException)
+		expected string
+	}{
+		{"duplicate entry", func(*UnityRepinException) {},
+			"policy contains a duplicate repository/path repin exception"},
+		{"repository is not owner/name", func(e *UnityRepinException) { e.Repository = "fixture" },
+			"repin exception repository must be owner/name"},
+		{"path is not a workflow file", func(e *UnityRepinException) { e.Path = ".github/workflows/nested/protected.yml" },
+			"repin exception path must be a normalized workflow YAML path"},
+		{"owner is missing", func(e *UnityRepinException) { e.Owner = " " },
+			"repin exception owner is required"},
+		{"reason is missing", func(e *UnityRepinException) { e.Reason = "" },
+			"repin exception reason is required"},
+		{"expiry is not RFC3339", func(e *UnityRepinException) { e.ExpiresAt = "soon" },
+			"repin exception expiry must be RFC3339"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := unityAuditPolicy()
+			policy.RepinExceptions = []UnityRepinException{valid, valid}
+			test.mutate(&policy.RepinExceptions[0])
+			if _, err := AnalyzeUnityEnrollment(unityFixture(nil), policy); err == nil ||
+				!strings.Contains(err.Error(), test.expected) {
+				t.Fatalf("expected %q error, got: %v", test.expected, err)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentRejectsMissingSafetySurfaces(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -155,7 +155,12 @@ entries, and the rewrite fails closed when an exception has expired. A
 preserved file stays untouched and is listed in the run log and the repin
 pull request body; the run summary records the count. An exception whose file
 no longer exists is reported in the run log, so stale entries stay visible
-until a reviewer removes them.
+until a reviewer removes them. The scheduled enrollment audit reports the
+same staleness as operator-visible findings: an expired entry and an entry
+whose protected file no longer exists on the audited default branch become
+`expired-repin-exception` and `stale-repin-exception` findings in the drift
+issue. Keep the rewrite behavior unchanged; the audit finding is the visible
+report, and the rewrite failure is the safety gate.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by

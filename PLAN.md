@@ -24,6 +24,10 @@ impact on licensed-resource safety and consumer CI churn.
 - Repin automation honors reviewed, expiring `repinExceptions`: a pin-only
   update can no longer move a caller to an action whose input contract the
   caller cannot satisfy (#233 follow-up).
+- The scheduled enrollment audit reports stale or expired `repinExceptions`
+  entries as `expired-repin-exception` and `stale-repin-exception` findings
+  in the drift issue (#234). The repin rewrite keeps its own fail-closed
+  gate.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

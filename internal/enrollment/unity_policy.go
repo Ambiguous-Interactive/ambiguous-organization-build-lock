@@ -107,6 +107,7 @@ type UnityEnrollmentPolicy struct {
 	ApprovedReturnSHAs       []string               `json:"approvedReturnShas"`
 	ApprovedDarwinReturnSHAs []string               `json:"approvedDarwinReturnShas"`
 	Exceptions               []UnityPolicyException `json:"exceptions"`
+	RepinExceptions          []UnityRepinException  `json:"repinExceptions"`
 	ProtectedBranches        []string               `json:"-"`
 	AllowWorkflowDispatch    bool                   `json:"-"`
 	Now                      time.Time              `json:"-"`
@@ -241,6 +242,32 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		}
 		exceptions[key] = exception
 	}
+	// Repin exceptions never reclassify a workflow. They are audited for
+	// staleness only, so an expired or orphaned entry becomes an
+	// operator-visible finding instead of a silent permission.
+	repinExceptions := make(map[string]bool, len(policy.RepinExceptions))
+	for _, exception := range policy.RepinExceptions {
+		if !validRepository(exception.Repository) {
+			return UnityEnrollmentResult{}, fmt.Errorf("repin exception repository must be owner/name")
+		}
+		if !validRepinExceptionPath(exception.Path) {
+			return UnityEnrollmentResult{}, fmt.Errorf("repin exception path must be a normalized workflow YAML path")
+		}
+		if strings.TrimSpace(exception.Owner) == "" || strings.ContainsAny(exception.Owner, "\r\n`") {
+			return UnityEnrollmentResult{}, fmt.Errorf("repin exception owner is required")
+		}
+		if strings.TrimSpace(exception.Reason) == "" || strings.ContainsAny(exception.Reason, "\r\n`") {
+			return UnityEnrollmentResult{}, fmt.Errorf("repin exception reason is required")
+		}
+		if _, err := time.Parse(time.RFC3339, exception.ExpiresAt); err != nil {
+			return UnityEnrollmentResult{}, fmt.Errorf("repin exception expiry must be RFC3339")
+		}
+		key := exception.Repository + "\x00" + exception.Path
+		if repinExceptions[key] {
+			return UnityEnrollmentResult{}, fmt.Errorf("policy contains a duplicate repository/path repin exception")
+		}
+		repinExceptions[key] = true
+	}
 
 	base := &analyzer{
 		snapshot:           snapshot,
@@ -371,6 +398,22 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 					policy.AllowWorkflowDispatch,
 				)
 			}
+		}
+	}
+
+	// A repin exception is stale when its protected file is gone, and expired
+	// when its review window has closed. Both states make the entry an
+	// operator-visible audit finding; the repin rewrite keeps its own
+	// independent fail-closed gate.
+	for _, exception := range policy.RepinExceptions {
+		if exception.Repository != snapshot.Repository {
+			continue
+		}
+		if expiry, _ := time.Parse(time.RFC3339, exception.ExpiresAt); !expiry.After(now) {
+			base.add("expired-repin-exception", exception.Path, "")
+		}
+		if _, exists := snapshot.Files[exception.Path]; !exists {
+			base.add("stale-repin-exception", exception.Path, "")
 		}
 	}
 
