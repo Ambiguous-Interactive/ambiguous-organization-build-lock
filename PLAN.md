@@ -18,6 +18,9 @@ impact on licensed-resource safety and consumer CI churn.
 - The enrollment audit admits the central return on Windows and, for pins
   listed in the new reviewed `approvedDarwinReturnShas` allowlist, on macOS.
   The allowlist is empty until a Darwin verifier release exists (#153, #228).
+- The in-repo #229 follow-ups are done: `gofmt` is a CI formatter gate, and
+  the three tests that settled only through unref'd event-loop timers now
+  use ref'd keep-alive floors.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -71,3 +74,5 @@ impact on licensed-resource safety and consumer CI churn.
   licensed canary runs. The enrollment-audit admission contract for the
   Darwin shape is done; the reviewed `approvedDarwinReturnShas` merge is
   the separate authorization step that follows a Darwin-capable release.
+  Issue #229 tracks the remaining canary, authorization, and
+  Windows-container work.
