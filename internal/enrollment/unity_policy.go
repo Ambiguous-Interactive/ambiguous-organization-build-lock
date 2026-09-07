@@ -563,6 +563,13 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if !licensed {
 		a.analyzer.add("missing-lock-acquire", workflowPath, jobName)
 	}
+	// Licensed Unity work must stay on the organization's self-hosted fleet.
+	// A paid job whose runner identity is hosted or ambiguous cannot be
+	// reconciled with portal license seats, so record it as a finding instead
+	// of letting it escape every self-hosted runner control.
+	if !selfHostedRunnerJob(job) {
+		a.analyzer.add("unsafe-hosted-unity-runner", workflowPath, jobName)
+	}
 	if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
 		a.analyzer.add("unsafe-workflow-cancellation", workflowPath, jobName)
 	}
@@ -4563,6 +4570,25 @@ func jobEnvContainsCredential(job *yaml.Node) bool {
 
 func selfHostedJob(job *yaml.Node) bool {
 	return strings.Contains(strings.ToLower(nodeScalarText(mappingValue(job, "runs-on"))), "self-hosted")
+}
+
+// selfHostedRunnerJob requires a literal `self-hosted` label in a sequence
+// runs-on. Dynamic or scalar runner expressions fail closed so a hosted or
+// ambiguous runner cannot present itself as organization fleet capacity.
+func selfHostedRunnerJob(job *yaml.Node) bool {
+	runsOn := mappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, label := range runsOn.Content {
+		if label.Kind != yaml.ScalarNode {
+			return false
+		}
+		if strings.EqualFold(label.Value, "self-hosted") {
+			return true
+		}
+	}
+	return false
 }
 
 func needsAny(job *yaml.Node, candidates map[string]bool) bool {

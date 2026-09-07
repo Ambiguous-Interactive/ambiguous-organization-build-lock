@@ -1,0 +1,5 @@
+# Store and check out all text files with LF on every platform.
+# CRLF in the working tree breaks every bash script the devcontainer executes
+# inside the container (e.g. "set -euo pipefail\r" fails at line 2), which made
+# Windows clones unable to build the container while Linux/macOS clones worked.
+* text=auto eol=lf

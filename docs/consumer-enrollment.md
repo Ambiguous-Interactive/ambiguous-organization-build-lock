@@ -62,6 +62,11 @@ as an open pull request, not as a silent absence.
    label set has a registered runner visible to the repository; it does not
    require the runner to be online or idle. Make the licensed job depend on the
    preflight so an impossible label set fails instead of queueing forever.
+   Every licensed job itself must run on the organization's self-hosted fleet.
+   Declare a literal `self-hosted` label in the job's `runs-on` list. The
+   enrollment audit rejects licensed work on GitHub-hosted or ambiguous
+   runners as `unsafe-hosted-unity-runner`, because portal license seats
+   cannot be attributed to a hosted machine identity.
 3. Before referencing Unity credentials or entering the organization FIFO,
    invoke the pinned central `ensure-unity-editor` action with a ten-minute
    timeout, literal `ci-managed-only: true` and
