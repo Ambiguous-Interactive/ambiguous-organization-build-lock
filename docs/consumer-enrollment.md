@@ -243,6 +243,76 @@ jobs:
           fallback-cleanup-result: ${{ needs.unity-cleanup.outputs.cleanup-result }}
 ```
 
+## Finding codes
+
+The scheduled audit reports every consumer drift finding with one of these
+reason codes. Fix the finding with the matching consumer edit. Item numbers
+refer to the Workflow contract above. The exception codes apply to
+`unity-enrollment-policy.json` in this repository.
+
+| Code | Consumer fix |
+| --- | --- |
+| `acquire-after-activation` | Move the acquire step before every activation-capable step. See item 5. |
+| `ambiguous-lock-acquire` | Keep exactly one acquire action in the licensed job. See item 5. |
+| `approval-environment` | Remove the approval-only `environment` from the job. See Preconditions item 6. |
+| `classifier-before-unity-return` | Order the evidence classifier after the central return. See item 7. |
+| `classifier-inputs-not-typed` | Bind the classifier inputs to the exact acquire step outputs. See item 7. |
+| `classifier-not-always` | Run the classifier with `always()` and failure propagation. See item 7. |
+| `cleanup-gate-before-release` | Run the final cleanup gate after the release step. See item 9. |
+| `cleanup-gate-inputs-not-typed` | Bind the gate inputs to the exact typed release and classifier outputs. See item 9. |
+| `cleanup-gate-not-always` | Run the gate with literal `always()` and no `continue-on-error`. See item 9. |
+| `expired-policy-exception` | Renew or remove the expired registry exception in `unity-enrollment-policy.json`. |
+| `expired-repin-exception` | Renew or remove the expired `repinExceptions` entry. See Release authorization. |
+| `fallback-cleanup-not-always` | Guard the fallback job with `always()` and the source-job condition shape. See item 8. |
+| `fallback-cleanup-not-hosted` | Run the fallback job on `ubuntu-latest`. See item 8. |
+| `foreign-action-reference` | Use action files only from this repository. See Preconditions item 7. |
+| `ineligible-unity-trigger` | Restrict licensed work to the eligible trusted triggers. See Preconditions item 2. |
+| `invalid-acquire-pr-head-revalidation` | Give acquire the exact current-head revalidation inputs. See item 4. |
+| `invalid-current-head-guard` | Replace the custom guard step with the approved current-head guard action. See item 4. |
+| `invalid-fallback-release` | Keep one typed, source-matched release step in the fallback job. See item 8. |
+| `invalid-fallback-timeout` | Give the fallback job a timeout of at least 5 minutes. See item 8. |
+| `job-scoped-unity-credential` | Remove credential-bearing job-level `env` mappings. See item 3. |
+| `missing-cleanup-classifier` | Add the typed central evidence classifier. See item 7. |
+| `missing-cleanup-gate` | Add the final cleanup gate. See item 9. |
+| `missing-fallback-aggregate` | Cover the source and fallback jobs with one hosted always-reporting aggregate. See item 8 and the exact static shape note. |
+| `missing-initial-current-head-guard` | Put the approved current-head guard first in the licensed PR job. See item 4. |
+| `missing-licensed-steps` | Keep the licensed steps in the audited job. See item 6. |
+| `missing-lock-acquire` | Acquire before the activation-capable section. See item 5. |
+| `missing-pre-lock-current-head-guard` | Re-check the current head immediately before acquire. See item 4. |
+| `missing-runner-preflight` | Add the hosted registration preflight and make the licensed job depend on it. See item 2. |
+| `missing-typed-release` | Add the typed central release step. See item 7. |
+| `missing-unity-aggregate` | Emit the exact-shape hosted aggregate that covers the licensed job. See item 10 and the exact static shape note. |
+| `missing-unity-editor-check` | Invoke the pinned `ensure-unity-editor` action with the exact inputs. See item 3. |
+| `missing-unity-return` | Run the pinned central `return-unity-license` action. See item 7. |
+| `mutable-acquire-ref` | Pin acquire to a full 40-character commit SHA. |
+| `mutable-action-ref` | Pin every remote action to a reviewed full commit SHA. See item 1. |
+| `mutable-reusable-ref` | Pin every reusable workflow call to a full commit SHA. See item 1. |
+| `release-before-classification` | Order the release step after the evidence classifier. See item 7. |
+| `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
+| `release-not-always` | Run the release step with literal `always()`. See item 7. |
+| `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
+| `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
+| `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
+| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. |
+| `unbounded-unity-editor-check` | Give the editor gate a timeout of 10 minutes or less. See item 3. |
+| `unexpected-fallback-step` | Keep only the approved release action in the fallback job. See item 8. |
+| `unity-editor-check-after-credentials` | Run the editor gate before any credential reference. See item 3. |
+| `unity-editor-check-after-lock` | Run the editor gate before acquire. See item 3. |
+| `unity-editor-provisioning-control` | Remove the editor provisioning control overrides. CI must not provision an editor. See item 3. |
+| `unity-return-not-always` | Run the central return with `always()` on acquired work. See item 7. |
+| `unresolved-reusable-workflow` | Keep every reusable workflow call resolvable at audit time. |
+| `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
+| `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
+| `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |
+| `unsafe-job-cancellation` | Use literal `cancel-in-progress: false` on the job concurrency group. See item 11. |
+| `unsafe-job-container` | Run licensed work directly on the self-hosted runner, not in a container. See item 6. |
+| `unsafe-matrix-fail-fast` | Set `fail-fast: false` on licensed matrices. |
+| `unsafe-node-options` | Remove workflow or job `env` that can preload Node before the immutable gate. See item 3. |
+| `unsafe-return-execution-environment` | Return only on an admitted self-hosted runner with isolation and a timeout. See item 7. |
+| `unsafe-unity-editor-check` | Keep the editor gate success-dependent and failure-propagating. See item 3. |
+| `unsafe-unity-editor-provisioning` | Remove editor install, repair, or provisioning steps. Rely on the central gate. See item 3. |
+| `unsafe-workflow-cancellation` | Use literal `cancel-in-progress: false` on the workflow concurrency group. See item 11. |
+
 ## Canary
 
 Before enforcing the aggregate as required:

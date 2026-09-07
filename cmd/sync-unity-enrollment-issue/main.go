@@ -258,6 +258,7 @@ func renderIssueBody(audit enrollment.UnityOrganizationAudit, evidenceURL string
 		body.WriteString("Retrieval: **incomplete (fail closed)**\n\n")
 	}
 	body.WriteString("This issue contains sanitized repository, commit, workflow, job, classification, and reason-code evidence only. It never contains matched source lines or credential values.\n\n")
+	body.WriteString("Every reason code maps to its reviewed consumer fix in the [finding-code contract](docs/consumer-enrollment.md).\n\n")
 	fmt.Fprintf(
 		&body,
 		"Summary: **%d findings**, **%d active inventory rows**. [Download the full retained source-free audit artifact](%s).\n\n",

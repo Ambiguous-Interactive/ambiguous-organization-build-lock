@@ -46,6 +46,8 @@ func TestRenderIssueBodyContainsOnlySanitizedFields(t *testing.T) {
 	for _, expected := range []string{
 		alertMarker, "Ambiguous-Interactive/DoxReloaded", ".github/workflows/unity.yml",
 		"missing-lock-acquire", "paid-serial",
+		"finding-code contract",
+		"(docs/consumer-enrollment.md)",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("body missing %q:\n%s", expected, body)
