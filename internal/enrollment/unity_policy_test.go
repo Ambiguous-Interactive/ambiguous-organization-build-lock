@@ -285,6 +285,33 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentRejectsLicensedJobWithoutSelfHostedRunner(t *testing.T) {
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	selfHostedRunsOn := "runs-on: [self-hosted, Windows]"
+	mutations := []struct {
+		name string
+		to   string
+	}{
+		{name: "github hosted label", to: "runs-on: ubuntu-latest"},
+		{name: "label set without self-hosted", to: "runs-on: [Windows]"},
+		{name: "dynamic runs-on", to: "runs-on: ${{ fromJSON(needs.preflight.outputs.os) }}"},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			workflow := strings.Replace(base, selfHostedRunsOn, mutation.to, 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "unsafe-hosted-unity-runner") {
+				t.Fatalf("licensed job without a self-hosted runner was not rejected: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentAcceptsExactLegacyEditorPrefixDuringMigration(t *testing.T) {
 	base := unityWorkflow(legacyCentralReturnSteps(), safeAggregate())
 	legacyBlock := legacyEditorGateBlock()
