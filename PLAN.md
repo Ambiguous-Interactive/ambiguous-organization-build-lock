@@ -23,7 +23,16 @@ impact on licensed-resource safety and consumer CI churn.
   use ref'd keep-alive floors.
 - Repin automation honors reviewed, expiring `repinExceptions`: a pin-only
   update can no longer move a caller to an action whose input contract the
-  caller cannot satisfy (#233 follow-up).
+  caller cannot satisfy (#233 follow-up). Issue #233 is closed: unity-helpers
+  #739 removed the incompatible historical wrapper, the quarantined
+  reservation reconciled through the documented reaper path, and the audit
+  reports stale exceptions (#236).
+- The first scheduled repin run completed 2026-09-07 07:02 UTC (run
+  34093552546). It opened repin PRs in DoxReloaded (#801), IshoBoy (#855),
+  and unity-helpers (#738, the incompatible update closed in #233).
+  DxMessaging closed its repin #553 as a duplicate and adopts the pins in its
+  own PR #554. Next observable step: the next scheduled run's handling of
+  stale repin branches and closed PRs.
 - The scheduled enrollment audit reports stale or expired `repinExceptions`
   entries as `expired-repin-exception` and `stale-repin-exception` findings
   in the drift issue (#234). The repin rewrite keeps its own fail-closed
@@ -64,8 +73,10 @@ impact on licensed-resource safety and consumer CI churn.
       new App; the reader App stays read-only.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
       edits; this repository supplies the evidence and the contract. The
-      repin workflow has not run yet; its first scheduled run is the next
-      observable step.
+      first repin run opened the PRs; their merges are consumer decisions:
+      DoxReloaded #801 and IshoBoy #855 wait for review, DxMessaging adopted
+      the pins in its own PR #554, and unity-helpers #738 was closed in the
+      #233 incident (the wrapper is gone).
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
