@@ -44,10 +44,10 @@ impact on licensed-resource safety and consumer CI churn.
       references` workflow opens repin pull requests in enrolled
       repositories for every newly authorized release (operator directive
       2026-09-07). Consumers merge; the automation never does.
-- [ ] Grant the `BUILD_LOCK_CONSUMER_APP_*` App its Contents-write and
-      Pull-requests-write installation on the enrolled repositories
-      (maintainer action in App settings); the workflow fails visibly until
-      then.
+- [ ] Extend the existing automation App (`BUILD_LOCK_APP_*`): grant
+      Contents write plus Pull requests write and install it on the six
+      enrolled consumer repositories. No new App is created; the reader App
+      stays strictly read-only. The workflow fails visibly until then.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
       edits; this repository supplies the evidence and the contract.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the

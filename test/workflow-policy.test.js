@@ -1481,14 +1481,15 @@ test("consumer repin automation is scheduled, least privilege, and never merges"
   assert.equal(checkout.with.ref, "main");
   assert.ok(scope);
   assert.match(token.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
-  assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_CONSUMER_APP_ID }}");
-  assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_CONSUMER_APP_PRIVATE_KEY }}");
+  assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_APP_ID }}");
+  assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}");
   assert.equal(token.with["owner"], "Ambiguous-Interactive");
   assert.equal(token.with.repositories, "${{ steps.repin-scope.outputs.repositories }}");
   assert.equal(token.with["permission-contents"], "write");
   assert.equal(token.with["permission-pull-requests"], "write");
   assert.equal(repin.env.CONSUMER_AUTHORIZATION, "${{ steps.repin-token.outputs.token }}");
   assert.match(repin.run, /bash tools\/workflows\/repin-consumer-locks\.sh repin-consumers/);
+  assert.doesNotMatch(text, /BUILD_LOCK_READER/);
   assert.doesNotMatch(text, /\$\{\{\s*secrets\..*\}\}[^"']*@(?:api|github)\.com/);
 
   // The script is the only place consumer write authority is exercised, and

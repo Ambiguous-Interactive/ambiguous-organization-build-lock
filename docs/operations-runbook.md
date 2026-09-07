@@ -145,12 +145,12 @@ keeps the run red. Idempotency: a repository with no stale reference is
 skipped, and an open repin pull request for the same target is never
 duplicated.
 
-The workflow mints one installation token per run through the
-`BUILD_LOCK_CONSUMER_APP_*` App credentials. That App needs only Contents
-write and Pull requests write, installed on the enrolled repositories. The
-automation never merges, never force-pushes, never edits a default branch,
-and never uses a PAT. Merging the repin pull request is the consumer's
-adoption decision.
+The workflow mints one installation token per run through the automation App
+(`BUILD_LOCK_APP_*` credentials), scoped to exactly the enrolled repository
+list with Contents write and Pull requests write. The reader App never gains
+write. The automation never merges, never force-pushes, never edits a default
+branch, and never uses a PAT. Merging the repin pull request is the
+consumer's adoption decision.
 
 ## Credential and App boundary
 
