@@ -41,6 +41,7 @@ jobs:
           repositories: ${{ steps.repin-scope.outputs.repositories }}
           permission-contents: write
           permission-pull-requests: write
+          permission-workflows: write
 
       - name: Open consumer repin pull requests
         env:

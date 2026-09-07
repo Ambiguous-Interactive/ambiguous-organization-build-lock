@@ -146,11 +146,13 @@ skipped, and an open repin pull request for the same target is never
 duplicated.
 
 The workflow mints one installation token per run through the automation App
-(`BUILD_LOCK_APP_*` credentials), scoped to exactly the enrolled repository
-list with Contents write and Pull requests write. The reader App never gains
-write. The automation never merges, never force-pushes, never edits a default
-branch, and never uses a PAT. Merging the repin pull request is the
-consumer's adoption decision.
+(`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by
+operator decision; the token stays scoped to exactly the enrolled repository
+list with Contents write, Pull requests write, and Workflows write
+(workflow-file edits are refused without that permission). The reader App
+never gains write. The automation never merges, never force-pushes, never
+edits a default branch, and never uses a PAT. Merging the repin pull request
+is the consumer's adoption decision.
 
 ## Credential and App boundary
 

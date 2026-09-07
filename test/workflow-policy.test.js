@@ -1487,6 +1487,7 @@ test("consumer repin automation is scheduled, least privilege, and never merges"
   assert.equal(token.with.repositories, "${{ steps.repin-scope.outputs.repositories }}");
   assert.equal(token.with["permission-contents"], "write");
   assert.equal(token.with["permission-pull-requests"], "write");
+  assert.equal(token.with["permission-workflows"], "write");
   assert.equal(repin.env.CONSUMER_AUTHORIZATION, "${{ steps.repin-token.outputs.token }}");
   assert.match(repin.run, /bash tools\/workflows\/repin-consumer-locks\.sh repin-consumers/);
   assert.doesNotMatch(text, /BUILD_LOCK_READER/);
