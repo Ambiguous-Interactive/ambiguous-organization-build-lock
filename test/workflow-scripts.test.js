@@ -758,3 +758,294 @@ test("consumer repin preserves reviewed compatibility exceptions and fails close
     assert.match(result.stderr, fatalCase.stderr, fatalCase.name);
   }
 });
+const repinOldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+const repinOrganization = "Ambiguous-Interactive";
+
+function gitRun(cwd, ...args) {
+  const result = childProcess.spawnSync("git", args, { cwd, encoding: "utf8" });
+  assert.equal(result.status, 0, `git ${args.join(" ")} failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+// A consumer remote whose default branch pins an older release. An
+// "automation" state adds the repin branch a previous run pushed, and
+// "advanced" moves the default branch forward after that branch existed.
+function createConsumerRemote(root, name, state, releaseSha, branchName) {
+  const remotePath = path.join(root, "remote", repinOrganization, `${name}.git`);
+  const seed = path.join(root, "seed", name);
+  fs.mkdirSync(path.dirname(remotePath), { recursive: true });
+  fs.mkdirSync(seed, { recursive: true });
+  gitRun(root, "init", "--bare", "-b", "master", remotePath);
+  gitRun(seed, "init", "-b", "master");
+  gitRun(seed, "config", "user.name", "seed");
+  gitRun(seed, "config", "user.email", "seed@example.com");
+  gitRun(seed, "remote", "add", "origin", remotePath);
+  const workflows = path.join(seed, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const writePin = (sha) => fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${sha}\n`
+  );
+  writePin(repinOldSha);
+  gitRun(seed, "add", "-A");
+  gitRun(seed, "commit", "-m", "seed workflow");
+  gitRun(seed, "push", "-q", "origin", "master");
+  if (state.automation) {
+    gitRun(seed, "checkout", "-qB", branchName);
+    writePin(releaseSha);
+    gitRun(seed, "add", "-A");
+    gitRun(seed, "commit", "-m", "chore: repin organization lock actions to v1.14.0");
+    gitRun(seed, "push", "-q", "origin", branchName);
+    gitRun(seed, "checkout", "-q", "master");
+    if (state.advanced) {
+      fs.writeFileSync(path.join(seed, "README.md"), "advanced\n");
+      gitRun(seed, "add", "-A");
+      gitRun(seed, "commit", "-m", "advance default after the branch existed");
+      gitRun(seed, "push", "-q", "origin", "master");
+    }
+  }
+  if (!state.automation) {
+    return null;
+  }
+  return gitRun(remotePath, "rev-parse", `refs/heads/${branchName}`);
+}
+
+function consumerRepinHarness(t, consumerStates) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-consumers-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  // A local release tag drives resolve_repin_target instead of network state.
+  const targetRepository = path.join(root, "target-repository.git");
+  const targetSeed = path.join(root, "target-seed");
+  fs.mkdirSync(targetRepository, { recursive: true });
+  fs.mkdirSync(targetSeed, { recursive: true });
+  gitRun(root, "init", "--bare", "-b", "main", targetRepository);
+  gitRun(targetSeed, "init", "-b", "main");
+  gitRun(targetSeed, "config", "user.name", "seed");
+  gitRun(targetSeed, "config", "user.email", "seed@example.com");
+  gitRun(targetSeed, "remote", "add", "origin", targetRepository);
+  fs.writeFileSync(path.join(targetSeed, "README.md"), "release\n");
+  gitRun(targetSeed, "add", "-A");
+  gitRun(targetSeed, "commit", "-m", "release v1.14.0");
+  gitRun(targetSeed, "tag", "v1.14.0");
+  gitRun(targetSeed, "push", "-q", "origin", "main");
+  gitRun(targetSeed, "push", "-q", "origin", "refs/tags/v1.14.0");
+  const releaseSha = gitRun(targetRepository, "rev-parse", "refs/tags/v1.14.0^{commit}");
+  const branchName = `automation/repin-lock-${releaseSha.slice(0, 7)}`;
+
+  const branches = new Map();
+  const consumers = [];
+  for (const [name, state] of Object.entries(consumerStates)) {
+    branches.set(name, createConsumerRemote(root, name, state, releaseSha, branchName));
+    consumers.push({ repository: `${repinOrganization}/${name}`, defaultBranch: "master" });
+  }
+  const policyPath = path.join(root, "unity-enrollment-policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: repinOrganization,
+    approvedLockShas: [repinOldSha, releaseSha],
+    approvedReturnShas: [releaseSha],
+    approvedDarwinReturnShas: [],
+    repositories: consumers,
+    exceptions: []
+  }));
+
+  const shims = path.join(root, "shims");
+  fs.mkdirSync(shims);
+  const events = path.join(root, "events.log");
+  const prState = path.join(root, "pr-state");
+  fs.writeFileSync(events, "");
+  fs.mkdirSync(prState, { recursive: true });
+  for (const [name, state] of Object.entries(consumerStates)) {
+    fs.mkdirSync(path.join(prState, name), { recursive: true });
+    fs.writeFileSync(path.join(prState, name, "open"), `${state.openPrs || 0}\n`);
+    fs.writeFileSync(path.join(prState, name, "closed"), `${state.closedPrs || 0}\n`);
+  }
+
+  writeExecutable(path.join(shims, "gh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then',
+    '  repository="$3"; directory="$4"',
+    '  printf \'clone %s\\n\' "${repository}" >> "${TEST_EVENTS}"',
+    '  shift 5',
+    '  exec git clone "${TEST_CLONE_BASE}/${repository}.git" "${directory}" "$@"',
+    "fi",
+    'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+    '  repository=""; state="open"',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--repo" ]; then repository="${argument}"; fi',
+    '    if [ "${previous}" = "--state" ]; then state="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  name="${repository#*/}"',
+    '  cat "${TEST_PR_STATE}/${name}/${state}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "pr" ] && [ "$2" = "create" ]; then',
+    '  head=""; title=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--head" ]; then head="${argument}"; fi',
+    '    if [ "${previous}" = "--title" ]; then title="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  printf \'create %s %s\\n\' "${head}" "${title}" >> "${TEST_EVENTS}"',
+    "  exit 0",
+    "fi",
+    "exit 64"
+  ].join("\n"));
+
+  // Real git commands keep their production https URLs; the rewrite sends
+  // them to local bare repositories so pushes, fetches, and ls-remote calls
+  // exercise real Git behavior.
+  const gitConfig = path.join(root, "git-config");
+  fs.writeFileSync(gitConfig, [
+    `[url "file://${path.join(root, "remote")}/"]`,
+    "\tinsteadOf = https://github.com/"
+  ].join("\n"));
+
+  const summaryPath = path.join(root, "summary.md");
+  const remotePath = (name) => path.join(root, "remote", repinOrganization, `${name}.git`);
+  return {
+    root,
+    events,
+    branches,
+    branchName,
+    releaseSha,
+    summaryPath,
+    remotePath,
+    run: () => {
+      const workspace = path.join(root, "workspace");
+      fs.rmSync(workspace, { recursive: true, force: true });
+      fs.mkdirSync(workspace, { recursive: true });
+      fs.copyFileSync(policyPath, path.join(workspace, "unity-enrollment-policy.json"));
+      gitRun(root, "init", "-q", "-b", "main", workspace);
+      gitRun(workspace, "remote", "add", "origin", targetRepository);
+      return childProcess.spawnSync(
+        "bash",
+        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "repin-consumers"],
+        {
+          cwd: workspace,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${shims}:${process.env.PATH}`,
+            GIT_CONFIG_GLOBAL: gitConfig,
+            CONSUMER_AUTHORIZATION: "test-consumer-token",
+            GITHUB_STEP_SUMMARY: summaryPath,
+            RUNNER_TEMP: path.join(root, "runner-temp"),
+            TEST_EVENTS: events,
+            TEST_PR_STATE: prState,
+            TEST_CLONE_BASE: `file://${path.join(root, "remote")}`
+          }
+        }
+      );
+    }
+  };
+}
+
+function repinEventLog(harness) {
+  return fs.readFileSync(harness.events, "utf8").split("\n").filter(Boolean);
+}
+
+test("consumer repin skips a closed repin pull request and stays green", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true, closedPrs: 1 },
+    "dxmessaging": {}
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /left the closed repin pull request in place/);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` was closed; consumers decide adoption \|/);
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+  assert.equal(
+    repinEventLog(harness).filter((event) => event.startsWith("create")).length,
+    1,
+    "only the fresh consumer opens a pull request"
+  );
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`),
+    "the consumer's repin branch is never updated"
+  );
+});
+
+test("consumer repin reuses an orphaned repin branch with identical content", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const events = repinEventLog(harness);
+  assert.deepEqual(events.filter((event) => event.startsWith("create")), [
+    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+  ]);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| opened repin pull request to `v1.14.0` from the existing branch \|/);
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`),
+    "the identical remote branch is reused without a push"
+  );
+});
+
+test("consumer repin leaves a repin branch with different content untouched", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true, advanced: true }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /left the stale repin branch untouched/);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| existing repin branch has different content; left untouched \|/);
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("create")).length, 0);
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
+  );
+});
+
+test("consumer repin pushes and opens a pull request when no branch exists", (t) => {
+  const harness = consumerRepinHarness(t, { "dxmessaging": {} });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const events = repinEventLog(harness);
+  assert.deepEqual(events.filter((event) => event.startsWith("create")), [
+    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+  ]);
+  const pushed = gitRun(
+    harness.remotePath("dxmessaging"),
+    "show", `${harness.branchName}:.github/workflows/unity.yml`
+  );
+  assert.match(pushed, new RegExp(`return-unity-license@${harness.releaseSha}`));
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+});
+
+test("consumer repin never duplicates an open pull request", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true, openPrs: 1 }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` is already open \|/);
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("create")).length, 0);
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
+  );
+});

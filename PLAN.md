@@ -31,8 +31,14 @@ impact on licensed-resource safety and consumer CI churn.
   34093552546). It opened repin PRs in DoxReloaded (#801), IshoBoy (#855),
   and unity-helpers (#738, the incompatible update closed in #233).
   DxMessaging closed its repin #553 as a duplicate and adopts the pins in its
-  own PR #554. Next observable step: the next scheduled run's handling of
-  stale repin branches and closed PRs.
+  own PR #554.
+- The repin automation now treats a closed repin pull request as the
+  consumer's adoption answer: the same repin is never re-offered, the branch
+  is never force-updated, and the run stays green with a summary row. An
+  orphaned repin branch is reused only when its content matches the current
+  repin exactly. Verified against real Git push behavior with end-to-end
+  tests; without it, the next scheduled run would have failed the
+  non-fast-forward push against unity-helpers' stale branch.
 - The scheduled enrollment audit reports stale or expired `repinExceptions`
   entries as `expired-repin-exception` and `stale-repin-exception` findings
   in the drift issue (#234). The repin rewrite keeps its own fail-closed
@@ -85,8 +91,8 @@ impact on licensed-resource safety and consumer CI churn.
       `docs/consumer-enrollment.md` and linked from the drift issue. The
       first repin run opened the PRs; their merges are consumer decisions:
       DoxReloaded #801 and IshoBoy #855 wait for review, DxMessaging adopted
-      the pins in its own PR #554, and unity-helpers #738 was closed in the
-      #233 incident (the wrapper is gone).
+      the pins in its own PR #554, and unity-helpers declined the repin for
+      this release by closing #738; the next release opens a fresh offer.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
