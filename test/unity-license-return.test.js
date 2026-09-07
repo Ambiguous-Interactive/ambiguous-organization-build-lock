@@ -7,8 +7,11 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
+const { setTimeout: delay } = require("node:timers/promises");
 
 const {
+  DARWIN_CODESIGN_PATH,
+  darwinDesignatedRequirement,
   editorEnvironment,
   editorPath,
   executeReturn,
@@ -18,6 +21,7 @@ const {
   run,
   systemPowerShell,
   terminateProcess,
+  UNITY_DARWIN_TEAM_IDS,
   verifyUnityEditor,
   workflowCommandData
 } = require("../.github/dist/return-unity-license.js");
@@ -371,4 +375,240 @@ test("a reparse point in the editor ancestry is rejected", async (t) => {
     platform: "linux",
     verifyEditor: async () => {}
   }), /reparse point/);
+});
+
+/*
+  Darwin trusted return (#153). Every case below is the Windows control's
+  counterpart, so a reviewer can read the two halves side by side, and each one
+  is red against a specific way the Darwin path could be wrong rather than
+  against "it does not work".
+*/
+
+const REVIEWED_TEAM = new Set(["ABCDE12345"]);
+
+test("darwin editor path resolves the Mach-O inside the reviewed bundle", () => {
+  assert.equal(
+    editorPath("/opt/tool-cache", "6000.5.2f1", "canonical", "darwin"),
+    "/opt/tool-cache/u6-v3/6000.5.2f1/Editor/Unity.app/Contents/MacOS/Unity"
+  );
+  assert.equal(
+    editorPath("/opt/tool-cache", "6000.5.2f1", "ci-managed-alternate", "darwin"),
+    "/opt/tool-cache/u6-v3/_ci-managed-editors/6000.5.2f1/Editor/Unity.app/Contents/MacOS/Unity"
+  );
+});
+
+test("the darwin requirement pins the anchor, the Developer ID chain and the team", () => {
+  const requirement = darwinDesignatedRequirement(REVIEWED_TEAM);
+  assert.match(requirement, /^anchor apple generic and /);
+  assert.match(requirement, /certificate 1\[field\.1\.2\.840\.113635\.100\.6\.2\.6\] exists/);
+  assert.match(requirement, /certificate leaf\[field\.1\.2\.840\.113635\.100\.6\.1\.13\] exists/);
+  assert.match(requirement, /certificate leaf\[subject\.OU\] = "ABCDE12345"/);
+});
+
+test("an unpinned or malformed darwin identity fails closed rather than verifying", () => {
+  assert.throws(
+    () => darwinDesignatedRequirement(new Set()),
+    /No reviewed Unity Developer ID team is configured/
+  );
+  for (const malformed of ["abcde12345", "ABCDE1234", "ABCDE123456", "ABCDE-1234", ""]) {
+    assert.throws(
+      () => darwinDesignatedRequirement(new Set([malformed])),
+      /malformed/,
+      `expected ${JSON.stringify(malformed)} to be refused`
+    );
+  }
+});
+
+test("the shipped darwin team set is empty, so an unreviewed editor cannot verify", async () => {
+  assert.equal(UNITY_DARWIN_TEAM_IDS.size, 0);
+  await assert.rejects(
+    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+      platform: "darwin",
+      spawnImpl: () => {
+        throw new Error("codesign must not be reached without a reviewed team.");
+      }
+    }),
+    /No reviewed Unity Developer ID team is configured/
+  );
+});
+
+test("darwin verification runs absolute codesign against the designated requirement", async () => {
+  const calls = [];
+  const spawnImpl = (command, argumentsList, options) => {
+    calls.push({ command, argumentsList, options });
+    const child = new EventEmitter();
+    process.nextTick(() => child.emit("close", 0));
+    return child;
+  };
+  await verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+    allowedTeamIDs: REVIEWED_TEAM,
+    environment: { PATH: "/usr/bin:/bin", TMPDIR: "/runner/temp" },
+    platform: "darwin",
+    spawnImpl
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/usr/bin/codesign");
+  assert.equal(calls[0].command, DARWIN_CODESIGN_PATH);
+  assert.ok(path.isAbsolute(calls[0].command));
+  assert.equal(calls[0].options.shell, false);
+  assert.deepEqual(calls[0].options.env, { PATH: "/usr/bin:/bin", TMPDIR: "/runner/temp" });
+  assert.ok(calls[0].argumentsList.includes("--verify"));
+  assert.ok(calls[0].argumentsList.includes("--strict"));
+  // `--` before the path, so an executable whose name begins with a dash is an
+  // operand rather than a flag.
+  const separator = calls[0].argumentsList.indexOf("--");
+  assert.ok(separator >= 0);
+  assert.equal(
+    calls[0].argumentsList[separator + 1],
+    "/opt/tool-cache/Unity.app/Contents/MacOS/Unity"
+  );
+  assert.match(calls[0].argumentsList.join(" "), /=anchor apple generic and /);
+  assert.match(calls[0].argumentsList.join(" "), /subject\.OU\] = "ABCDE12345"/);
+});
+
+test("a codesign identity mismatch fails the darwin return", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    // codesign exits nonzero when the signature does not satisfy -R, which is
+    // the image-substitution case: correctly signed, wrong team.
+    process.nextTick(() => child.emit("close", 3));
+    return child;
+  };
+  await assert.rejects(
+    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+      allowedTeamIDs: REVIEWED_TEAM,
+      platform: "darwin",
+      spawnImpl
+    }),
+    /signature verification failed/
+  );
+});
+
+test("darwin verification is bounded and terminates a hung codesign", async () => {
+  const terminated = [];
+  const verifier = new EventEmitter();
+  verifier.pid = 4321;
+  verifier.exitCode = null;
+  verifier.kill = () => {
+    terminated.push("direct");
+    return true;
+  };
+  /*
+    The action's bound is unref'd on purpose -- a verification timer must never
+    be the reason a runner stays alive -- so it only fires while something else
+    holds the loop open. `delay` is that something, and awaiting it before the
+    assertion makes the outcome settled rather than raced: at 50 ms the 5 ms
+    bound has fired, so the check below reads a decided verdict.
+  */
+  const verification = verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+    allowedTeamIDs: REVIEWED_TEAM,
+    killImpl: (pid, signal) => {
+      terminated.push(`${pid}:${signal}`);
+    },
+    platform: "darwin",
+    spawnImpl: () => verifier,
+    timeoutMs: 5
+  });
+  const outcome = verification.then(
+    () => new Error("a hung codesign must not verify the editor."),
+    (error) => error
+  );
+  await delay(50);
+  assert.match((await outcome).message, /signature verification timed out/);
+  // The group, so a codesign that forked is not left behind on the runner.
+  assert.deepEqual(terminated, ["-4321:SIGTERM"]);
+});
+
+test("a codesign that cannot start fails the darwin return closed", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    process.nextTick(() => child.emit("error", new Error("ENOENT")));
+    return child;
+  };
+  await assert.rejects(
+    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+      allowedTeamIDs: REVIEWED_TEAM,
+      platform: "darwin",
+      spawnImpl
+    }),
+    /could not start/
+  );
+});
+
+test("darwin termination signals the whole process group, not the editor alone", () => {
+  const signals = [];
+  const child = new EventEmitter();
+  child.pid = 5150;
+  child.exitCode = null;
+  child.kill = () => {
+    signals.push("direct");
+    return true;
+  };
+  terminateProcess(child, "darwin", () => {
+    throw new Error("darwin termination must not spawn a helper.");
+  }, {}, (pid, signal) => {
+    signals.push(`${pid}:${signal}`);
+  });
+  // A negative pid is the process group, which is what reaches descendants the
+  // editor left behind after its parent exited.
+  assert.deepEqual(signals, ["-5150:SIGTERM"]);
+});
+
+test("a darwin group signal that fails falls back to the direct child kill", () => {
+  const signals = [];
+  const child = new EventEmitter();
+  child.pid = 5150;
+  child.exitCode = null;
+  child.kill = () => {
+    signals.push("direct");
+    return true;
+  };
+  terminateProcess(child, "darwin", () => {
+    throw new Error("darwin termination must not spawn a helper.");
+  }, {}, () => {
+    throw new Error("ESRCH");
+  });
+  assert.deepEqual(signals, ["direct"]);
+});
+
+test("the darwin child environment is an allowlist that drops workflow control", () => {
+  const environment = editorEnvironment(
+    {
+      DYLD_INSERT_LIBRARIES: "/tmp/evil.dylib",
+      GITHUB_TOKEN: "secret",
+      HOME: "/Users/runner",
+      "INPUT_UNITY-PASSWORD": "private-password",
+      PATH: "/usr/bin:/bin",
+      TMPDIR: "/attacker/temp",
+      USER: "runner"
+    },
+    "/runner/temp",
+    "darwin"
+  );
+  assert.deepEqual(environment, {
+    HOME: "/Users/runner",
+    PATH: "/usr/bin:/bin",
+    TMPDIR: "/runner/temp",
+    USER: "runner"
+  });
+  // The loader-injection variable is the macOS counterpart of a hijacked
+  // SystemRoot, and neither reaches the editor.
+  assert.equal(environment.DYLD_INSERT_LIBRARIES, undefined);
+  assert.equal(environment["INPUT_UNITY-PASSWORD"], undefined);
+  assert.equal(environment.GITHUB_TOKEN, undefined);
+});
+
+test("an unsupported platform is refused rather than verified by another platform's rule", async () => {
+  for (const platform of ["linux", "aix", "freebsd"]) {
+    await assert.rejects(
+      verifyUnityEditor("/opt/tool-cache/Unity", {
+        allowedTeamIDs: REVIEWED_TEAM,
+        platform,
+        spawnImpl: () => {
+          throw new Error("no verifier may run on an unsupported platform.");
+        }
+      }),
+      /supports Windows and Darwin only/
+    );
+  }
 });

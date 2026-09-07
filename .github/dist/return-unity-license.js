@@ -12,11 +12,18 @@ const DEFAULT_TIMEOUT_MS = 240_000;
 const DEFAULT_VERIFY_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 30_000;
 const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
+const DARWIN_CODESIGN_PATH = "/usr/bin/codesign";
+const SUPPORTED_RETURN_PLATFORMS = new Set(["win32", "darwin"]);
 const EDITOR_LAYOUTS = new Set(["canonical", "ci-managed-alternate"]);
 const UNITY_SIGNER_THUMBPRINTS = new Set([
   "228FB6411B0A144478C86AAA3CD9473C43A8ABA7",
   "BFFD800651947878FCD0DC749C16D57B0D5E397D"
 ]);
+// Apple team identifiers whose Developer ID signature is accepted as Unity's own,
+// and the Darwin counterpart of UNITY_SIGNER_THUMBPRINTS. Empty until a reviewer
+// reads `codesign -dv --verbose=4` on a real installed Unity.app and records the
+// OU there. Empty fails the return closed; it never passes an unpinned binary.
+const UNITY_DARWIN_TEAM_IDS = new Set([]);
 
 function input(env, name) {
   return String(env[`INPUT_${name.toUpperCase()}`] || "").trim();
@@ -75,19 +82,34 @@ function runIdentity(env) {
   return { runID, runAttempt, runnerTemp };
 }
 
-function editorPath(toolCache, unityVersion, editorLayout = "canonical") {
+function editorPath(toolCache, unityVersion, editorLayout = "canonical", platform = "win32") {
   if (!EDITOR_LAYOUTS.has(editorLayout)) {
     throw new Error("editor-layout is invalid.");
   }
+  /*
+    Deliberately no platform gate here. Resolving a path decides nothing about
+    trust, and verifyUnityEditor is the one place that refuses an unsupported
+    platform -- so there is a single answer to "may this platform return a
+    licence" rather than two that can drift apart.
+  */
   const layoutComponents = editorLayout === "ci-managed-alternate"
     ? ["u6-v3", "_ci-managed-editors"]
     : ["u6-v3"];
+  /*
+    The same install root on both platforms, so the layout stays one reviewed
+    shape. Darwin's editor is the Mach-O inside the bundle rather than the
+    bundle: the bundle is a directory, and every guard here -- the regular-file
+    assertion, the symlink walk, and code-signature verification -- is about the
+    executable the return actually runs.
+  */
+  const executableComponents = platform === "darwin"
+    ? ["Editor", "Unity.app", "Contents", "MacOS", "Unity"]
+    : ["Editor", "Unity.exe"];
   return path.join(
     toolCache,
     ...layoutComponents,
     unityVersion,
-    "Editor",
-    "Unity.exe"
+    ...executableComponents
   );
 }
 
@@ -114,10 +136,109 @@ function systemPowerShell() {
   );
 }
 
+/*
+  The Darwin counterpart of the Authenticode script below, stated as a code
+  signing requirement rather than as a thumbprint comparison this action makes
+  itself. Both halves of the Windows check appear here:
+
+    anchor apple generic                       -- the chain roots in Apple, as
+                                                  Get-AuthenticodeSignature's
+                                                  Valid status asserts;
+    certificate 1[...6.2.6] exists             -- the issuer is the Developer ID
+                                                  CA, not any Apple-anchored CA;
+    certificate leaf[...6.1.13] exists         -- the leaf carries the Developer
+                                                  ID Application marker, which
+                                                  is the code-signing usage the
+                                                  Windows script reads as EKU
+                                                  1.3.6.1.5.5.7.3.3;
+    certificate leaf[subject.OU] = "<team>"    -- the identity, which is what the
+                                                  thumbprint allowlist pins.
+
+  codesign evaluates it against the signature on disk, so no part of the verdict
+  is computed from output this action parses.
+*/
+function darwinDesignatedRequirement(teamIDs) {
+  const ordered = [...teamIDs].sort();
+  if (ordered.length === 0) {
+    throw new Error(
+      "No reviewed Unity Developer ID team is configured, so a Darwin Unity return cannot be trusted."
+    );
+  }
+  for (const teamID of ordered) {
+    if (!/^[A-Z0-9]{10}$/.test(teamID)) {
+      throw new Error("A reviewed Unity Developer ID team identifier is malformed.");
+    }
+  }
+  const identity = ordered
+    .map((teamID) => `certificate leaf[subject.OU] = "${teamID}"`)
+    .join(" or ");
+  return [
+    "anchor apple generic",
+    "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
+    "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+    ordered.length === 1 ? identity : `(${identity})`
+  ].join(" and ");
+}
+
+async function verifyDarwinUnityEditor(executable, options = {}) {
+  const spawnImpl = options.spawnImpl || spawn;
+  const environment = options.environment || {};
+  const timeoutMs = options.timeoutMs === undefined
+    ? DEFAULT_VERIFY_TIMEOUT_MS
+    : options.timeoutMs;
+  const teamIDs = options.allowedTeamIDs || UNITY_DARWIN_TEAM_IDS;
+  const requirement = darwinDesignatedRequirement(teamIDs);
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const verifier = spawnImpl(
+      DARWIN_CODESIGN_PATH,
+      ["--verify", "--strict", "-R", `=${requirement}`, "--", executable],
+      {
+        cwd: "/",
+        env: environment,
+        shell: false,
+        stdio: "ignore"
+      }
+    );
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      terminateProcess(verifier, "darwin", spawnImpl, environment, options.killImpl);
+      reject(new Error("Unity editor signature verification timed out."));
+    }, timeoutMs);
+    timeout.unref?.();
+    verifier.once("error", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("Unity editor signature verification could not start."));
+      }
+    });
+    verifier.once("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error("Unity editor signature verification failed."));
+      }
+    });
+  });
+}
+
 async function verifyUnityEditor(executable, options = {}) {
   const platform = options.platform || process.platform;
+  if (platform === "darwin") {
+    return verifyDarwinUnityEditor(executable, options);
+  }
   if (platform !== "win32") {
-    throw new Error("The central Unity return action requires Windows Authenticode.");
+    throw new Error("The central Unity return action supports Windows and Darwin only.");
   }
   const spawnImpl = options.spawnImpl || spawn;
   const environment = options.environment || {};
@@ -211,8 +332,44 @@ function removeEvidenceDirectory(directory, io = fs) {
   io.rmSync(directory, { recursive: true, force: false });
 }
 
-function terminateProcess(child, platform, spawnImpl, environment) {
+function terminateProcess(child, platform, spawnImpl, environment, killImpl) {
   if (!child || child.exitCode !== null) {
+    return;
+  }
+  /*
+    taskkill /T's counterpart. The editor is spawned detached on Darwin, so it
+    leads its own process group and a negative pid signals the group -- the
+    editor and every descendant it left behind. Signalling the pid alone would
+    leave a hung child holding the seat after the parent exited, which is the
+    property #153 names.
+  */
+  if (platform === "darwin" && Number.isInteger(child.pid) && child.pid > 0) {
+    const kill = killImpl || process.kill.bind(process);
+    const signalGroup = (signal) => {
+      try {
+        kill(-child.pid, signal);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const fallback = () => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The caller will fail closed if the process does not exit.
+      }
+    };
+    if (!signalGroup("SIGTERM")) {
+      fallback();
+      return;
+    }
+    const escalation = setTimeout(() => {
+      if (!signalGroup("SIGKILL")) {
+        fallback();
+      }
+    }, 5_000);
+    escalation.unref?.();
     return;
   }
   if (platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) {
@@ -250,7 +407,28 @@ function terminateProcess(child, platform, spawnImpl, environment) {
   }
 }
 
-function editorEnvironment(env, runnerTemp) {
+function editorEnvironment(env, runnerTemp, platform = "win32") {
+  if (platform === "darwin") {
+    /*
+      The same rule as the Windows list: an allowlist, so nothing the workflow
+      happens to export reaches the editor. HOME is load-bearing rather than
+      convenience -- the Unity licensing client reads and writes per-user state
+      under it, and a return launched without it looks to Unity like a different
+      user with no license to give back.
+    */
+    const allowedDarwin = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "USER"];
+    const darwinResult = {};
+    for (const name of allowedDarwin) {
+      if (typeof env[name] === "string" && env[name] !== "") {
+        darwinResult[name] = env[name];
+      }
+    }
+    if (!darwinResult.PATH) {
+      darwinResult.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    }
+    darwinResult.TMPDIR = runnerTemp;
+    return darwinResult;
+  }
   const allowed = [
     "ALLUSERSPROFILE",
     "APPDATA",
@@ -321,7 +499,8 @@ async function executeReturn(options) {
   const executable = editorPath(
     values.toolCache,
     values.unityVersion,
-    values.editorLayout
+    values.editorLayout,
+    platform
   );
   const evidenceDirectory = path.join(
     identity.runnerTemp,
@@ -338,11 +517,13 @@ async function executeReturn(options) {
     throw new Error("The CI-managed Unity editor is not a regular file.");
   }
   assertNoReparsePath(executable, io);
-  const childEnvironment = editorEnvironment(env, identity.runnerTemp);
+  const childEnvironment = editorEnvironment(env, identity.runnerTemp, platform);
   const verifyEditor = options.verifyEditor || verifyUnityEditor;
   await verifyEditor(executable, {
+    allowedTeamIDs: options.allowedTeamIDs,
     environment: childEnvironment,
     execPath: options.execPath,
+    killImpl: options.killImpl,
     platform,
     spawnImpl
   });
@@ -387,7 +568,7 @@ async function executeReturn(options) {
         return;
       }
       terminationStarted = true;
-      terminateProcess(child, platform, spawnImpl, childEnvironment);
+      terminateProcess(child, platform, spawnImpl, childEnvironment, options.killImpl);
       terminationGrace = setTimeout(
         () => settle({ code: null, signal: "termination-grace-expired" }),
         terminationGraceMs
@@ -396,6 +577,10 @@ async function executeReturn(options) {
     };
     child = spawnImpl(executable, argumentsList, {
       cwd: identity.runnerTemp,
+      // Its own process group on Darwin, so terminateProcess can reach every
+      // descendant with one signal. Inert on Windows, where taskkill /T walks
+      // the tree instead.
+      detached: platform === "darwin",
       env: childEnvironment,
       shell: false,
       windowsHide: true,
@@ -487,9 +672,13 @@ module.exports = {
   DEFAULT_VERIFY_TIMEOUT_MS,
   MAX_EVIDENCE_BYTES,
   TERMINATION_GRACE_MS,
+  DARWIN_CODESIGN_PATH,
+  SUPPORTED_RETURN_PLATFORMS,
+  UNITY_DARWIN_TEAM_IDS,
   UNITY_SIGNER_THUMBPRINTS,
   WINDOWS_SYSTEM_ROOT,
   assertNoReparsePath,
+  darwinDesignatedRequirement,
   editorEnvironment,
   editorPath,
   executeReturn,
@@ -499,6 +688,7 @@ module.exports = {
   runIdentity,
   systemPowerShell,
   terminateProcess,
+  verifyDarwinUnityEditor,
   verifyUnityEditor,
   workflowCommandData
 };
