@@ -248,8 +248,8 @@ jobs:
 The scheduled audit reports every finding with one of these reason codes.
 Fix the finding with the matching consumer edit. Item numbers refer to the
 Workflow contract above. The exception codes apply to
-`unity-enrollment-policy.json` in this repository. The repository codes
-report central audit health, not consumer drift.
+`unity-enrollment-policy.json` in this repository. The repository and
+head-revalidation codes report central audit health, not consumer drift.
 
 | Code | Consumer fix |
 | --- | --- |
@@ -262,6 +262,8 @@ report central audit health, not consumer drift.
 | `cleanup-gate-before-release` | Run the final cleanup gate after the release step. See item 9. |
 | `cleanup-gate-inputs-not-typed` | Bind the gate inputs to the exact typed release and classifier outputs. See item 9. |
 | `cleanup-gate-not-always` | Run the gate with literal `always()` and no `continue-on-error`. See item 9. |
+| `default-branch-advanced` | No consumer edit. The default branch advanced while the audit read it, so the audit refreshed the snapshot and failed closed when the refresh did not reconcile. The next audit reads the new head. |
+| `default-branch-revalidation-incomplete` | No consumer edit. The audit could not read the current default-branch head. Central operators check the reader token and run access. |
 | `expired-policy-exception` | Renew or remove the expired registry exception in `unity-enrollment-policy.json`. |
 | `expired-repin-exception` | Renew or remove the expired `repinExceptions` entry. See Release authorization. |
 | `fallback-cleanup-not-always` | Guard the fallback job with `always()` and the source-job condition shape. See item 8. |
