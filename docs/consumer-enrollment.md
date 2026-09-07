@@ -132,7 +132,7 @@ Merging it is the consumer's adoption decision; the automation never merges.
    contract, rejects link/reparse ancestry, hard links, and identity changes,
    then atomically claims the action-owned directory under a private random
    name. The authoritative bounded read, digest check, and classification occur
-   only after that claim. On the central action's required Windows runner, the
+   only after that claim. On the central action's Windows runner, the
    classifier opens the exact file and empty directory through
    identity-verified native handles. The file handle excludes write/delete
    sharing while it rechecks the digest and deletes those objects with no
@@ -147,13 +147,19 @@ Merging it is the consumer's adoption decision; the automation never merges.
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
    return/classifier/release/gate suffix.
-   Signer rotation requires a reviewed central action release. The immediate
-   signature-check-to-process-start interval assumes no concurrently executing
-   same-account process is mutating the verified editor image; sequential
-   consumer workflow steps are not trusted to establish editor identity.
-   The central return pin must appear in both `approvedLockShas` and the
-   narrower `approvedReturnShas`; older globally approved releases do not
-   authorize this credential-bearing action.
+    Signer rotation requires a reviewed central action release. The immediate
+    signature-check-to-process-start interval assumes no concurrently executing
+    same-account process is mutating the verified editor image; sequential
+    consumer workflow steps are not trusted to establish editor identity.
+    The central return pin must appear in both `approvedLockShas` and the
+    narrower `approvedReturnShas`; older globally approved releases do not
+    authorize this credential-bearing action. The audit admits the central
+    return only on a literal self-hosted Windows or macOS runner. A Darwin
+    return is additionally admitted only when its pin is listed in
+    `approvedDarwinReturnShas`. That list is a separate reviewed authorization
+    added after a Darwin verifier release exists; until then the list is empty
+    and every Darwin return fails closed as
+    `unsafe-return-execution-environment`.
 8. Preserve fallback cleanup for runner loss. It must target the exact acquire
    identity and fail closed to quarantine when positive return cannot be
    proven. A separate fallback job is classified as `fallback-cleanup`, not as

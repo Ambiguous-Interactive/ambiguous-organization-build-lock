@@ -77,12 +77,13 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			SHA:        sha,
 		})
 		result, analyzeErr := enrollment.AnalyzeUnityEnrollment(snapshot, enrollment.UnityEnrollmentPolicy{
-			ApprovedLockSHAs:      registry.ApprovedLockSHAs,
-			ApprovedReturnSHAs:    registry.ApprovedReturnSHAs,
-			Exceptions:            registry.Exceptions,
-			ProtectedBranches:     []string{repository.DefaultBranch},
-			AllowWorkflowDispatch: repository.AllowWorkflowDispatch,
-			Now:                   time.Now().UTC(),
+			ApprovedLockSHAs:         registry.ApprovedLockSHAs,
+			ApprovedReturnSHAs:       registry.ApprovedReturnSHAs,
+			ApprovedDarwinReturnSHAs: registry.ApprovedDarwinReturnSHAs,
+			Exceptions:               registry.Exceptions,
+			ProtectedBranches:        []string{repository.DefaultBranch},
+			AllowWorkflowDispatch:    repository.AllowWorkflowDispatch,
+			Now:                      time.Now().UTC(),
 		})
 		if analyzeErr != nil {
 			audit.Complete = false

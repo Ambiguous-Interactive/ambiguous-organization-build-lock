@@ -21,12 +21,13 @@ func validUnityRegistry() UnityEnrollmentRegistry {
 		})
 	}
 	return UnityEnrollmentRegistry{
-		SchemaVersion:      1,
-		Organization:       UnityEnrollmentOrganization,
-		ApprovedLockSHAs:   []string{testSHA},
-		ApprovedReturnSHAs: []string{},
-		Repositories:       repositories,
-		Exceptions:         []UnityPolicyException{},
+		SchemaVersion:            1,
+		Organization:             UnityEnrollmentOrganization,
+		ApprovedLockSHAs:         []string{testSHA},
+		ApprovedReturnSHAs:       []string{},
+		ApprovedDarwinReturnSHAs: []string{},
+		Repositories:             repositories,
+		Exceptions:               []UnityPolicyException{},
 	}
 }
 
@@ -91,6 +92,21 @@ func TestUnityEnrollmentRegistryRequiresBaselineRepositorySet(t *testing.T) {
 		{"return not approved globally", func(value *UnityEnrollmentRegistry) {
 			value.ApprovedReturnSHAs = []string{strings.Repeat("b", 40)}
 		}},
+		{"mutable darwin return", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedReturnSHAs = []string{testSHA}
+			value.ApprovedDarwinReturnSHAs = []string{"main"}
+		}},
+		{"duplicate darwin return", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedReturnSHAs = []string{testSHA}
+			value.ApprovedDarwinReturnSHAs = []string{testSHA, testSHA}
+		}},
+		{"darwin return not return-approved", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedDarwinReturnSHAs = []string{testSHA}
+		}},
+		{"darwin return not approved globally", func(value *UnityEnrollmentRegistry) {
+			value.ApprovedReturnSHAs = []string{testSHA}
+			value.ApprovedDarwinReturnSHAs = []string{strings.Repeat("b", 40)}
+		}},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -100,6 +116,19 @@ func TestUnityEnrollmentRegistryRequiresBaselineRepositorySet(t *testing.T) {
 				t.Fatal("invalid registry passed")
 			}
 		})
+	}
+}
+
+func TestUnityEnrollmentRegistryRetainsDarwinReturnAuthorization(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.ApprovedReturnSHAs = []string{testSHA}
+	registry.ApprovedDarwinReturnSHAs = []string{testSHA}
+	parsed, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.ApprovedDarwinReturnSHAs) != 1 || parsed.ApprovedDarwinReturnSHAs[0] != testSHA {
+		t.Fatalf("darwin return authorization was not retained: %#v", parsed.ApprovedDarwinReturnSHAs)
 	}
 }
 

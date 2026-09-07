@@ -2873,6 +2873,126 @@ func TestUnityEnrollmentRejectsGloballyApprovedButUnapprovedReturnSHA(t *testing
 	}
 }
 
+func darwinAuditPolicy() UnityEnrollmentPolicy {
+	policy := unityAuditPolicy()
+	policy.ApprovedDarwinReturnSHAs = []string{testSHA}
+	return policy
+}
+
+func TestUnityEnrollmentAcceptsAuthorizedCentralReturnRunnerPlatforms(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		runsOn string
+		policy UnityEnrollmentPolicy
+	}{
+		{name: "windows runner", runsOn: "[self-hosted, Windows]", policy: unityAuditPolicy()},
+		{name: "windows runner under darwin-capable policy", runsOn: "[self-hosted, Windows]", policy: darwinAuditPolicy()},
+		{name: "darwin runner with darwin authorization", runsOn: "[self-hosted, macOS]", policy: darwinAuditPolicy()},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := strings.Replace(
+				unityWorkflow(centralReturnSteps(), safeAggregate()),
+				"runs-on: [self-hosted, Windows]",
+				"runs-on: "+testCase.runsOn,
+				1,
+			)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), testCase.policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Findings) != 0 {
+				t.Fatalf("authorized runner platform produced findings: %#v", result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRejectsDarwinCentralReturnMutations(t *testing.T) {
+	base := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"runs-on: [self-hosted, Windows]",
+		"runs-on: [self-hosted, macOS]",
+		1,
+	)
+	uncapableSHA := strings.Repeat("c", 40)
+	tests := []struct {
+		name   string
+		mutate func(string) string
+		policy func() UnityEnrollmentPolicy
+	}{
+		{
+			name:   "darwin runner without darwin authorization",
+			policy: unityAuditPolicy,
+		},
+		{
+			name: "darwin runner with a return sha lacking darwin capability",
+			mutate: func(value string) string {
+				return strings.Replace(value, returnActionRef, lockActionPrefix+"return-unity-license@"+uncapableSHA, 1)
+			},
+			policy: func() UnityEnrollmentPolicy {
+				policy := darwinAuditPolicy()
+				policy.ApprovedLockSHAs = append(policy.ApprovedLockSHAs, uncapableSHA)
+				policy.ApprovedReturnSHAs = append(policy.ApprovedReturnSHAs, uncapableSHA)
+				return policy
+			},
+		},
+		{
+			name: "dual-platform runner",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted, macOS, windows]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "hosted alias label",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted, macos-latest]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "no platform label",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "scalar runs-on",
+			mutate: func(value string) string {
+				return strings.Replace(value, "runs-on: [self-hosted, macOS]", "runs-on: self-hosted", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+		{
+			name: "expression runs-on label",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, macOS]", "[self-hosted, matrix.platform]", 1)
+			},
+			policy: darwinAuditPolicy,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := base
+			if testCase.mutate != nil {
+				workflow = testCase.mutate(base)
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), testCase.policy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "unsafe-return-execution-environment") {
+				t.Fatalf("unsupported central-return runner was accepted: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 	base := unityWorkflow(centralReturnSteps(), safeAggregate())
 	tests := []struct {
