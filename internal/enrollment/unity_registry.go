@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -56,6 +57,34 @@ type UnityEnrollmentRegistry struct {
 	ApprovedDarwinReturnSHAs []string                    `json:"approvedDarwinReturnShas"`
 	Repositories             []UnityEnrollmentRepository `json:"repositories"`
 	Exceptions               []UnityPolicyException      `json:"exceptions"`
+	RepinExceptions          []UnityRepinException       `json:"repinExceptions"`
+}
+
+// UnityRepinException is a reviewed, expiring permission to skip repinning one
+// consumer workflow file. It protects callers whose input contract is not yet
+// compatible with the newest authorized release. Without it, a pin-only update
+// can move a caller to an action that requires evidence the caller cannot
+// supply.
+type UnityRepinException struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	Reason     string `json:"reason"`
+	Owner      string `json:"owner"`
+	ExpiresAt  string `json:"expiresAt"`
+}
+
+// validRepinExceptionPath requires the exact normalized form of one workflow
+// file: a top-level `.github/workflows/` YAML path with no directory
+// component and no line or Markdown-format control characters, because the
+// path is reproduced in run logs and repin pull request bodies.
+func validRepinExceptionPath(value string) bool {
+	clean, err := cleanRepositoryPath(value)
+	if err != nil || clean != value || !isYAML(clean) ||
+		!strings.HasPrefix(clean, ".github/workflows/") {
+		return false
+	}
+	rest := strings.TrimPrefix(clean, ".github/workflows/")
+	return !strings.Contains(rest, "/") && !strings.ContainsAny(rest, "\r\n`")
 }
 
 // ParseUnityEnrollmentRegistry strictly validates the required baseline and
@@ -135,6 +164,33 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 		if canonicalRepositories[exceptionKey] != exception.Repository {
 			return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment exception repository spelling is not canonical")
 		}
+	}
+	repinExceptions := make(map[string]bool)
+	for _, exception := range registry.RepinExceptions {
+		exceptionKey := strings.ToLower(exception.Repository)
+		if !seen[exceptionKey] {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception repository is not registered")
+		}
+		if canonicalRepositories[exceptionKey] != exception.Repository {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception repository spelling is not canonical")
+		}
+		if !validRepinExceptionPath(exception.Path) {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception path must be a normalized workflow YAML path")
+		}
+		if strings.TrimSpace(exception.Owner) == "" || strings.ContainsAny(exception.Owner, "\r\n`") {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception owner is required")
+		}
+		if strings.TrimSpace(exception.Reason) == "" || strings.ContainsAny(exception.Reason, "\r\n`") {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception reason is required")
+		}
+		if _, err := time.Parse(time.RFC3339, exception.ExpiresAt); err != nil {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exception expiry must be RFC3339")
+		}
+		key := exceptionKey + "\x00" + exception.Path
+		if repinExceptions[key] {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exceptions contain a duplicate repository/path entry")
+		}
+		repinExceptions[key] = true
 	}
 	sort.Slice(registry.Repositories, func(i, j int) bool {
 		return registry.Repositories[i].Repository < registry.Repositories[j].Repository

@@ -21,6 +21,9 @@ impact on licensed-resource safety and consumer CI churn.
 - The in-repo #229 follow-ups are done: `gofmt` is a CI formatter gate, and
   the three tests that settled only through unref'd event-loop timers now
   use ref'd keep-alive floors.
+- Repin automation honors reviewed, expiring `repinExceptions`: a pin-only
+  update can no longer move a caller to an action whose input contract the
+  caller cannot satisfy (#233 follow-up).
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

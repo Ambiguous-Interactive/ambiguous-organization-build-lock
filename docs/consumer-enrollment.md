@@ -57,6 +57,9 @@ After each authorization merge, the central `Repin consumer lock references`
 workflow opens repin pull requests in enrolled repositories. Each pull request
 moves the repository's lock action references to the newly authorized release.
 Merging it is the consumer's adoption decision; the automation never merges.
+A workflow file listed in a reviewed `repinExceptions` policy entry keeps its
+current pin; the pull request body names each preserved file and its review
+expiry.
 
 ## Workflow contract
 

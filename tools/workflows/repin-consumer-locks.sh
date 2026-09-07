@@ -5,7 +5,9 @@ set -euo pipefail
 # the newest authorized release. Consumers merge the pull request; this
 # script never merges, never force-pushes, and never edits a default branch.
 
-policy_path="unity-enrollment-policy.json"
+# The reviewed enrollment policy that drives scope and repin exceptions.
+# REPIN_POLICY_PATH overrides it for tests.
+policy_path="${REPIN_POLICY_PATH:-unity-enrollment-policy.json}"
 lock_repository_prefix="Ambiguous-Interactive/ambiguous-organization-build-lock/"
 
 resolve_scope() {
@@ -71,11 +73,14 @@ rewrite_pins() {
   # `uses:` lines that name this repository's actions, and normalize a trailing
   # `# vX.Y.Z` comment when the release tag is known. Everything else is
   # untouched, and the target must already be authorized in both allowlists.
-  local directory="$1" target_sha="$2" target_version="$3"
-  node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" <<'EOF'
+  # A reviewed, unexpired repin exception preserves one whole workflow file so
+  # a pin-only update cannot move a caller to an action whose input contract
+  # it cannot satisfy.
+  local directory="$1" target_sha="$2" target_version="$3" repository="$4"
+  node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" "${repository}" <<'EOF'
 const fs = require("node:fs");
 const path = require("node:path");
-const [directory, targetSha, targetVersion, policyPath, lockPrefix] = process.argv.slice(2);
+const [directory, targetSha, targetVersion, policyPath, lockPrefix, repository] = process.argv.slice(2);
 if (!/^[a-f0-9]{40}$/.test(targetSha)) {
   throw new Error("Repins require a full lowercase 40-character commit SHA.");
 }
@@ -83,6 +88,58 @@ const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
 const lowered = (values) => new Set((values || []).map((value) => String(value).toLowerCase()));
 if (!lowered(policy.approvedLockShas).has(targetSha) || !lowered(policy.approvedReturnShas).has(targetSha)) {
   throw new Error(`Refusing to repin to ${targetSha}: it is not authorized in both allowlists.`);
+}
+const exceptionPattern = /^\.github\/workflows\/[^/]+\.[yY][aA]?[mM][lL]$/;
+const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const singleLine = (value) => !/[\r\n`]/.test(value);
+// Every entry must match the reviewed registry contract, including entries
+// for other repositories, so a standalone rewrite cannot accept a policy the
+// registry parser would reject.
+if (policy.repinExceptions !== undefined && !Array.isArray(policy.repinExceptions)) {
+  throw new Error("Repins require repinExceptions to be a list when present.");
+}
+const entries = policy.repinExceptions || [];
+const canonicalRepositories = new Map();
+for (const value of Array.isArray(policy.repositories) ? policy.repositories : []) {
+  canonicalRepositories.set(String(value.repository || "").toLowerCase(), String(value.repository || ""));
+}
+const seenExceptions = new Set();
+for (const entry of entries) {
+  const entryRepository = String(entry.repository || "");
+  if (canonicalRepositories.get(entryRepository.toLowerCase()) !== entryRepository) {
+    throw new Error("Repins require a registered canonical repository spelling in every repinExceptions entry.");
+  }
+  const entryPath = String(entry.path || "");
+  if (!exceptionPattern.test(entryPath) || entryPath.includes("\\") ||
+    !singleLine(entryPath) || entryPath.split("/").includes("..")) {
+    throw new Error(`Repins require a normalized workflow path in repinExceptions; got ${entryPath}`);
+  }
+  if (!singleLine(String(entry.owner || "")) || !String(entry.owner || "").trim() ||
+    !singleLine(String(entry.reason || "")) || !String(entry.reason || "").trim()) {
+    throw new Error("Repins require a single-line owner and reason in every repinExceptions entry.");
+  }
+  const expiry = String(entry.expiresAt || "");
+  if (!rfc3339Pattern.test(expiry) || !Number.isFinite(Date.parse(expiry))) {
+    throw new Error(`Repins require an RFC3339 expiry in repinExceptions; got ${expiry}`);
+  }
+  const key = `${entryRepository.toLowerCase()}\u0000${entryPath}`;
+  if (seenExceptions.has(key)) {
+    throw new Error("Repins reject a duplicate repository/path repinExceptions entry.");
+  }
+  seenExceptions.add(key);
+}
+const exceptions = new Map();
+for (const entry of entries) {
+  if (entry.repository !== repository) {
+    continue;
+  }
+  const expiry = Date.parse(String(entry.expiresAt));
+  if (expiry <= Date.now()) {
+    throw new Error(
+      `The repin exception for ${entry.path} expired at ${entry.expiresAt}; renew or remove it before repinning.`
+    );
+  }
+  exceptions.set(entry.path, entry);
 }
 const linePattern =
   /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
@@ -99,8 +156,20 @@ const visit = (entry) => {
   }
 };
 visit(path.join(directory, ".github"));
-const report = { changed: 0, files: [] };
+const report = { changed: 0, files: [], skipped: [], unmatched: [] };
+const matchedExceptions = new Set();
 for (const filePath of files) {
+  const relativePath = path.relative(directory, filePath).split(path.sep).join("/");
+  const exception = exceptions.get(relativePath);
+  if (exception) {
+    matchedExceptions.add(relativePath);
+    report.skipped.push({
+      path: relativePath,
+      owner: String(exception.owner || ""),
+      expiresAt: String(exception.expiresAt || "")
+    });
+    continue;
+  }
   const original = fs.readFileSync(filePath, "utf8");
   const lines = original.split("\n");
   let fileChanges = 0;
@@ -121,7 +190,16 @@ for (const filePath of files) {
   }
   fs.writeFileSync(filePath, `${rewritten.join("\n")}`, "utf8");
   report.changed += fileChanges;
-  report.files.push({ path: path.relative(directory, filePath), lines: fileChanges });
+  report.files.push({ path: relativePath, lines: fileChanges });
+}
+for (const [entryPath, entry] of exceptions) {
+  if (!matchedExceptions.has(entryPath)) {
+    report.unmatched.push({
+      path: entryPath,
+      owner: String(entry.owner || ""),
+      expiresAt: String(entry.expiresAt || "")
+    });
+  }
 }
 process.stdout.write(`${JSON.stringify(report)}\n`);
 EOF
@@ -147,7 +225,7 @@ repin_consumer() {
       exit 1
     fi
     local report
-    if ! report="$(rewrite_pins "${directory}" "${target_sha}" "${target_version}")"; then
+    if ! report="$(rewrite_pins "${directory}" "${target_sha}" "${target_version}" "${repository}")"; then
       echo "::error::${repository}: could not rewrite the lock references." >&2
       exit 1
     fi
@@ -156,8 +234,32 @@ repin_consumer() {
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
+    local preserved preserved_count
+    if ! preserved="$(printf '%s' "${report}" | jq -r '
+      .skipped[] | "- `\(.path)` preserved; reviewed by \(.owner) until \(.expiresAt)"
+    ')" || ! preserved_count="$(printf '%s' "${report}" | jq -er '.skipped | length')"; then
+      echo "::error::${repository}: could not read the rewrite report." >&2
+      exit 1
+    fi
+    local unmatched
+    if ! unmatched="$(printf '%s' "${report}" | jq -r '
+      .unmatched[] | "- `\(.path)` names a repin exception but no file exists at that path; remove the exception"
+    ')" || ! printf '%s' "${report}" | jq -e '.unmatched' >/dev/null; then
+      echo "::error::${repository}: could not read the rewrite report." >&2
+      exit 1
+    fi
+    if [ -n "${preserved}" ]; then
+      printf '%s\n' "${preserved}"
+    fi
+    if [ -n "${unmatched}" ]; then
+      printf '%s\n' "${unmatched}" >&2
+    fi
     if [ "${changed}" = "0" ]; then
-      printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\` |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+      if [ "${preserved_count}" != "0" ]; then
+        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\`; ${preserved_count} file(s) preserved by reviewed repin exceptions |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+      else
+        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\` |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+      fi
       exit 0
     fi
     local open_prs
@@ -200,6 +302,17 @@ repin_consumer() {
     body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
     local file_list
     file_list="$(printf '%s' "${report}" | jq -r '.files[] | "- `\(.path)` (\(.lines) line\(if .lines == 1 then "" else "s" end))"' )"
+    local preserved_section=""
+    if [ "${preserved_count}" != "0" ]; then
+      preserved_section="
+## Preserved compatibility exceptions
+
+These files kept their current pins. A reviewed repin exception protects each
+caller because a pin-only update would break its input contract:
+
+${preserved}
+"
+    fi
     cat > "${body_file}" <<EOF
 Repin the organization lock actions to the authorized release ${label}
 (\`${target_sha}\`).
@@ -214,7 +327,7 @@ Repin the organization lock actions to the authorized release ${label}
 \`\`\`
 ${file_list}
 \`\`\`
-
+${preserved_section}
 This pull request is opened by central automation. It never merges itself and
 never edits a default branch.
 EOF
@@ -227,7 +340,11 @@ EOF
       exit 1
     fi
     rm -f "${body_file}"
-    printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines) |" >> "${GITHUB_STEP_SUMMARY}"
+    if [ "${preserved_count}" != "0" ]; then
+      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines; ${preserved_count} file(s) preserved) |" >> "${GITHUB_STEP_SUMMARY}"
+    else
+      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines) |" >> "${GITHUB_STEP_SUMMARY}"
+    fi
   )
 }
 
@@ -263,7 +380,7 @@ case "${1:-}" in
     ;;
   repin-consumers) repin_consumers ;;
   *)
-    echo "usage: $0 <resolve-scope|rewrite-pins <directory> <target-sha> <target-version>|repin-consumers>" >&2
+    echo "usage: $0 <resolve-scope|rewrite-pins <directory> <target-sha> <target-version> <repository>|repin-consumers>" >&2
     exit 2
     ;;
 esac

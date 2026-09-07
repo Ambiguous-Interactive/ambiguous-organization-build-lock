@@ -217,6 +217,111 @@ func TestUnityEnrollmentRegistryRequiresCanonicalExceptionRepository(t *testing.
 	}
 }
 
+func TestUnityEnrollmentRegistryRetainsValidRepinException(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.RepinExceptions = []UnityRepinException{{
+		Repository: "Ambiguous-Interactive/unity-helpers",
+		Path:       ".github/workflows/legacy-return.yml",
+		Reason:     "The wrapper cannot supply the return-log-digest input.",
+		Owner:      "unity-helpers-maintainers",
+		ExpiresAt:  "2099-01-01T00:00:00Z",
+	}}
+	parsed, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.RepinExceptions) != 1 || parsed.RepinExceptions[0].Path != ".github/workflows/legacy-return.yml" {
+		t.Fatalf("repin exception was not retained: %#v", parsed.RepinExceptions)
+	}
+}
+
+func TestUnityEnrollmentRegistryRejectsInvalidRepinException(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*UnityRepinException)
+	}{
+		{"unregistered repository", func(value *UnityRepinException) {
+			value.Repository = "Ambiguous-Interactive/not-enrolled"
+		}},
+		{"non-canonical repository", func(value *UnityRepinException) {
+			value.Repository = "Ambiguous-Interactive/UNITY-HELPERS"
+		}},
+		{"path outside workflows", func(value *UnityRepinException) {
+			value.Path = "scripts/legacy-return.yml"
+		}},
+		{"non-yaml path", func(value *UnityRepinException) {
+			value.Path = ".github/workflows/legacy-return.json"
+		}},
+		{"nested workflow path", func(value *UnityRepinException) {
+			value.Path = ".github/workflows/nested/legacy-return.yml"
+		}},
+		{"escaping path", func(value *UnityRepinException) {
+			value.Path = ".github/workflows/../legacy-return.yml"
+		}},
+		{"multiline path", func(value *UnityRepinException) {
+			value.Path = ".github/workflows/legacy\n-return.yml"
+		}},
+		{"backtick path", func(value *UnityRepinException) {
+			value.Path = ".github/workflows/leg`acy-return.yml"
+		}},
+		{"missing owner", func(value *UnityRepinException) {
+			value.Owner = " "
+		}},
+		{"multiline owner", func(value *UnityRepinException) {
+			value.Owner = "owner\nsecond-line"
+		}},
+		{"backtick owner", func(value *UnityRepinException) {
+			value.Owner = "`owner`"
+		}},
+		{"missing reason", func(value *UnityRepinException) {
+			value.Reason = ""
+		}},
+		{"multiline reason", func(value *UnityRepinException) {
+			value.Reason = "line one\nline two"
+		}},
+		{"invalid expiry", func(value *UnityRepinException) {
+			value.ExpiresAt = "2026-09-07"
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := validUnityRegistry()
+			registry.RepinExceptions = []UnityRepinException{{
+				Repository: "Ambiguous-Interactive/unity-helpers",
+				Path:       ".github/workflows/legacy-return.yml",
+				Reason:     "The wrapper cannot supply the return-log-digest input.",
+				Owner:      "unity-helpers-maintainers",
+				ExpiresAt:  "2099-01-01T00:00:00Z",
+			}}
+			testCase.mutate(&registry.RepinExceptions[0])
+			if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err == nil {
+				t.Fatalf("invalid repin exception %q passed", testCase.name)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRegistryRejectsDuplicateRepinException(t *testing.T) {
+	registry := validUnityRegistry()
+	entry := UnityRepinException{
+		Repository: "Ambiguous-Interactive/unity-helpers",
+		Path:       ".github/workflows/legacy-return.yml",
+		Reason:     "The wrapper cannot supply the return-log-digest input.",
+		Owner:      "unity-helpers-maintainers",
+		ExpiresAt:  "2099-01-01T00:00:00Z",
+	}
+	registry.RepinExceptions = []UnityRepinException{entry, entry}
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err == nil {
+		t.Fatal("duplicate repin exception passed")
+	}
+	second := entry
+	second.Path = ".github/workflows/other.yml"
+	registry.RepinExceptions = []UnityRepinException{entry, second}
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err != nil {
+		t.Fatalf("distinct repin exceptions failed: %v", err)
+	}
+}
+
 func TestUnityEnrollmentRegistryRejectsUnknownAndTrailingJSON(t *testing.T) {
 	content := encodeRegistry(t, validUnityRegistry())
 	withUnknown := strings.Replace(string(content), `"schemaVersion":1`, `"schemaVersion":1,"unknown":true`, 1)

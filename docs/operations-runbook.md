@@ -145,6 +145,18 @@ keeps the run red. Idempotency: a repository with no stale reference is
 skipped, and an open repin pull request for the same target is never
 duplicated.
 
+A reviewed, expiring `repinExceptions` entry in
+`unity-enrollment-policy.json` protects one workflow file in one repository
+from repinning. Use it only when a pin-only update would move a caller to an
+action whose input contract the caller cannot satisfy. Each entry names the
+repository, the top-level `.github/workflows/` YAML file, the reason, the
+review owner, and an RFC3339 expiry. The registry parser rejects malformed
+entries, and the rewrite fails closed when an exception has expired. A
+preserved file stays untouched and is listed in the run log and the repin
+pull request body; the run summary records the count. An exception whose file
+no longer exists is reported in the run log, so stale entries stay visible
+until a reviewer removes them.
+
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by
 operator decision; the token stays scoped to exactly the enrolled repository

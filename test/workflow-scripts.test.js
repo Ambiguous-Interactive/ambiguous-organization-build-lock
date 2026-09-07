@@ -329,11 +329,13 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
       { cwd: repoRoot, encoding: "utf8" }
     );
 
-  const result = runRewrite(target, "v1.14.0");
+  const result = runRewrite(target, "v1.14.0", "Ambiguous-Interactive/unity-helpers");
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     changed: 3,
-    files: [{ path: path.join(".github", "workflows", "unity.yml"), lines: 3 }]
+    files: [{ path: path.join(".github", "workflows", "unity.yml"), lines: 3 }],
+    skipped: [],
+    unmatched: []
   });
 
   const lines = fs.readFileSync(path.join(workflows, "unity.yml"), "utf8").split("\n");
@@ -356,15 +358,163 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
     "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@64bac446903115134dca8235410b332bc5a83547 # post-v1.10.0"
   );
 
-  const rerun = runRewrite(target, "v1.14.0");
+  const rerun = runRewrite(target, "v1.14.0", "Ambiguous-Interactive/unity-helpers");
   assert.equal(rerun.status, 0, rerun.stderr);
-  assert.deepEqual(JSON.parse(rerun.stdout), { changed: 0, files: [] });
+  assert.deepEqual(JSON.parse(rerun.stdout), { changed: 0, files: [], skipped: [], unmatched: [] });
 
-  const unapproved = runRewrite("0".repeat(40), "v0.0.0");
+  const unapproved = runRewrite("0".repeat(40), "v0.0.0", "Ambiguous-Interactive/unity-helpers");
   assert.equal(unapproved.status, 1);
   assert.match(unapproved.stderr, /not authorized in both allowlists/);
 
-  const malformed = runRewrite("64bac446", "v1.14.0");
+  const malformed = runRewrite("64bac446", "v1.14.0", "Ambiguous-Interactive/unity-helpers");
   assert.equal(malformed.status, 1);
   assert.match(malformed.stderr, /40-character commit SHA/);
+});
+
+test("consumer repin preserves reviewed compatibility exceptions and fails closed on expiry", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-exceptions-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const legacyPin = `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${oldSha}`;
+  const writeWorkflow = (repository, name, pinLine) => {
+    const workflows = path.join(root, "consumers", repository, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.writeFileSync(path.join(workflows, name), [pinLine, ""].join("\n"));
+  };
+  // The legacy wrapper shape from issue 233: a caller whose input contract
+  // cannot satisfy the newer classifier, protected by a reviewed exception.
+  writeWorkflow("unity-helpers", "legacy-return.yml", legacyPin);
+  writeWorkflow("unity-helpers", "native.yml", legacyPin);
+  writeWorkflow("dxmessaging", "legacy-return.yml", legacyPin);
+  const baseException = {
+    repository: "Ambiguous-Interactive/unity-helpers",
+    path: ".github/workflows/legacy-return.yml",
+    reason: "The wrapper cannot supply the return-log-digest input.",
+    owner: "unity-helpers-maintainers",
+    expiresAt: "2099-01-01T00:00:00Z"
+  };
+  const writePolicy = (repinExceptions) => {
+    const policyPath = path.join(root, "policy.json");
+    fs.writeFileSync(policyPath, JSON.stringify({
+      schemaVersion: 1,
+      organization: "Ambiguous-Interactive",
+      approvedLockShas: [oldSha, target],
+      approvedReturnShas: [target],
+      approvedDarwinReturnShas: [],
+      repositories: [
+        { repository: "Ambiguous-Interactive/unity-helpers" },
+        { repository: "Ambiguous-Interactive/dxmessaging" }
+      ],
+      exceptions: [],
+      repinExceptions
+    }));
+    return policyPath;
+  };
+  const runRewrite = (repository, policyPath) =>
+    childProcess.spawnSync(
+      "bash",
+      [
+        path.join(scriptsRoot, "repin-consumer-locks.sh"),
+        "rewrite-pins",
+        path.join(root, "consumers", repository),
+        target,
+        "v1.14.0",
+        `Ambiguous-Interactive/${repository}`
+      ],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+    );
+
+  const preserved = runRewrite("unity-helpers", writePolicy([baseException]));
+  assert.equal(preserved.status, 0, preserved.stderr);
+  assert.deepEqual(JSON.parse(preserved.stdout), {
+    changed: 1,
+    files: [{ path: path.join(".github", "workflows", "native.yml"), lines: 1 }],
+    skipped: [
+      {
+        path: path.join(".github", "workflows", "legacy-return.yml"),
+        owner: "unity-helpers-maintainers",
+        expiresAt: "2099-01-01T00:00:00Z"
+      }
+    ],
+    unmatched: []
+  });
+  assert.equal(
+    fs.readFileSync(path.join(root, "consumers", "unity-helpers", ".github", "workflows", "legacy-return.yml"), "utf8"),
+    `${legacyPin}\n`
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, "consumers", "unity-helpers", ".github", "workflows", "native.yml"), "utf8"),
+    new RegExp(`return-unity-license@${target}`)
+  );
+
+  // The exception is scoped to one repository; other consumers still repin.
+  const otherRepository = runRewrite("dxmessaging", writePolicy([baseException]));
+  assert.equal(otherRepository.status, 0, otherRepository.stderr);
+  assert.deepEqual(JSON.parse(otherRepository.stdout), {
+    changed: 1,
+    files: [{ path: path.join(".github", "workflows", "legacy-return.yml"), lines: 1 }],
+    skipped: [],
+    unmatched: []
+  });
+
+  // An exception whose file no longer exists is visible, not fatal.
+  const orphaned = { ...baseException, path: ".github/workflows/deleted-wrapper.yml" };
+  const unmatched = runRewrite("unity-helpers", writePolicy([baseException, orphaned]));
+  assert.equal(unmatched.status, 0, unmatched.stderr);
+  assert.deepEqual(JSON.parse(unmatched.stdout).unmatched, [
+    {
+      path: path.join(".github", "workflows", "deleted-wrapper.yml"),
+      owner: "unity-helpers-maintainers",
+      expiresAt: "2099-01-01T00:00:00Z"
+    }
+  ]);
+
+  const fatalCases = [
+    {
+      name: "expired",
+      entries: [{ ...baseException, expiresAt: "2000-01-01T00:00:00Z" }],
+      stderr: /expired at 2000-01-01T00:00:00Z; renew or remove it before repinning/
+    },
+    {
+      name: "path outside workflows",
+      entries: [{ ...baseException, path: "scripts/legacy-return.yml" }],
+      stderr: /normalized workflow path/
+    },
+    {
+      name: "non-RFC3339 expiry",
+      entries: [{ ...baseException, expiresAt: "2099-01-01" }],
+      stderr: /RFC3339 expiry/
+    },
+    {
+      name: "duplicate entry",
+      entries: [baseException, { ...baseException }],
+      stderr: /duplicate repository\/path repinExceptions entry/
+    },
+    {
+      name: "malformed entry for another repository",
+      entries: [baseException, { ...baseException, repository: "Ambiguous-Interactive/dxmessaging", path: "bogus" }],
+      stderr: /normalized workflow path/
+    },
+    {
+      name: "non-canonical repository spelling",
+      entries: [{ ...baseException, repository: "Ambiguous-Interactive/UNITY-HELPERS" }],
+      stderr: /registered canonical repository spelling/
+    },
+    {
+      name: "unregistered repository",
+      entries: [{ ...baseException, repository: "Ambiguous-Interactive/not-enrolled" }],
+      stderr: /registered canonical repository spelling/
+    },
+    {
+      name: "backtick in owner",
+      entries: [{ ...baseException, owner: "`owner`" }],
+      stderr: /single-line owner and reason/
+    }
+  ];
+  for (const fatalCase of fatalCases) {
+    const result = runRewrite("unity-helpers", writePolicy(fatalCase.entries));
+    assert.equal(result.status, 1, `${fatalCase.name}: expected failure, got ${result.status}`);
+    assert.match(result.stderr, fatalCase.stderr, fatalCase.name);
+  }
 });
