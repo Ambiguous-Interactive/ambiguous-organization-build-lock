@@ -49,7 +49,10 @@ clone_consumers() {
   )
 }
 
-revalidate_heads() {
+max_head_revalidation_attempts=3
+
+revalidate_heads_once() {
+  local stale_snapshots="$1"
   failed=false
   record_finding() {
     local repository="$1"
@@ -63,6 +66,11 @@ revalidate_heads() {
     mv "${temporary}" "${AUDIT_PATH}"
     failed=true
   }
+  note_stale_snapshot() {
+    local repository="$1"
+    local branch="$2"
+    printf '%s\t%s\n' "${repository}" "${branch}" >> "${stale_snapshots:?stale snapshot ledger is required}"
+  }
   verify_head() {
     local repository="$1"
     local branch="$2"
@@ -73,8 +81,10 @@ revalidate_heads() {
       audited_sha="$(git -C "${directory}" rev-parse HEAD)"
     fi
     if ! current_sha="$(GH_TOKEN="${READER_AUTHORIZATION:?READER_AUTHORIZATION is required}" gh api "repos/${repository}/git/ref/heads/${branch}" --jq .object.sha)"; then
+      note_stale_snapshot "${repository}" "${branch}"
       record_finding "${repository}" "${audited_sha}" "default-branch-revalidation-incomplete"
     elif [ "${audited_sha}" != "${current_sha}" ]; then
+      note_stale_snapshot "${repository}" "${branch}"
       record_finding "${repository}" "${audited_sha}" "default-branch-advanced"
     fi
   }
@@ -87,9 +97,45 @@ revalidate_heads() {
     jq -r '.repositories[] | [.repository, .defaultBranch] | @tsv' \
       unity-enrollment-policy.json
   )
-  if [ "${failed}" = true ]; then
-    exit 1
-  fi
+  [ "${failed}" != true ]
+}
+
+refresh_stale_snapshots() {
+  local stale_snapshots="$1"
+  local repository
+  local branch
+  local directory
+  while IFS=$'\t' read -r repository branch; do
+    directory=".policy-consumers/${repository#*/}"
+    rm -rf "${directory}"
+    GH_TOKEN="${READER_AUTHORIZATION:?READER_AUTHORIZATION is required}" gh repo clone "${repository}" "${directory}" -- \
+      --branch "${branch}" \
+      --single-branch \
+      --no-tags
+  done < "${stale_snapshots:?stale snapshot ledger is required}"
+  go run ./cmd/audit-unity-enrollment \
+    --policy unity-enrollment-policy.json \
+    --repositories-root .policy-consumers \
+    --output "${AUDIT_PATH:?AUDIT_PATH is required}"
+}
+
+revalidate_heads() {
+  local attempt
+  local stale_snapshots
+  for ((attempt = 1; attempt <= max_head_revalidation_attempts; attempt++)); do
+    stale_snapshots="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/unity-enrollment-stale.XXXXXX")"
+    if revalidate_heads_once "${stale_snapshots}"; then
+      rm -f "${stale_snapshots}"
+      return 0
+    fi
+    if [ "${attempt}" -eq "${max_head_revalidation_attempts}" ]; then
+      echo "Consumer default branches stayed stale for ${max_head_revalidation_attempts} revalidation attempts; the audit fails closed." >&2
+      rm -f "${stale_snapshots}"
+      return 1
+    fi
+    echo "Consumer default branches advanced while the audit read them; refreshing the stale snapshots." >&2
+    refresh_stale_snapshots "${stale_snapshots}"
+  done
 }
 
 record_counts() {
