@@ -53,6 +53,11 @@ Until the merge, consumer pins to the new release fail closed as
 `unapproved-lock-ref`. The released-but-unauthorized gap is therefore visible
 as an open pull request, not as a silent absence.
 
+After each authorization merge, the central `Repin consumer lock references`
+workflow opens repin pull requests in enrolled repositories. Each pull request
+moves the repository's lock action references to the newly authorized release.
+Merging it is the consumer's adoption decision; the automation never merges.
+
 ## Workflow contract
 
 1. Pin every remote action, including transitive local-composite leaves, to a
@@ -135,7 +140,10 @@ as an open pull request, not as a silent absence.
    `classification-complete=true`. Run typed release and the final cleanup gate
    with literal `always()`. Only exact entitlement and ULF success lines in the
    dedicated return log are `confirmed/healthy`; exit zero, supplemental proof,
-   or a missing serial is not proof. Supplemental evidence is classified but
+   or a missing serial is not proof. The one exception is the measured
+   shared-seat handoff (issue #83): the ULF success line with a `400006` seat
+   response and a completed command is `confirmed/healthy`, because the peer
+   already released the seat. Supplemental evidence is classified but
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
    return/classifier/release/gate suffix.

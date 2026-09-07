@@ -191,8 +191,8 @@ test("classification precedence is fail-closed and proof is return-log scoped", 
     ["bare skip with suffix", 0, `${PROOF}Serial number unavailable for ULF return; skipping operation\n`, [], true, true, expected("unknown", "healthy", "return-ulf-skipped")],
     ["incidental skip phrase", 0, `${PROOF}checking for ${SKIP}\n`, [], true, true, expected("confirmed", "healthy", "cleanup-confirmed")],
     ["supplemental skip", 0, PROOF, [Buffer.from(`${SKIP}\n`)], true, true, expected("confirmed", "healthy", "cleanup-confirmed")],
-    ["400006 vetoes proof", 0, `${PROOF}400006\n`, [], true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
-    ["supplemental 400006", 0, PROOF, [Buffer.from("code 400006\n")], true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["400006 history with full proof confirms", 0, `${PROOF}400006\n`, [], true, true, expected("confirmed", "healthy", "cleanup-confirmed", "400006")],
+    ["supplemental 400006 with full proof confirms", 0, PROOF, [Buffer.from("code 400006\n")], true, true, expected("confirmed", "healthy", "cleanup-confirmed", "400006")],
     ["20113", 0, `${PROOF}20113\n`, [], true, true, expected("unknown", "healthy", "unity-20113-unclassified", "20113")],
     ["supplemental 20113", 0, PROOF, [Buffer.from("code 20113\n")], true, true, expected("unknown", "healthy", "unity-20113-unclassified", "20113")],
     ["20111 beats proof", 0, `${PROOF}20111\n`, [], true, true, expected("unknown", "blocked", "unity-account-limit-20111", "20111")],
@@ -242,6 +242,50 @@ test("generic return failure attributes the checked licensing codes without expo
   assert.equal(verdict.licensingCodesChecked, "20111,20113,400006");
   assert.equal(verdict.licensingCodeMatched, "none");
   assert.equal(JSON.stringify(verdict).includes("Return command failed"), false);
+});
+
+test("the shared-seat 400006 signature confirms cleanup instead of quarantining", async (t) => {
+  const seatHandoffLog = [
+    "[Licensing::Client] Error: Code 400006 while processing request (status: Bad request: Seat id doesn't belong to user)",
+    "[Licensing::Module] Error: Failed to return entitlement license",
+    ULF
+  ].join("\n") + "\n";
+
+  await t.test("ulf success with a completed command proves the seat handoff", () => {
+    assert.deepEqual(
+      classifyEvidence({
+        exitCode: 1,
+        returnLog: Buffer.from(seatHandoffLog),
+        supplemental: [],
+        commandCompleted: true,
+        captureComplete: true
+      }),
+      expected("confirmed", "healthy", "cleanup-confirmed", "400006")
+    );
+  });
+
+  const failClosed = [
+    ["terminated return", 137, seatHandoffLog, true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["timeout return", 124, seatHandoffLog, true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["ulf skipped", 1, seatHandoffLog.replace(`${ULF}\n`, `${SKIP}\n`), true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["ulf absent", 1, "code 400006\n", true, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["command incomplete", null, seatHandoffLog, false, true, expected("unknown", "healthy", "unity-return-400006", "400006")],
+    ["capture incomplete", 1, seatHandoffLog, true, false, expected("unknown", "healthy", "return-log-truncated", "400006")]
+  ];
+  for (const [name, exitCode, returnText, completed, captureComplete, want] of failClosed) {
+    await t.test(name, () => {
+      assert.deepEqual(
+        classifyEvidence({
+          exitCode,
+          returnLog: Buffer.from(returnText),
+          supplemental: [],
+          commandCompleted: completed,
+          captureComplete
+        }),
+        want
+      );
+    });
+  }
 });
 
 test("completed classifier outputs carry bounded licensing-code attribution", () => {

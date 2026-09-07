@@ -291,10 +291,14 @@ owns command invocation and bounded raw-log capture; it must not classify its ow
 evidence. The central classifier accepts cleanup proof only from the dedicated
 current return log. Exact entitlement-return and client-ULF-return lines are both
 required. Exit zero, supplemental proof, or `Serial number unavailable` is
-insufficient. Skipped ULF, timeouts, truncated logs, termination, `400006`,
-`20113`, and missing positive evidence report `unknown/healthy` with an
-allowlisted reason. Detected `20111` reports `unknown/blocked` with
-`unity-account-limit-20111`.
+insufficient. The one exception is the measured shared-seat handoff
+(issue #83): a `400006` response with the client-ULF-return line and a
+completed command proves the peer already released the seat, so the classifier
+reports `confirmed/healthy/cleanup-confirmed` with
+`licensing-code-matched=400006`. Skipped ULF, timeouts, truncated logs,
+termination, a `400006` without ULF proof, `20113`, and missing positive
+evidence report `unknown/healthy` with an allowlisted reason. Detected `20111`
+reports `unknown/blocked` with `unity-account-limit-20111`.
 
 The final cleanup gate is intentionally separate from release. Holder removal can
 be followed by a cooldown, quarantine, or account incident, so `released=true`
