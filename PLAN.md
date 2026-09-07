@@ -37,9 +37,14 @@ impact on licensed-resource safety and consumer CI churn.
   entries as `expired-repin-exception` and `stale-repin-exception` findings
   in the drift issue (#234). The repin rewrite keeps its own fail-closed
   gate.
-- The drift issue now links the reviewed per-code fix contract. The 62-code
+- The drift issue now links the reviewed per-code fix contract. The 64-code
   audit vocabulary is test-locked to `docs/consumer-enrollment.md`, so a new
-  reason code cannot ship without its documented fix.
+  reason code cannot ship without its documented fix. The two head-revalidation
+  codes are covered too; the sync test extracts them from the audit script.
+- The scheduled audit survives a consumer push that lands mid-run: it
+  re-clones the advanced repository, re-analyzes, and fails closed only when
+  bounded refresh attempts cannot reconcile (2026-09-07 race on DoxReloaded,
+  run 34164453758).
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
