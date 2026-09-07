@@ -42,6 +42,22 @@ tree; a signal to a pid does not. The editor is therefore spawned `detached` on 
 its own group, and termination signals `-pid`. Without that, a `codesign` or editor child outliving
 its parent keeps the seat, which is exactly the failure #153 names.
 
+## The analyzer now admits the runner the implementation supports
+
+`auditPaidJob` refused any job running `return-unity-license` on anything but a self-hosted
+**Windows** runner, so a macOS job would have carried `unsafe-return-execution-environment` even
+with the implementation above merged. #153 asks for "analyzer support only for the exact approved
+immutable action shape and same-runner suffix", and this is that.
+
+`windowsSelfHostedJob` and a new `darwinSelfHostedJob` now share one `selfHostedPlatformJob`
+helper, and the rule admits either. **It widens nothing else.** A hosted macOS runner, a
+self-hosted runner naming neither platform, and a dynamic `runs-on` expression all still fail
+closed, each with its own red case.
+
+Ordering is worth stating: the analyzer admitting a Darwin return is safe before the team
+identifier is read, because the action itself refuses every Darwin return until then. The analyzer
+stops double-blocking; it does not become the thing that permits.
+
 ## What is deliberately not decided here
 
 **`UNITY_DARWIN_TEAM_IDS` is empty, and an empty set fails the return closed.** It is the Darwin
@@ -64,6 +80,9 @@ identity is not cleanup authority.
 - Whole suite before and after: **11 fail, 126 cancelled in both**. Those are this container's,
   not this change's; `pass` moves 555 -> 567 and nothing else moves.
 - `node --test test/documentation-policy.test.js test/action-manifests.test.js`: 67 pass.
+- `go build ./...`, `go vet ./...`, `go test ./...`: all pass, ten packages.
+- **`go test -race` was not run**: this container has no gcc and the race detector needs cgo. The
+  change adds no concurrency, and that is an argument rather than a measurement; CI runs it.
 
 ### Mutation coverage
 
@@ -76,6 +95,21 @@ Each guard was broken in turn and only its own tests went red.
 | unsupported platform falls through to the Darwin verifier | platform-refusal test |
 | an empty reviewed team set is allowed through | both fail-closed tests |
 | loader injection allowed into the child environment | environment allowlist test |
+
+And for the analyzer, each guard broken in turn:
+
+| mutation | red |
+| --- | --- |
+| Darwin runners not admitted at all | the accepts-Darwin test, both label spellings |
+| a hosted macOS runner admitted | the hosted-macOS case |
+| any self-hosted runner admitted whatever its platform | the non-Windows and no-trusted-platform cases |
+| a dynamic `runs-on` stops failing closed | the dynamic-expression case |
+
+One harness bug was found doing this and is worth recording: the first mutation script scanned only
+for `--- FAIL` and reported a mutant that **failed to compile** as "nothing went red", which reads
+exactly like a coverage gap and is not one. It also exited before restoring, so it left two mutants
+in the tree. A mutation harness restores in a `finally` and treats a build failure as inconclusive
+rather than as either colour.
 
 ## What this does not do, and must not be read as doing
 

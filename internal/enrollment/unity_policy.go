@@ -688,9 +688,12 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			lastActivation = index
 		}
 	}
+	// The central return has a trusted implementation on exactly two runners, so
+	// exactly two are admitted here. Every other platform, and every hosted
+	// runner on these two, still fails closed.
 	if returnActionCount > 0 &&
 		(!centralReturnExecutionIsolated(workflow, job) ||
-			!windowsSelfHostedJob(job) ||
+			!(windowsSelfHostedJob(job) || darwinSelfHostedJob(job)) ||
 			!optionalTimeoutAtLeast(job, 5)) {
 		a.analyzer.add("unsafe-return-execution-environment", workflowPath, jobName)
 	}
@@ -4981,24 +4984,39 @@ func centralReturnExecutionIsolated(workflow, job *yaml.Node) bool {
 	return true
 }
 
-func windowsSelfHostedJob(job *yaml.Node) bool {
+// selfHostedPlatformJob reports whether runs-on is a literal sequence carrying
+// both `self-hosted` and the named platform label. A scalar, dynamic, or
+// expression runs-on fails closed, so a hosted runner can never satisfy it.
+func selfHostedPlatformJob(job *yaml.Node, platform string) bool {
 	runsOn := mappingValue(job, "runs-on")
 	if runsOn == nil || runsOn.Kind != yaml.SequenceNode {
 		return false
 	}
-	selfHosted, windows := false, false
+	selfHosted, matched := false, false
 	for _, label := range runsOn.Content {
 		if label.Kind != yaml.ScalarNode {
 			return false
 		}
-		switch strings.ToLower(label.Value) {
-		case "self-hosted":
+		value := strings.ToLower(label.Value)
+		if value == "self-hosted" {
 			selfHosted = true
-		case "windows":
-			windows = true
+		}
+		if value == platform {
+			matched = true
 		}
 	}
-	return selfHosted && windows
+	return selfHosted && matched
+}
+
+func windowsSelfHostedJob(job *yaml.Node) bool {
+	return selfHostedPlatformJob(job, "windows")
+}
+
+// darwinSelfHostedJob is the macOS counterpart, admitted for the trusted Darwin
+// return (#153). Self-hosted only, for the reason the Windows rule is: a hosted
+// macOS runner is outside every control the fleet supplies.
+func darwinSelfHostedJob(job *yaml.Node) bool {
+	return selfHostedPlatformJob(job, "macos")
 }
 
 func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Node) bool {

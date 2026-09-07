@@ -3109,6 +3109,32 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 			code: "unsafe-return-execution-environment",
 		},
 		{
+			name: "hosted macOS runner",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, Windows]", "[macOS]", 1)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "self-hosted runner naming no trusted platform",
+			mutate: func(value string) string {
+				return strings.Replace(value, "[self-hosted, Windows]", "[self-hosted]", 1)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
+			name: "dynamic runner expression on the darwin return",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"[self-hosted, Windows]",
+					"${{ fromJSON(inputs.runner) }}",
+					1,
+				)
+			},
+			code: "unsafe-return-execution-environment",
+		},
+		{
 			name: "duplicate acquire",
 			mutate: func(value string) string {
 				return strings.Replace(
@@ -3131,6 +3157,31 @@ func TestUnityEnrollmentRejectsCentralReturnContractMutations(t *testing.T) {
 			}
 			if !strings.Contains(findingCodes(result.Findings), testCase.code) {
 				t.Fatalf("missing %s: %#v", testCase.code, result.Findings)
+			}
+		})
+	}
+}
+
+// The Darwin counterpart of the Windows return runner. #153 admits exactly two
+// trusted platforms, and this is the green half of that rule -- the red half is
+// the hosted-macOS and no-trusted-platform cases in the mutation table above.
+func TestUnityEnrollmentAcceptsSelfHostedDarwinReturn(t *testing.T) {
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	for _, labels := range []string{"[self-hosted, macOS]", "[self-hosted, macos]"} {
+		t.Run(labels, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": strings.Replace(
+					base,
+					"[self-hosted, Windows]",
+					labels,
+					1,
+				),
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Findings) != 0 {
+				t.Fatalf("a self-hosted macOS return produced findings: %#v", result.Findings)
 			}
 		})
 	}
