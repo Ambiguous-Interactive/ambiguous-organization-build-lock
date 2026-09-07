@@ -12,7 +12,7 @@ const policyTextExtensions = new Set([".js", ".json", ".md", ".sh", ".yml", ".ya
 const unparsedJobsName = "<unparsed-flow-jobs>";
 const expectedWorkflowJobs = new Map([
   ["auto-release.yml", ["release"]],
-  ["ci.yml", ["validate", "windows-evidence-deletion"]],
+  ["ci.yml", ["validate", "darwin-return-requirement", "windows-evidence-deletion"]],
   ["dependabot-auto-merge.yml", ["dependabot"]],
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
@@ -50,6 +50,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/ci.sh verify-modules",
       "bash tools/workflows/ci.sh tidy-modules",
       "go run ./cmd/workflow-credential-audit .",
+      "node --test test/unity-license-return.test.js",
       "node --test test/unity-cleanup-evidence.test.js test/unity-editor-action.test.js"
     ]
   ],

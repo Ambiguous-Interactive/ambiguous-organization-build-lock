@@ -257,10 +257,18 @@ the classified file and empty directory by identity before reporting
 unsupported platforms. Supplemental evidence paths are read-only inputs and
 are not deleted by the classifier.
 
-The central return action is Windows-only. It rejects reparse points anywhere
-in the CI-managed editor path and verifies the editor's Authenticode signature,
-code-signing EKU, and centrally allowlisted Unity leaf-certificate thumbprint
-before passing credentials. Consumers cannot supply signer identities or an
+The central return action supports Windows and Darwin, and refuses every other
+platform rather than falling back to a weaker check. It rejects reparse points
+anywhere in the CI-managed editor path on both. On Windows it verifies the
+editor's Authenticode signature, code-signing EKU, and centrally allowlisted
+Unity leaf-certificate thumbprint before passing credentials. On Darwin it
+verifies the Mach-O inside the reviewed bundle against a `codesign` designated
+requirement pinning the Apple anchor, the Developer ID chain and issuance
+markers, and the reviewed Unity team identifier, so the verdict is the operating
+system's rather than a comparison this action makes on output it parses.
+A Darwin return is additionally refused by the enrollment analyzer unless its
+release SHA is listed in `approvedDarwinReturnShas`, which is empty until a
+reviewed release and a native canary exist. Consumers cannot supply signer identities or an
 executable path. Certificate rotation therefore requires a reviewed central
 release, and the release SHA must be listed in both `approvedLockShas` and the
 return-action-specific `approvedReturnShas`. Return evidence is
