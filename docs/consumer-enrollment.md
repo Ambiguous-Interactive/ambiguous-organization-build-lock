@@ -245,16 +245,17 @@ jobs:
 
 ## Finding codes
 
-The scheduled audit reports every consumer drift finding with one of these
-reason codes. Fix the finding with the matching consumer edit. Item numbers
-refer to the Workflow contract above. The exception codes apply to
-`unity-enrollment-policy.json` in this repository.
+The scheduled audit reports every finding with one of these reason codes.
+Fix the finding with the matching consumer edit. Item numbers refer to the
+Workflow contract above. The exception codes apply to
+`unity-enrollment-policy.json` in this repository. The repository codes
+report central audit health, not consumer drift.
 
 | Code | Consumer fix |
 | --- | --- |
 | `acquire-after-activation` | Move the acquire step before every activation-capable step. See item 5. |
 | `ambiguous-lock-acquire` | Keep exactly one acquire action in the licensed job. See item 5. |
-| `approval-environment` | Remove the approval-only `environment` from the job. See Preconditions item 6. |
+| `approval-environment` | Remove the `environment` key from the job. See Preconditions item 6. |
 | `classifier-before-unity-return` | Order the evidence classifier after the central return. See item 7. |
 | `classifier-inputs-not-typed` | Bind the classifier inputs to the exact acquire step outputs. See item 7. |
 | `classifier-not-always` | Run the classifier with `always()` and failure propagation. See item 7. |
@@ -268,10 +269,10 @@ refer to the Workflow contract above. The exception codes apply to
 | `foreign-action-reference` | Use action files only from this repository. See Preconditions item 7. |
 | `ineligible-unity-trigger` | Restrict licensed work to the eligible trusted triggers. See Preconditions item 2. |
 | `invalid-acquire-pr-head-revalidation` | Give acquire the exact current-head revalidation inputs. See item 4. |
-| `invalid-current-head-guard` | Replace the custom guard step with the approved current-head guard action. See item 4. |
+| `invalid-current-head-guard` | Pin the guard step to the approved current-head guard SHA. See item 4. |
 | `invalid-fallback-release` | Keep one typed, source-matched release step in the fallback job. See item 8. |
 | `invalid-fallback-timeout` | Give the fallback job a timeout of at least 5 minutes. See item 8. |
-| `job-scoped-unity-credential` | Remove credential-bearing job-level `env` mappings. See item 3. |
+| `job-scoped-unity-credential` | Remove job-level `env` mappings; any mapping fails a fallback-cleanup job. See item 3. |
 | `missing-cleanup-classifier` | Add the typed central evidence classifier. See item 7. |
 | `missing-cleanup-gate` | Add the final cleanup gate. See item 9. |
 | `missing-fallback-aggregate` | Cover the source and fallback jobs with one hosted always-reporting aggregate. See item 8 and the exact static shape note. |
@@ -290,6 +291,8 @@ refer to the Workflow contract above. The exception codes apply to
 | `release-before-classification` | Order the release step after the evidence classifier. See item 7. |
 | `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
 | `release-not-always` | Run the release step with literal `always()`. See item 7. |
+| `repository-analysis-incomplete` | No consumer edit. The audit failed closed while analyzing this repository. Central operators diagnose the run. |
+| `repository-retrieval-incomplete` | No consumer edit. The audit failed closed before reading this repository. Central operators repair the run. |
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |

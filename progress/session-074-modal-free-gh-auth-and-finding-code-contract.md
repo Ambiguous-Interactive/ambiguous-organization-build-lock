@@ -80,21 +80,56 @@ per-code fix contract. A consumer had to read Go source to learn what
 
 ### Change
 
-1. `docs/consumer-enrollment.md` gains a `Finding codes` section: 60 reason
-   codes, each with a one-line consumer fix that references the contract
-   item.
+1. `docs/consumer-enrollment.md` gains a `Finding codes` section: 62 reason
+   codes, each with a one-line fix that references the contract item. The
+   two `repository-*-incomplete` codes are audit-health codes; their rows
+   name the central repair path, not a consumer edit.
 2. `test/documentation-policy.test.js` gains a bidirectional sync test. It
-   extracts emitted codes from `internal/enrollment/analyzer.go` and
-   `unity_policy.go` (`.add` literals, `guardFindingCode` arguments, and its
-   kebab-case return) and requires exact set equality with the documented
+   extracts emitted codes from `internal/enrollment/analyzer.go`,
+   `unity_policy.go`, and `cmd/audit-unity-enrollment/main.go` (`.add`
+   literals, `guardFindingCode` arguments, its kebab-case return, and the
+   `Code:` literals) and requires exact set equality with the documented
    table. A new reason code cannot ship without a documented fix, and a
    documented code cannot outlive its emitter.
 3. `cmd/sync-unity-enrollment-issue/main.go` links the contract from the
    drift issue body. `main_test.go` asserts the link stays present.
 
 Red-green: the sync test failed before the doc section existed; it passes
-with the 60-row table. The exact-60 result confirms the table covers every
+with the 62-row table. The exact-62 result confirms the table covers every
 emitted code and no extra code.
+
+### Independent adversarial review
+
+A separate reviewer sub-agent examined the branch. Findings and
+dispositions:
+
+1. Blocker: `cmd/audit-unity-enrollment/main.go` emits
+   `repository-retrieval-incomplete` and `repository-analysis-incomplete`
+   outside the tested sources, so the issue-body sentence was false on the
+   fail-closed path. Fixed: both codes documented with central repair
+   guidance, the command joined the sync test, PLAN.md corrected to 62.
+2. Should-fix: the `invalid-current-head-guard` row described the wrong
+   trigger. Fixed: the row now says to pin the guard action to the approved
+   SHA.
+3. Should-fix: the `job-scoped-unity-credential` fix missed the
+   fallback-cleanup path, which rejects any job `env`. Fixed in the row.
+4. Should-fix: `approval-environment` fires for any `environment`, not only
+   approval-only ones. Fixed in the row.
+5. Should-fix: the skill's repair-verify command could hang and printed the
+   credential. Fixed with a stdin-fed, redirected form.
+6. Nit: the issue-body link is the only relative link in an issue body.
+   Kept relative on purpose: GitHub resolves it against the default branch,
+   and the contract is a living reviewed document. No change.
+7. Nit: sync-test section parsing and return-literal breadth are latent
+   fragilities. Hardened the section bound at the next heading; accepted
+   the residual risk, which the record above already discloses.
+8. Nit: skill prose stated the fresh-shell fact and the no-fill rule too
+   broadly. Qualified both.
+
+Second review round: all findings verified fixed, 62 documented codes equal
+62 extracted codes, no new code findings. The round flagged one process
+blocker, the uncommitted remediation state; the state is committed now.
+The reviewer's test-source-index nit is fixed with a named variable.
 
 ## Validation
 

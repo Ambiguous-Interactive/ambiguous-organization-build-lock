@@ -240,6 +240,8 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
   const goSources = ["analyzer.go", "unity_policy.go"].map((file) =>
     read(path.join(repoRoot, "internal", "enrollment", file))
   );
+  goSources.push(read(path.join(repoRoot, "cmd", "audit-unity-enrollment", "main.go")));
+  const auditCommandSource = goSources[goSources.length - 1];
   const emitted = new Set();
   for (const source of goSources) {
     for (const match of source.matchAll(/\.add\("([a-z0-9-]+)"/g)) {
@@ -252,8 +254,11 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
       emitted.add(match[1]);
     }
   }
+  for (const match of auditCommandSource.matchAll(/Code:\s*"([a-z0-9-]+)"/g)) {
+    emitted.add(match[1]);
+  }
   const enrollmentDoc = read(path.join(repoRoot, "docs", "consumer-enrollment.md"));
-  const section = enrollmentDoc.split(/^## Finding codes$/m)[1];
+  const section = enrollmentDoc.split(/^## Finding codes$/m)[1].split(/^## /m)[0];
   assert.ok(section, "docs/consumer-enrollment.md must document the finding codes");
   const documented = new Set(
     [...section.matchAll(/^\| `([a-z0-9-]+)` \|/gm)].map((match) => match[1])

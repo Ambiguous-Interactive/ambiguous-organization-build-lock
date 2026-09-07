@@ -38,14 +38,15 @@ exists, the fill is answered by the dispatcher and no modal opens.
 ## Rules
 
 - Check the cache before any credential work: `[ -s ~/.config/gh/token ]`.
-  If the cache exists, never run `git credential fill` in the session; the
-  bootstrap step is the only fill.
+  While the cache is valid, never run `git credential fill` in the session;
+  the bootstrap step is the only fill.
 - Export `GH_TOKEN` from the cache at session start. Do not call
   `git credential fill` per command; the dispatcher makes it safe, but the
   cache read is cheaper and has no helper dependency.
-- Agent tool calls run in fresh shells: shell state does not persist between
-  commands. Re-export `GH_TOKEN` from the cache in every command that needs
-  it, or wrap `gh` in a script that reads the cache file. Never re-fill.
+- Agent tool calls in this environment run in fresh shells: shell state does
+  not carry between commands. Re-export `GH_TOKEN` from the cache in every
+  command that needs it, or wrap `gh` in a script that reads the cache file.
+  Never re-fill.
 - Never put `git credential fill` inside a per-command wrapper script. That
   pattern turned one modal into one modal per `gh` call (2026-09-07). A
   wrapper may read the cache only; seeding stays a manual, once-per-machine
@@ -75,8 +76,9 @@ exists, the fill is answered by the dispatcher and no modal opens.
     "$HOME/.local/bin/git-credential-dispatch"
   ```
 
-  Verify the repair once with `time git credential fill`: it must return
-  from the cache in milliseconds with no modal.
+  Verify the repair once with
+  `printf 'protocol=https\nhost=github.com\n\n' | git credential fill >/dev/null`:
+  it must return from the cache in milliseconds with no modal.
 
 ## Scope limits of this token
 
