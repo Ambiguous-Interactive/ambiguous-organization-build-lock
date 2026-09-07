@@ -113,10 +113,15 @@ refresh_stale_snapshots() {
       --single-branch \
       --no-tags
   done < "${stale_snapshots:?stale snapshot ledger is required}"
+  local analysis_status=0
   go run ./cmd/audit-unity-enrollment \
     --policy unity-enrollment-policy.json \
     --repositories-root .policy-consumers \
-    --output "${AUDIT_PATH:?AUDIT_PATH is required}"
+    --output "${AUDIT_PATH:?AUDIT_PATH is required}" || analysis_status=$?
+  if [ "$(jq -r '.complete // false' "${AUDIT_PATH}")" != "true" ]; then
+    echo "The audit re-analysis did not produce complete evidence (status ${analysis_status}); the audit fails closed." >&2
+    return 1
+  fi
 }
 
 revalidate_heads() {

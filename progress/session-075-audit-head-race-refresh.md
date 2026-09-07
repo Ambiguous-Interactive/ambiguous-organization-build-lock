@@ -117,7 +117,7 @@ is green again while the durable fix prevents the next day-long red.
 Observed on the session branch:
 
 - `node tools/llm-harness.mjs check`: pass.
-- `node --test test/*.test.js`: 844 tests, 844 pass, 0 fail, 0 cancelled,
+- `node --test test/*.test.js`: 845 tests, 842 pass, 0 fail, 0 cancelled,
   3 skipped (the pre-existing conditional skips).
 - `go test ./...`: pass. `go test -race ./...`: pass.
 - `gofmt -l .`: empty. `go vet ./...`: clean.
@@ -144,3 +144,36 @@ Observed on the session branch:
   only, lives in `RUNNER_TEMP`, and is removed on every path.
 - Are the shims test-only? Yes. They live in the test file and no
   production hook was added to the script.
+
+## PR review round 1: Bugbot finding (fixed)
+
+Cursor Bugbot reported a high-severity defect on the first pushed commit:
+`refresh_stale_snapshots` ran the analyzer under `set -e`, but
+`cmd/audit-unity-enrollment` exits 1 whenever the artifact reports
+findings (main.go:124). The production audit always reports 63 findings,
+so the first refresh would have died right after the rewrite. The
+mid-run push would still fail the job, which is the exact red outcome
+this change was meant to recover.
+
+Verified against the Go source; the report is correct. Root cause of the
+miss: the test `go` shim always exited 0, so the tests modeled an
+analyzer that never reports findings and could not see the defect.
+
+Fix, in production code:
+
+1. The refresh captures the analyzer status and keeps going when the
+   rewritten artifact parses with `complete: true`. Findings never fail
+   the audit job; incompleteness does, through `record-counts`.
+2. If the artifact does not say `complete: true` after the analyzer run,
+   the refresh exits 1 with the analyzer status. Exit 2 before a rewrite
+   or a partial write therefore fails closed.
+
+The `go` shim now mirrors the analyzer contract: exit 0 only when the
+fixture is complete with zero findings, exit 1 otherwise. A new test
+drives the production shape, a race reconciled while consumer findings
+exist, and fails without the gate. Red-green: removing the gate fails
+that test; restoring it passes.
+
+Sweep: the analyzer's findings-as-exit-1 contract is used only by the
+workflow step with `continue-on-error` and this refresh. No other caller
+shares the class.

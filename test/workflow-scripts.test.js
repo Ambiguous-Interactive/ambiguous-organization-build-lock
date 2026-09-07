@@ -330,7 +330,7 @@ function headRevalidationHarness(t, options = {}) {
     "Ambiguous-Interactive/example-b\tbbb"
   ].join("\n"));
   fs.writeFileSync(counter, "0");
-  fs.writeFileSync(analyzeFixture, JSON.stringify({
+  const analyzeFixtureContent = {
     complete: true,
     repositories: [
       { repository: "Ambiguous-Interactive/example-a", sha: "aaa" },
@@ -338,7 +338,17 @@ function headRevalidationHarness(t, options = {}) {
     ],
     inventory: [],
     findings: []
-  }));
+  };
+  if (options.analyzeFindings) {
+    analyzeFixtureContent.findings.push({
+      repository: "Ambiguous-Interactive/example-a",
+      sha: "aaa",
+      code: "unapproved-lock-ref",
+      path: ".github/workflows/unity.yml",
+      job: "unity"
+    });
+  }
+  fs.writeFileSync(analyzeFixture, JSON.stringify(analyzeFixtureContent));
   fs.writeFileSync(auditPath, fs.readFileSync(analyzeFixture, "utf8"));
 
   writeExecutable(path.join(shims, "git"), [
@@ -397,7 +407,11 @@ function headRevalidationHarness(t, options = {}) {
     "  done",
     '  if [ -z "${output}" ]; then exit 64; fi',
     '  cat "${TEST_ANALYZE_FIXTURE}" > "${output}"',
-    "  exit 0",
+    '  if [ "$(jq -r \'.complete // false\' "${output}")" = "true" ] &&',
+    '     [ "$(jq -r \'.findings | length\' "${output}")" = "0" ]; then',
+    "    exit 0",
+    "  fi",
+    "  exit 1",
     "fi",
     "exit 64"
   ].join("\n"));
@@ -466,6 +480,28 @@ test("head revalidation re-clones and re-analyzes a snapshot whose branch advanc
     "clone Ambiguous-Interactive/example-a",
     "analyze"
   ]);
+});
+
+test("head revalidation recovers even when the re-analysis reports consumer findings", (t) => {
+  const harness = headRevalidationHarness(t, { analyzeFindings: true });
+  fs.writeFileSync(harness.current, [
+    "Ambiguous-Interactive/example-a\tccc",
+    "Ambiguous-Interactive/example-b\tbbb"
+  ].join("\n"));
+
+  const result = runHeadRevalidation(harness);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /refreshing the stale snapshots/);
+  const audit = JSON.parse(fs.readFileSync(harness.auditPath, "utf8"));
+  assert.equal(audit.complete, true);
+  assert.deepEqual(audit.findings, [{
+    repository: "Ambiguous-Interactive/example-a",
+    sha: "aaa",
+    code: "unapproved-lock-ref",
+    path: ".github/workflows/unity.yml",
+    job: "unity"
+  }]);
 });
 
 test("head revalidation fails closed when a branch keeps advancing past every refresh", (t) => {
