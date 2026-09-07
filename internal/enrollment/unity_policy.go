@@ -103,12 +103,13 @@ type UnityPolicyException struct {
 // UnityEnrollmentPolicy defines the immutable lock versions and narrow
 // exceptions accepted by an organization enrollment audit.
 type UnityEnrollmentPolicy struct {
-	ApprovedLockSHAs      []string               `json:"approvedLockShas"`
-	ApprovedReturnSHAs    []string               `json:"approvedReturnShas"`
-	Exceptions            []UnityPolicyException `json:"exceptions"`
-	ProtectedBranches     []string               `json:"-"`
-	AllowWorkflowDispatch bool                   `json:"-"`
-	Now                   time.Time              `json:"-"`
+	ApprovedLockSHAs         []string               `json:"approvedLockShas"`
+	ApprovedReturnSHAs       []string               `json:"approvedReturnShas"`
+	ApprovedDarwinReturnSHAs []string               `json:"approvedDarwinReturnShas"`
+	Exceptions               []UnityPolicyException `json:"exceptions"`
+	ProtectedBranches        []string               `json:"-"`
+	AllowWorkflowDispatch    bool                   `json:"-"`
+	Now                      time.Time              `json:"-"`
 }
 
 // UnityInventoryEntry is a source-free, deterministic classification suitable
@@ -128,12 +129,13 @@ type UnityEnrollmentResult struct {
 }
 
 type unityPolicyAnalyzer struct {
-	analyzer        *analyzer
-	approved        map[string]bool
-	approvedReturns map[string]bool
-	exceptions      map[string]UnityPolicyException
-	usedExceptions  map[string]bool
-	now             time.Time
+	analyzer              *analyzer
+	approved              map[string]bool
+	approvedReturns       map[string]bool
+	approvedDarwinReturns map[string]bool
+	exceptions            map[string]UnityPolicyException
+	usedExceptions        map[string]bool
+	now                   time.Time
 }
 
 type flattenedUnityStep struct {
@@ -179,6 +181,24 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 			return UnityEnrollmentResult{}, fmt.Errorf("approved return SHA must also be an approved lock SHA")
 		}
 		approvedReturns[sha] = true
+	}
+	// A Darwin central return needs its own code-identity verifier, so a SHA
+	// becomes Darwin-capable only through a separate reviewed authorization
+	// after the Darwin path exists. Until then every Darwin return fails
+	// closed.
+	approvedDarwinReturns := make(map[string]bool, len(policy.ApprovedDarwinReturnSHAs))
+	for _, sha := range policy.ApprovedDarwinReturnSHAs {
+		sha = strings.ToLower(strings.TrimSpace(sha))
+		if !isSHA(sha) {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved Darwin return SHA must be a full immutable commit SHA")
+		}
+		if approvedDarwinReturns[sha] {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved Darwin return SHA list contains a duplicate")
+		}
+		if !approvedReturns[sha] {
+			return UnityEnrollmentResult{}, fmt.Errorf("approved Darwin return SHA must also be an approved return SHA")
+		}
+		approvedDarwinReturns[sha] = true
 	}
 	protectedBranches := make(map[string]bool, len(policy.ProtectedBranches))
 	for _, branch := range policy.ProtectedBranches {
@@ -235,12 +255,13 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		requiredAcquireSHA: "",
 	}
 	a := &unityPolicyAnalyzer{
-		analyzer:        base,
-		approved:        approved,
-		approvedReturns: approvedReturns,
-		exceptions:      exceptions,
-		usedExceptions:  make(map[string]bool),
-		now:             now,
+		analyzer:              base,
+		approved:              approved,
+		approvedReturns:       approvedReturns,
+		approvedDarwinReturns: approvedDarwinReturns,
+		exceptions:            exceptions,
+		usedExceptions:        make(map[string]bool),
+		now:                   now,
 	}
 	result := UnityEnrollmentResult{
 		Inventory: make([]UnityInventoryEntry, 0),
@@ -596,6 +617,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps)
 	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
 	acquireCount, returnActionCount := 0, 0
+	var returnRefs []string
 	acquireID, returnID, classifierID, releaseID := "", "", "", ""
 	acquireScope, returnScope, classifierScope := "", "", ""
 	returnAlways := false
@@ -633,6 +655,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			switch lockActionName(uses) {
 			case returnAction:
 				returnActionCount++
+				returnRefs = append(returnRefs, strings.ToLower(actionRef(uses)))
 				if !exactLockActionReference(uses, returnAction) ||
 					!a.approvedReturns[strings.ToLower(actionRef(uses))] ||
 					!jobFailurePropagates ||
@@ -690,7 +713,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	}
 	if returnActionCount > 0 &&
 		(!centralReturnExecutionIsolated(workflow, job) ||
-			!windowsSelfHostedJob(job) ||
+			!centralReturnRunnerApproved(a.approvedDarwinReturns, job, returnRefs) ||
 			!optionalTimeoutAtLeast(job, 5)) {
 		a.analyzer.add("unsafe-return-execution-environment", workflowPath, jobName)
 	}
@@ -4981,24 +5004,65 @@ func centralReturnExecutionIsolated(workflow, job *yaml.Node) bool {
 	return true
 }
 
-func windowsSelfHostedJob(job *yaml.Node) bool {
+// returnRunnerPlatform reports the one operating-system family a job's
+// literal `runs-on` list declares for the central return action. It returns an
+// empty string when the list is missing, scalar, expression-bearing, or does
+// not name exactly one supported family on the self-hosted fleet, so an
+// unsupported or ambiguous runner fails closed.
+func returnRunnerPlatform(job *yaml.Node) string {
 	runsOn := mappingValue(job, "runs-on")
 	if runsOn == nil || runsOn.Kind != yaml.SequenceNode {
-		return false
+		return ""
 	}
-	selfHosted, windows := false, false
+	selfHosted, family := false, ""
 	for _, label := range runsOn.Content {
-		if label.Kind != yaml.ScalarNode {
-			return false
+		if label.Kind != yaml.ScalarNode || strings.Contains(label.Value, "${{") {
+			return ""
 		}
 		switch strings.ToLower(label.Value) {
 		case "self-hosted":
 			selfHosted = true
 		case "windows":
-			windows = true
+			if family != "" && family != "windows" {
+				return ""
+			}
+			family = "windows"
+		case "macos":
+			if family != "" && family != "darwin" {
+				return ""
+			}
+			family = "darwin"
 		}
 	}
-	return selfHosted && windows
+	if !selfHosted {
+		return ""
+	}
+	return family
+}
+
+// centralReturnRunnerApproved reports whether the job's literal runner labels
+// name one supported self-hosted platform and every central return reference
+// is authorized for it. Windows returns need only the platform; a Darwin
+// return is admitted only for SHAs the reviewed policy lists as
+// Darwin-capable, so the Darwin verifier cannot be adopted ahead of its
+// separate immutable SHA authorization.
+func centralReturnRunnerApproved(approvedDarwinReturns map[string]bool, job *yaml.Node, returnRefs []string) bool {
+	switch returnRunnerPlatform(job) {
+	case "windows":
+		return true
+	case "darwin":
+		if len(returnRefs) == 0 {
+			return false
+		}
+		for _, ref := range returnRefs {
+			if !approvedDarwinReturns[ref] {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Node) bool {

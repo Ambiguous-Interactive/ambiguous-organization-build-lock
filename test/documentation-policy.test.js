@@ -134,6 +134,10 @@ test("steady-state runbook reports the registered release and consumer inventory
   assert.ok(enrollmentPolicy.approvedReturnShas.every(
     (sha) => enrollmentPolicy.approvedLockShas.includes(sha)
   ));
+  assert.ok(Array.isArray(enrollmentPolicy.approvedDarwinReturnShas));
+  assert.ok(enrollmentPolicy.approvedDarwinReturnShas.every(
+    (sha) => enrollmentPolicy.approvedReturnShas.includes(sha)
+  ));
 });
 
 test("continuous enrollment audit facts and guidance stay synchronized", () => {
@@ -206,6 +210,8 @@ test("active enrollment guidance uses the central editor action without a helper
     assert.doesNotMatch(text, /Checkout trusted Unity editor validator/);
     assert.doesNotMatch(text, /set-safe-directory: false/);
   }
+  const enrollment = fs.readFileSync(path.join(repoRoot, "docs", "consumer-enrollment.md"), "utf8");
+  assert.match(enrollment, /listed in\s+`approvedDarwinReturnShas`/);
 });
 
 test("rollout history cannot be mistaken for the active runbook", () => {

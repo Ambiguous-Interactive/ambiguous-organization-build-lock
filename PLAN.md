@@ -15,6 +15,9 @@ impact on licensed-resource safety and consumer CI churn.
   ambiguous runners (`unsafe-hosted-unity-runner`). The live audit
   (2026-09-07) identifies the unity-helpers hosted `.unitypackage` export
   jobs as the non-self-hosted Unity seat holder seen in the portal.
+- The enrollment audit admits the central return on Windows and, for pins
+  listed in the new reviewed `approvedDarwinReturnShas` allowlist, on macOS.
+  The allowlist is empty until a Darwin verifier release exists (#153, #228).
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -33,8 +36,9 @@ impact on licensed-resource safety and consumer CI churn.
       a `400006` return whose log proves the ULF serial return with a
       completed command (maintainer directive 2026-09-07; implements the
       re-opened #106 part 2). No quarantine, no red cleanup gate.
-- [ ] Keep fail-closed quarantine for a `400006` without ULF proof, degraded
-      reports, timeouts, truncation, and termination.
+- [x] Keep fail-closed quarantine for a `400006` without ULF proof, degraded
+      reports, timeouts, truncation, and termination. Enforced by the session
+      068 classifier verdict tests; verified again 2026-09-07.
 - [ ] Decide holder capacity against real seat capacity: independent
       returnable Unity identities, slot-aware state, and two-order live proof.
 
@@ -49,14 +53,21 @@ impact on licensed-resource safety and consumer CI churn.
       standing operator configuration). Operator-confirmed 2026-09-07; no
       new App; the reader App stays read-only.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
-      edits; this repository supplies the evidence and the contract.
+      edits; this repository supplies the evidence and the contract. The
+      repin workflow has not run yet; its first scheduled run is the next
+      observable step.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
 ## Blocked on authority or evidence (do not start here)
 
 - #29 canaries and monitoring, #44 truthful aggregates, #51 App credential
-  scope, #53 FIFO starvation, #153 Darwin and container cleanup: each needs
-  organization-owner authority, portal decisions, or multi-week live
-  evidence windows. Triage recorded 2026-09-06 (session 066) and
-  2026-09-07 (session 067).
+  scope, #53 FIFO starvation: each needs organization-owner authority,
+  portal decisions, or multi-week live evidence windows. Triage recorded
+  2026-09-06 (session 066) and 2026-09-07 (session 067).
+- #153 Windows-container trusted cleanup and the Darwin verifier release:
+  PR #228 carries the Darwin action design and stays draft until the Unity
+  Darwin team identifier is read on a real macOS install and an exact-head
+  licensed canary runs. The enrollment-audit admission contract for the
+  Darwin shape is done; the reviewed `approvedDarwinReturnShas` merge is
+  the separate authorization step that follows a Darwin-capable release.
