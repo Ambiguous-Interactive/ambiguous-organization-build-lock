@@ -37,6 +37,15 @@ directories, environment, globals, and processes; restore narrow mutations in
 cleanup even after assertion failure. Assert retry counts, delays, ordering,
 terminal diagnostics, and deadlines directly.
 
+An unref'd timer does not keep the event loop alive. A test that waits only on
+such a timer settles only while other work keeps the loop alive. That
+dependence is nondeterminism. Await a ref'd delay that outlives the scheduled
+timeout, then assert the already-settled outcome. The delay holds the loop
+alive; it is not a timing assertion.
+
+A mutation scan needs a red result to prove coverage. A mutant that cannot
+build or run is inconclusive, not covered; record it and fix the harness.
+
 A mandatory test must pass on the first attempt. Repetition is a diagnostic
 for flakes, never a retry-based green gate; any divergent run is evidence of
 nondeterminism.

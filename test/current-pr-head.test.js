@@ -120,20 +120,29 @@ test("embedded current-head checks can return stale without writing another acti
 
 test("a caller cancellation signal does not disable the bounded request timeout", async () => {
   const caller = new AbortController();
-  await assert.rejects(
-    requireCurrentPrHead({
-      env: guardEnvironment(),
-      fetchImpl: async (_url, options) => {
-        await new Promise((_resolve, reject) => {
-          options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
-        });
-      },
-      signal: caller.signal,
-      timeoutMs: 1,
-      log: () => {}
-    }),
-    /timeout|aborted/i
+  const guard = requireCurrentPrHead({
+    env: guardEnvironment(),
+    fetchImpl: async (_url, options) => {
+      await new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      });
+    },
+    signal: caller.signal,
+    timeoutMs: 1,
+    log: () => {}
+  });
+  let outcome = null;
+  guard.then(
+    () => {
+      outcome = "resolved";
+    },
+    (error) => {
+      outcome = error;
+    }
   );
+  // The bounded timeout signal does not keep the loop alive. This ref'd delay does.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(String(outcome), /timeout|aborted/i);
   assert.equal(caller.signal.aborted, false);
 });
 
