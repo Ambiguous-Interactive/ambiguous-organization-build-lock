@@ -85,8 +85,9 @@ export job that still runs.
 ## Disposition
 
 - The in-repo #233 follow-up is done. The consumer-side wrapper removal is
-  validated in unity-helpers PR #739 and awaits its merge there.
-- Follow-up recorded for a later session: a target-release input-contract
-  compatibility check could flag unsupported callers without a manual
-  exception. Not built now because required-input analysis of composite
-  actions needs its own reviewed design.
+  merged in unity-helpers PR #739 (merge commit `93671a56`, 16:37 UTC), so
+  the incompatible caller is gone from that default branch.
+- Follow-up recorded as issue #234: the enrollment audit should report stale
+  or expired repin exceptions. A target-release input-contract compatibility
+  check could flag unsupported callers without a manual exception; it needs
+  its own reviewed design and is not started.
