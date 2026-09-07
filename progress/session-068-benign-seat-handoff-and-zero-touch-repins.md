@@ -100,6 +100,17 @@ Red/green and full-suite evidence:
   `resolve-scope` validated the policy and emitted the six-repo scope;
   the repin-target resolver returned `64bac446903115134dca8235410b332bc5a83547`
   / `v1.14.0` from live release tags and both allowlists.
+- Full stubbed dry run of `repin-consumers` against six local bare remotes
+  (three stale consumers, one stale composite wrapper, two current
+  repositories). The first run exposed a false-success path: bash ignores
+  errexit for a function called from a result-inspecting caller, so a
+  tolerated clone or rewrite failure still reported a successful repin and
+  the run exited zero. Fixed with explicit status guards on every fallible
+  command; a failed pull-request listing is now an error instead of a skip,
+  and a failed push never opens a pull request. The corrected dry run opened
+  exactly four pull requests with the right diff counts and bodies, skipped
+  the two current repositories, reran with perfect idempotency, and the
+  forced-failure run stayed red with no pull request.
 - `node --test test/*.test.js`: 838 tests, 835 passed, 0 failed, 3 expected
   platform skips. `go test ./...`, `go test -race ./...`, `go vet ./...`,
   `golangci-lint run --timeout=5m` (0 issues), `go mod verify` and
@@ -117,13 +128,14 @@ Red/green and full-suite evidence:
 Adversarial self-review covered unsafe success paths (the benign verdict
 requires ULF proof in the dedicated return log, a completed command, and no
 termination or timeout; all weaker shapes quarantine; degraded reports
-still quarantine; repins are authorization-gated and never merge),
-credential exposure (tokens only through step environments and
-environment-backed credential helpers; no token-bearing usernames or URLs),
-documentation drift (four docs plus facts updated together), and
-untested boundaries (live tag resolution, scope resolution, and the rewrite
-matrix; clone/push/PR glue follows the audited audit and
-authorization-script patterns). No unresolved findings.
+still quarantine; repins are authorization-gated and never merge; the
+stubbed dry run caught and fixed the tolerated-failure path), credential
+exposure (tokens only through step environments and environment-backed
+credential helpers; no token-bearing usernames or URLs), documentation
+drift (four docs plus facts updated together), and untested boundaries
+(live tag resolution, scope resolution, the rewrite matrix, and the full
+clone-rewrite-commit-push-pull-request loop with idempotency and failure
+injection). No unresolved findings.
 
 ## Continuous improvement
 
