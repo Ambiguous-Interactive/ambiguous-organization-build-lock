@@ -77,3 +77,14 @@ trust boundary it was.
 The green proof for the macOS job itself is CI's to give: the job was red on
 the suite it now runs (run 34168816228), and the push of this session lands the
 widened job with the fixed fixture.
+
+## Outcomes after the push
+
+- The macOS job went green on the fixed suite at commit `9a9c565d6`. Every
+  check on the pull request passed, and Cursor Bugbot reported no findings on
+  the final revision.
+- Squash-merged to main as `6a384393c`. Post-merge main CI: Build lock CI and
+  the Organization Unity enrollment audit both green.
+- Issue #241 closed as completed by the merge.
+- Draft #228 closed as superseded. Its analyzer half is weaker than the
+  #230 admission contract main already has; its runtime half is landed.
