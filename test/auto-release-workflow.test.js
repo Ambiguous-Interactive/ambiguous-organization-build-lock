@@ -114,13 +114,16 @@ test("semantic-release never comments on referenced issues", () => {
   // numbers. A success comment would post false release linkage on local
   // issues and hard-fail the release when a number exists only in a
   // consumer repository (issue #244, run 34191956733).
+  // `successCommentCondition: false` skips the whole comment step before
+  // any issue lookup runs; `successComment: false` works too but is a
+  // documented deprecation in @semantic-release/github v12.
   assert.deepEqual(config.plugins, [
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
     [
       "@semantic-release/github",
       {
-        successComment: false,
+        successCommentCondition: false,
         releasedLabels: false
       }
     ]
