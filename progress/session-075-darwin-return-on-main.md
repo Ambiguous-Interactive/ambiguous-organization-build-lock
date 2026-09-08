@@ -152,6 +152,45 @@ is why two of them compile a deliberately wrong requirement and the third compar
 | an empty reviewed team set is allowed through | both fail-closed tests |
 | loader injection allowed into the child environment | environment allowlist test |
 
+## Cancellation, which is the cost `detached` introduced
+
+Cursor Bugbot found this on the pull request, at High, and it is right. It is also the
+best kind of finding: the mechanism added to stop a seat leaking was itself a way to
+leak one.
+
+`detached: true` is what lets `terminateProcess` signal the editor's whole process
+group. It also takes the editor **out of the runner's kill tree**, because a detached
+child leads its own group and session. So a cancelled workflow run terminated this Node
+process and left the editor running with the paid seat -- exactly the failure #153
+exists to prevent. Windows never had it: the child is not detached there, so the tree
+kill already reaches it.
+
+`SIGINT` and `SIGTERM` are forwarded to the group now, on Darwin only, and the handlers
+are released on settle -- a listener outliving the child would signal a pid this process
+no longer owns, and on a runner a pid is reusable.
+
+**And writing the test found a second defect, larger than the first.** The completion
+rule accepted *any* signal as a close, so the synthetic `runner-cancelled` satisfied it.
+A cancelled run -- editor killed mid-return, nothing it wrote a verdict -- would have
+written **`return-command-completed=true`**. That is the one direction this action must
+not fail in, and it became reachable the moment the handler existed. The two synthetic
+signals are a named set now and neither is a completion.
+
+Four mutations, each red on exactly the case that owns it:
+
+| mutation | red |
+| --- | --- |
+| no handler installed at all | the darwin cancellation case, on a **bounded** wait -- the first draft hung here instead of failing, and a test that hangs on its own mutation reports nothing |
+| handler installed on every platform | the windows case, which exists to say why Windows does not need one |
+| `runner-cancelled` scored as a completion | the darwin case, on `return-command-completed` |
+| handlers not released on settle | the darwin case, on the listener count |
+
+The fixture takes a platform now, because `editorPath` defaults to the Windows layout
+while `executeReturn` defaults to `process.platform`, so a fixture that always plants
+`Unity.exe` disagrees with the action the moment either is asked about Darwin. That is
+one half of #241; the temp root under macOS's symlinked `/var` is the other and is still
+open.
+
 ## What this does not do, and must not be read as doing
 
 - **No canary.** #153 requires an exact-head licensed canary on native macOS. Nothing here has run

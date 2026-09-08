@@ -26,13 +26,18 @@ const {
   workflowCommandData
 } = require("../.github/dist/return-unity-license.js");
 
-function fixture(t, script) {
+// `editorPath` defaults to the Windows layout while `executeReturn` defaults to
+// `process.platform`, so a fixture that always plants `Unity.exe` disagrees with the
+// action under test the moment either one is asked about Darwin. The platform is a
+// parameter here for the same reason it is one there. (#241 is the rest of that
+// coupling: this file's temp root sits under macOS's symlinked `/var`.)
+function fixture(t, script, platform = "win32") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-return-action-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const toolCache = path.join(root, "tool-cache");
   const runnerTemp = path.join(root, "runner-temp");
   const output = path.join(root, "outputs.txt");
-  const executable = editorPath(toolCache, "6000.5.2f1");
+  const executable = editorPath(toolCache, "6000.5.2f1", "canonical", platform);
   fs.mkdirSync(path.dirname(executable), { recursive: true });
   fs.mkdirSync(runnerTemp);
   fs.writeFileSync(executable, script, { mode: 0o700 });
@@ -625,4 +630,110 @@ test("an unsupported platform is refused rather than verified by another platfor
       /supports Windows and Darwin only/
     );
   }
+});
+
+/*
+  Cancellation, which is the cost `detached` introduced.
+
+  A detached child leads its own process group and is therefore outside the runner's
+  kill tree. So a cancelled workflow run terminates this Node process and leaves the
+  editor holding the paid seat -- the exact leak #153 exists to prevent, arriving
+  through the mechanism added to prevent it. Found by Cursor Bugbot on the pull
+  request that landed the Darwin path.
+
+  Both cases drive the real `executeReturn`, so they are red against the handler not
+  being installed and against it being installed on the platform that does not need it.
+*/
+
+test("a runner signal terminates the detached darwin editor before this process goes", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nsleep 30\n", "darwin");
+  const signalled = [];
+  const child = new EventEmitter();
+  child.pid = 6100;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {
+    signalled.push("direct");
+    return true;
+  };
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "darwin",
+    spawnImpl: () => child,
+    verifyEditor: async () => {},
+    killImpl: (pid, signal) => {
+      signalled.push(`${pid}:${signal}`);
+    }
+  });
+
+  /*
+    Wait for the handler rather than for a fixed delay: it is installed only after
+    the child exists, and asserting on a race is how this case would go quietly
+    green. Bounded, because the mutation this case exists to catch -- installing no
+    handler at all -- makes the condition unreachable, and a test that hangs on its
+    own mutation reports nothing. It must fail, and say what it was waiting for.
+  */
+  const deadline = Date.now() + 2_000;
+  while (process.listenerCount("SIGTERM") === before) {
+    assert.ok(
+      Date.now() < deadline,
+      "executeReturn never installed a SIGTERM handler, so a cancelled run leaves the "
+        + "detached editor holding the seat"
+    );
+    await delay(1);
+  }
+
+  process.emit("SIGTERM");
+  const result = await pending;
+
+  // The editor was killed mid-return, so nothing it wrote is a verdict. Scoring this
+  // as a completion would set `return-command-completed=true` on a seat that never
+  // came back, which is the one direction this action must not fail in.
+  assert.equal(result.commandCompleted, false);
+  assert.equal(result.captureComplete, false);
+  const outputs = fs.readFileSync(item.output, "utf8");
+  assert.ok(
+    !outputs.includes("return-command-completed=true"),
+    `a cancelled return claimed completion: ${outputs}`
+  );
+  // The negative pid is the group, which is what reaches the editor the runner's
+  // tree kill can no longer see.
+  assert.ok(
+    signalled.includes("-6100:SIGTERM"),
+    `the editor's process group was never signalled: ${JSON.stringify(signalled)}`
+  );
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "the signal handler outlived the child, so it would signal a reused pid"
+  );
+});
+
+test("the windows return installs no signal handler, because its child is in the tree", async (t) => {
+  const item = fixture(t, "@echo off\r\n");
+  const child = new EventEmitter();
+  child.pid = 6200;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => true;
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "win32",
+    spawnImpl: () => child,
+    verifyEditor: async () => {}
+  });
+  await delay(20);
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "windows is not detached, so the runner's tree kill already reaches the editor"
+  );
+  child.emit("close", 0, null);
+  await pending;
 });

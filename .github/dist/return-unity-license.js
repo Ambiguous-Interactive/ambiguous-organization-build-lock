@@ -573,6 +573,36 @@ async function executeReturn(options) {
     let terminationStarted = false;
     let terminationGrace;
     let timeout;
+    /*
+      `detached` buys the group signal in terminateProcess, and it costs the one
+      thing that used to be free: a detached child leads its own process group and
+      is no longer inside the runner's kill tree. So a cancelled workflow run
+      terminates this Node process and leaves the editor running, holding the paid
+      seat -- which is the exact leak #153 exists to prevent, arriving through the
+      mechanism added to prevent it.
+
+      Windows does not need this: the child is not detached there, so the runner's
+      tree kill already reaches it, and taskkill /T is the timeout path's answer.
+
+      The handlers are removed on settle. A listener that outlives the child would
+      signal a pid this process no longer owns, and on a runner that pid is
+      reusable.
+    */
+    const forwardedSignals = platform === "darwin" ? ["SIGINT", "SIGTERM"] : [];
+    const onRunnerSignal = () => {
+      requestTermination();
+      settle({ code: null, signal: "runner-cancelled" });
+    };
+    const releaseSignalHandlers = () => {
+      for (const signal of forwardedSignals) {
+        try {
+          process.removeListener(signal, onRunnerSignal);
+        } catch {
+          // Nothing to release; the handler was never installed.
+        }
+      }
+    };
+
     const settle = (value) => {
       if (settled) {
         return;
@@ -580,6 +610,7 @@ async function executeReturn(options) {
       settled = true;
       clearTimeout(timeout);
       clearTimeout(terminationGrace);
+      releaseSignalHandlers();
       resolve(value);
     };
     const requestTermination = () => {
@@ -605,6 +636,10 @@ async function executeReturn(options) {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
+
+    for (const signal of forwardedSignals) {
+      process.on(signal, onRunnerSignal);
+    }
 
     const record = (chunk) => {
       const data = Buffer.from(chunk);
@@ -635,7 +670,17 @@ async function executeReturn(options) {
     timeout.unref?.();
   });
 
-  const completed = result.signal !== "termination-grace-expired" &&
+  /*
+    A close carrying a signal is still a close: the editor ran and ended, and the
+    classifier reads the evidence to decide what that meant. Two synthetic signals are
+    not closes at all and must never be scored as one -- the grace expiring, and the
+    runner cancelling us, where the editor was killed mid-return and nothing it wrote
+    is a verdict. Without `runner-cancelled` here, cancellation would set
+    `return-command-completed=true`, which is the one direction this action must not
+    fail in.
+  */
+  const NOT_A_COMPLETION = new Set(["termination-grace-expired", "runner-cancelled"]);
+  const completed = !NOT_A_COMPLETION.has(result.signal) &&
     (child.exitCode !== null || result.code !== null || result.signal !== null);
   const exitCode = timedOut ? 124 : result.code;
   let evidence;
