@@ -27,45 +27,36 @@ fi
 
 # The step runs on every workflow run, not only when a release was just
 # published. Without an explicit version, authorize the newest published
-# release that the policy does not list yet, so a failed run is retried by
-# the next scheduled or manual run instead of staying silent.
-release_tags=""
+# release if the policy does not list it yet, so a failed run is retried by
+# the next scheduled or manual run instead of staying silent. A superseded
+# release that was never authorized is never re-offered.
 if [[ -z "${RELEASE_VERSION}" ]]; then
-  if ! release_tags="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
-    --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))] | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber)) | reverse | .[].tag_name' | tr -d '"')"; then
+  if ! newest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30" \
+    --jq '[.[] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))] | sort_by(.tag_name | ltrimstr("v") | split(".") | map(tonumber)) | reverse | .[0].tag_name' | tr -d '"')"; then
     echo "::error::Could not list published releases for authorization discovery." >&2
     exit 1
   fi
-  unexamined_tags=0
-  while IFS= read -r tag; do
-    if [[ -z "${tag}" ]]; then
-      continue
-    fi
-    if ! git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" >/dev/null 2>&1; then
-      unexamined_tags=1
-      continue
-    fi
-    candidate_sha="$(git rev-parse "${tag}^{commit}" 2>/dev/null)" || {
-      unexamined_tags=1
-      continue
-    }
-    if [[ ! "${candidate_sha}" =~ ^[a-f0-9]{40}$ ]]; then
-      unexamined_tags=1
-      continue
-    fi
-    if [[ "$(sha_is_authorized "${candidate_sha}")" != "true" ]]; then
-      RELEASE_VERSION="${tag#v}"
-      break
-    fi
-  done <<<"${release_tags}"
-  if [[ -z "${RELEASE_VERSION}" && "${unexamined_tags}" == "1" ]]; then
-    echo "::error::Could not examine every published release tag; refusing to claim all releases are authorized." >&2
+  if [[ -z "${newest_tag}" || "${newest_tag}" == "null" ]]; then
+    echo "No published release exists to authorize."
+    exit 0
+  fi
+  if ! git fetch --force origin "refs/tags/${newest_tag}:refs/tags/${newest_tag}" >/dev/null 2>&1; then
+    echo "::error::Could not examine the newest published release tag; refusing to claim the newest published release is authorized." >&2
     exit 1
   fi
-  if [[ -z "${RELEASE_VERSION}" ]]; then
+  newest_sha="$(git rev-parse "${newest_tag}^{commit}" 2>/dev/null)" || {
+    echo "::error::Could not resolve the newest published release tag; refusing to claim the newest published release is authorized." >&2
+    exit 1
+  }
+  if [[ ! "${newest_sha}" =~ ^[a-f0-9]{40}$ ]]; then
+    echo "::error::Newest release commit is not a full SHA; refusing to claim the newest published release is authorized." >&2
+    exit 1
+  fi
+  if [[ "$(sha_is_authorized "${newest_sha}")" == "true" ]]; then
     echo "Every published release is already authorized."
     exit 0
   fi
+  RELEASE_VERSION="${newest_tag#v}"
 fi
 
 git fetch --force origin "refs/tags/v${RELEASE_VERSION}:refs/tags/v${RELEASE_VERSION}"
@@ -150,10 +141,17 @@ ${changed_files}
 Merging adds ${release_sha} to \`approvedLockShas\` and \`approvedReturnShas\` in \`${policy_path}\`.
 EOF
 
-gh pr create \
+# The repository may block the workflow identity from opening pull requests.
+# Open the pull request with the reviewed writer App identity instead, and
+# leave no unreviewed branch behind when creation fails.
+if ! GH_TOKEN="${RELEASE_AUTHORIZATION:?RELEASE_AUTHORIZATION is required}" gh pr create \
   --head "${branch}" \
   --title "Authorize v${RELEASE_VERSION} release adoption" \
-  --body-file "${body_file}"
+  --body-file "${body_file}"; then
+  git push origin --delete "${branch}" >/dev/null 2>&1 || true
+  echo "::error::Could not open the authorization pull request; removed the unreviewed branch ${branch}." >&2
+  exit 1
+fi
 
 # Bot-created pull requests do not start hosted checks on their own. Dispatch
 # the required workflow on the branch so the pull request shows real results.
