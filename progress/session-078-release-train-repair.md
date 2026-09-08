@@ -136,3 +136,32 @@ authorization step was skipped. The v1.14.1 release itself is intact.
 - The contract test now pins `successComment: false` and records why.
 - The next release (v1.14.2, from this fix commit) supersedes v1.14.1, so
   discovery correctly offers only v1.14.2 for authorization.
+
+## Outcomes after the merges
+
+- PR #245 squash-merged to main as c4f1a7e36, with the conventional
+  subject preserved. PR #246 squash-merged as d79e1cc2a after one Bugbot
+  finding was answered and its thread resolved: the pinned plugin source
+  (semantic-release/github v12.0.9, lib/success.js) shows the whole
+  comment block is skipped before any issue lookup when
+  `successCommentCondition` is false, so the reported failure mode
+  cannot happen. The commit moved to the option the plugin recommends.
+- v1.14.1 remains unauthorized by design. It was published minutes
+  before v1.14.2 superseded it, and discovery offers only the newest
+  release. Consumers pinning v1.14.1 would be flagged
+  `unapproved-lock-ref`, which is the fail-closed behavior wanted.
+- Live proof, Auto release run 34193801123: every step green.
+  v1.14.2 published (d79e1cc2a), the `v1` alias updated, the writer App
+  token minted, and authorization pull request #247 opened by
+  `app/ambiguous-build-lock-automation` while the repository setting
+  that blocks GITHUB_TOKEN pull requests stayed off.
+- PR #247 diff reviewed: it adds only d79e1cc2a to `approvedLockShas`
+  and `approvedReturnShas`. `approvedDarwinReturnShas` stays empty.
+- Issue #244 closed (auto-closed by the merge, evidence comment added).
+  Status comments posted on #231 and #229: the release exists, the
+  authorization pull request is open, and both stay gated on the
+  native macOS canary evidence and a human merge.
+
+The session ends with the authorization merge itself deliberately
+unmade: that decision belongs to a reviewer with the #229 canary
+evidence in hand.

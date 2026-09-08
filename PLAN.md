@@ -6,7 +6,11 @@ impact on licensed-resource safety and consumer CI churn.
 
 ## Current state (2026-09-08)
 
-- v1.14.0 is released and authorized for consumer pins (PR #224).
+- v1.14.0 is released and authorized for consumer pins (PR #224). v1.14.2
+  (d79e1cc2a) is released and its authorization pull request #247 is open;
+  the merge waits for the #229 native macOS canary, then is a human
+  decision. v1.14.1 stays unauthorized by design (superseded within
+  minutes; discovery offers only the newest release).
 - `Auto release` opens the release-authorization pull request after every
   release. Merging it stays the human decision.
 - The cleanup classifier attributes generic return failures through
@@ -58,15 +62,17 @@ impact on licensed-resource safety and consumer CI churn.
   re-clones the advanced repository, re-analyzes, and fails closed only when
   bounded refresh attempts cannot reconcile (2026-09-07 race on DoxReloaded,
   run 34164453758).
-- The release train is repaired (issue #244): Auto release now opens the
-  release-authorization pull request with a writer App token scoped to this
-  repository, so it no longer depends on the repository setting that began
-  blocking GITHUB_TOKEN pull requests (2026-09-07). Discovery retries only
-  the newest published release, a declined offer stays closed, a failed
-  creation removes the branch when no pull request uses it, and a run
-  summary reports commits whose subjects are not conventional.
-  Release-driving pull request titles must be conventional; the squash
-  merge copies the title into the commit subject semantic-release reads.
+- The release train is repaired (issue #244): Auto release opens the
+  release-authorization pull request with a writer App token scoped to
+  this repository, discovery retries only the newest published release, a
+  declined offer stays closed, a failed creation removes the branch when
+  no pull request uses it, a run summary reports non-conventional commit
+  subjects, and semantic-release no longer comments on referenced issues
+  (foreign repository references cannot fail a release). Proven live:
+  v1.14.2 published and its authorization pull request #247 opened by the
+  App. Release-driving pull request titles must be conventional; the
+  squash merge copies the title into the commit subject semantic-release
+  reads.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
