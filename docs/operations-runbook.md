@@ -145,7 +145,13 @@ repository on the stable branch prefix `automation/repin-lock-`. The
 per-repository result is recorded in the run summary; any repository failure
 keeps the run red. Idempotency: a repository with no stale reference is
 skipped, and an open repin pull request for the same target is never
-duplicated.
+duplicated. A closed repin pull request is a consumer answer: the automation
+skips that repository with a summary row instead of re-offering the same
+repin, and it never updates the branch underneath the closed pull request. A
+repin branch without an open or closed pull request is a partially failed
+run; the next run reuses it only when its content matches the current repin
+exactly, opens the pull request from it, and never force-updates a branch
+that holds other work.
 
 A reviewed, expiring `repinExceptions` entry in
 `unity-enrollment-policy.json` protects one workflow file in one repository

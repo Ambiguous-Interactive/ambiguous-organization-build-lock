@@ -4,6 +4,8 @@ set -euo pipefail
 # Open reviewed pull requests that repin consumer lock action references to
 # the newest authorized release. Consumers merge the pull request; this
 # script never merges, never force-pushes, and never edits a default branch.
+# A closed repin pull request is a consumer answer: the automation never
+# re-offers that repin and never updates its branch underneath it.
 
 # The reviewed enrollment policy that drives scope and repin exceptions.
 # REPIN_POLICY_PATH overrides it for tests.
@@ -205,6 +207,43 @@ process.stdout.write(`${JSON.stringify(report)}\n`);
 EOF
 }
 
+open_repin_pull_request() {
+  # One pull request body and create call, shared by the fresh-push path and
+  # the identical-branch recovery path. Arguments are explicit so the two
+  # paths cannot drift.
+  local repository="$1" branch_name="$2" label="$3" target_sha="$4"
+  local authorization="$5" file_list="$6" preserved_section="$7"
+  local body_file
+  body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
+  cat > "${body_file}" <<EOF
+Repin the organization lock actions to the authorized release ${label}
+(\`${target_sha}\`).
+
+## Review before merge (merge = the adoption decision)
+
+- Only the \`@<sha>\` suffix of \`uses:\` references to
+  \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments.
+- Release authorization evidence: the central authorization pull request for
+  this release, merged by a maintainer.
+- Changed references:
+\`\`\`
+${file_list}
+\`\`\`
+${preserved_section}
+This pull request is opened by central automation. It never merges itself and
+never edits a default branch.
+EOF
+  if ! GH_TOKEN="${authorization}" gh pr create \
+    --repo "${repository}" \
+    --head "${branch_name}" \
+    --title "Repin organization lock actions to ${label}" \
+    --body-file "${body_file}"; then
+    echo "::error::${repository}: could not open the repin pull request." >&2
+    exit 1
+  fi
+  rm -f "${body_file}"
+}
+
 repin_consumer() {
   # The caller inspects this function's result, which makes bash ignore
   # errexit for the whole body, including subshells. Every fallible command
@@ -276,6 +315,24 @@ repin_consumer() {
       printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` is already open |" >> "${GITHUB_STEP_SUMMARY}"
       exit 0
     fi
+    local closed_prs
+    if ! closed_prs="$(GH_TOKEN="${authorization}" gh pr list \
+      --repo "${repository}" \
+      --head "${branch_name}" \
+      --state closed \
+      --json number \
+      --jq length)" || ! [[ "${closed_prs}" =~ ^[0-9]+$ ]]; then
+      echo "::error::${repository}: could not list closed repin pull requests." >&2
+      exit 1
+    fi
+    if [ "${closed_prs}" != "0" ]; then
+      # Merging or closing the repin pull request is the consumer's adoption
+      # decision. Re-offering the same repin would override that decision, so
+      # the repository is skipped and the summary records the state.
+      printf '%s\n' "${repository}: a repin pull request for ${label} was closed; the automation left the closed repin pull request in place." >&2
+      printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` was closed; consumers decide adoption |" >> "${GITHUB_STEP_SUMMARY}"
+      exit 0
+    fi
     if ! git -C "${directory}" checkout -B "${branch_name}"; then
       echo "::error::${repository}: could not create ${branch_name}." >&2
       exit 1
@@ -291,15 +348,6 @@ repin_consumer() {
       echo "::error::${repository}: could not commit the repin." >&2
       exit 1
     fi
-    if ! CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
-      -c credential.helper= \
-      -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
-      push "https://github.com/${repository}.git" "${branch_name}"; then
-      echo "::error::${repository}: could not push ${branch_name}." >&2
-      exit 1
-    fi
-    local body_file
-    body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
     local file_list
     file_list="$(printf '%s' "${report}" | jq -r '.files[] | "- `\(.path)` (\(.lines) line\(if .lines == 1 then "" else "s" end))"' )"
     local preserved_section=""
@@ -313,37 +361,62 @@ caller because a pin-only update would break its input contract:
 ${preserved}
 "
     fi
-    cat > "${body_file}" <<EOF
-Repin the organization lock actions to the authorized release ${label}
-(\`${target_sha}\`).
-
-## Review before merge (merge = the adoption decision)
-
-- Only the \`@<sha>\` suffix of \`uses:\` references to
-  \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments.
-- Release authorization evidence: the central authorization pull request for
-  this release, merged by a maintainer.
-- Changed references:
-\`\`\`
-${file_list}
-\`\`\`
-${preserved_section}
-This pull request is opened by central automation. It never merges itself and
-never edits a default branch.
-EOF
-    if ! GH_TOKEN="${authorization}" gh pr create \
-      --repo "${repository}" \
-      --head "${branch_name}" \
-      --title "Repin organization lock actions to ${label}" \
-      --body-file "${body_file}"; then
-      echo "::error::${repository}: could not open the repin pull request." >&2
+    local remote_tip
+    if ! remote_tip="$(CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
+      -c credential.helper= \
+      -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
+      ls-remote "https://github.com/${repository}.git" "refs/heads/${branch_name}" |
+      cut -f1)" || [[ "${remote_tip}" =~ [^0-9a-f] ]]; then
+      echo "::error::${repository}: could not read the remote repin branch state." >&2
       exit 1
     fi
-    rm -f "${body_file}"
+    if [ -n "${remote_tip}" ]; then
+      # The branch already exists without an open or closed pull request: a
+      # previous run pushed it but could not open the pull request. Reuse it
+      # only when its content is exactly this repin's content. The automation
+      # never force-updates a branch that holds other work.
+      if ! CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
+        -c credential.helper= \
+        -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
+        fetch --depth 1 "https://github.com/${repository}.git" "${branch_name}"; then
+        echo "::error::${repository}: could not fetch the existing repin branch." >&2
+        exit 1
+      fi
+      local remote_tree local_tree
+      if ! remote_tree="$(git -C "${directory}" rev-parse 'FETCH_HEAD^{tree}')" ||
+        ! local_tree="$(git -C "${directory}" rev-parse 'HEAD^{tree}')"; then
+        echo "::error::${repository}: could not compare the existing repin branch content." >&2
+        exit 1
+      fi
+      if [ "${remote_tree}" != "${local_tree}" ]; then
+        printf '%s\n' "${repository}: an existing repin branch holds different content; the automation left the stale repin branch untouched." >&2
+        printf '%s\n' "| \`${repository}\` | existing repin branch has different content; left untouched |" >> "${GITHUB_STEP_SUMMARY}"
+        exit 0
+      fi
+      open_repin_pull_request \
+        "${repository}" "${branch_name}" "${label}" "${target_sha}" \
+        "${authorization}" "${file_list}" "${preserved_section}"
+      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` from the existing branch |" >> "${GITHUB_STEP_SUMMARY}"
+      exit 0
+    fi
+    if ! CONSUMER_PUSH_AUTHORIZATION="${authorization}" git -C "${directory}" \
+      -c credential.helper= \
+      -c 'credential.helper=!f() { printf "username=build-lock-repin\npassword=%s\n" "${CONSUMER_PUSH_AUTHORIZATION}"; }; f' \
+      push "https://github.com/${repository}.git" "${branch_name}"; then
+      echo "::error::${repository}: could not push ${branch_name}." >&2
+      exit 1
+    fi
+    open_repin_pull_request \
+      "${repository}" "${branch_name}" "${label}" "${target_sha}" \
+      "${authorization}" "${file_list}" "${preserved_section}"
+    local lines_word="lines"
+    if [ "${changed}" = "1" ]; then
+      lines_word="line"
+    fi
     if [ "${preserved_count}" != "0" ]; then
-      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines; ${preserved_count} file(s) preserved) |" >> "${GITHUB_STEP_SUMMARY}"
+      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} ${lines_word}; ${preserved_count} file(s) preserved) |" >> "${GITHUB_STEP_SUMMARY}"
     else
-      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} lines) |" >> "${GITHUB_STEP_SUMMARY}"
+      printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` (${changed} ${lines_word}) |" >> "${GITHUB_STEP_SUMMARY}"
     fi
   )
 }

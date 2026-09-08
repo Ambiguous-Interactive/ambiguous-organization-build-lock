@@ -57,7 +57,12 @@ After each authorization merge, the central `Repin consumer lock references`
 workflow opens repin pull requests in enrolled repositories. Each pull request
 moves the repository's lock action references to the newly authorized release.
 Merging it is the consumer's adoption decision; the automation never merges.
-A workflow file listed in a reviewed `repinExceptions` policy entry keeps its
+Closing a repin pull request is the same decision: the automation does not
+re-offer that repin, and it leaves the repin branch untouched. A new release
+opens a new repin pull request. A repin branch without a pull request is
+reused only when its content matches the current repin exactly; the
+automation never force-updates it. A workflow file listed in a reviewed
+`repinExceptions` policy entry keeps its
 current pin; the pull request body names each preserved file and its review
 expiry. The scheduled enrollment audit reports an expired repin exception and
 a repin exception whose protected file no longer exists. The finding codes
