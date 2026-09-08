@@ -538,8 +538,7 @@ mirrored first holder conservatively, its state write can drop additional
 
 ## Organization enrollment audit
 
-The daily and manually dispatchable `Organization Unity enrollment audit`
-workflow enforces the reviewed extensible perimeter in
+The daily `Organization Unity enrollment audit` workflow enforces the reviewed extensible perimeter in
 `unity-enrollment-policy.json`. It derives one exact Contents-read token scope
 from that validated registry, checks out current default branches, audits immutable
 Git objects without executing consumer code, and revalidates the heads before
