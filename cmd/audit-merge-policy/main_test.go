@@ -102,6 +102,7 @@ type rulesetServer struct {
 	protectionStatus      int
 	protection404Body     string
 	withNextLink          bool
+	withActiveNextLink    bool
 }
 
 func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
@@ -128,6 +129,9 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 			rest := strings.TrimPrefix(path, "/repos/")
 			separator := strings.Index(rest, "/rules/branches/")
 			key := rest[:separator] + "@" + rest[separator+len("/rules/branches/"):]
+			if server.withActiveNextLink {
+				writer.Header().Set("Link", `<`+request.URL.String()+`&page=2>; rel="next"`)
+			}
 			writer.Header().Set("Content-Type", "application/json")
 			payload, ok := server.activeRulesPayloads[key]
 			if !ok {
@@ -521,6 +525,22 @@ func TestRunFailsClosedOnUnexpectedPagination(t *testing.T) {
 	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
 	if exit != 1 {
 		t.Fatalf("paginated rulesets exit = %d, want 1", exit)
+	}
+	if codes := findingCodes(t, content); len(codes) != 6 ||
+		codes[0] != "merge-policy-retrieval-incomplete" {
+		t.Fatalf("every repository must fail closed: %s", content)
+	}
+}
+
+func TestRunFailsClosedWhenActiveRulesArePaginated(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory)
+	server, client := newRulesetServer(t)
+	server.withActiveNextLink = true
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("paginated active rules exit = %d, want 1", exit)
 	}
 	if codes := findingCodes(t, content); len(codes) != 6 ||
 		codes[0] != "merge-policy-retrieval-incomplete" {

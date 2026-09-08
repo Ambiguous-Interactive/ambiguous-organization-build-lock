@@ -118,6 +118,19 @@ Follow-up recorded: an expectation bypass actor currently accepts any
 observed bypass mode; a mode-aware schema needs a first reviewed actor to
 justify its shape.
 
+## Second review round (Bugbot on the pull request)
+
+- Accepted: the per-branch active-rules read sent no `per_page`, so GitHub's
+  30-item default page silently truncated the authoritative rule list; a
+  carrying ruleset hidden on a later page would have dodged the bypass
+  check. Fixed by requesting 100 items and failing closed on a next-page
+  Link header, with a dedicated test. Re-run live: identical complete result.
+- Rejected with evidence: the claim that a `null` `required_status_checks`
+  breaks the protection decode. Go's `encoding/json` documents `null` as a
+  no-op for non-pointer struct fields; a reproduction decodes the documented
+  response shape with `err=nil` and zero checks, which is the correct
+  "protection present, no required checks" outcome.
+
 ## Live verification after remediation
 
 The redesigned audit reproduced the same live result over real GitHub

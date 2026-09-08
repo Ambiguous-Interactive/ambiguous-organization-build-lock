@@ -295,12 +295,21 @@ func observeRepository(
 	expectation mergepolicy.RepositoryExpectation,
 ) (mergepolicy.Observed, error) {
 	observed := mergepolicy.Observed{}
-	activeContent, _, err := client.get(
+	// GitHub defaults this endpoint to 30 items per page. A later page could
+	// hide a carrying ruleset, so a paginated read is unbounded evidence and
+	// fails closed rather than silently truncating the authoritative list.
+	activeContent, activeHeaders, err := client.get(
 		ctx,
-		fmt.Sprintf("repos/%s/rules/branches/%s", expectation.Repository, expectation.DefaultBranch),
+		fmt.Sprintf(
+			"repos/%s/rules/branches/%s?per_page=%d",
+			expectation.Repository, expectation.DefaultBranch, maxRulesetsPerRun,
+		),
 	)
 	if err != nil {
 		return observed, fmt.Errorf("read active rules failed")
+	}
+	if hasPagination(activeHeaders) {
+		return observed, fmt.Errorf("active rule pagination is not supported by the bounded audit")
 	}
 	var active activeRulesPayload
 	if err := strictDecode(activeContent, &active); err != nil {
