@@ -108,6 +108,7 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
   assert.deepEqual(scripts, [
     "auto-release.sh",
     "ci.sh",
+    "merge-policy-audit.sh",
     "onboard-unity-repository.sh",
     "open-release-authorization-pr.sh",
     "repin-consumer-locks.sh",
@@ -299,6 +300,23 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
   const incomplete = runScript("unity-enrollment-audit.sh", "record-counts", environment);
   assert.notEqual(incomplete.status, 0);
   assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
+});
+
+test("merge policy summary fails closed when retained audit evidence is incomplete", (t) => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "merge-policy-summary-"));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const auditPath = path.join(temporary, "audit.json");
+  const summaryPath = path.join(temporary, "summary.md");
+  const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
+
+  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: true }));
+  assert.equal(runScript("merge-policy-audit.sh", "record-counts", environment).status, 0);
+  assert.match(fs.readFileSync(summaryPath, "utf8"), /Complete: true/);
+
+  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: false }));
+  const incomplete = runScript("merge-policy-audit.sh", "record-counts", environment);
+  assert.notEqual(incomplete.status, 0);
+  assert.match(fs.readFileSync(summaryPath, "utf8"), /merge-gate status is unknown/);
 });
 
 const revalidateRepositories = [

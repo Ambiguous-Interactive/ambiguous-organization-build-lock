@@ -241,7 +241,8 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
     read(path.join(repoRoot, "internal", "enrollment", file))
   );
   goSources.push(read(path.join(repoRoot, "cmd", "audit-unity-enrollment", "main.go")));
-  const auditCommandSource = goSources[goSources.length - 1];
+  goSources.push(read(path.join(repoRoot, "internal", "mergepolicy", "audit.go")));
+  const auditCommandSource = goSources[goSources.length - 2];
   const emitted = new Set();
   for (const source of goSources) {
     for (const match of source.matchAll(/\.add\("([a-z0-9-]+)"/g)) {
@@ -251,6 +252,9 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
       emitted.add(match[1]);
     }
     for (const match of source.matchAll(/return "([a-z0-9-]+)"/g)) {
+      emitted.add(match[1]);
+    }
+    for (const match of source.matchAll(/Code[A-Za-z]+ += "([a-z0-9-]+)"/g)) {
       emitted.add(match[1]);
     }
   }

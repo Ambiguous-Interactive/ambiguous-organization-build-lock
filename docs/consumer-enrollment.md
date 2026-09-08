@@ -253,8 +253,9 @@ jobs:
 The scheduled audit reports every finding with one of these reason codes.
 Fix the finding with the matching consumer edit. Item numbers refer to the
 Workflow contract above. The exception codes apply to
-`unity-enrollment-policy.json` in this repository. The repository and
-head-revalidation codes report central audit health, not consumer drift.
+`unity-enrollment-policy.json` in this repository. The repository,
+head-revalidation, and merge-policy retrieval codes report central audit
+health, not consumer drift.
 
 | Code | Consumer fix |
 | --- | --- |
@@ -322,6 +323,43 @@ head-revalidation codes report central audit health, not consumer drift.
 | `unsafe-unity-editor-check` | Keep the editor gate success-dependent and failure-propagating. See item 3. |
 | `unsafe-unity-editor-provisioning` | Remove editor install, repair, or provisioning steps. Rely on the central gate. See item 3. |
 | `unsafe-workflow-cancellation` | Use literal `cancel-in-progress: false` on the workflow concurrency group. See item 11. |
+| `missing-required-context` | Require the aggregate context on the default branch. See Merge policy audit. |
+| `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
+| `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |
+| `unexpected-bypass-actor` | Remove the bypass actor, or record it in `merge-policy-expectations.json` after review. See Merge policy audit. |
+| `merge-policy-retrieval-incomplete` | No consumer edit. The audit could not read merge settings. Central operators check the reader App Administration read permission. |
+
+## Merge policy audit
+
+A scheduled central audit compares each enrolled default branch with the
+reviewed expectations in `merge-policy-expectations.json`. The expectations
+name the always-reporting Unity aggregate contexts that the branch must
+require before merge, plus every bypass actor that review accepted. The
+repository set and default branches must match `unity-enrollment-policy.json`;
+the audit refuses to run when they drift.
+
+The audit reads live rulesets and classic branch protection with a
+per-repository reader token scoped to Administration read. A failed read is a
+finding, never a pass. Findings are consumer decisions; the audit reports and
+opens one deduplicated issue.
+
+- `missing-required-context`: no active ruleset or branch protection on the
+  default branch requires the reviewed aggregate. Add the requirement.
+- `renamed-required-context`: the reviewed aggregate is required with a
+  different letter case. Restore the reviewed spelling.
+- `disabled-ruleset`: a ruleset that still declares the aggregate is not
+  active on the default branch. Set its enforcement to active.
+- `unexpected-bypass-actor`: a ruleset grants a bypass actor that review did
+  not accept, or classic protection lets administrators bypass the aggregate.
+  Remove the bypass or record it in `merge-policy-expectations.json` after
+  review.
+- `merge-policy-retrieval-incomplete`: the audit could not read this
+  repository's merge settings. No consumer edit; central operators repair the
+  run.
+
+`unity-builder` is exempt: it is a fork whose paid Windows workflow is a
+controlled manual canary, so it declares no required context. Item 6 of
+Preconditions records the same policy.
 
 ## Canary
 
