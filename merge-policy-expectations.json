@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "organization": "Ambiguous-Interactive",
+  "repositories": [
+    {
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "defaultBranch": "main",
+      "requiredContexts": ["CI Success"],
+      "requireAdminEnforcement": true,
+      "allowedBypassActors": []
+    },
+    {
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "defaultBranch": "master",
+      "requiredContexts": ["Unity CI Success"],
+      "requireAdminEnforcement": true,
+      "allowedBypassActors": []
+    },
+    {
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "defaultBranch": "main",
+      "requiredContexts": ["Unity CI Success"],
+      "requireAdminEnforcement": true,
+      "allowedBypassActors": []
+    },
+    {
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "defaultBranch": "main",
+      "requiredContexts": ["Unity CI"],
+      "requireAdminEnforcement": true,
+      "allowedBypassActors": []
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-builder",
+      "defaultBranch": "main",
+      "requiredContexts": [],
+      "requireAdminEnforcement": false,
+      "allowedBypassActors": []
+    },
+    {
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "defaultBranch": "main",
+      "requiredContexts": ["Unity CI Success"],
+      "requireAdminEnforcement": true,
+      "allowedBypassActors": []
+    }
+  ]
+}
