@@ -107,18 +107,23 @@ test("authorization opens on every run so a failed attempt is retried", () => {
   assert.doesNotMatch(stepHeader, /new_release_published/);
 });
 
-test("semantic-release publishes without claiming referenced issues are resolved", () => {
+test("semantic-release never comments on referenced issues", () => {
   const config = JSON.parse(fs.readFileSync(releaseConfigPath, "utf8"));
 
+  // Squash-merge bodies legitimately reference consumer-repository issue
+  // numbers. A success comment would post false release linkage on local
+  // issues and hard-fail the release when a number exists only in a
+  // consumer repository (issue #244, run 34191956733).
+  // `successCommentCondition: false` skips the whole comment step before
+  // any issue lookup runs; `successComment: false` works too but is a
+  // documented deprecation in @semantic-release/github v12.
   assert.deepEqual(config.plugins, [
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
     [
       "@semantic-release/github",
       {
-        successComment:
-          "This <%= issue.pull_request ? 'pull request' : 'issue' %> is associated with a pull request or commit included in version <%= nextRelease.version %>.\n\n" +
-          "This automated notice records release linkage only; it does not establish that the <%= issue.pull_request ? 'pull request' : 'issue' %> is resolved. Use its current state and acceptance evidence as the authority.",
+        successCommentCondition: false,
         releasedLabels: false
       }
     ]
