@@ -3,14 +3,21 @@ set -euo pipefail
 
 # semantic-release skips commits whose subject is not conventional, so a
 # stalled release train stays silent. Report the drift in the run summary.
-# This is a diagnostic only: it never fails the run, because a week with no
-# releasable change is a normal result.
+# This is a diagnostic only: it never fails the run and it stays out of the
+# way when its own inputs are missing.
 
-summary_path="${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  echo "::warning::GITHUB_STEP_SUMMARY is not set; skipping the commit convention report." >&2
+  exit 0
+fi
+summary_path="${GITHUB_STEP_SUMMARY}"
 
-if ! last_tag="$(git describe --tags --abbrev=0 2>/dev/null)"; then
-  echo "::error::No reachable release tag; cannot report commit convention drift." >&2
-  exit 1
+# Name the newest semver release tag reachable from HEAD. The plain newest
+# tag can be the moving v1 alias, which would label the report wrong.
+last_tag="$(git tag --merged HEAD -l 'v*.*.*' --sort=-v:refname | head -n 1)"
+if [[ -z "${last_tag}" ]]; then
+  echo "::warning::No reachable release tag; skipping the commit convention report." >&2
+  exit 0
 fi
 
 mapfile -t subjects < <(git log --format='%h %s' "${last_tag}..HEAD")

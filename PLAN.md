@@ -62,8 +62,9 @@ impact on licensed-resource safety and consumer CI churn.
   release-authorization pull request with a writer App token scoped to this
   repository, so it no longer depends on the repository setting that began
   blocking GITHUB_TOKEN pull requests (2026-09-07). Discovery retries only
-  the newest published release, a failed creation leaves no branch behind,
-  and a run summary reports commits whose subjects are not conventional.
+  the newest published release, a declined offer stays closed, a failed
+  creation removes the branch when no pull request uses it, and a run
+  summary reports commits whose subjects are not conventional.
   Release-driving pull request titles must be conventional; the squash
   merge copies the title into the commit subject semantic-release reads.
 

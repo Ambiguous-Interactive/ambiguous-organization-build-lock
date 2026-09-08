@@ -94,6 +94,13 @@ if [[ "${open_prs}" != "0" ]]; then
   echo "An authorization pull request for ${RELEASE_VERSION} is already open."
   exit 0
 fi
+# A closed-without-merge authorization pull request is a declined release.
+# Re-offering it would override that reviewed decision.
+declined_prs="$(gh pr list --head "${branch}" --state closed --json state --jq '[.[] | select(.state == "CLOSED")] | length')"
+if [[ "${declined_prs}" != "0" ]]; then
+  echo "A prior authorization pull request for ${RELEASE_VERSION} was closed without merging; not re-offering."
+  exit 0
+fi
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -148,8 +155,18 @@ if ! GH_TOKEN="${RELEASE_AUTHORIZATION:?RELEASE_AUTHORIZATION is required}" gh p
   --head "${branch}" \
   --title "Authorize v${RELEASE_VERSION} release adoption" \
   --body-file "${body_file}"; then
-  git push origin --delete "${branch}" >/dev/null 2>&1 || true
-  echo "::error::Could not open the authorization pull request; removed the unreviewed branch ${branch}." >&2
+  # Creation can also fail after the pull request was created server-side.
+  # Only delete the branch when no pull request uses it, and say so when the
+  # deletion itself fails.
+  open_prs="$(gh pr list --head "${branch}" --state open --json number --jq length)"
+  if [[ "${open_prs}" == "0" ]]; then
+    if ! git push origin --delete "${branch}" >/dev/null 2>&1; then
+      echo "::warning::Could not delete the unreviewed branch ${branch}." >&2
+    fi
+  else
+    echo "::warning::An authorization pull request for ${branch} appeared during creation; keeping the branch." >&2
+  fi
+  echo "::error::Could not open the authorization pull request." >&2
   exit 1
 fi
 

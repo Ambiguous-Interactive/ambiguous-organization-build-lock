@@ -28,33 +28,53 @@ run 34104911681 (2026-09-07 09:14 UTC).
 - `open-release-authorization-pr.sh` discovery now examines only the newest
   published release: offer it when unauthorized, exit 0 when authorized,
   fail closed when its tag cannot be examined. A superseded release is
-  never re-offered. This matches the repin rule: a closed offer stays
-  closed.
+  never re-offered.
+- A closed-without-merge authorization pull request is a declined release
+  and is never re-offered, the same rule the repin automation follows.
+  A merged authorization never reaches this path because the policy then
+  lists the SHA.
 - The pull request is now created with a writer App installation token
   scoped to this repository (`actions/create-github-app-token`, the same
   pinned action and App secrets the repin workflow uses). App-created pull
   requests are not subject to the blocked GITHUB_TOKEN setting. If creation
-  still fails, the script deletes the branch it pushed, so no unreviewed
-  authorization branch remains.
+  fails, the script re-checks for an open pull request on the branch
+  (creation can fail after a server-side success) and deletes the pushed
+  branch only when nothing uses it. A deletion failure is reported, never
+  silent.
 - New `report-nonconventional-commits.sh`, wired into the workflow when no
-  release was published: it lists commits since the newest tag whose
-  subjects are not conventional in the run summary, with a warning. It
-  never fails the run. This makes the silent stall from cause 1 visible.
+  release was published: it lists commits since the newest reachable semver
+  tag whose subjects are not conventional in the run summary, with a
+  warning. It never fails the run: a missing summary variable or a missing
+  tag degrades to a warning and exit 0.
 - Deleted the stray `release-authorization/v1.12.1` branch from the remote.
 
 ## Red-green evidence
 
 New behavioral tests in `test/workflow-scripts.test.js` run the real script
-against a local bare remote with release tags and a `gh` shim:
+against a local bare remote with release tags. The `gh` shim executes the
+script's own `--jq` program with real `jq` against a raw releases payload,
+so the production filter, semver sort, and newest-only selection all run.
 
-- "never re-offers a superseded release": red before the fix (the old code
-  offered v1.12.1 and attempted a pull request), green after (exit 0, no
-  pull request, no branch).
-- "removes its branch when pull request creation fails": red before (branch
-  remained on the remote), green after (branch deleted, non-zero exit).
-- "offers only the newest unauthorized release": pins the offer path,
-  including the pushed policy content.
-- Two diagnostic tests cover drift reporting and silence.
+Discrimination proof: the pre-fix script (origin/main version) under this
+same harness resurrected v1.12.1 and pushed
+`release-authorization/v1.12.1` at 6520f75 in the fixture, exit 0. The
+fixed script exits 0 with "Every published release is already authorized."
+and pushes nothing. An earlier shim draft answered the API with a
+pre-filtered one-line list; it let the old loop pass too, so it was
+replaced before merge. The review caught it; the record here states the
+final, verified behavior.
+
+Covered paths:
+
+- Superseded release never re-offered (draft and prerelease noise filtered,
+  shuffled payload order).
+- Newest unauthorized release offered once, with the pushed policy content
+  checked.
+- Unexaminable newest tag fails closed with a non-zero exit.
+- A declined release (closed-without-merge pull request) is not re-offered.
+- A failed pull request creation removes the branch.
+- An empty release list reports and offers nothing.
+- Diagnostic drift reporting, silence, and the two degraded paths.
 
 Contract tests updated: `auto-release-workflow.test.js` pins the mint step,
 `RELEASE_AUTHORIZATION`, newest-only discovery (no `unexamined_tags` loop),
@@ -63,7 +83,7 @@ script in the Auto release step signatures.
 
 ## Validation
 
-- `node --test test/*.test.js`: 873 tests, 867 pass, 6 skipped (macOS-only),
+- `node --test test/*.test.js`: 877 tests, 871 pass, 6 skipped (macOS-only),
   0 fail.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`: clean.
 - `go mod verify`, `go mod tidy -diff`, `go -C tools/actionlint mod verify`,
