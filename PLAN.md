@@ -6,11 +6,9 @@ impact on licensed-resource safety and consumer CI churn.
 
 ## Current state (2026-09-08)
 
-- v1.14.0 is released and authorized for consumer pins (PR #224). v1.14.2
-  (d79e1cc2a) is released and its authorization pull request #247 is open;
-  the merge waits for the #229 native macOS canary, then is a human
-  decision. v1.14.1 stays unauthorized by design (superseded within
-  minutes; discovery offers only the newest release).
+- v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
+  authorized for consumer pins. v1.14.1 stays unauthorized by design
+  (superseded within minutes; discovery offers only the newest release).
 - `Auto release` opens the release-authorization pull request after every
   release. Merging it stays the human decision.
 - The cleanup classifier attributes generic return failures through
@@ -110,11 +108,17 @@ impact on licensed-resource safety and consumer CI churn.
 - [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
       edits; this repository supplies the evidence and the contract. The
       per-reason-code fix contract is published in
-      `docs/consumer-enrollment.md` and linked from the drift issue. The
-      first repin run opened the PRs; their merges are consumer decisions:
-      DoxReloaded #801 and IshoBoy #855 wait for review, DxMessaging adopted
-      the pins in its own PR #554, and unity-helpers declined the repin for
-      this release by closing #738; the next release opens a fresh offer.
+      `docs/consumer-enrollment.md` and linked from the drift issue.
+      Session 079 opened reviewed fix pull requests for every one of the
+      64 findings, each verified against the unmodified local analyzer over
+      all six enrolled snapshots (0 findings, complete): DoxReloaded #810
+      (also repins its unapproved refs to v1.14.2, superseding automation
+      offer #801 and Dependabot #775), DxMessaging #562, qora-redux #374,
+      and unity-helpers #749 (structural only; its pins stay at v1.14.0 per
+      its maintainer decision). Their merges are consumer decisions.
+      IshoBoy #855 still waits for review; DxMessaging adopted the pins in
+      its own PR #554; unity-helpers declined the repin for the earlier
+      release by closing #738, and the next release opens a fresh offer.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
