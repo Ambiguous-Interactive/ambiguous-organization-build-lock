@@ -60,7 +60,7 @@ consumer-side rollout.
 
 `unity-enrollment-policy.json` is the reviewed extensible repository registry
 and immutable lock-action allowlist. The `Organization Unity enrollment audit`
-workflow runs daily at `23 8 * * *`, can be dispatched manually, and also runs
+workflow runs daily at `23 8 * * *` and also runs
 after relevant policy changes reach `main`. It uses the reader App to check out
 each current default branch without persisting credentials, analyzes exact Git
 objects without executing consumer code—including immutable workflows, actions,
