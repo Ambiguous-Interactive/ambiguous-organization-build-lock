@@ -613,6 +613,27 @@ async function executeReturn(options) {
       releaseSignalHandlers();
       resolve(value);
     };
+    /*
+      The rejection path is `settle`'s twin and has to do the same bookkeeping, which
+      is why it is a function rather than a third copy of it inline. Cursor Bugbot
+      found the inline copy releasing no listeners: they would outlive the child and
+      later signal a reused pid.
+
+      It terminates as well. `error` can arrive *after* a successful spawn, so a
+      detached editor may be running with the seat. `terminateProcess` checks the pid
+      and the exit code, so it is a no-op on a spawn that never started one.
+    */
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(terminationGrace);
+      releaseSignalHandlers();
+      terminateProcess(child, platform, spawnImpl, childEnvironment, options.killImpl);
+      reject(error);
+    };
     const requestTermination = () => {
       if (terminationStarted) {
         return;
@@ -653,14 +674,7 @@ async function executeReturn(options) {
     };
     child.stdout.on("data", record);
     child.stderr.on("data", record);
-    child.once("error", (error) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        clearTimeout(terminationGrace);
-        reject(error);
-      }
-    });
+    child.once("error", fail);
     child.once("close", (code, signal) => settle({ code, signal }));
 
     timeout = setTimeout(() => {

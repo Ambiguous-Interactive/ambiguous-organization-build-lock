@@ -185,6 +185,15 @@ Four mutations, each red on exactly the case that owns it:
 | `runner-cancelled` scored as a completion | the darwin case, on `return-command-completed` |
 | handlers not released on settle | the darwin case, on the listener count |
 
+**A second Bugbot round found the rejection path**, which was a third inline copy of
+`settle`'s bookkeeping and released no listeners: they would outlive the child and later
+signal a reused pid. `error` can also arrive *after* a successful spawn, in which case a
+detached editor is running with the seat -- so the path terminates as well.
+
+It is a `fail()` twin of `settle()` now rather than a third copy, which is what stops the
+next path from getting it wrong again. Two more mutations, both red on the new case:
+releasing no handlers, and releasing them without terminating.
+
 The fixture takes a platform now, because `editorPath` defaults to the Windows layout
 while `executeReturn` defaults to `process.platform`, so a fixture that always plants
 `Unity.exe` disagrees with the action the moment either is asked about Darwin. That is

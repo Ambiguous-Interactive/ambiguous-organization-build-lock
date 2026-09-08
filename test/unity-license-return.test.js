@@ -737,3 +737,53 @@ test("the windows return installs no signal handler, because its child is in the
   child.emit("close", 0, null);
   await pending;
 });
+
+test("a darwin spawn error releases the handlers and terminates the group", async (t) => {
+  /*
+    Cursor Bugbot, on the pull request that added the handlers. The `error` path was a
+    third inline copy of settle's bookkeeping and released no listeners, so they would
+    outlive the child and later signal a reused pid. `error` can also arrive after a
+    successful spawn, in which case a detached editor is running with the seat.
+  */
+  const item = fixture(t, "#!/bin/sh\nsleep 30\n", "darwin");
+  const signalled = [];
+  const child = new EventEmitter();
+  child.pid = 6300;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {
+    signalled.push("direct");
+    return true;
+  };
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "darwin",
+    spawnImpl: () => child,
+    verifyEditor: async () => {},
+    killImpl: (pid, signal) => {
+      signalled.push(`${pid}:${signal}`);
+    }
+  });
+
+  const deadline = Date.now() + 2_000;
+  while (process.listenerCount("SIGTERM") === before) {
+    assert.ok(Date.now() < deadline, "executeReturn never installed a SIGTERM handler");
+    await delay(1);
+  }
+
+  child.emit("error", new Error("spawn failed after the editor started"));
+  await assert.rejects(pending, /spawn failed after the editor started/);
+
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "the signal handlers outlived a failed spawn, so they would signal a reused pid"
+  );
+  assert.ok(
+    signalled.includes("-6300:SIGTERM"),
+    `a failed spawn left the editor group unsignalled: ${JSON.stringify(signalled)}`
+  );
+});
