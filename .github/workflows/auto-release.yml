@@ -39,14 +39,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Report unreleasable commit subjects
+        if: steps.semantic.outputs.new_release_published != 'true'
+        run: bash tools/workflows/report-nonconventional-commits.sh
+
       - name: Update v1 major tag alias
         if: steps.semantic.outputs.new_release_published == 'true' && steps.semantic.outputs.new_release_major_version == '1'
         run: bash tools/workflows/auto-release.sh
         env:
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
 
+      - name: Mint release authorization token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BUILD_LOCK_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+          owner: Ambiguous-Interactive
+          repositories: ambiguous-organization-build-lock
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Open release authorization pull request
         run: bash tools/workflows/open-release-authorization-pr.sh
         env:
           RELEASE_VERSION: ${{ steps.semantic.outputs.new_release_version }}
+          RELEASE_AUTHORIZATION: ${{ steps.release-token.outputs.token }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

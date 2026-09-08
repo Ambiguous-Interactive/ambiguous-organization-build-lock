@@ -33,8 +33,15 @@ test("auto release workflow is scheduled and uses semantic-release", () => {
   assert.match(text, /new_release_published\s*==\s*'true'/);
   assert.match(text, /new_release_major_version\s*==\s*'1'/);
   assert.match(text, /run: bash tools\/workflows\/auto-release\.sh/);
+  assert.match(text, /run: bash tools\/workflows\/report-nonconventional-commits\.sh/);
+  assert.match(text, /new_release_published != 'true'/);
   assert.match(text, /run: bash tools\/workflows\/open-release-authorization-pr\.sh/);
+  assert.match(text, /uses: actions\/create-github-app-token@[a-f0-9]{40}\s+#\s+v[0-9.]+\s*$/m);
+  assert.match(text, /app-id: \$\{\{ secrets\.BUILD_LOCK_APP_ID \}\}/);
+  assert.match(text, /private-key: \$\{\{ secrets\.BUILD_LOCK_APP_PRIVATE_KEY \}\}/);
+  assert.match(text, /repositories: ambiguous-organization-build-lock/);
   assert.match(text, /RELEASE_VERSION: \$\{\{ steps\.semantic\.outputs\.new_release_version \}\}/);
+  assert.match(text, /RELEASE_AUTHORIZATION: \$\{\{ steps\.release-token\.outputs\.token \}\}/);
   assert.match(text, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(script, /git config user\.name "github-actions\[bot\]"/);
   assert.match(script, /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/);
@@ -53,8 +60,13 @@ test("release authorization stays a reviewed human merge decision", () => {
   assert.match(script, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\?per_page=30"/);
   assert.match(script, /draft == false and \.prerelease == false/);
   assert.match(script, /split\("\."\) \| map\(tonumber\)/);
+  // Discovery examines only the newest published release. A superseded
+  // release that was never authorized must never be re-offered.
+  assert.match(script, /\.\[0\]\.tag_name/);
+  assert.doesNotMatch(script, /unexamined_tags/);
+  assert.doesNotMatch(script, /while IFS= read -r tag/);
   assert.match(script, /Could not list published releases for authorization discovery\./);
-  assert.match(script, /refusing to claim all releases are authorized/);
+  assert.match(script, /refusing to claim the newest published release is authorized/);
   assert.match(script, /Every published release is already authorized\./);
   assert.match(script, /git fetch --force origin "refs\/tags\/v\$\{RELEASE_VERSION\}:/);
   assert.match(script, /git rev-parse "v\$\{RELEASE_VERSION\}\^\{commit\}"/);
@@ -62,6 +74,9 @@ test("release authorization stays a reviewed human merge decision", () => {
   assert.match(script, /approvedLockShas/);
   assert.match(script, /approvedReturnShas/);
   assert.match(script, /is already authorized/);
+  assert.match(script, /GH_TOKEN="\$\{RELEASE_AUTHORIZATION:\?RELEASE_AUTHORIZATION is required\}"/);
+  assert.match(script, /git push origin --delete "\$\{branch\}"/);
+  assert.match(script, /Could not open the authorization pull request/);
   assert.match(script, /git checkout -B "\$\{branch\}" origin\/main/);
   assert.match(script, /before any file mutation/);
   assert.match(script, /git commit -m "chore: authorize v\$\{RELEASE_VERSION\} adoption"/);

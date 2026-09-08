@@ -111,6 +111,7 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
     "onboard-unity-repository.sh",
     "open-release-authorization-pr.sh",
     "repin-consumer-locks.sh",
+    "report-nonconventional-commits.sh",
     "request-unity-repository-onboarding.sh",
     "unity-enrollment-audit.sh"
   ]);
@@ -1048,4 +1049,315 @@ test("consumer repin never duplicates an open pull request", (t) => {
     harness.branches.get("unity-helpers"),
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
   );
+});
+
+const authorizationScriptPath = path.join(scriptsRoot, "open-release-authorization-pr.sh");
+const diagnosticScriptPath = path.join(scriptsRoot, "report-nonconventional-commits.sh");
+
+// A policy repository with release tags v1.12.1, v1.14.0, and v1.15.0. The
+// `publishedReleases` option is the raw GitHub API releases payload the shim
+// serves, so the script's own --jq filter and selection run for real. Set
+// `omitTag` to a release that exists in the payload but not in git, to prove
+// discovery fails closed when the newest release cannot be examined.
+// `authorizedTags` names the release commits the policy lists.
+function releaseAuthorizationHarness(t, {
+  publishedReleases,
+  authorizedTags,
+  omitTag = null,
+  declinedPrs = false,
+  prCreateStatus = "0"
+} = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "release-authorization-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const remotePath = path.join(root, "origin.git");
+  const seed = path.join(root, "seed");
+  const work = path.join(root, "work");
+  fs.mkdirSync(remotePath, { recursive: true });
+  fs.mkdirSync(seed, { recursive: true });
+  gitRun(root, "init", "--bare", "-b", "main", remotePath);
+  gitRun(seed, "init", "-b", "main");
+  gitRun(seed, "config", "user.name", "seed");
+  gitRun(seed, "config", "user.email", "seed@example.com");
+  gitRun(seed, "remote", "add", "origin", remotePath);
+
+  const shasByTag = new Map();
+  for (const version of ["v1.12.1", "v1.14.0", "v1.15.0"]) {
+    fs.writeFileSync(path.join(seed, `${version}.txt`), `${version}\n`);
+    gitRun(seed, "add", "-A");
+    gitRun(seed, "commit", "-m", `release ${version}`);
+    gitRun(seed, "tag", version);
+    shasByTag.set(version, gitRun(seed, "rev-parse", `${version}^{commit}`));
+  }
+  const authorizedShas = authorizedTags.map((tag) => shasByTag.get(tag));
+  fs.writeFileSync(path.join(seed, "unity-enrollment-policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    approvedLockShas: authorizedShas,
+    approvedReturnShas: authorizedShas,
+    approvedDarwinReturnShas: [],
+    repositories: [],
+    exceptions: []
+  }));
+  gitRun(seed, "add", "-A");
+  gitRun(seed, "commit", "-m", "policy");
+  gitRun(seed, "push", "-q", "origin", "main");
+  const pushedTags = ["v1.12.1", "v1.14.0", "v1.15.0"].filter((tag) => tag !== omitTag);
+  gitRun(seed, "push", "-q", "origin", "main", ...pushedTags.map((tag) => `refs/tags/${tag}`));
+
+  gitRun(root, "clone", "-q", remotePath, work);
+
+  const shims = path.join(root, "shims");
+  const events = path.join(root, "events.log");
+  const releasesPayload = path.join(root, "releases.json");
+  const prState = path.join(root, "pr-state");
+  fs.mkdirSync(shims);
+  fs.mkdirSync(prState);
+  fs.writeFileSync(events, "");
+  fs.writeFileSync(releasesPayload, JSON.stringify(publishedReleases));
+  fs.writeFileSync(path.join(prState, "open"), "0\n");
+  fs.writeFileSync(path.join(prState, "closed"), `${declinedPrs ? 1 : 0}\n`);
+  writeExecutable(path.join(shims, "gh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'printf \'gh %s\\n\' "$*" >> "${TEST_EVENTS}"',
+    'if [ "$1" = "api" ]; then',
+    '  program=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--jq" ]; then program="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  exec jq "${program}" "${TEST_RELEASES_PAYLOAD}"',
+    "fi",
+    'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
+    '  state="open"',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--state" ]; then state="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  cat "${TEST_PR_STATE}/${state}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "pr" ] && [ "$2" = "create" ]; then',
+    '  exit "${TEST_PR_CREATE_STATUS}"',
+    "fi",
+    'if [ "$1" = "workflow" ] && [ "$2" = "run" ]; then',
+    "  exit 0",
+    "fi",
+    "exit 64"
+  ].join("\n"));
+
+  return {
+    root,
+    remotePath,
+    work,
+    events,
+    shasByTag,
+    run: () => childProcess.spawnSync("bash", [authorizationScriptPath], {
+      cwd: work,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${shims}:${process.env.PATH}`,
+        GITHUB_REPOSITORY: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+        RELEASE_VERSION: "",
+        GH_TOKEN: "test-github-token",
+        RELEASE_AUTHORIZATION: "test-release-token",
+        TEST_EVENTS: events,
+        TEST_RELEASES_PAYLOAD: releasesPayload,
+        TEST_PR_STATE: prState,
+        TEST_PR_CREATE_STATUS: String(prCreateStatus)
+      }
+    })
+  };
+}
+
+function authorizationBranchOnRemote(harness, branch) {
+  return gitRun(harness.work, "ls-remote", "--heads", harness.remotePath, branch);
+}
+
+function defaultPublishedReleases() {
+  // Deliberately shuffled and polluted: discovery must filter drafts and
+  // prereleases, sort by semantic version, and take only the newest.
+  return [
+    { tag_name: "v1.12.1", draft: false, prerelease: false },
+    { tag_name: "v1.15.0-rc1", draft: false, prerelease: true },
+    { tag_name: "v1.14.0", draft: false, prerelease: false },
+    { tag_name: "v1.16.0", draft: true, prerelease: false },
+    { tag_name: "v1.15.0", draft: false, prerelease: false }
+  ];
+}
+
+test("release authorization discovery never re-offers a superseded release", (t) => {
+  // v1.14.0 is the newest published release and is authorized. v1.12.1 was
+  // superseded before its authorization merged and must never be offered.
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: [
+      { tag_name: "v1.12.1", draft: false, prerelease: false },
+      { tag_name: "v1.15.0-rc1", draft: false, prerelease: true },
+      { tag_name: "v1.16.0", draft: true, prerelease: false },
+      { tag_name: "v1.14.0", draft: false, prerelease: false }
+    ],
+    authorizedTags: ["v1.14.0"]
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Every published release is already authorized\./);
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh workflow run/);
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.12.1"), "");
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.14.0"), "");
+});
+
+test("release authorization offers only the newest unauthorized release", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.14.0"]
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const events = fs.readFileSync(harness.events, "utf8");
+  assert.match(events, /gh pr create/);
+  assert.match(events, /gh workflow run/);
+  const releaseSha = harness.shasByTag.get("v1.15.0");
+  const pushed = gitRun(
+    harness.work,
+    "show",
+    "refs/remotes/origin/release-authorization/v1.15.0:unity-enrollment-policy.json"
+  );
+  const pushedPolicy = JSON.parse(pushed);
+  assert.ok(pushedPolicy.approvedLockShas.includes(releaseSha));
+  assert.ok(pushedPolicy.approvedReturnShas.includes(releaseSha));
+});
+
+test("release authorization fails closed when the newest release tag cannot be examined", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.12.1"],
+    omitTag: "v1.15.0"
+  });
+
+  const result = harness.run();
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /refusing to claim the newest published release is authorized/);
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
+});
+
+test("release authorization never re-offers a declined release", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.14.0"],
+    declinedPrs: true
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /closed without merging/);
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
+});
+
+test("release authorization removes its branch when pull request creation fails", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.14.0"],
+    prCreateStatus: "1"
+  });
+
+  const result = harness.run();
+
+  assert.notEqual(result.status, 0);
+  assert.match(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
+});
+
+test("release authorization reports an empty release list without offering anything", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: [],
+    authorizedTags: []
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /No published release exists to authorize\./);
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
+});
+
+function diagnosticHarness(t, subjects, { withTag = true, withSummary = true } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "release-diagnostic-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(root, { recursive: true });
+  gitRun(root, "init", "-b", "main");
+  gitRun(root, "config", "user.name", "seed");
+  gitRun(root, "config", "user.email", "seed@example.com");
+  fs.writeFileSync(path.join(root, "release.md"), "v1.14.0\n");
+  gitRun(root, "add", "-A");
+  gitRun(root, "commit", "-m", "release v1.14.0");
+  if (withTag) {
+    gitRun(root, "tag", "v1.14.0");
+  }
+  for (const [index, subject] of subjects.entries()) {
+    fs.writeFileSync(path.join(root, `commit-${index}.md`), `${subject}\n`);
+    gitRun(root, "add", "-A");
+    gitRun(root, "commit", "-m", subject);
+  }
+  const summary = path.join(root, "summary.md");
+  fs.writeFileSync(summary, "");
+  return {
+    root,
+    summary,
+    run: () => childProcess.spawnSync("bash", [diagnosticScriptPath], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: withSummary ? summary : ""
+      }
+    })
+  };
+}
+
+test("release diagnostics report non-conventional subjects since the newest release", (t) => {
+  const harness = diagnosticHarness(t, [
+    "Land the Darwin trusted return, with its requirement compiled in CI (#240)"
+  ]);
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(harness.summary, "utf8");
+  assert.match(summary, /v1\.14\.0/);
+  assert.match(summary, /Land the Darwin trusted return, with its requirement compiled in CI \(#240\)/);
+  assert.match(result.stderr, /::warning::/);
+});
+
+test("release diagnostics stay silent for conventional subjects and for no unreleased commits", (t) => {
+  const conventional = diagnosticHarness(t, ["fix(release): repair discovery", "docs: record session"]);
+  assert.equal(conventional.run().status, 0);
+  assert.equal(fs.readFileSync(conventional.summary, "utf8"), "");
+
+  const noCommits = diagnosticHarness(t, []);
+  assert.equal(noCommits.run().status, 0);
+  assert.equal(fs.readFileSync(noCommits.summary, "utf8"), "");
+});
+
+test("release diagnostics degrade to a warning when their inputs are missing", (t) => {
+  const noTag = diagnosticHarness(t, ["Land the Darwin trusted return (#240)"], { withTag: false });
+  const noTagResult = noTag.run();
+  assert.equal(noTagResult.status, 0, noTagResult.stderr);
+  assert.match(noTagResult.stderr, /No reachable release tag/);
+  assert.equal(fs.readFileSync(noTag.summary, "utf8"), "");
+
+  const noSummary = diagnosticHarness(t, ["Land the Darwin trusted return (#240)"], { withSummary: false });
+  const noSummaryResult = noSummary.run();
+  assert.equal(noSummaryResult.status, 0, noSummaryResult.stderr);
+  assert.match(noSummaryResult.stderr, /GITHUB_STEP_SUMMARY is not set/);
 });
