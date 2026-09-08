@@ -116,9 +116,12 @@ impact on licensed-resource safety and consumer CI churn.
       offer #801 and Dependabot #775), DxMessaging #562, qora-redux #374,
       and unity-helpers #749 (structural only; its pins stay at v1.14.0 per
       its maintainer decision). Their merges are consumer decisions.
-      IshoBoy #855 still waits for review; DxMessaging adopted the pins in
-      its own PR #554; unity-helpers declined the repin for the earlier
-      release by closing #738, and the next release opens a fresh offer.
+      IshoBoy closed repin offer #855 unadopted (2026-09-07); a closed
+      offer is a decline, so the automation never re-offers it.
+      DxMessaging adopted the pins in its own PR #554. unity-helpers
+      declined the earlier repin by closing #738. The v1.14.2
+      authorization (#247) merged after that morning's scheduled run, so
+      the fresh v1.14.2 offers open on the next scheduled run.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
