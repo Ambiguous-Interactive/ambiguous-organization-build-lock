@@ -17,6 +17,7 @@ const expectedWorkflowJobs = new Map([
   ["devcontainer.yml", ["build"]],
   ["dx-unity-automation-audit.yml", ["audit"]],
   ["lock-recovery-audit.yml", ["audit"]],
+  ["merge-policy-audit.yml", ["audit"]],
   ["onboard-unity-repository.yml", ["onboard"]],
   ["repin-consumer-locks.yml", ["repin"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
@@ -74,6 +75,15 @@ const expectedWorkflowRunScriptSignatures = new Map([
   [
     "lock-recovery-audit.yml",
     ["go run ./cmd/lock-recovery-audit --lock=wallstop-organization-builds --state-ref=lock-state"]
+  ],
+  [
+    "merge-policy-audit.yml",
+    [
+      "bash tools/workflows/merge-policy-audit.sh resolve-scope",
+      'go run ./cmd/audit-merge-policy --policy unity-enrollment-policy.json --expectations merge-policy-expectations.json --output "${RUNNER_TEMP}/merge-policy-audit.json"',
+      'go run ./cmd/sync-merge-policy-issue --audit "${RUNNER_TEMP}/merge-policy-audit.json"',
+      "bash tools/workflows/merge-policy-audit.sh record-counts"
+    ]
   ],
   [
     "onboard-unity-repository.yml",
@@ -1490,6 +1500,59 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.equal(sync.env.UNITY_AUDIT_ARTIFACT_URL, "${{ steps.audit-evidence.outputs.artifact-url }}");
   assert.ok(summary);
   assert.match(automation, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH[^}]*\}"\)" != "true" \]; then/);
+  const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");
+  assert.equal(trustedCheckout.with.ref, "main");
+});
+
+test("organization merge-policy audit is exact, read-only, and fail closed", () => {
+  const text = readWorkflow("merge-policy-audit.yml");
+  const automation = readWorkflowScript("merge-policy-audit.sh");
+  const job = jobSections(text).find((candidate) => candidate.name === "audit");
+  const steps = workflowJobStepMaps(text, "audit");
+  const scope = steps.find((step) => step.name === "Resolve exact reader scope from reviewed expectations");
+  const token = steps.find((step) => step.name === "Mint exact repository-scoped reader token");
+  const audit = steps.find((step) => step.name === "Audit live consumer merge policies");
+  const evidence = steps.find((step) => step.name === "Upload full sanitized audit evidence");
+  const sync = steps.find((step) => step.name === "Synchronize deduplicated drift issue");
+  const summary = steps.find((step) => step.name === "Record sanitized audit counts");
+
+  assert.ok(job);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), false);
+  assert.equal(hasEffectivePermission(text, job.text, "issues", "write"), true);
+  assert.equal(workflowHasTrigger(text, "schedule"), true);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), false);
+  assert.equal(workflowHasTrigger(text, "pull_request"), false);
+  const concurrency = workflowConcurrency(text);
+  assert.equal(hasStableConcurrencyGroup(concurrency), true);
+  assert.equal(concurrency["cancel-in-progress"], "false");
+  assert.match(automation, /--validate-only/);
+  assert.match(automation, /\.repositories\[\]\.repository/);
+  assert.match(automation, /echo "repositories=\$\{repositories\}" >> "\$\{GITHUB_OUTPUT/);
+  assert.match(automation, /if \[ "\$\(jq -r '\.complete' "\$\{AUDIT_PATH[^}]*\}"\)" != "true" \]; then/);
+
+  assert.match(token.uses, /^actions\/create-github-app-token@[a-f0-9]{40}$/);
+  assert.ok(scope);
+  assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_READER_APP_ID }}");
+  assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}");
+  assert.equal(token.with["permission-administration"], "read");
+  assert.equal(token.with.repositories, "${{ steps.merge-policy-scope.outputs.repositories }}");
+  assert.equal(audit.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
+  assert.equal(audit["continue-on-error"], "true");
+  assert.equal(audit.env.READER_AUTHORIZATION, "${{ steps.reader-token.outputs.token }}");
+  assert.equal(evidence.if, "${{ always() }}");
+  assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+  assert.equal(evidence.with.name, "merge-policy-audit-${{ github.run_id }}-${{ github.run_attempt }}");
+  assert.equal(evidence.with.path, "${{ runner.temp }}/merge-policy-audit.json");
+  assert.equal(evidence.with["if-no-files-found"], "error");
+  assert.equal(evidence.with["retention-days"], "30");
+  assert.equal(sync.if, "${{ always() }}");
+  assert.equal(sync.env.GITHUB_TOKEN, "${{ github.token }}");
+  assert.equal(sync.env.GITHUB_SERVER_URL, "${{ github.server_url }}");
+  assert.equal(sync.env.GITHUB_REPOSITORY, "${{ github.repository }}");
+  assert.equal(sync.env.GITHUB_RUN_ID, "${{ github.run_id }}");
+  assert.equal(sync.env.MERGE_POLICY_AUDIT_ARTIFACT_URL, "${{ steps.audit-evidence.outputs.artifact-url }}");
+  assert.ok(summary);
   const trustedCheckout = steps.find((step) => step.name === "Checkout trusted policy repository");
   assert.equal(trustedCheckout.with.ref, "main");
 });

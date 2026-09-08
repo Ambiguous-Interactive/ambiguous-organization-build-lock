@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-08)
+## Current state (2026-09-08, session 081)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -71,6 +71,14 @@ impact on licensed-resource safety and consumer CI churn.
   App. Release-driving pull request titles must be conventional; the
   squash merge copies the title into the commit subject semantic-release
   reads.
+- The central merge-policy drift audit (#44 item 7, #252) is implemented:
+  a reviewed expectation list (`merge-policy-expectations.json`) is compared
+  daily with each consumer's live rulesets and branch protection, and drift
+  opens one deduplicated issue. The first live comparison (session 081,
+  complete, 22 observed required checks) found four true gaps: DoxReloaded
+  does not require `CI Success`, unity-helpers has no merge gate, and
+  DxMessaging (Integration 3977200, ruleset 17663217) plus qora-redux
+  (administrator bypass) grant unreviewed bypasses. IshoBoy is clean.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

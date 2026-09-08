@@ -1,0 +1,96 @@
+name: Organization merge-policy audit
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/merge-policy-audit.yml"
+      - "cmd/audit-merge-policy/**"
+      - "cmd/sync-merge-policy-issue/**"
+      - "internal/githubissue/**"
+      - "internal/mergepolicy/**"
+      - "merge-policy-expectations.json"
+      - "tools/workflows/merge-policy-audit.sh"
+      - "unity-enrollment-policy.json"
+  schedule:
+    - cron: "41 8 * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: organization-merge-policy-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Audit consumer merge policies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted policy repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve exact reader scope from reviewed expectations
+        id: merge-policy-scope
+        shell: bash
+        run: bash tools/workflows/merge-policy-audit.sh resolve-scope
+
+      - name: Mint exact repository-scoped reader token
+        id: reader-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BUILD_LOCK_READER_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}
+          owner: Ambiguous-Interactive
+          repositories: ${{ steps.merge-policy-scope.outputs.repositories }}
+          permission-administration: read
+
+      - name: Audit live consumer merge policies
+        id: merge-policy-audit
+        if: ${{ always() && steps.reader-token.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_API_URL: ${{ github.api_url }}
+          READER_AUTHORIZATION: ${{ steps.reader-token.outputs.token }}
+        shell: bash
+        run: go run ./cmd/audit-merge-policy --policy unity-enrollment-policy.json --expectations merge-policy-expectations.json --output "${RUNNER_TEMP}/merge-policy-audit.json"
+
+      - name: Upload full sanitized audit evidence
+        id: audit-evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: merge-policy-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/merge-policy-audit.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Synchronize deduplicated drift issue
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          MERGE_POLICY_AUDIT_ARTIFACT_URL: ${{ steps.audit-evidence.outputs.artifact-url }}
+        run: go run ./cmd/sync-merge-policy-issue --audit "${RUNNER_TEMP}/merge-policy-audit.json"
+
+      - name: Record sanitized audit counts
+        if: ${{ always() }}
+        env:
+          AUDIT_PATH: ${{ runner.temp }}/merge-policy-audit.json
+        shell: bash
+        run: bash tools/workflows/merge-policy-audit.sh record-counts
