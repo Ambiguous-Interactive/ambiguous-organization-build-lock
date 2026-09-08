@@ -7,8 +7,11 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
+const { setTimeout: delay } = require("node:timers/promises");
 
 const {
+  DARWIN_CODESIGN_PATH,
+  darwinDesignatedRequirement,
   editorEnvironment,
   editorPath,
   executeReturn,
@@ -18,17 +21,28 @@ const {
   run,
   systemPowerShell,
   terminateProcess,
+  UNITY_DARWIN_TEAM_IDS,
   verifyUnityEditor,
   workflowCommandData
 } = require("../.github/dist/return-unity-license.js");
 
-function fixture(t, script) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-return-action-"));
+// `editorPath` defaults to the Windows layout while `executeReturn` defaults to
+// `process.platform`, so every case below names the platform it means: the
+// fixture plants the executable for the platform passed here, and the case
+// passes the same one to the action. A bare default agrees with the action only
+// on the host the file was written on.
+function fixture(t, script, platform = "win32") {
+  // Resolve the root before anything is built under it. On macOS `os.tmpdir()`
+  // is `/var/folders/...` and `/var` is a symlink, so the action's
+  // `assertNoReparsePath` walk would refuse the fixture itself (issue #241).
+  // Production resolves under `runner.tool_cache`, which has no symlinked
+  // ancestor; the fixture has to stand where the real editor stands.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "unity-return-action-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const toolCache = path.join(root, "tool-cache");
   const runnerTemp = path.join(root, "runner-temp");
   const output = path.join(root, "outputs.txt");
-  const executable = editorPath(toolCache, "6000.5.2f1");
+  const executable = editorPath(toolCache, "6000.5.2f1", "canonical", platform);
   fs.mkdirSync(path.dirname(executable), { recursive: true });
   fs.mkdirSync(runnerTemp);
   fs.writeFileSync(executable, script, { mode: 0o700 });
@@ -360,7 +374,11 @@ test("symlinked editor is rejected without exposing credentials", async (t) => {
   const target = `${executable}.target`;
   fs.renameSync(executable, target);
   fs.symlinkSync(target, executable);
-  await assert.rejects(executeReturn({ env: item.env }), /not a regular file/);
+  // The fixture planted the Windows layout, so the action has to resolve that
+  // same path. Inheriting the host here is what made this case resolve the
+  // bundle Mach-O on macOS and fail with ENOENT instead of the rejection it
+  // asserts (issue #241).
+  await assert.rejects(executeReturn({ env: item.env, platform: "win32" }), /not a regular file/);
   const outputs = fs.readFileSync(item.output, "utf8");
   assert.match(outputs, /return-command-completed=false/);
   assert.ok(!outputs.includes(item.env["INPUT_UNITY-EMAIL"]));
@@ -383,4 +401,398 @@ test("a reparse point in the editor ancestry is rejected", async (t) => {
     platform: "linux",
     verifyEditor: async () => {}
   }), /reparse point/);
+});
+
+/*
+  Darwin trusted return (#153). Every case below is the Windows control's
+  counterpart, so a reviewer can read the two halves side by side, and each one
+  is red against a specific way the Darwin path could be wrong rather than
+  against "it does not work".
+*/
+
+const REVIEWED_TEAM = new Set(["ABCDE12345"]);
+
+test("darwin editor path resolves the Mach-O inside the reviewed bundle", () => {
+  assert.equal(
+    editorPath("/opt/tool-cache", "6000.5.2f1", "canonical", "darwin"),
+    "/opt/tool-cache/u6-v3/6000.5.2f1/Editor/Unity.app/Contents/MacOS/Unity"
+  );
+  assert.equal(
+    editorPath("/opt/tool-cache", "6000.5.2f1", "ci-managed-alternate", "darwin"),
+    "/opt/tool-cache/u6-v3/_ci-managed-editors/6000.5.2f1/Editor/Unity.app/Contents/MacOS/Unity"
+  );
+});
+
+test("the darwin requirement pins the anchor, the Developer ID chain and the team", () => {
+  const requirement = darwinDesignatedRequirement(REVIEWED_TEAM);
+  assert.match(requirement, /^anchor apple generic and /);
+  assert.match(requirement, /certificate 1\[field\.1\.2\.840\.113635\.100\.6\.2\.6\] exists/);
+  assert.match(requirement, /certificate leaf\[field\.1\.2\.840\.113635\.100\.6\.1\.13\] exists/);
+  assert.match(requirement, /certificate leaf\[subject\.OU\] = "ABCDE12345"/);
+});
+
+test("an unpinned or malformed darwin identity fails closed rather than verifying", () => {
+  assert.throws(
+    () => darwinDesignatedRequirement(new Set()),
+    /No reviewed Unity Developer ID team is configured/
+  );
+  for (const malformed of ["abcde12345", "ABCDE1234", "ABCDE123456", "ABCDE-1234", ""]) {
+    assert.throws(
+      () => darwinDesignatedRequirement(new Set([malformed])),
+      /malformed/,
+      `expected ${JSON.stringify(malformed)} to be refused`
+    );
+  }
+});
+
+test("the shipped darwin team is the one measured off Unity's signed editor package", () => {
+  /*
+    Read from the signing chain in the xar table of contents of
+    MacEditorInstaller/Unity.pkg at revision eb73d3b415a1: OU, UID and the common
+    name all carry 9QW8UQUTAA for Unity Technologies SF, issued under Apple's
+    Developer ID Certification Authority. Pinned as one value, so a second team
+    appearing here is a review decision rather than a drift.
+  */
+  assert.deepEqual([...UNITY_DARWIN_TEAM_IDS], ["9QW8UQUTAA"]);
+  assert.match(
+    darwinDesignatedRequirement(UNITY_DARWIN_TEAM_IDS),
+    /certificate leaf\[subject\.OU\] = "9QW8UQUTAA"/
+  );
+});
+
+test("darwin verification runs absolute codesign against the designated requirement", async () => {
+  const calls = [];
+  const spawnImpl = (command, argumentsList, options) => {
+    calls.push({ command, argumentsList, options });
+    const child = new EventEmitter();
+    process.nextTick(() => child.emit("close", 0));
+    return child;
+  };
+  await verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+    allowedTeamIDs: REVIEWED_TEAM,
+    environment: { PATH: "/usr/bin:/bin", TMPDIR: "/runner/temp" },
+    platform: "darwin",
+    spawnImpl
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/usr/bin/codesign");
+  assert.equal(calls[0].command, DARWIN_CODESIGN_PATH);
+  assert.ok(path.isAbsolute(calls[0].command));
+  assert.equal(calls[0].options.shell, false);
+  assert.deepEqual(calls[0].options.env, { PATH: "/usr/bin:/bin", TMPDIR: "/runner/temp" });
+  assert.ok(calls[0].argumentsList.includes("--verify"));
+  assert.ok(calls[0].argumentsList.includes("--strict"));
+  // `--` before the path, so an executable whose name begins with a dash is an
+  // operand rather than a flag.
+  const separator = calls[0].argumentsList.indexOf("--");
+  assert.ok(separator >= 0);
+  assert.equal(
+    calls[0].argumentsList[separator + 1],
+    "/opt/tool-cache/Unity.app/Contents/MacOS/Unity"
+  );
+  assert.match(calls[0].argumentsList.join(" "), /=anchor apple generic and /);
+  assert.match(calls[0].argumentsList.join(" "), /subject\.OU\] = "ABCDE12345"/);
+});
+
+test("a codesign identity mismatch fails the darwin return", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    // codesign exits nonzero when the signature does not satisfy -R, which is
+    // the image-substitution case: correctly signed, wrong team.
+    process.nextTick(() => child.emit("close", 3));
+    return child;
+  };
+  await assert.rejects(
+    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+      allowedTeamIDs: REVIEWED_TEAM,
+      platform: "darwin",
+      spawnImpl
+    }),
+    /signature verification failed/
+  );
+});
+
+test("darwin verification is bounded and terminates a hung codesign", async () => {
+  const terminated = [];
+  const verifier = new EventEmitter();
+  verifier.pid = 4321;
+  verifier.exitCode = null;
+  verifier.kill = () => {
+    terminated.push("direct");
+    return true;
+  };
+  /*
+    The action's bound is unref'd on purpose -- a verification timer must never
+    be the reason a runner stays alive -- so it only fires while something else
+    holds the loop open. `delay` is that something, and awaiting it before the
+    assertion makes the outcome settled rather than raced: at 50 ms the 5 ms
+    bound has fired, so the check below reads a decided verdict.
+  */
+  const verification = verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+    allowedTeamIDs: REVIEWED_TEAM,
+    killImpl: (pid, signal) => {
+      terminated.push(`${pid}:${signal}`);
+    },
+    platform: "darwin",
+    spawnImpl: () => verifier,
+    timeoutMs: 5
+  });
+  const outcome = verification.then(
+    () => new Error("a hung codesign must not verify the editor."),
+    (error) => error
+  );
+  await delay(50);
+  assert.match((await outcome).message, /signature verification timed out/);
+  // The group, so a codesign that forked is not left behind on the runner.
+  assert.deepEqual(terminated, ["-4321:SIGTERM"]);
+});
+
+test("a codesign that cannot start fails the darwin return closed", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    process.nextTick(() => child.emit("error", new Error("ENOENT")));
+    return child;
+  };
+  await assert.rejects(
+    verifyUnityEditor("/opt/tool-cache/Unity.app/Contents/MacOS/Unity", {
+      allowedTeamIDs: REVIEWED_TEAM,
+      platform: "darwin",
+      spawnImpl
+    }),
+    /could not start/
+  );
+});
+
+test("darwin termination signals the whole process group, not the editor alone", () => {
+  const signals = [];
+  const child = new EventEmitter();
+  child.pid = 5150;
+  child.exitCode = null;
+  child.kill = () => {
+    signals.push("direct");
+    return true;
+  };
+  terminateProcess(child, "darwin", () => {
+    throw new Error("darwin termination must not spawn a helper.");
+  }, {}, (pid, signal) => {
+    signals.push(`${pid}:${signal}`);
+  });
+  // A negative pid is the process group, which is what reaches descendants the
+  // editor left behind after its parent exited.
+  assert.deepEqual(signals, ["-5150:SIGTERM"]);
+});
+
+test("a darwin group signal that fails falls back to the direct child kill", () => {
+  const signals = [];
+  const child = new EventEmitter();
+  child.pid = 5150;
+  child.exitCode = null;
+  child.kill = () => {
+    signals.push("direct");
+    return true;
+  };
+  terminateProcess(child, "darwin", () => {
+    throw new Error("darwin termination must not spawn a helper.");
+  }, {}, () => {
+    throw new Error("ESRCH");
+  });
+  assert.deepEqual(signals, ["direct"]);
+});
+
+test("the darwin child environment is an allowlist that drops workflow control", () => {
+  const environment = editorEnvironment(
+    {
+      DYLD_INSERT_LIBRARIES: "/tmp/evil.dylib",
+      GITHUB_TOKEN: "secret",
+      HOME: "/Users/runner",
+      "INPUT_UNITY-PASSWORD": "private-password",
+      PATH: "/usr/bin:/bin",
+      TMPDIR: "/attacker/temp",
+      USER: "runner"
+    },
+    "/runner/temp",
+    "darwin"
+  );
+  assert.deepEqual(environment, {
+    HOME: "/Users/runner",
+    PATH: "/usr/bin:/bin",
+    TMPDIR: "/runner/temp",
+    USER: "runner"
+  });
+  // The loader-injection variable is the macOS counterpart of a hijacked
+  // SystemRoot, and neither reaches the editor.
+  assert.equal(environment.DYLD_INSERT_LIBRARIES, undefined);
+  assert.equal(environment["INPUT_UNITY-PASSWORD"], undefined);
+  assert.equal(environment.GITHUB_TOKEN, undefined);
+});
+
+test("an unsupported platform is refused rather than verified by another platform's rule", async () => {
+  for (const platform of ["linux", "aix", "freebsd"]) {
+    await assert.rejects(
+      verifyUnityEditor("/opt/tool-cache/Unity", {
+        allowedTeamIDs: REVIEWED_TEAM,
+        platform,
+        spawnImpl: () => {
+          throw new Error("no verifier may run on an unsupported platform.");
+        }
+      }),
+      /supports Windows and Darwin only/
+    );
+  }
+});
+
+/*
+  Cancellation, which is the cost `detached` introduced.
+
+  A detached child leads its own process group and is therefore outside the runner's
+  kill tree. So a cancelled workflow run terminates this Node process and leaves the
+  editor holding the paid seat -- the exact leak #153 exists to prevent, arriving
+  through the mechanism added to prevent it. Found by Cursor Bugbot on the pull
+  request that landed the Darwin path.
+
+  Both cases drive the real `executeReturn`, so they are red against the handler not
+  being installed and against it being installed on the platform that does not need it.
+*/
+
+test("a runner signal terminates the detached darwin editor before this process goes", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nsleep 30\n", "darwin");
+  const signalled = [];
+  const child = new EventEmitter();
+  child.pid = 6100;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {
+    signalled.push("direct");
+    return true;
+  };
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "darwin",
+    spawnImpl: () => child,
+    verifyEditor: async () => {},
+    killImpl: (pid, signal) => {
+      signalled.push(`${pid}:${signal}`);
+    }
+  });
+
+  /*
+    Wait for the handler rather than for a fixed delay: it is installed only after
+    the child exists, and asserting on a race is how this case would go quietly
+    green. Bounded, because the mutation this case exists to catch -- installing no
+    handler at all -- makes the condition unreachable, and a test that hangs on its
+    own mutation reports nothing. It must fail, and say what it was waiting for.
+  */
+  const deadline = Date.now() + 2_000;
+  while (process.listenerCount("SIGTERM") === before) {
+    assert.ok(
+      Date.now() < deadline,
+      "executeReturn never installed a SIGTERM handler, so a cancelled run leaves the "
+        + "detached editor holding the seat"
+    );
+    await delay(1);
+  }
+
+  process.emit("SIGTERM");
+  const result = await pending;
+
+  // The editor was killed mid-return, so nothing it wrote is a verdict. Scoring this
+  // as a completion would set `return-command-completed=true` on a seat that never
+  // came back, which is the one direction this action must not fail in.
+  assert.equal(result.commandCompleted, false);
+  assert.equal(result.captureComplete, false);
+  const outputs = fs.readFileSync(item.output, "utf8");
+  assert.ok(
+    !outputs.includes("return-command-completed=true"),
+    `a cancelled return claimed completion: ${outputs}`
+  );
+  // The negative pid is the group, which is what reaches the editor the runner's
+  // tree kill can no longer see.
+  assert.ok(
+    signalled.includes("-6100:SIGTERM"),
+    `the editor's process group was never signalled: ${JSON.stringify(signalled)}`
+  );
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "the signal handler outlived the child, so it would signal a reused pid"
+  );
+});
+
+test("the windows return installs no signal handler, because its child is in the tree", async (t) => {
+  const item = fixture(t, "@echo off\r\n");
+  const child = new EventEmitter();
+  child.pid = 6200;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => true;
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "win32",
+    spawnImpl: () => child,
+    verifyEditor: async () => {}
+  });
+  await delay(20);
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "windows is not detached, so the runner's tree kill already reaches the editor"
+  );
+  child.emit("close", 0, null);
+  await pending;
+});
+
+test("a darwin spawn error releases the handlers and terminates the group", async (t) => {
+  /*
+    Cursor Bugbot, on the pull request that added the handlers. The `error` path was a
+    third inline copy of settle's bookkeeping and released no listeners, so they would
+    outlive the child and later signal a reused pid. `error` can also arrive after a
+    successful spawn, in which case a detached editor is running with the seat.
+  */
+  const item = fixture(t, "#!/bin/sh\nsleep 30\n", "darwin");
+  const signalled = [];
+  const child = new EventEmitter();
+  child.pid = 6300;
+  child.exitCode = null;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {
+    signalled.push("direct");
+    return true;
+  };
+
+  const before = process.listenerCount("SIGTERM");
+  const pending = executeReturn({
+    env: item.env,
+    platform: "darwin",
+    spawnImpl: () => child,
+    verifyEditor: async () => {},
+    killImpl: (pid, signal) => {
+      signalled.push(`${pid}:${signal}`);
+    }
+  });
+
+  const deadline = Date.now() + 2_000;
+  while (process.listenerCount("SIGTERM") === before) {
+    assert.ok(Date.now() < deadline, "executeReturn never installed a SIGTERM handler");
+    await delay(1);
+  }
+
+  child.emit("error", new Error("spawn failed after the editor started"));
+  await assert.rejects(pending, /spawn failed after the editor started/);
+
+  assert.equal(
+    process.listenerCount("SIGTERM"),
+    before,
+    "the signal handlers outlived a failed spawn, so they would signal a reused pid"
+  );
+  assert.ok(
+    signalled.includes("-6300:SIGTERM"),
+    `a failed spawn left the editor group unsignalled: ${JSON.stringify(signalled)}`
+  );
 });

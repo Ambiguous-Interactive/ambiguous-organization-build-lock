@@ -80,6 +80,26 @@ jobs:
       - name: Reject credential-shaped workflow env literals
         run: go run ./cmd/workflow-credential-audit .
 
+  darwin-return-action:
+    name: Validate Darwin return action
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      # The requirement cases here are skipped everywhere else, because the
+      # requirement compiler they ask is macOS-only. The rest of the return
+      # suite runs on every host; this job keeps it honest on the platform it
+      # names.
+      - name: Run Darwin return action tests
+        run: node --test test/unity-darwin-requirement.test.js test/unity-license-return.test.js
+
   windows-evidence-deletion:
     name: Validate Windows evidence deletion
     runs-on: windows-latest

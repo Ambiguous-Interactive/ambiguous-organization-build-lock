@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-07)
+## Current state (2026-09-08)
 
 - v1.14.0 is released and authorized for consumer pins (PR #224).
 - `Auto release` opens the release-authorization pull request after every
@@ -21,6 +21,13 @@ impact on licensed-resource safety and consumer CI churn.
 - The in-repo #229 follow-ups are done: `gofmt` is a CI formatter gate, and
   the three tests that settled only through unref'd event-loop timers now
   use ref'd keep-alive floors.
+- PR #240 carries the Darwin trusted return runtime: editor resolution inside
+  the reviewed bundle, a `codesign` designated-requirement identity check,
+  process-group termination, and runner-cancellation forwarding. Its
+  `macos-latest` job runs the whole return-action suite on macOS; the fixture
+  fixes behind that are #241, closed by session 077. The analyzer still
+  refuses every Darwin return until `approvedDarwinReturnShas` names a
+  release (#231).
 - Repin automation honors reviewed, expiring `repinExceptions`: a pin-only
   update can no longer move a caller to an action whose input contract the
   caller cannot satisfy (#233 follow-up). Issue #233 is closed: unity-helpers
@@ -103,8 +110,9 @@ impact on licensed-resource safety and consumer CI churn.
   portal decisions, or multi-week live evidence windows. Triage recorded
   2026-09-06 (session 066) and 2026-09-07 (session 067).
 - #153 Windows-container trusted cleanup and the Darwin verifier release:
-  PR #228 carries the Darwin action design and stays draft until the Unity
-  Darwin team identifier is read on a real macOS install and an exact-head
+  PR #240 (superseding draft #228) carries the Darwin action design with its
+  requirement compiled in CI, and stays runtime-only until #229's canary reads
+  the Developer ID Application team on a real macOS install and an exact-head
   licensed canary runs. The enrollment-audit admission contract for the
   Darwin shape is done; the reviewed `approvedDarwinReturnShas` merge is
   the separate authorization step that follows a Darwin-capable release.
