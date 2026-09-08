@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-08, session 081)
+## Current state (2026-09-08, session 082)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -74,11 +74,20 @@ impact on licensed-resource safety and consumer CI churn.
 - The central merge-policy drift audit (#44 item 7, #252) is implemented:
   a reviewed expectation list (`merge-policy-expectations.json`) is compared
   daily with each consumer's live rulesets and branch protection, and drift
-  opens one deduplicated issue. The first live comparison (session 081,
-  complete, 22 observed required checks) found four true gaps: DoxReloaded
-  does not require `CI Success`, unity-helpers has no merge gate, and
-  DxMessaging (Integration 3977200, ruleset 17663217) plus qora-redux
-  (administrator bypass) grant unreviewed bypasses. IshoBoy is clean.
+  opens one deduplicated issue. Drift findings stay issue-visible with a green
+  run; an incomplete audit fails the run closed.
+- The first `Organization merge-policy audit` run (34285720502, pushed by
+  the #253 merge) failed closed as designed. The reader App holds
+  Administration read, but GitHub returns ruleset `bypass_actors` only to
+  ruleset-write callers. So the carrying rulesets on DxMessaging (17663217)
+  and IshoBoy (4545251) report `merge-policy-retrieval-incomplete`. True
+  consumer gaps stay visible: DoxReloaded and unity-helpers do not require
+  their aggregate, and qora-redux lets administrators bypass required
+  checks. #254 records the credential decision: read-only paths are
+  live-proven and documented insufficient, so only a ruleset-write
+  credential or #252 option 3 remains. The finding-code contract no longer
+  tells operators to "check Administration read" (session 082). The run
+  stays red until that decision is made and implemented.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -121,9 +130,10 @@ impact on licensed-resource safety and consumer CI churn.
       64 findings, each verified against the unmodified local analyzer over
       all six enrolled snapshots (0 findings, complete): DoxReloaded #810
       (also repins its unapproved refs to v1.14.2, superseding automation
-      offer #801 and Dependabot #775), DxMessaging #562, qora-redux #374,
-      and unity-helpers #749 (structural only; its pins stay at v1.14.0 per
-      its maintainer decision). Their merges are consumer decisions.
+      offer #801 and Dependabot #775) and qora-redux #374 merged 2026-09-08;
+      DxMessaging #562 and unity-helpers #749 (structural only; its pins stay
+      at v1.14.0 per its maintainer decision) remain open. Their merges are
+      consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a closed
       offer is a decline, so the automation never re-offers it.
       DxMessaging adopted the pins in its own PR #554. unity-helpers
