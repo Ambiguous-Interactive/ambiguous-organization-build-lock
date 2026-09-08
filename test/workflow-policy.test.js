@@ -164,6 +164,48 @@ test("all remote workflow actions are pinned to immutable commit SHAs", () => {
   }
 });
 
+test("workflow checkouts persist no credentials, except the documented release checkout", () => {
+  for (const workflowName of listWorkflows()) {
+    const workflow = readWorkflow(workflowName);
+    // Split the file at every YAML list item. A checkout step is then one
+    // segment from its `- name:` marker to the next list item, so a flag can
+    // never be counted for a different step.
+    const stepBlocks = [];
+    let current = [];
+    for (const line of workflow.split("\n")) {
+      if (/^\s*-\s/.test(line)) {
+        stepBlocks.push(current);
+        current = [line];
+      } else {
+        current.push(line);
+      }
+    }
+    stepBlocks.push(current);
+    const checkoutBlocks = stepBlocks
+      .filter((lines) => lines.some((line) => /^\s*uses:\s*actions\/checkout@[a-f0-9]{40}/.test(line)))
+      .map((lines) => lines.join("\n"));
+    if (workflowName === "auto-release.yml") {
+      // semantic-release pushes tags and the v1 alias through the
+      // authenticated origin that actions/checkout configures. This is the
+      // one documented exception; every other checkout drops the token.
+      assert.equal(checkoutBlocks.length, 1, `${workflowName} keeps its single documented checkout`);
+      assert.doesNotMatch(
+        checkoutBlocks[0],
+        /persist-credentials:/,
+        `${workflowName} is the only workflow allowed to persist checkout credentials`
+      );
+      continue;
+    }
+    for (const block of checkoutBlocks) {
+      assert.match(
+        block,
+        /^\s*persist-credentials:\s*false\s*$/m,
+        `${workflowName} must set persist-credentials: false on every actions/checkout step`
+      );
+    }
+  }
+});
+
 function listPolicyTextFiles(root = repoRoot) {
   return childProcess
     .execFileSync(
@@ -1538,12 +1580,15 @@ test("Unity repository onboarding opens a reviewable registry-only PR from trust
   assert.match(automation, /test "\$\{REQUEST_HEAD_BRANCH[^}]*\}" = "main"/);
   assert.match(automation, /test "\$\{REQUEST_HEAD_REPOSITORY[^}]*\}" = "\$\{TRUSTED_REPOSITORY[^}]*\}"/);
   assert.equal(checkout.with.ref, "main");
+  assert.equal(checkout.with["persist-credentials"], "false");
   assert.match(automation, /go run \.\/cmd\/onboard-unity-repository/);
   assert.equal(update.env.TARGET_REPOSITORY, "${{ steps.request.outputs.repository }}");
   assert.equal(update.env.TARGET_DEFAULT_BRANCH, "${{ steps.request.outputs.default_branch }}");
   assert.equal(pullRequest.env.GH_TOKEN, "${{ github.token }}");
   assert.match(automation, /git add unity-enrollment-policy\.json/);
   assert.match(automation, /gh pr create/);
+  assert.match(automation, /ONBOARDING_PUSH_AUTHORIZATION="\$\{GH_TOKEN[^}]*\}"/);
+  assert.match(automation, /push origin "\$\{ONBOARDING_BRANCH\}"/);
   assert.match(text, /Mint target-scoped reader token/);
   assert.match(automation, /--validate-only/);
   assert.ok(
