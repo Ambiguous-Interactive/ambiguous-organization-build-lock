@@ -17,8 +17,9 @@ or writer App. The current inventory is recorded in
    audit. That audit must read the exact default-branch commit and fail closed
    on incomplete retrieval.
 4. Add the repository to the reader App's selected-repository installation.
-   The App has Actions read, Contents read, Metadata read, and organization
-   self-hosted runners read. Do not grant write permission.
+   The App has Actions read, Contents read, Metadata read, organization
+   self-hosted runners read, and Administration read. Do not grant write
+   permission.
 5. Add the repository to selected-repository visibility for only the writer,
    reader, and Unity organization secrets it needs. The writer App itself
    remains installed only on
@@ -327,7 +328,7 @@ health, not consumer drift.
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |
 | `unexpected-bypass-actor` | Remove the bypass actor, or record it in `merge-policy-expectations.json` after review. See Merge policy audit. |
-| `merge-policy-retrieval-incomplete` | No consumer edit. The audit could not read merge settings. Central operators check the reader App Administration read permission. |
+| `merge-policy-retrieval-incomplete` | No consumer edit. The usual cause is structural: GitHub returns ruleset bypass actors only to ruleset-write callers, and the reader App is read-only (issue #254). Central operators diagnose the run. |
 
 ## Merge policy audit
 
@@ -340,7 +341,11 @@ the audit refuses to run when they drift.
 
 The audit reads live rulesets and classic branch protection with a
 per-repository reader token scoped to Administration read. A failed read is a
-finding, never a pass. Findings are consumer decisions; the audit reports and
+finding, never a pass. GitHub returns ruleset `bypass_actors` only to callers
+with write access to the ruleset. The reader App stays read-only by reviewed
+policy, so a carrying ruleset without bypass evidence fails the audit closed
+(issue #254). Classic branch protection bypass evidence stays readable with
+Administration read. Findings are consumer decisions; the audit reports and
 opens one deduplicated issue.
 
 - `missing-required-context`: no active ruleset or branch protection on the
@@ -354,8 +359,12 @@ opens one deduplicated issue.
   Remove the bypass or record it in `merge-policy-expectations.json` after
   review.
 - `merge-policy-retrieval-incomplete`: the audit could not read this
-  repository's merge settings. No consumer edit; central operators repair the
-  run.
+  repository's merge settings. No consumer edit. The usual cause is
+  structural. GitHub returns ruleset `bypass_actors` only to callers with
+  write access to the ruleset. The reader App holds read access only, by
+  reviewed policy. The credential decision is tracked in issue #254. Until
+  that decision is made and implemented, the run stays red and the drift
+  issue stays open.
 
 `unity-builder` is exempt: it is a fork whose paid Windows workflow is a
 controlled manual canary, so it declares no required context. Item 6 of

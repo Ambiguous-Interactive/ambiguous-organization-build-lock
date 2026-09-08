@@ -187,10 +187,11 @@ The required steady-state boundary is:
   `Ambiguous-Interactive/ambiguous-organization-build-lock` with Metadata read
   and Contents write. Acquire and release request a repository-restricted token.
 - The reader App is installed only on the reviewed consumer inventory. It has
-  Actions read, Contents read, Metadata read, and organization self-hosted
-  runners read. Each operation requests only the permissions and repositories
-  it needs: preflight uses runner inventory, reaping uses Actions/Metadata, and
-  the central policy audit uses Contents.
+  Actions read, Contents read, Metadata read, organization self-hosted
+  runners read, and Administration read. Each operation requests only the
+  permissions and repositories it needs: preflight uses runner inventory,
+  reaping uses Actions/Metadata, the central policy audit uses Contents, and
+  the central merge-policy audit uses Administration read.
 - Writer, reader, and Unity organization secrets use selected-repository
   visibility. They are exposed only to enrolled consumers and to this policy
   repository where an operation requires them.
