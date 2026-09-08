@@ -20,14 +20,24 @@ import (
 )
 
 const (
-	defaultTimeout    = 20 * time.Second
-	maxResponseBytes  = 4 << 20
-	maxRulesetsPerRun = 128
+	defaultTimeout   = 20 * time.Second
+	maxResponseBytes = 4 << 20
+	// GitHub caps ruleset lists at 100 per page; anything beyond that is
+	// paginated and therefore rejected as unbounded evidence.
+	maxRulesetsPerRun = 100
+	maxCarrierBytes   = 128
 )
 
 // errNoProtection marks the documented "Branch not protected" response that
-// proves classic branch protection is absent.
+// proves classic branch protection is absent. Any other 404 stays an error.
 var errNoProtection = errors.New("branch protection is absent")
+
+// retrievalError carries sanitized, single-line evidence for the finding.
+type retrievalError struct {
+	detail string
+}
+
+func (err *retrievalError) Error() string { return err.detail }
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv, http.DefaultClient))
@@ -58,8 +68,8 @@ func run(
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return 2
 	}
-	if !*validateOnly && *outputPath == "" {
-		_, _ = fmt.Fprintln(stderr, "expectations and output are required")
+	if *outputPath == "" && !*validateOnly {
+		_, _ = fmt.Fprintln(stderr, "output is required unless --validate-only is set")
 		return 2
 	}
 	policyContent, err := os.ReadFile(*policyPath)
@@ -96,8 +106,7 @@ func run(
 		return 2
 	}
 	audit := auditRepositories(context.Background(), client, expectations)
-	writeErr := writeAudit(*outputPath, audit)
-	if writeErr != nil {
+	if err := writeAudit(*outputPath, audit); err != nil {
 		_, _ = fmt.Fprintln(stderr, "cannot write merge policy audit artifact")
 		return 2
 	}
@@ -178,17 +187,20 @@ func (client *apiClient) get(ctx context.Context, endpoint string) ([]byte, http
 		return nil, nil, fmt.Errorf("GitHub API request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusNotFound && strings.HasSuffix(endpoint, "/protection") {
-		return nil, response.Header.Clone(), errNoProtection
+	content, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if readErr != nil || len(content) > maxResponseBytes {
+		return nil, nil, fmt.Errorf("GitHub API response exceeded bound")
+	}
+	headers := response.Header.Clone()
+	if response.StatusCode == http.StatusNotFound &&
+		strings.HasSuffix(endpoint, "/protection") &&
+		strings.Contains(string(content), "Branch not protected") {
+		return nil, headers, errNoProtection
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
 	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(content) > maxResponseBytes {
-		return nil, nil, fmt.Errorf("GitHub API response exceeded bound")
-	}
-	return content, response.Header.Clone(), nil
+	return content, headers, nil
 }
 
 type rulesetSummary struct {
@@ -197,19 +209,11 @@ type rulesetSummary struct {
 	Enforcement string `json:"enforcement"`
 }
 
-type rulesetListPayload []rulesetSummary
-
 type rulesetDetailPayload struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Enforcement string `json:"enforcement"`
-	Conditions  struct {
-		RefName struct {
-			Include []string `json:"include"`
-			Exclude []string `json:"exclude"`
-		} `json:"ref_name"`
-	} `json:"conditions"`
-	BypassActors []struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Enforcement  string `json:"enforcement"`
+	BypassActors *[]struct {
 		ActorID    int64  `json:"actor_id"`
 		ActorType  string `json:"actor_type"`
 		BypassMode string `json:"bypass_mode"`
@@ -222,6 +226,16 @@ type rulesetDetailPayload struct {
 			} `json:"required_status_checks"`
 		} `json:"parameters"`
 	} `json:"rules"`
+}
+
+type activeRulesPayload []struct {
+	RulesetID  int64  `json:"ruleset_id"`
+	Type       string `json:"type"`
+	Parameters struct {
+		RequiredStatusChecks []struct {
+			Context string `json:"context"`
+		} `json:"required_status_checks"`
+	} `json:"parameters"`
 }
 
 type protectionPayload struct {
@@ -255,9 +269,15 @@ func auditRepositories(
 		})
 		if retrievalErr != nil {
 			audit.Complete = false
+			detail := ""
+			var evidence *retrievalError
+			if errors.As(retrievalErr, &evidence) {
+				detail = evidence.detail
+			}
 			audit.Findings = append(audit.Findings, mergepolicy.Finding{
 				Repository: expectation.Repository,
 				Code:       mergepolicy.CodeRetrievalIncomplete,
+				Detail:     mergepolicy.BoundDetail(detail),
 			})
 			continue
 		}
@@ -265,6 +285,206 @@ func auditRepositories(
 		audit.Findings = append(audit.Findings, findings...)
 		audit.Inventory = append(audit.Inventory, inventory...)
 	}
+	sortAudit(audit)
+	return audit
+}
+
+func observeRepository(
+	ctx context.Context,
+	client *apiClient,
+	expectation mergepolicy.RepositoryExpectation,
+) (mergepolicy.Observed, error) {
+	observed := mergepolicy.Observed{}
+	activeContent, _, err := client.get(
+		ctx,
+		fmt.Sprintf("repos/%s/rules/branches/%s", expectation.Repository, expectation.DefaultBranch),
+	)
+	if err != nil {
+		return observed, fmt.Errorf("read active rules failed")
+	}
+	var active activeRulesPayload
+	if err := strictDecode(activeContent, &active); err != nil {
+		return observed, fmt.Errorf("decode active rules failed")
+	}
+	for _, rule := range active {
+		if rule.Type != "required_status_checks" {
+			continue
+		}
+		for _, check := range rule.Parameters.RequiredStatusChecks {
+			observed.ActiveChecks = append(observed.ActiveChecks, mergepolicy.ActiveCheck{
+				Context:   mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes),
+				RulesetID: rule.RulesetID,
+			})
+		}
+	}
+
+	listContent, listHeaders, err := client.get(
+		ctx,
+		fmt.Sprintf("repos/%s/rulesets?per_page=%d", expectation.Repository, maxRulesetsPerRun),
+	)
+	if err != nil {
+		return observed, fmt.Errorf("list rulesets failed")
+	}
+	if hasPagination(listHeaders) {
+		return observed, fmt.Errorf("ruleset pagination is not supported by the bounded audit")
+	}
+	var list []rulesetSummary
+	if err := strictDecode(listContent, &list); err != nil {
+		return observed, fmt.Errorf("decode ruleset list failed")
+	}
+	if len(list) > maxRulesetsPerRun {
+		return observed, fmt.Errorf("ruleset count exceeded bound")
+	}
+	// Carrying rulesets are those the per-branch authority reported as active
+	// requirements; their bypass evidence is mandatory, not optional.
+	carrying := make(map[int64]bool)
+	for _, check := range observed.ActiveChecks {
+		for _, context := range expectation.RequiredContexts {
+			if check.Context == context {
+				carrying[check.RulesetID] = true
+			}
+		}
+	}
+	for _, summary := range list {
+		detailEndpoint := fmt.Sprintf("repos/%s/rulesets/%d", expectation.Repository, summary.ID)
+		detailContent, _, err := client.get(ctx, detailEndpoint)
+		if err != nil {
+			return observed, fmt.Errorf("read ruleset %d failed", summary.ID)
+		}
+		var detail rulesetDetailPayload
+		if err := strictDecode(detailContent, &detail); err != nil {
+			return observed, fmt.Errorf("decode ruleset %d failed", summary.ID)
+		}
+		if detail.ID != summary.ID {
+			return observed, fmt.Errorf("ruleset %d evidence does not match its identity", summary.ID)
+		}
+		if detail.Enforcement != summary.Enforcement {
+			return observed, fmt.Errorf("ruleset %d changed between reads", summary.ID)
+		}
+		if carrying[summary.ID] && detail.BypassActors == nil {
+			return observed, &retrievalError{detail: fmt.Sprintf(
+				"bypass actor evidence for ruleset %s (id %d) is unavailable",
+				mergepolicy.SanitizeText(detail.Name, maxCarrierBytes), summary.ID,
+			)}
+		}
+		observed.Rulesets = append(observed.Rulesets, rulesetFromDetail(detail))
+	}
+	for _, check := range observed.ActiveChecks {
+		if !carrying[check.RulesetID] {
+			continue
+		}
+		if _, known := findRuleset(observed.Rulesets, check.RulesetID); !known {
+			return observed, &retrievalError{detail: fmt.Sprintf(
+				"carrying ruleset id %d is missing from the ruleset evidence", check.RulesetID,
+			)}
+		}
+	}
+
+	protectionContent, _, err := client.get(
+		ctx,
+		fmt.Sprintf("repos/%s/branches/%s/protection", expectation.Repository, expectation.DefaultBranch),
+	)
+	switch {
+	case err == nil:
+		var payload protectionPayload
+		if err := strictDecode(protectionContent, &payload); err != nil {
+			return observed, fmt.Errorf("decode branch protection failed")
+		}
+		observed.Protection = mergepolicy.Protection{
+			Present:        true,
+			AdminEnforced:  payload.EnforceAdmins.Enabled,
+			RequiredChecks: protectionChecks(payload),
+		}
+	case errors.Is(err, errNoProtection):
+		observed.Protection = mergepolicy.Protection{Present: false}
+	default:
+		return observed, fmt.Errorf("read branch protection failed")
+	}
+	return observed, nil
+}
+
+func findRuleset(rulesets []mergepolicy.Ruleset, id int64) (mergepolicy.Ruleset, bool) {
+	for _, ruleset := range rulesets {
+		if ruleset.ID == id {
+			return ruleset, true
+		}
+	}
+	return mergepolicy.Ruleset{}, false
+}
+
+func rulesetFromDetail(detail rulesetDetailPayload) mergepolicy.Ruleset {
+	ruleset := mergepolicy.Ruleset{
+		ID:          detail.ID,
+		Name:        mergepolicy.SanitizeText(detail.Name, maxCarrierBytes),
+		Enforcement: detail.Enforcement,
+	}
+	for _, rule := range detail.Rules {
+		if rule.Type != "required_status_checks" {
+			continue
+		}
+		for _, check := range rule.Parameters.RequiredStatusChecks {
+			ruleset.RequiredChecks = append(ruleset.RequiredChecks, mergepolicy.RequiredCheck{
+				Context: mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes),
+			})
+		}
+	}
+	if detail.BypassActors != nil {
+		for _, actor := range *detail.BypassActors {
+			ruleset.BypassActors = append(ruleset.BypassActors, mergepolicy.RuleBypassActor{
+				ActorType: mergepolicy.SanitizeText(actor.ActorType, 32),
+				ActorID:   actor.ActorID,
+				Mode:      mergepolicy.SanitizeText(actor.BypassMode, 32),
+			})
+		}
+	}
+	return ruleset
+}
+
+func protectionChecks(payload protectionPayload) []mergepolicy.RequiredCheck {
+	checks := make([]mergepolicy.RequiredCheck, 0, len(payload.RequiredStatusChecks.Checks)+len(payload.RequiredStatusChecks.Contexts))
+	for _, check := range payload.RequiredStatusChecks.Checks {
+		checks = append(checks, mergepolicy.RequiredCheck{Context: mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes)})
+	}
+	for _, context := range payload.RequiredStatusChecks.Contexts {
+		sanitized := mergepolicy.SanitizeText(context, mergepolicy.MaxContextBytes)
+		duplicate := false
+		for _, check := range checks {
+			if check.Context == sanitized {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			checks = append(checks, mergepolicy.RequiredCheck{Context: sanitized})
+		}
+	}
+	return checks
+}
+
+func hasPagination(headers http.Header) bool {
+	// A ruleset list that names a next page is unbounded evidence for this
+	// audit, because the bounded single read could miss carrying rulesets.
+	for _, part := range strings.Split(headers.Get("Link"), ",") {
+		if strings.Contains(part, `rel="next"`) {
+			return true
+		}
+	}
+	return false
+}
+
+func strictDecode(content []byte, result any) error {
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	if err := decoder.Decode(result); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("response must contain one JSON value")
+	}
+	return nil
+}
+
+func sortAudit(audit mergepolicy.Audit) {
 	sort.Slice(audit.Repositories, func(i, j int) bool {
 		return audit.Repositories[i].Repository < audit.Repositories[j].Repository
 	})
@@ -294,182 +514,6 @@ func auditRepositories(
 		}
 		return left.Detail < right.Detail
 	})
-	return audit
-}
-
-func observeRepository(
-	ctx context.Context,
-	client *apiClient,
-	expectation mergepolicy.RepositoryExpectation,
-) (mergepolicy.Observed, error) {
-	observed := mergepolicy.Observed{}
-	listEndpoint := fmt.Sprintf(
-		"repos/%s/rulesets?per_page=%d",
-		expectation.Repository,
-		maxRulesetsPerRun,
-	)
-	listContent, headers, err := client.get(ctx, listEndpoint)
-	if err != nil {
-		return observed, fmt.Errorf("list rulesets failed")
-	}
-	if hasPagination(headers) {
-		return observed, fmt.Errorf("ruleset pagination is not supported by the bounded audit")
-	}
-	var list rulesetListPayload
-	if err := strictDecode(listContent, &list); err != nil {
-		return observed, fmt.Errorf("decode ruleset list failed")
-	}
-	if len(list) > maxRulesetsPerRun {
-		return observed, fmt.Errorf("ruleset count exceeded bound")
-	}
-	for _, summary := range list {
-		detailEndpoint := fmt.Sprintf("repos/%s/rulesets/%d", expectation.Repository, summary.ID)
-		detailContent, _, err := client.get(ctx, detailEndpoint)
-		if err != nil {
-			return observed, fmt.Errorf("read ruleset %d failed", summary.ID)
-		}
-		var detail rulesetDetailPayload
-		if err := strictDecode(detailContent, &detail); err != nil {
-			return observed, fmt.Errorf("decode ruleset %d failed", summary.ID)
-		}
-		observed.Rulesets = append(observed.Rulesets, rulesetFromDetail(detail, expectation.DefaultBranch))
-	}
-	protectionContent, _, err := client.get(
-		ctx,
-		fmt.Sprintf("repos/%s/branches/%s/protection", expectation.Repository, expectation.DefaultBranch),
-	)
-	switch {
-	case err == nil:
-		var payload protectionPayload
-		if err := strictDecode(protectionContent, &payload); err != nil {
-			return observed, fmt.Errorf("decode branch protection failed")
-		}
-		observed.Protection = mergepolicy.Protection{
-			Present:        true,
-			AdminEnforced:  payload.EnforceAdmins.Enabled,
-			RequiredChecks: protectionChecks(payload),
-		}
-	case errors.Is(err, errNoProtection):
-		observed.Protection = mergepolicy.Protection{Present: false}
-	default:
-		return observed, fmt.Errorf("read branch protection failed")
-	}
-	return observed, nil
-}
-
-func rulesetFromDetail(detail rulesetDetailPayload, branch string) mergepolicy.Ruleset {
-	ruleset := mergepolicy.Ruleset{
-		ID:                   detail.ID,
-		Name:                 sanitizeText(detail.Name),
-		Enforcement:          detail.Enforcement,
-		TargetsDefaultBranch: targetsDefaultBranch(branch, detail.Conditions.RefName.Include, detail.Conditions.RefName.Exclude),
-	}
-	for _, rule := range detail.Rules {
-		if rule.Type != "required_status_checks" {
-			continue
-		}
-		for _, check := range rule.Parameters.RequiredStatusChecks {
-			ruleset.RequiredChecks = append(ruleset.RequiredChecks, mergepolicy.RequiredCheck{
-				Context: sanitizeText(check.Context),
-			})
-		}
-	}
-	for _, actor := range detail.BypassActors {
-		ruleset.BypassActors = append(ruleset.BypassActors, mergepolicy.RuleBypassActor{
-			ActorType: sanitizeText(actor.ActorType),
-			ActorID:   actor.ActorID,
-			Mode:      sanitizeText(actor.BypassMode),
-		})
-	}
-	return ruleset
-}
-
-func protectionChecks(payload protectionPayload) []mergepolicy.RequiredCheck {
-	checks := make([]mergepolicy.RequiredCheck, 0, len(payload.RequiredStatusChecks.Checks)+len(payload.RequiredStatusChecks.Contexts))
-	for _, check := range payload.RequiredStatusChecks.Checks {
-		checks = append(checks, mergepolicy.RequiredCheck{Context: sanitizeText(check.Context)})
-	}
-	for _, context := range payload.RequiredStatusChecks.Contexts {
-		duplicate := false
-		for _, check := range checks {
-			if check.Context == sanitizeText(context) {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			checks = append(checks, mergepolicy.RequiredCheck{Context: sanitizeText(context)})
-		}
-	}
-	return checks
-}
-
-// targetsDefaultBranch applies the ruleset ref-name conditions. A ruleset
-// without ref-name conditions targets every branch. A ruleset is targeted
-// when an include pattern selects the branch and no exclude pattern removes
-// it.
-func targetsDefaultBranch(branch string, include, exclude []string) bool {
-	selects := func(pattern string) bool {
-		return pattern == "~ALL" || pattern == "~DEFAULT_BRANCH" || pattern == branchRef(branch)
-	}
-	included := len(include) == 0
-	for _, pattern := range include {
-		if selects(pattern) {
-			included = true
-			break
-		}
-	}
-	if !included {
-		return false
-	}
-	for _, pattern := range exclude {
-		if pattern == "~ALL" || selects(pattern) {
-			return false
-		}
-	}
-	return true
-}
-
-func branchRef(branch string) string {
-	return "refs/heads/" + branch
-}
-
-// sanitizeText bounds free-form API text and strips characters the artifact
-// and issue contract cannot carry.
-func sanitizeText(value string) string {
-	if len(value) > 128 {
-		value = value[:128]
-	}
-	var sanitized strings.Builder
-	for _, char := range value {
-		if strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.+()/:-", char) {
-			sanitized.WriteRune(char)
-			continue
-		}
-		sanitized.WriteByte('?')
-	}
-	return sanitized.String()
-}
-
-func hasPagination(headers http.Header) bool {
-	for _, part := range strings.Split(headers.Get("Link"), ",") {
-		if strings.Contains(part, `rel="next"`) {
-			return true
-		}
-	}
-	return false
-}
-
-func strictDecode(content []byte, result any) error {
-	decoder := json.NewDecoder(bytes.NewReader(content))
-	if err := decoder.Decode(result); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("response must contain one JSON value")
-	}
-	return nil
 }
 
 func writeAudit(path string, audit mergepolicy.Audit) error {

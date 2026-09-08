@@ -40,9 +40,11 @@ session shipped the audit end to end.
 - `internal/mergepolicy`: strict expectations parser plus the pure
   comparison. Detection: missing, case-renamed, disabled-ruleset, and
   unexpected bypass actors (ruleset actors, classic admin bypass).
-- `cmd/audit-merge-policy`: bounded ruleset list, ruleset details, and branch
-  protection reads; sanitized bounded artifact; exit 1 on findings or any
-  retrieval failure.
+- `cmd/audit-merge-policy`: bounded reads of the per-branch active rules,
+  ruleset list, ruleset details, and classic branch protection; sanitized
+  bounded artifact; exit 1 on findings or any retrieval failure. Rule
+  targeting comes from the per-branch endpoint, which GitHub resolves
+  authoritatively, so the audit implements no condition matching of its own.
 - `cmd/sync-merge-policy-issue`: deduplicated alert
   (`<!-- merge-policy-audit:v1 -->`) through the shared issue client.
 - `.github/workflows/merge-policy-audit.yml` plus
@@ -82,6 +84,45 @@ They are reported for consumer choice, not auto-remediated.
   workflow credential audit, llm harness check: pass.
 - Contract locks updated: workflow job/script inventories, finding-code sync
   (now locks merge-policy codes too), script summary fail-closed test.
+
+## Adversarial review loop (independent reviewer, then remediation)
+
+The first implementation passed every suite but the reviewer reproduced four
+real defects; all were fixed before the PR:
+
+- Fail-open in ruleset targeting: the audit matched ref-name conditions with
+  exact string rules, so an `exclude: ["refs/heads/ma*"]` glob could switch
+  the gate off while the audit still reported the context as carried. Fixed
+  by reading `GET /repos/{org}/{repo}/rules/branches/{branch}` instead and
+  deleting all condition matching; the endpoint reports only active rules.
+- Fail-open in bypass evidence: GitHub omits `bypass_actors` for callers
+  without ruleset write access, and Go decodes a missing key to nil while an
+  explicit `[]` stays non-nil. A carrying ruleset whose bypass evidence is
+  absent now fails the audit closed with a naming detail instead of passing.
+- Alert-channel death: the sanitizer's output alphabet (`:`, `?`) exceeded
+  the sync validator's, and a rename detail could exceed the 256-byte detail
+  bound; hostile-but-legal names made `sync-merge-policy-issue` reject the
+  whole artifact, so no issue could open, update, or close. Fixed with one
+  shared alphabet constant, producer-side clamping, and a round-trip test
+  that feeds sanitizer outputs into the validator.
+- Protection 404 ambiguity: any 404 read as "no protection". Now only the
+  documented `Branch not protected` body means absent; anything else fails
+  closed.
+
+Minor remediation: branch grammar aligned between parser and validator,
+`per_page` set to GitHub's 100 cap, dead code and a typo removed, the
+finding-code lock selects its sources by content instead of position, and
+the workflow trigger paths include `internal/githubissue/**`.
+
+Follow-up recorded: an expectation bypass actor currently accepts any
+observed bypass mode; a mode-aware schema needs a first reviewed actor to
+justify its shape.
+
+## Live verification after remediation
+
+The redesigned audit reproduced the same live result over real GitHub
+(`complete=true`, 22 observed required checks, the same four findings), and
+every repository read came through the per-branch authority.
 
 ## Follow-ups
 

@@ -23,7 +23,48 @@ const (
 	MaxContextsPerRepository = 32
 	// MaxContextBytes bounds one required check-context name.
 	MaxContextBytes = 128
+	// MaxDetailBytes bounds one finding detail in the artifact and issue.
+	MaxDetailBytes = 256
+	// Alphabet is the only text the audit publishes. The sanitizer maps every
+	// byte outside this set to '?', and the issue contract accepts exactly
+	// this set, so sanitized evidence is always publishable. The value is a
+	// regular-expression character-class fragment; consumers append the
+	// literal hyphen last so it can never form an accidental range.
+	Alphabet = "A-Za-z0-9_.+ /():?"
 )
+
+// SanitizeText bounds free-form API text to limit bytes and maps every rune
+// outside Alphabet to '?' so the result always satisfies the issue contract.
+func SanitizeText(value string, limit int) string {
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	var sanitized strings.Builder
+	for _, char := range value {
+		if isSanitary(char) {
+			sanitized.WriteRune(char)
+			continue
+		}
+		sanitized.WriteByte('?')
+	}
+	return sanitized.String()
+}
+
+// BoundDetail clamps one finding detail to MaxDetailBytes. Details are built
+// from sanitized parts and ASCII text, so a byte cut is always a rune cut.
+func BoundDetail(detail string) string {
+	if len(detail) > MaxDetailBytes {
+		return detail[:MaxDetailBytes]
+	}
+	return detail
+}
+
+func isSanitary(char rune) bool {
+	if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' {
+		return true
+	}
+	return strings.ContainsRune(" _.+ /():?-", char)
+}
 
 var (
 	repositoryPattern = regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)

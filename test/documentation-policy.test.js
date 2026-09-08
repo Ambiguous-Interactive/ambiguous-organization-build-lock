@@ -242,7 +242,8 @@ test("enrollment finding codes stay synchronized with the consumer contract", ()
   );
   goSources.push(read(path.join(repoRoot, "cmd", "audit-unity-enrollment", "main.go")));
   goSources.push(read(path.join(repoRoot, "internal", "mergepolicy", "audit.go")));
-  const auditCommandSource = goSources[goSources.length - 2];
+  const auditCommandSource = goSources.find((source) => source.includes("func run(") && source.includes("validate-policy-only"));
+  assert.ok(auditCommandSource, "the audit command source must be part of the finding-code lock");
   const emitted = new Set();
   for (const source of goSources) {
     for (const match of source.matchAll(/\.add\("([a-z0-9-]+)"/g)) {

@@ -38,9 +38,9 @@ func expectationBody(repository, branch, context string) string {
     "repository": "Ambiguous-Interactive/%s",
     "defaultBranch": "%s",
     "requiredContexts": [%s],
-    "requireAdminEnforcement": true,
+    "requireAdminEnforcement": %t,
     "allowedBypassActors": []
-  }`, repository, branch, contexts)
+  }`, repository, branch, contexts, context != "")
 }
 
 func writeRepositoryPolicy(t *testing.T, directory string) string {
@@ -86,29 +86,35 @@ func writeExpectations(t *testing.T, directory string, bodies ...string) string 
 	return path
 }
 
-// rulesetServer serves the ruleset and branch protection endpoints the audit
-// reads. A repository without a configured ruleset list serves an empty list;
-// a branch without a configured protection payload answers "not protected".
+// rulesetServer serves the ruleset, per-branch rules, and branch protection
+// endpoints the audit reads. A repository without a configured ruleset list
+// serves an empty list; a branch without configured active rules serves an
+// empty list; a branch without a configured protection payload answers
+// "not protected".
 type rulesetServer struct {
 	*httptest.Server
+	activeRulesPayloads   map[string]string
 	rulesetListPayloads   map[string]string
 	rulesetDetailPayloads map[int64]string
 	protectionPayloads    map[string]string
 	listStatus            int
 	detailStatus          int
 	protectionStatus      int
+	protection404Body     string
 	withNextLink          bool
 }
 
 func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 	t.Helper()
 	server := &rulesetServer{
+		activeRulesPayloads:   map[string]string{},
 		rulesetListPayloads:   map[string]string{},
 		rulesetDetailPayloads: map[int64]string{},
 		protectionPayloads:    map[string]string{},
 		listStatus:            http.StatusOK,
 		detailStatus:          http.StatusOK,
 		protectionStatus:      http.StatusOK,
+		protection404Body:     `{"message": "Branch not protected"}`,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
@@ -118,6 +124,16 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 			return
 		}
 		switch {
+		case strings.Contains(path, "/rules/branches/"):
+			rest := strings.TrimPrefix(path, "/repos/")
+			separator := strings.Index(rest, "/rules/branches/")
+			key := rest[:separator] + "@" + rest[separator+len("/rules/branches/"):]
+			writer.Header().Set("Content-Type", "application/json")
+			payload, ok := server.activeRulesPayloads[key]
+			if !ok {
+				payload = "[]"
+			}
+			_, _ = writer.Write([]byte(payload))
 		case strings.HasSuffix(path, "/rulesets"):
 			repository := strings.TrimSuffix(strings.TrimPrefix(path, "/repos/"), "/rulesets")
 			if server.listStatus != http.StatusOK {
@@ -149,6 +165,11 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 			_, _ = writer.Write([]byte(payload))
 		case strings.HasSuffix(path, "/protection"):
 			if server.protectionStatus != http.StatusOK {
+				if server.protectionStatus == http.StatusNotFound && server.protection404Body != "" {
+					writer.WriteHeader(http.StatusNotFound)
+					_, _ = writer.Write([]byte(server.protection404Body))
+					return
+				}
 				writer.WriteHeader(server.protectionStatus)
 				return
 			}
@@ -171,12 +192,19 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 }
 
 func detailPayload(id int64, name, enforcement, context, bypassActors string) string {
+	// An empty string means the field is present and empty (evidence read,
+	// no actors); "OMIT" omits the key entirely, which is how GitHub answers
+	// a caller that cannot see bypass evidence.
+	bypassSection := `"bypass_actors": [],`
+	if bypassActors == "OMIT" {
+		bypassSection = ""
+	}
 	return fmt.Sprintf(`{
     "id": %d,
     "name": "%s",
     "enforcement": "%s",
     "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
-    "bypass_actors": [%s],
+    %s
     "rules": [
       {
         "type": "required_status_checks",
@@ -184,7 +212,16 @@ func detailPayload(id int64, name, enforcement, context, bypassActors string) st
       }
     ],
     "source": {"type": "organization"}
-  }`, id, name, enforcement, bypassActors, context)
+  }`, id, name, enforcement, bypassSection, context)
+}
+
+func activeRulesJSON(rulesetID int64, contexts ...string) string {
+	checks := make([]string, 0, len(contexts))
+	for _, context := range contexts {
+		checks = append(checks, fmt.Sprintf(`{"context": "%s"}`, context))
+	}
+	return fmt.Sprintf(`[{"ruleset_id": %d, "type": "required_status_checks", "parameters": {"required_status_checks": [%s], "strict_required_status_checks_policy": false}}]`,
+		rulesetID, strings.Join(checks, ", "))
 }
 
 func protectionJSON(context string, adminEnforced bool) string {
@@ -346,6 +383,8 @@ func TestRunReportsCleanMergePolicy(t *testing.T) {
 		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
 	server.rulesetDetailPayloads[managedRulesetID] =
 		detailPayload(managedRulesetID, "Main Protection", "active", "CI Success", "")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON(managedRulesetID, "CI Success")
 	server.protectionPayloads["Ambiguous-Interactive/qora-redux/branches/main"] = protectionJSON("Unity CI", true)
 	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
 	if exit != 0 {
@@ -387,6 +426,60 @@ func TestRunReportsMissingContextAndAbsentProtection(t *testing.T) {
 	}
 	if len(helpers) != 1 || helpers[0] != "missing-required-context Unity CI Success" {
 		t.Fatalf("unexpected unity-helpers findings: %v in %s", helpers, content)
+	}
+}
+
+func TestRunFailsClosedWhenBypassEvidenceIsUnavailable(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	// A caller without ruleset write access cannot see bypass actors; GitHub
+	// answers with the key absent, which must fail closed, not pass.
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload(managedRulesetID, "Main Protection", "active", "CI Success", "OMIT")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON(managedRulesetID, "CI Success")
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("unavailable bypass evidence exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete {
+		t.Fatalf("missing bypass evidence must fail the audit closed: %s", content)
+	}
+	if len(audit.Findings) != 1 ||
+		audit.Findings[0].Code != "merge-policy-retrieval-incomplete" ||
+		!strings.Contains(audit.Findings[0].Detail, "Main Protection") {
+		t.Fatalf("unexpected artifact: %s", content)
+	}
+}
+
+func TestRunTreatsUnexpectedProtection404AsRetrievalFailure(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory)
+	server, client := newRulesetServer(t)
+	// A bare 404 without the documented "Branch not protected" body is
+	// ambiguous; it must never be read as "no protection".
+	server.protectionStatus = http.StatusNotFound
+	server.protection404Body = ""
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("ambiguous protection 404 exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete || len(audit.Findings) != 6 {
+		t.Fatalf("every repository must fail closed: %s", content)
 	}
 }
 

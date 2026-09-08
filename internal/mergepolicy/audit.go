@@ -26,9 +26,12 @@ const (
 	modeDefault                  = "always"
 )
 
-// RequiredCheck is one status check requirement observed on a default branch.
-type RequiredCheck struct {
-	Context string
+// ActiveCheck is one required status check that GitHub itself reports as
+// active on the audited default branch. The per-branch rules endpoint is the
+// authority for targeting, so no condition matching happens here.
+type ActiveCheck struct {
+	Context   string
+	RulesetID int64
 }
 
 // RuleBypassActor is one bypass identity observed on a ruleset.
@@ -40,12 +43,16 @@ type RuleBypassActor struct {
 
 // Ruleset is the observed state of one repository ruleset.
 type Ruleset struct {
-	ID                   int64
-	Name                 string
-	Enforcement          string
-	TargetsDefaultBranch bool
-	RequiredChecks       []RequiredCheck
-	BypassActors         []RuleBypassActor
+	ID             int64
+	Name           string
+	Enforcement    string
+	RequiredChecks []RequiredCheck
+	BypassActors   []RuleBypassActor
+}
+
+// RequiredCheck is one declared check requirement inside a ruleset.
+type RequiredCheck struct {
+	Context string
 }
 
 // Protection is the observed classic branch protection of a default branch.
@@ -57,8 +64,11 @@ type Protection struct {
 
 // Observed is the live merge-policy evidence for one repository.
 type Observed struct {
-	Rulesets   []Ruleset
-	Protection Protection
+	// ActiveChecks is the per-branch endpoint's authoritative list of active
+	// required checks, which already resolves ruleset conditions.
+	ActiveChecks []ActiveCheck
+	Rulesets     []Ruleset
+	Protection   Protection
 }
 
 // Finding is one sanitized, source-free merge-policy result.
@@ -90,15 +100,13 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 	findings := make([]Finding, 0)
 	inventory := make([]InventoryEntry, 0)
 
-	active := make([]Ruleset, 0, len(observed.Rulesets))
+	rulesetNames := make(map[int64]string, len(observed.Rulesets))
 	for _, ruleset := range observed.Rulesets {
-		if ruleset.Enforcement == enforcementActive && ruleset.TargetsDefaultBranch {
-			active = append(active, ruleset)
-		}
+		rulesetNames[ruleset.ID] = ruleset.Name
 	}
 
-	requires := func(checks []RequiredCheck, context string) bool {
-		for _, check := range checks {
+	requiresActive := func(context string) bool {
+		for _, check := range observed.ActiveChecks {
 			if check.Context == context {
 				return true
 			}
@@ -106,12 +114,11 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 		return false
 	}
 	protectionRequires := func(context string) bool {
-		return observed.Protection.Present && requires(observed.Protection.RequiredChecks, context)
+		return observed.Protection.Present && containsContext(observed.Protection.RequiredChecks, context)
 	}
 
-	classic := observed.Protection.RequiredChecks
 	if observed.Protection.Present {
-		for _, check := range classic {
+		for _, check := range observed.Protection.RequiredChecks {
 			inventory = append(inventory, InventoryEntry{
 				Repository:  expectation.Repository,
 				Kind:        kindBranchProtection,
@@ -121,41 +128,29 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 			})
 		}
 	}
-	for _, ruleset := range active {
-		for _, check := range ruleset.RequiredChecks {
-			inventory = append(inventory, InventoryEntry{
-				Repository:  expectation.Repository,
-				Kind:        kindRuleset,
-				Carrier:     rulesetDisplayName(ruleset),
-				Context:     check.Context,
-				Enforcement: ruleset.Enforcement,
-			})
-		}
+	for _, check := range observed.ActiveChecks {
+		inventory = append(inventory, InventoryEntry{
+			Repository:  expectation.Repository,
+			Kind:        kindRuleset,
+			Carrier:     rulesetCarrier(rulesetNames[check.RulesetID], check.RulesetID),
+			Context:     check.Context,
+			Enforcement: enforcementActive,
+		})
 	}
 
 	for _, context := range expectation.RequiredContexts {
-		if protectionRequires(context) {
+		if protectionRequires(context) || requiresActive(context) {
 			continue
 		}
-		carried := false
-		for _, ruleset := range active {
-			if requires(ruleset.RequiredChecks, context) {
-				carried = true
-				break
-			}
-		}
-		if carried {
-			continue
-		}
-		if renamed, carrier := caseRenamed(context, classic, active); renamed != "" {
+		if renamed, carrier := caseRenamed(context, observed); renamed != "" {
 			findings = append(findings, Finding{
 				Repository: expectation.Repository,
 				Code:       CodeRenamedRequiredContext,
 				Context:    context,
-				Detail: fmt.Sprintf(
+				Detail: BoundDetail(fmt.Sprintf(
 					"required context is spelled %q in %s; restore the reviewed spelling %q",
 					renamed, carrier, context,
-				),
+				)),
 			})
 			continue
 		}
@@ -164,7 +159,7 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 				Repository: expectation.Repository,
 				Code:       CodeDisabledRuleset,
 				Context:    context,
-				Detail:     disabled,
+				Detail:     BoundDetail(disabled),
 			})
 			continue
 		}
@@ -175,7 +170,7 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 		})
 	}
 
-	findings = append(findings, bypassFindings(expectation, observed, requires, active)...)
+	findings = append(findings, bypassFindings(expectation, observed)...)
 
 	sortFindings(findings)
 	sortInventory(inventory)
@@ -189,22 +184,34 @@ func protectionEnforcement(protection Protection) string {
 	return enforcementActiveAdminBypass
 }
 
-func rulesetDisplayName(ruleset Ruleset) string {
-	return fmt.Sprintf("ruleset %s (id %d)", ruleset.Name, ruleset.ID)
+func rulesetCarrier(name string, id int64) string {
+	if name == "" {
+		name = "unknown"
+	}
+	return fmt.Sprintf("ruleset %s (id %d)", name, id)
+}
+
+func containsContext(checks []RequiredCheck, context string) bool {
+	for _, check := range checks {
+		if check.Context == context {
+			return true
+		}
+	}
+	return false
 }
 
 // caseRenamed reports an active requirement that differs from the reviewed
 // context only by letter case, plus the carrier that requires it.
-func caseRenamed(context string, classic []RequiredCheck, active []Ruleset) (string, string) {
-	for _, check := range classic {
+func caseRenamed(context string, observed Observed) (string, string) {
+	for _, check := range observed.ActiveChecks {
 		if strings.EqualFold(check.Context, context) {
-			return check.Context, "default branch protection"
+			return check.Context, "the active rules on the default branch"
 		}
 	}
-	for _, ruleset := range active {
-		for _, check := range ruleset.RequiredChecks {
+	if observed.Protection.Present {
+		for _, check := range observed.Protection.RequiredChecks {
 			if strings.EqualFold(check.Context, context) {
-				return check.Context, rulesetDisplayName(ruleset)
+				return check.Context, "default branch protection"
 			}
 		}
 	}
@@ -215,34 +222,38 @@ func caseRenamed(context string, classic []RequiredCheck, active []Ruleset) (str
 // context, so the drift reads as a disabled gate, not a missing one.
 func disabledCarrier(context string, rulesets []Ruleset) string {
 	for _, ruleset := range rulesets {
-		if !ruleset.TargetsDefaultBranch || ruleset.Enforcement == "active" {
+		if ruleset.Enforcement == enforcementActive {
 			continue
 		}
-		for _, check := range ruleset.RequiredChecks {
-			if check.Context == context {
-				return fmt.Sprintf(
-					"%s is %s; set the ruleset enforcement to active",
-					rulesetDisplayName(ruleset), ruleset.Enforcement,
-				)
-			}
+		if containsContext(ruleset.RequiredChecks, context) {
+			return fmt.Sprintf(
+				"%s is %s; set the ruleset enforcement to active",
+				rulesetCarrier(ruleset.Name, ruleset.ID), ruleset.Enforcement,
+			)
 		}
 	}
 	return ""
 }
 
-func bypassFindings(
-	expectation RepositoryExpectation,
-	observed Observed,
-	requires func([]RequiredCheck, string) bool,
-	active []Ruleset,
-) []Finding {
-	requiresExpected := func(checks []RequiredCheck) bool {
-		for _, context := range expectation.RequiredContexts {
-			if requires(checks, context) {
-				return true
+func bypassFindings(expectation RepositoryExpectation, observed Observed) []Finding {
+	requiresExpected := func(contexts []string) bool {
+		for _, expected := range expectation.RequiredContexts {
+			for _, context := range contexts {
+				if context == expected {
+					return true
+				}
 			}
 		}
 		return false
+	}
+	// Active rulesets that carry an expected context, keyed by id.
+	carriers := make(map[int64]bool)
+	for _, check := range observed.ActiveChecks {
+		for _, expected := range expectation.RequiredContexts {
+			if check.Context == expected {
+				carriers[check.RulesetID] = true
+			}
+		}
 	}
 	findings := make([]Finding, 0)
 	seen := make(map[string]bool)
@@ -256,11 +267,11 @@ func bypassFindings(
 			Repository: expectation.Repository,
 			Code:       code,
 			Context:    context,
-			Detail:     detail,
+			Detail:     BoundDetail(detail),
 		})
 	}
-	for _, ruleset := range active {
-		if !requiresExpected(ruleset.RequiredChecks) {
+	for _, ruleset := range observed.Rulesets {
+		if !carriers[ruleset.ID] || ruleset.Enforcement != enforcementActive {
 			continue
 		}
 		for _, actor := range ruleset.BypassActors {
@@ -272,14 +283,14 @@ func bypassFindings(
 				"",
 				fmt.Sprintf(
 					"%s grants actor type %s id %d bypass mode %s",
-					rulesetDisplayName(ruleset), actor.ActorType, actor.ActorID, bypassMode(actor.Mode),
+					rulesetCarrier(ruleset.Name, ruleset.ID), actor.ActorType, actor.ActorID, bypassMode(actor.Mode),
 				),
 			)
 		}
 	}
 	if expectation.RequireAdminEnforcement &&
 		observed.Protection.Present &&
-		requiresExpected(observed.Protection.RequiredChecks) &&
+		requiresExpected(contextsOf(observed.Protection.RequiredChecks)) &&
 		!observed.Protection.AdminEnforced {
 		add(
 			CodeUnexpectedBypassActor,
@@ -288,6 +299,14 @@ func bypassFindings(
 		)
 	}
 	return findings
+}
+
+func contextsOf(checks []RequiredCheck) []string {
+	contexts := make([]string, 0, len(checks))
+	for _, check := range checks {
+		contexts = append(contexts, check.Context)
+	}
+	return contexts
 }
 
 func allowedBypass(allowed []BypassActor, actor RuleBypassActor) bool {

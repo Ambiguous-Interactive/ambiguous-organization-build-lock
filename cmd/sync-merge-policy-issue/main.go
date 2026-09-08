@@ -23,7 +23,6 @@ const (
 	alertAuthor          = "github-actions[bot]"
 	alertTitle           = "policy: organization merge-policy drift detected"
 	maxAuditBytes        = 4 * 1024 * 1024
-	issuePageSize        = githubissue.DefaultPageSize
 	maxAuditRows         = 4096
 	maxRepositories      = 64
 	maxIssueBodyBytes    = 60 * 1024
@@ -118,15 +117,15 @@ func readAudit(path string) (mergepolicy.Audit, error) {
 }
 
 var (
-	repositoryPattern = regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)
-	branchPattern     = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,100}$`)
-	codePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
-	contextPattern    = regexp.MustCompile(`^[A-Za-z0-9_.+ /()-]{0,128}$`)
-	carrierPattern    = regexp.MustCompile(`^[A-Za-z0-9_.+ /()-]{0,160}$`)
-	kindPattern       = regexp.MustCompile(`^(ruleset|branch-protection)$`)
-	enforcementPatter = regexp.MustCompile(`^[a-z-]{0,32}$`)
-	detailPattern     = regexp.MustCompile(`^[A-Za-z0-9_.+ /():;"-]{0,256}$`)
-	runIDPattern      = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
+	repositoryPattern  = regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)
+	branchPattern      = regexp.MustCompile(`^[A-Za-z0-9._@+/-]{1,100}$`)
+	codePattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
+	contextPattern     = regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0,128}$")
+	carrierPattern     = regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0,160}$")
+	kindPattern        = regexp.MustCompile(`^(ruleset|branch-protection)$`)
+	enforcementPattern = regexp.MustCompile(`^[a-z-]{0,32}$`)
+	detailPattern      = regexp.MustCompile("^[" + mergepolicy.Alphabet + "\";-]{0,256}$")
+	runIDPattern       = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 )
 
 func validateAudit(audit mergepolicy.Audit) error {
@@ -146,7 +145,7 @@ func validateAudit(audit mergepolicy.Audit) error {
 			!kindPattern.MatchString(entry.Kind) ||
 			!carrierPattern.MatchString(entry.Carrier) ||
 			!contextPattern.MatchString(entry.Context) ||
-			!enforcementPatter.MatchString(entry.Enforcement) {
+			!enforcementPattern.MatchString(entry.Enforcement) {
 			return fmt.Errorf("invalid inventory entry")
 		}
 	}

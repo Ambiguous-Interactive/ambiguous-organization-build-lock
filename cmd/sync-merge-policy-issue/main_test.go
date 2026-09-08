@@ -168,6 +168,43 @@ func TestReadAuditRejectsUnknownFieldsAndHostileValues(t *testing.T) {
 	}
 }
 
+// The audit sanitizes hostile consumer-controlled names before they reach
+// the artifact. Every possible sanitizer output must still pass this
+// command's validator, or a hostile name could silence the drift alert.
+func TestSanitizedEvidenceAlwaysPassesValidation(t *testing.T) {
+	hostileValues := []string{
+		"Validate YAML & Workflows",
+		"build (Linux, Release)",
+		"naïve ✨ name",
+		"pipe|injection",
+		"backtick`injection",
+		"colon: name",
+		"quote\"name",
+		"semi;colon",
+		strings.Repeat("é", 300),
+		strings.Repeat("x", 300) + "\nnewlines\tand tabs",
+	}
+	for index, hostile := range hostileValues {
+		audit := sampleAudit()
+		audit.Inventory = []mergepolicy.InventoryEntry{{
+			Repository:  "Ambiguous-Interactive/DoxReloaded",
+			Kind:        "ruleset",
+			Carrier:     mergepolicy.SanitizeText(hostile, 128),
+			Context:     mergepolicy.SanitizeText(hostile, mergepolicy.MaxContextBytes),
+			Enforcement: "active",
+		}}
+		audit.Findings = []mergepolicy.Finding{{
+			Repository: "Ambiguous-Interactive/DoxReloaded",
+			Code:       "missing-required-context",
+			Context:    mergepolicy.SanitizeText(hostile, mergepolicy.MaxContextBytes),
+			Detail:     mergepolicy.BoundDetail("context " + mergepolicy.SanitizeText(hostile, 128) + ` in "ruleset name" (id 1)`),
+		}}
+		if err := validateAudit(audit); err != nil {
+			t.Fatalf("sanitized evidence %d (%q) was rejected: %v", index, hostile, err)
+		}
+	}
+}
+
 func TestValidateAuditBoundsCollections(t *testing.T) {
 	audit := sampleAudit()
 	audit.Findings = make([]mergepolicy.Finding, maxAuditRows+1)
