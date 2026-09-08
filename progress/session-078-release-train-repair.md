@@ -110,3 +110,29 @@ Release-driving pull request titles must be conventional (`feat:`, `fix:`,
 and so on), because the squash merge copies the title into the commit
 subject semantic-release reads. The new diagnostic makes a lapse visible in
 the weekly run summary.
+
+## Second failure class, found by the live proof (post-merge)
+
+With PR #245 merged (c4f1a7e36), the dispatched Auto release run
+34191956733 published release v1.14.1 and its tag, then failed in the
+semantic-release success stage: `Could not resolve to an issue or pull
+request with the number of 738`. The release range bodies (squash-merge
+descriptions of #242 and #243) legitimately reference consumer-repository
+issues (`unity-helpers #738`, `DoxReloaded #801`). The
+`@semantic-release/github` success step resolves every `#N` reference
+against THIS repository, so a foreign number hard-fails the run, and a
+colliding local number would receive a false "included in version" notice.
+
+No release-tag alias update happened (v1 still names v1.14.0), and the
+authorization step was skipped. The v1.14.1 release itself is intact.
+
+## Disposition
+
+- `.releaserc.json` sets `successComment: false` for
+  `@semantic-release/github`. `releasedLabels` was already false, so the
+  success step is now a no-op: foreign references cannot fail a release and
+  no issue receives an automated linkage notice. Release linkage stays
+  visible through the tag and the release notes.
+- The contract test now pins `successComment: false` and records why.
+- The next release (v1.14.2, from this fix commit) supersedes v1.14.1, so
+  discovery correctly offers only v1.14.2 for authorization.
