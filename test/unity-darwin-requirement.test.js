@@ -1,15 +1,10 @@
 "use strict";
 
 /*
-  The macOS half of the Darwin trusted return (#153), in its own file because it
-  is the only part of this action's suite that a macOS runner can currently run.
-
-  `test/unity-license-return.test.js` builds its editor fixture under
-  `os.tmpdir()`, which on macOS resolves beneath the symlinked `/var`. The
-  action's own `assertNoReparsePath` walk correctly refuses that, so several of
-  that file's cases fail on Darwin for a reason that is about the fixture and
-  not about the action. Fixing it is a real improvement and it is not this
-  change: it is issue #241.
+  The macOS half of the Darwin trusted return (#153): the three cases whose
+  verdict comes from the requirement compiler the operating system ships. They
+  are skipped everywhere else, and the `darwin-return-action` CI job runs them
+  next to the rest of this action's suite, which runs on every host.
 
   Nothing here builds a fixture. Every case asks the operating system about the
   requirement string the action ships, using `/bin/ls` and the binaries macOS

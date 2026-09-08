@@ -27,12 +27,17 @@ const {
 } = require("../.github/dist/return-unity-license.js");
 
 // `editorPath` defaults to the Windows layout while `executeReturn` defaults to
-// `process.platform`, so a fixture that always plants `Unity.exe` disagrees with the
-// action under test the moment either one is asked about Darwin. The platform is a
-// parameter here for the same reason it is one there. (#241 is the rest of that
-// coupling: this file's temp root sits under macOS's symlinked `/var`.)
+// `process.platform`, so every case below names the platform it means: the
+// fixture plants the executable for the platform passed here, and the case
+// passes the same one to the action. A bare default agrees with the action only
+// on the host the file was written on.
 function fixture(t, script, platform = "win32") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-return-action-"));
+  // Resolve the root before anything is built under it. On macOS `os.tmpdir()`
+  // is `/var/folders/...` and `/var` is a symlink, so the action's
+  // `assertNoReparsePath` walk would refuse the fixture itself (issue #241).
+  // Production resolves under `runner.tool_cache`, which has no symlinked
+  // ancestor; the fixture has to stand where the real editor stands.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "unity-return-action-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const toolCache = path.join(root, "tool-cache");
   const runnerTemp = path.join(root, "runner-temp");
@@ -369,7 +374,11 @@ test("symlinked editor is rejected without exposing credentials", async (t) => {
   const target = `${executable}.target`;
   fs.renameSync(executable, target);
   fs.symlinkSync(target, executable);
-  await assert.rejects(executeReturn({ env: item.env }), /not a regular file/);
+  // The fixture planted the Windows layout, so the action has to resolve that
+  // same path. Inheriting the host here is what made this case resolve the
+  // bundle Mach-O on macOS and fail with ENOENT instead of the rejection it
+  // asserts (issue #241).
+  await assert.rejects(executeReturn({ env: item.env, platform: "win32" }), /not a regular file/);
   const outputs = fs.readFileSync(item.output, "utf8");
   assert.match(outputs, /return-command-completed=false/);
   assert.ok(!outputs.includes(item.env["INPUT_UNITY-EMAIL"]));
