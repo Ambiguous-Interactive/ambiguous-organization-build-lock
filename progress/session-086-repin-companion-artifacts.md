@@ -95,9 +95,10 @@ Each pushed commit has an RCA comment on its pull request.
 
 ## Verification
 
-- `node --test test/*.test.js`: 877 pass, 0 fail (34 repin-script tests,
-  including new companion mode, report, staging, and pull-request-body
-  coverage).
+- Central CI on pull request #262: Build lock CI green; all workflow
+  validation jobs green.
+- `node --test test/*.test.js`: 879 pass, 0 fail (36 repin-script tests,
+  including the adversarial-round regressions).
 - `go test ./...`, `go test -race ./...`: pass, including new registry
   companion validation tests.
 - `go vet`, `go mod verify`, `go mod tidy -diff` (both modules): clean.
@@ -106,8 +107,24 @@ Each pushed commit has an RCA comment on its pull request.
 - `bash tools/workflows/ci.sh shellcheck`: clean.
 - `node tools/llm-harness.mjs check`: pass.
 - `go run ./cmd/workflow-credential-audit .`: pass.
-- Consumer CI re-ran on each pushed commit; outcomes recorded in the
-  follow-up comment on the tracking issue.
+- Local parity proof for unity-helpers: the fixed test passes against a
+  worktree at the exact pinned commit `d79e1cc`: 11 classifier cases and 9
+  gate cases.
+
+## Consumer outcomes (2026-09-09, after the companion pushes)
+
+- unity-helpers #751: green, 22 of 22 checks pass, including
+  `Contract Suites` (the parity fix proven in CI) and the
+  `Unity CI Success` aggregate. Awaiting the consumer merge.
+- IshoBoy #877: green; every check passes after the snapshot refresh.
+- qora-redux #382: green; every check passes after both pin constants
+  moved.
+- DxMessaging #567: closed by the consumer at 2026-09-09T16:18Z as
+  superseded by their own #568, which carries the complete seven-file pin
+  cohort including the companion docs files. The queued Unity legs of #567
+  then failed `require-current-pr-head` with `Pull request #567 is not
+  open`: the fail-closed head guard worked as designed, refusing results
+  for a closed pull request. #568 is open and mergeable.
 
 ## Adversarial review round
 

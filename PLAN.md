@@ -117,12 +117,13 @@ impact on licensed-resource safety and consumer CI churn.
   root cause, a reviewed consumer artifact that derives from the pin. The
   policy now declares `repinCompanions`, and the repin rewrite carries each
   declared file through one mechanical mode (`pin-lines`, `pin-literal`,
-  `policy-snapshot`). Companion-mode commits are pushed to DxMessaging #567,
-  IshoBoy #877, and qora-redux #382; unity-helpers #751 needed a test fix
-  (assert reviewed verdict fields, tolerate reviewed additive fields).
-  DoxReloaded's stale v1.14.0 offer #801 closed as superseded.
-  unity-helpers #749 is green with reviewer feedback answered; merges stay
-  consumer decisions.
+  `policy-snapshot`). Outcomes: unity-helpers #751 green end to end after a
+  parity-test fix (assert reviewed verdict fields, tolerate reviewed
+  additive fields); IshoBoy #877 and qora-redux #382 green after their
+  companion commits; DxMessaging's maintainer closed offer #567 in favor of
+  their own #568, which absorbed the complete pin cohort. DoxReloaded's
+  stale v1.14.0 offer #801 closed as superseded. unity-helpers #749 is
+  green with reviewer feedback answered; merges stay consumer decisions.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
