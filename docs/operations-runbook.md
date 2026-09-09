@@ -163,9 +163,9 @@ that holds other work.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
-(2026-09-09 issue 263). The rewrite accepts only a `vMAJOR.MINOR.PATCH`
-target version and fails closed otherwise; the scheduled resolver emits
-only that grammar. Dependabot cannot carry companion rewrites or
+(2026-09-09 issue 263). A non-empty target version must match
+`vMAJOR.MINOR.PATCH`, or the rewrite fails closed; the scheduled resolver
+emits only that grammar. Dependabot cannot carry companion rewrites or
 release authorization: a pin to an unauthorized SHA fails closed as
 `unapproved-lock-ref`, and a companion repository that merges a
 Dependabot-only pin update leaves its offered commit incomplete. The central
