@@ -56,6 +56,7 @@ jobs:
           owner: Ambiguous-Interactive
           repositories: ${{ steps.merge-policy-scope.outputs.repositories }}
           permission-administration: read
+          permission-contents: read
 
       - name: Audit live consumer merge policies
         id: merge-policy-audit

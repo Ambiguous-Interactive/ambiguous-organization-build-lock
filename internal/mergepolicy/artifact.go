@@ -1,9 +1,12 @@
 package mergepolicy
 
 // AuditedRepository records one consumer whose live merge settings were read.
+// AttestedRulesetIDs names the carrying rulesets whose bypass actors came
+// from the consumer attestation file instead of live API evidence.
 type AuditedRepository struct {
-	Repository    string `json:"repository"`
-	DefaultBranch string `json:"defaultBranch"`
+	Repository         string  `json:"repository"`
+	DefaultBranch      string  `json:"defaultBranch"`
+	AttestedRulesetIDs []int64 `json:"attestedRulesetIds,omitempty"`
 }
 
 // Audit is the bounded, source-free artifact consumed by issue sync. It

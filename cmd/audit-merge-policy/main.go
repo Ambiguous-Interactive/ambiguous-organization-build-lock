@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,19 +26,11 @@ const (
 	// GitHub caps ruleset lists at 100 per page; anything beyond that is
 	// paginated and therefore rejected as unbounded evidence.
 	maxRulesetsPerRun = 100
-	maxCarrierBytes   = 128
 )
 
 // errNoProtection marks the documented "Branch not protected" response that
 // proves classic branch protection is absent. Any other 404 stays an error.
 var errNoProtection = errors.New("branch protection is absent")
-
-// retrievalError carries sanitized, single-line evidence for the finding.
-type retrievalError struct {
-	detail string
-}
-
-func (err *retrievalError) Error() string { return err.detail }
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv, http.DefaultClient))
@@ -170,37 +163,97 @@ func newAPIClient(apiURL, token string, httpClient *http.Client) (*apiClient, er
 	return &apiClient{base: base, token: strings.TrimSpace(token), http: &safeClient}, nil
 }
 
-func (client *apiClient) get(ctx context.Context, endpoint string) ([]byte, http.Header, error) {
+// apiResponse is one bounded GitHub API response.
+type apiResponse struct {
+	status  int
+	content []byte
+	headers http.Header
+}
+
+func (client *apiClient) fetch(ctx context.Context, endpoint string) (apiResponse, error) {
 	target, err := client.base.Parse(endpoint)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid GitHub API endpoint")
+		return apiResponse{}, fmt.Errorf("invalid GitHub API endpoint")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create GitHub API request failed")
+		return apiResponse{}, fmt.Errorf("create GitHub API request failed")
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("Authorization", "Bearer "+client.token)
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	response, err := client.http.Do(request)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GitHub API request failed")
+		return apiResponse{}, fmt.Errorf("GitHub API request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
 	content, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if readErr != nil || len(content) > maxResponseBytes {
-		return nil, nil, fmt.Errorf("GitHub API response exceeded bound")
+		return apiResponse{}, fmt.Errorf("GitHub API response exceeded bound")
 	}
-	headers := response.Header.Clone()
-	if response.StatusCode == http.StatusNotFound &&
+	return apiResponse{
+		status:  response.StatusCode,
+		content: content,
+		headers: response.Header.Clone(),
+	}, nil
+}
+
+func (client *apiClient) get(ctx context.Context, endpoint string) ([]byte, http.Header, error) {
+	response, err := client.fetch(ctx, endpoint)
+	if err != nil {
+		return nil, nil, err
+	}
+	if response.status == http.StatusNotFound &&
 		strings.HasSuffix(endpoint, "/protection") &&
-		strings.Contains(string(content), "Branch not protected") {
-		return nil, headers, errNoProtection
+		strings.Contains(string(response.content), "Branch not protected") {
+		return nil, response.headers, errNoProtection
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, nil, fmt.Errorf("GitHub API status %d", response.StatusCode)
+	if response.status < 200 || response.status >= 300 {
+		return nil, nil, fmt.Errorf("GitHub API status %d", response.status)
 	}
-	return content, headers, nil
+	return response.content, response.headers, nil
+}
+
+// contentsPayload is the bounded metadata envelope of the contents API.
+type contentsPayload struct {
+	Content  *string `json:"content"`
+	Encoding string  `json:"encoding"`
+	Size     int     `json:"size"`
+}
+
+// getContents reads one bounded file from a repository. A documented 404
+// means the file is absent, which is valid evidence; every other failure
+// is a retrieval error.
+func (client *apiClient) getContents(ctx context.Context, repository, ref, path string) ([]byte, bool, error) {
+	endpoint := fmt.Sprintf(
+		"repos/%s/contents/%s?ref=%s",
+		repository, path, url.QueryEscape(ref),
+	)
+	response, err := client.fetch(ctx, endpoint)
+	if err != nil {
+		return nil, false, err
+	}
+	if response.status == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if response.status < 200 || response.status >= 300 {
+		return nil, false, fmt.Errorf("GitHub API status %d", response.status)
+	}
+	var payload contentsPayload
+	if err := strictDecode(response.content, &payload); err != nil {
+		return nil, false, fmt.Errorf("decode contents metadata failed")
+	}
+	if payload.Content == nil || payload.Encoding != "base64" {
+		return nil, false, fmt.Errorf("unsupported contents encoding")
+	}
+	if payload.Size > mergepolicy.MaxAttestationBytes || len(*payload.Content) > mergepolicy.MaxAttestationBytes {
+		return nil, false, fmt.Errorf("attestation file exceeds bound")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(*payload.Content, "\n", ""))
+	if err != nil {
+		return nil, false, fmt.Errorf("decode attestation content failed")
+	}
+	return decoded, true, nil
 }
 
 type rulesetSummary struct {
@@ -267,26 +320,70 @@ func auditRepositories(
 			Repository:    expectation.Repository,
 			DefaultBranch: expectation.DefaultBranch,
 		})
+		record := &audit.Repositories[len(audit.Repositories)-1]
 		if retrievalErr != nil {
 			audit.Complete = false
-			detail := ""
-			var evidence *retrievalError
-			if errors.As(retrievalErr, &evidence) {
-				detail = evidence.detail
-			}
 			audit.Findings = append(audit.Findings, mergepolicy.Finding{
 				Repository: expectation.Repository,
 				Code:       mergepolicy.CodeRetrievalIncomplete,
-				Detail:     mergepolicy.BoundDetail(detail),
 			})
 			continue
 		}
-		findings, inventory := mergepolicy.Analyze(expectation, observed)
+		attestation, finding := loadAttestation(ctx, client, expectation)
+		if finding != nil {
+			audit.Complete = false
+			audit.Findings = append(audit.Findings, *finding)
+			continue
+		}
+		resolved, attestedIDs, health, complete := mergepolicy.ResolveBypassEvidence(
+			expectation, observed, attestation,
+		)
+		if !complete {
+			audit.Complete = false
+			audit.Findings = append(audit.Findings, health...)
+			continue
+		}
+		audit.Findings = append(audit.Findings, health...)
+		record.AttestedRulesetIDs = attestedIDs
+		findings, inventory := mergepolicy.Analyze(expectation, resolved)
 		audit.Findings = append(audit.Findings, findings...)
 		audit.Inventory = append(audit.Inventory, inventory...)
 	}
 	sortAudit(audit)
 	return audit
+}
+
+// loadAttestation reads the consumer-published attestation file. A missing
+// file is valid empty evidence. An unreadable response or an unparseable
+// published file becomes one fail-closed finding for the repository.
+func loadAttestation(
+	ctx context.Context,
+	client *apiClient,
+	expectation mergepolicy.RepositoryExpectation,
+) (mergepolicy.Attestation, *mergepolicy.Finding) {
+	raw, found, err := client.getContents(
+		ctx, expectation.Repository, expectation.DefaultBranch, mergepolicy.AttestationPath,
+	)
+	if err != nil {
+		return mergepolicy.Attestation{}, &mergepolicy.Finding{
+			Repository: expectation.Repository,
+			Code:       mergepolicy.CodeRetrievalIncomplete,
+		}
+	}
+	if !found {
+		return mergepolicy.Attestation{}, nil
+	}
+	attestation, err := mergepolicy.ParseAttestation(raw, expectation.Repository)
+	if err != nil {
+		return mergepolicy.Attestation{}, &mergepolicy.Finding{
+			Repository: expectation.Repository,
+			Code:       mergepolicy.CodeAttestationStale,
+			Detail: mergepolicy.BoundDetail(
+				"the published merge policy attestation is not valid; republish it from the reviewed schema",
+			),
+		}
+	}
+	return attestation, nil
 }
 
 func observeRepository(
@@ -344,16 +441,6 @@ func observeRepository(
 	if len(list) > maxRulesetsPerRun {
 		return observed, fmt.Errorf("ruleset count exceeded bound")
 	}
-	// Carrying rulesets are those the per-branch authority reported as active
-	// requirements; their bypass evidence is mandatory, not optional.
-	carrying := make(map[int64]bool)
-	for _, check := range observed.ActiveChecks {
-		for _, context := range expectation.RequiredContexts {
-			if check.Context == context {
-				carrying[check.RulesetID] = true
-			}
-		}
-	}
 	for _, summary := range list {
 		detailEndpoint := fmt.Sprintf("repos/%s/rulesets/%d", expectation.Repository, summary.ID)
 		detailContent, _, err := client.get(ctx, detailEndpoint)
@@ -370,22 +457,18 @@ func observeRepository(
 		if detail.Enforcement != summary.Enforcement {
 			return observed, fmt.Errorf("ruleset %d changed between reads", summary.ID)
 		}
-		if carrying[summary.ID] && detail.BypassActors == nil {
-			return observed, &retrievalError{detail: fmt.Sprintf(
-				"bypass actor evidence for ruleset %s (id %d) is unavailable",
-				mergepolicy.SanitizeText(detail.Name, maxCarrierBytes), summary.ID,
-			)}
-		}
 		observed.Rulesets = append(observed.Rulesets, rulesetFromDetail(detail))
 	}
+	// Carrying rulesets are those the per-branch authority reported as active
+	// requirements. Every carrier must have full evidence in the ruleset
+	// reads; a carrier without a detail read is a retrieval failure.
+	carrying := mergepolicy.CarryingRulesetIDs(expectation, observed)
 	for _, check := range observed.ActiveChecks {
 		if !carrying[check.RulesetID] {
 			continue
 		}
 		if _, known := findRuleset(observed.Rulesets, check.RulesetID); !known {
-			return observed, &retrievalError{detail: fmt.Sprintf(
-				"carrying ruleset id %d is missing from the ruleset evidence", check.RulesetID,
-			)}
+			return observed, fmt.Errorf("carrying ruleset id %d is missing from the ruleset evidence", check.RulesetID)
 		}
 	}
 
@@ -422,9 +505,11 @@ func findRuleset(rulesets []mergepolicy.Ruleset, id int64) (mergepolicy.Ruleset,
 }
 
 func rulesetFromDetail(detail rulesetDetailPayload) mergepolicy.Ruleset {
+	// The raw name and required contexts are kept for exact comparison with
+	// the consumer attestation; rulesetCarrier sanitizes them at render time.
 	ruleset := mergepolicy.Ruleset{
 		ID:          detail.ID,
-		Name:        mergepolicy.SanitizeText(detail.Name, maxCarrierBytes),
+		Name:        detail.Name,
 		Enforcement: detail.Enforcement,
 	}
 	for _, rule := range detail.Rules {
@@ -433,11 +518,12 @@ func rulesetFromDetail(detail rulesetDetailPayload) mergepolicy.Ruleset {
 		}
 		for _, check := range rule.Parameters.RequiredStatusChecks {
 			ruleset.RequiredChecks = append(ruleset.RequiredChecks, mergepolicy.RequiredCheck{
-				Context: mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes),
+				Context: check.Context,
 			})
 		}
 	}
 	if detail.BypassActors != nil {
+		ruleset.BypassKnown = true
 		for _, actor := range *detail.BypassActors {
 			ruleset.BypassActors = append(ruleset.BypassActors, mergepolicy.RuleBypassActor{
 				ActorType: mergepolicy.SanitizeText(actor.ActorType, 32),
