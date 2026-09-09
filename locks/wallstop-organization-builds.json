@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:34397760639:unity-validation:isho-ci",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Unity CI Validation",
-    "job": "unity-validation",
-    "runId": "34397760639",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34397760639",
-    "queuedAt": "2026-09-09T19:55:07.131Z",
-    "acquiredAt": "2026-09-09T19:55:09.862Z",
-    "expiresAt": "2026-09-09T23:55:09.862Z",
-    "runnerId": "ELI-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:34397760639:unity-validation:isho-ci",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-validation",
-      "runId": "34397760639",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34397760639",
-      "queuedAt": "2026-09-09T19:55:07.131Z",
-      "acquiredAt": "2026-09-09T19:55:09.862Z",
-      "expiresAt": "2026-09-09T23:55:09.862Z",
-      "runnerId": "ELI-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder job 102577638834 is completed",
       "createdAt": "2026-09-09T18:24:35.447Z"
+    },
+    {
+      "reservationId": "0feb2c86-8e3d-4daf-bfac-1eef6604a091",
+      "holderId": "Ambiguous-Interactive/IshoBoy:34397760639:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "34397760639",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/34397760639",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-09T20:00:02.488Z",
+      "availableAt": "2026-09-09T20:00:03.488Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-09T19:55:09.863Z"
+  "updatedAt": "2026-09-09T20:00:02.489Z"
 }
