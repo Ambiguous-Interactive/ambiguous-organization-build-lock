@@ -79,8 +79,10 @@ rewrite_pins() {
   # a pin-only update cannot move a caller to an action whose input contract
   # it cannot satisfy. Reviewed `repinCompanions` files carry the consumer
   # artifacts that derive from the pin (copyable docs, pin constants, policy
-  # snapshots) through the same mechanical, mode-bound rewrite, so the repin
-  # pull request is never born red.
+  # snapshots) through the same mechanical, mode-bound rewrite, so a declared
+  # companion never leaves the offered commit incomplete. A pin-literal
+  # companion that still names a stale authorized pin when no workflow pin was
+  # removed fails the run instead of guessing.
   local directory="$1" target_sha="$2" target_version="$3" repository="$4"
   node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" "${repository}" <<'EOF'
 const fs = require("node:fs");
@@ -91,8 +93,32 @@ if (!/^[a-f0-9]{40}$/.test(targetSha)) {
 }
 const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
 const lowered = (values) => new Set((values || []).map((value) => String(value).toLowerCase()));
+// The exact reviewed top-level fields; the registry parser rejects any other
+// field, so the standalone rewrite must refuse it too.
+const reviewedPolicyKeys = new Set([
+  "schemaVersion",
+  "organization",
+  "approvedLockShas",
+  "approvedReturnShas",
+  "approvedDarwinReturnShas",
+  "repositories",
+  "exceptions",
+  "repinExceptions",
+  "repinCompanions"
+]);
+for (const key of Object.keys(policy)) {
+  if (!reviewedPolicyKeys.has(key)) {
+    throw new Error(`Repins reject an unknown policy field: ${key}`);
+  }
+}
 if (!lowered(policy.approvedLockShas).has(targetSha) || !lowered(policy.approvedReturnShas).has(targetSha)) {
   throw new Error(`Refusing to repin to ${targetSha}: it is not authorized in both allowlists.`);
+}
+if (policy.schemaVersion !== 1) {
+  throw new Error("Repins require the reviewed policy schemaVersion 1.");
+}
+if (policy.organization !== "Ambiguous-Interactive") {
+  throw new Error("Repins require the reviewed policy organization.");
 }
 const exceptionPattern = /^\.github\/workflows\/[^/]+\.[yY][aA]?[mM][lL]$/;
 const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
@@ -105,10 +131,16 @@ for (const value of Array.isArray(policy.repositories) ? policy.repositories : [
 // registry parser's validation, so a standalone rewrite cannot accept a
 // policy the audit would reject.
 const companionModes = new Set(["pin-lines", "pin-literal", "policy-snapshot"]);
+// The exact reviewed allowlist keys; any other approved*Shas key is an
+// unreviewed boundary the registry parser would reject.
+const reviewedSnapshotKeys = new Set(["approvedLockShas", "approvedReturnShas", "approvedDarwinReturnShas"]);
+const reviewedEntryKeys = new Set(["repository", "path", "reason", "owner", "expiresAt"]);
+const reviewedCompanionKeys = new Set(["repository", "path", "mode"]);
 const validCompanionPath = (value) =>
   typeof value === "string" && value.length > 0 &&
   !value.includes("\\") && !value.startsWith("/") && !value.startsWith("-") &&
-  !value.startsWith(".github/") && singleLine(value) &&
+  !value.startsWith(".github/") && value !== ".github" && singleLine(value) &&
+  !/[\x00-\x1f\x7f]/.test(value) &&
   !value.split("/").includes("..") && path.posix.normalize(value) === value;
 if (policy.repinExceptions !== undefined && !Array.isArray(policy.repinExceptions)) {
   throw new Error("Repins require repinExceptions to be a list when present.");
@@ -122,6 +154,11 @@ if (policy.repinCompanions !== undefined && !Array.isArray(policy.repinCompanion
 const entries = policy.repinExceptions || [];
 const seenExceptions = new Set();
 for (const entry of entries) {
+  for (const key of Object.keys(entry)) {
+    if (!reviewedEntryKeys.has(key)) {
+      throw new Error(`Repins reject an unknown repinExceptions entry field: ${key}`);
+    }
+  }
   const entryRepository = String(entry.repository || "");
   if (canonicalRepositories.get(entryRepository.toLowerCase()) !== entryRepository) {
     throw new Error("Repins require a registered canonical repository spelling in every repinExceptions entry.");
@@ -148,6 +185,11 @@ for (const entry of entries) {
 const companionEntries = policy.repinCompanions || [];
 const seenCompanions = new Set();
 for (const entry of companionEntries) {
+  for (const key of Object.keys(entry)) {
+    if (!reviewedCompanionKeys.has(key)) {
+      throw new Error(`Repins reject an unknown repinCompanions entry field: ${key}`);
+    }
+  }
   const entryRepository = String(entry.repository || "");
   if (canonicalRepositories.get(entryRepository.toLowerCase()) !== entryRepository) {
     throw new Error("Repins require a registered canonical repository spelling in every repinCompanions entry.");
@@ -256,13 +298,29 @@ for (const [entryPath, entry] of exceptions) {
     });
   }
 }
-const approvedListKey = /^approved[A-Za-z0-9]*Shas$/;
-for (const companion of companions) {
+// Only the reviewed allowlist keys mirror into consumer snapshots; any other
+// approved*Shas key is an unreviewed boundary.
+const reviewedCompanions = companions.map((companion) => {
   const companionPath = path.join(directory, ...companion.path.split("/"));
-  if (!fs.existsSync(companionPath)) {
+  let companionStat;
+  try {
+    companionStat = fs.lstatSync(companionPath);
+  } catch {
     report.unmatchedCompanions.push({ path: companion.path, mode: companion.mode });
+    return null;
+  }
+  if (!companionStat.isFile()) {
+    // A symlink or directory here would make the rewrite write outside the
+    // consumer checkout or fail obscurely later; refuse it by name instead.
+    throw new Error(`The repin companion ${companion.path} is not a regular file.`);
+  }
+  return { ...companion, companionPath };
+});
+for (const companion of reviewedCompanions) {
+  if (!companion) {
     continue;
   }
+  const { companionPath } = companion;
   let companionChanges = 0;
   if (companion.mode === "pin-lines") {
     const lines = fs.readFileSync(companionPath, "utf8").split("\n");
@@ -279,8 +337,35 @@ for (const companion of companions) {
   } else if (companion.mode === "pin-literal") {
     const original = fs.readFileSync(companionPath, "utf8");
     let updated = original;
+    // Standalone tokens only: a SHA embedded in a longer hex constant is a
+    // different reviewed value and must survive untouched.
+    const replaceStandalone = (sha) =>
+      updated.replace(new RegExp(`(?<![0-9a-fA-F])${sha}(?![0-9a-fA-F])`, "g"), () => targetSha);
     for (const replacedPin of [...replacedPins].sort()) {
-      updated = updated.split(replacedPin).join(targetSha);
+      updated = replaceStandalone(replacedPin);
+    }
+    if (replacedPins.size === 0) {
+      // No workflow pin was removed, so nothing above could heal a lagging
+      // companion. Standalone authorized tokens that are not the target may
+      // be reviewed witnesses, and a mechanical rewrite cannot tell them
+      // apart from stale pins. A healed companion names the target as its pin
+      // constant; one that names no target anywhere still carries a stale
+      // pin, so fail closed for operator review.
+      const approvedLocks = lowered(policy.approvedLockShas);
+      const standaloneTokens = [...original.matchAll(/(?<![0-9a-fA-F])([0-9a-f]{40})(?![0-9a-fA-F])/g)]
+        .map((match) => match[1]);
+      const namesTarget = standaloneTokens.some((token) => token === targetSha);
+      const hasStaleToken = standaloneTokens.some(
+        (token) => token !== targetSha && approvedLocks.has(token)
+      );
+      if (hasStaleToken && !namesTarget) {
+        throw new Error(
+          `The pin-literal companion ${companion.path} still names an authorized pin while ` +
+            "the workflows carry no pin this rewrite removes. A mechanical edit cannot tell " +
+            "a stale pin constant from a reviewed witness; review the companion and update " +
+            "it by hand."
+        );
+      }
     }
     if (updated !== original) {
       companionChanges = 1;
@@ -295,7 +380,7 @@ for (const companion of companions) {
       organization: policy.organization
     };
     for (const [key, value] of Object.entries(policy)) {
-      if (approvedListKey.test(key)) {
+      if (reviewedSnapshotKeys.has(key)) {
         snapshot[key] = value;
       }
     }
@@ -321,24 +406,31 @@ open_repin_pull_request() {
   local authorization="$5" file_list="$6" preserved_section="$7" companion_section="$8"
   local body_file
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
+  local mutation_bullet="Only the \`@<sha>\` suffix of \`uses:\` references to
+  \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments."
+  local references_section=""
+  if [ -z "${file_list}" ]; then
+    mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."
+  else
+    references_section="
+- Changed references:
+\`\`\`
+${file_list}
+\`\`\`"
+  fi
   cat > "${body_file}" <<EOF
 Repin the organization lock actions to the authorized release ${label}
 (\`${target_sha}\`).
 
 ## Review before merge (merge = the adoption decision)
 
-- Only the \`@<sha>\` suffix of \`uses:\` references to
-  \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments.
+- ${mutation_bullet}
 - Reviewed companion artifacts named in the enrollment policy carry the
   consumer files that derive from the pin. Each one moves through one
   mechanical, mode-bound rewrite.
 - Release authorization evidence: the central authorization pull request for
   this release, merged by a maintainer.
-- Changed references:
-\`\`\`
-${file_list}
-\`\`\`
-${companion_section}${preserved_section}
+${references_section}${companion_section}${preserved_section}
 This pull request is opened by central automation. It never merges itself and
 never edits a default branch.
 EOF
@@ -396,10 +488,10 @@ repin_consumer() {
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
-    local companions companion_count
+    local companions
     if ! companions="$(printf '%s' "${report}" | jq -r '
-      .companions[] | "- `\(.path)` (\(.mode); \(.lines) line\(if .lines == 1 then "" else "s" end))"
-    ')" || ! companion_count="$(printf '%s' "${report}" | jq -er '.companions | length')"; then
+      .companions[] | select(.lines > 0) | "- `\(.path)` (\(.mode))"
+    ')" || ! printf '%s' "${report}" | jq -e '.companions' >/dev/null; then
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
@@ -420,12 +512,12 @@ repin_consumer() {
       printf '%s\n' "${unmatched_companions}" >&2
     fi
     local companion_section=""
-    if [ "${companion_count}" != "0" ] || [ -n "${unmatched_companions}" ]; then
+    if [ -n "${companions}" ] || [ -n "${unmatched_companions}" ]; then
       companion_section="
 ## Reviewed companion artifacts
 
-These policy-reviewed files derive their content from the pin. Each one moved
-through its reviewed mechanical rewrite:
+These policy-reviewed files derive their content from the pin. Each changed
+file moved through its reviewed mechanical rewrite:
 
 ${companions}
 "

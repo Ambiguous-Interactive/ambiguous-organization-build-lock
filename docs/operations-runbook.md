@@ -175,12 +175,19 @@ A reviewed `repinCompanions` entry in `unity-enrollment-policy.json` names
 one consumer file that derives its content from the pin, with one mechanical
 rewrite mode. `pin-lines` applies the same `uses:` pin rewrite to every line
 of the file. `pin-literal` replaces the pinned SHAs that this rewrite
-removes, and never touches any other SHA. `policy-snapshot` mirrors the
-reviewed `approved*Shas` lists exactly, the same content a consumer snapshot
-refresh derives from the policy. The registry parser rejects a malformed
-entry. The rewrite lists each touched companion in the run log and the pull
+removes, as standalone tokens only, so a SHA embedded in a longer hex
+constant survives. When a rewrite removes no pin, a `pin-literal` companion
+that names no target pin anywhere still carries a stale pin, and the rewrite
+fails closed: it cannot tell a stale pin constant from a reviewed historical
+witness, so an operator updates that file by hand. `policy-snapshot` mirrors
+the reviewed `approved*Shas` lists exactly, the same content a consumer
+snapshot refresh derives from the policy. The registry parser rejects a
+malformed entry, and the rewrite accepts only the reviewed policy fields.
+The rewrite lists each changed companion in the run log and the pull
 request body. A companion whose file no longer exists is reported in both
-places, so stale entries stay visible until a reviewer removes them.
+places. That visibility comes from repin runs only; the enrollment audit
+has no companion finding, so a stale entry in a repository that no longer
+receives repin offers stays invisible until the next repin.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by

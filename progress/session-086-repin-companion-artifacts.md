@@ -83,9 +83,11 @@ fixed on the repin branch.
   the identical single-line edit the `pin-literal` mode performs. The mode
   could not generate it post hoc because the branch's workflows were already
   repinned in an earlier run, so this run had no removed pin to substitute.
-  Future atomic repin runs regenerate the companion themselves. CI then
-  found the second constant; `02332c1` moves `tests/github/unity-ci.test.mjs`
-  the same way, and both files are now declared companions.
+  An atomic repin run regenerates the companion itself; a divergent
+  missed-cycle companion fails the run closed for hand review, which is what
+  this remediation was. CI then found the second constant; `02332c1` moves
+  `tests/github/unity-ci.test.mjs` the same way, and both files are now
+  declared companions.
 - DoxReloaded #801 closed as superseded: `main` already pins v1.14.2 through
   merged #810, so the v1.14.0 offer could never merge and stayed red.
 
@@ -106,6 +108,34 @@ Each pushed commit has an RCA comment on its pull request.
 - `go run ./cmd/workflow-credential-audit .`: pass.
 - Consumer CI re-ran on each pushed commit; outcomes recorded in the
   follow-up comment on the tracking issue.
+
+## Adversarial review round
+
+An independent adversarial review of the branch found five defects that the
+fixes above now cover:
+
+1. A `pin-literal` companion left stale when no workflow pin was removed
+   reported a green "already pinned" row. The rewrite now fails closed when
+   such a companion names no target pin anywhere; a healed companion names
+   the target beside any reviewed witness, so idempotent reruns stay green.
+2. The `pin-literal` substring replace could corrupt a longer hex constant
+   that embedded the old pin. Replacement is now boundary-aware: standalone
+   tokens only.
+3. The standalone rewrite accepted policies the registry parser rejects
+   (unknown fields, wrong schemaVersion or organization, unknown allowlist
+   keys mirrored into snapshots). The rewrite now accepts exactly the
+   reviewed policy fields, validates schemaVersion and organization, mirrors
+   only the three reviewed allowlist keys, and rejects unknown entry fields.
+4. A companion that is a symlink or directory made the rewrite write outside
+   the checkout or fail obscurely. The rewrite refuses any companion that is
+   not a regular file, verified by test.
+5. Companion-only pull requests claimed "only the `@<sha>` suffix changed"
+   with an empty references block. The body now states companion-only
+   content plainly and lists only changed companions.
+
+Dispositions of the remaining review notes: audit-side finding codes for
+stale companions are deferred to issue #261 (repin-run visibility only, now
+documented), and the PLAN.md and comment claims were corrected in place.
 
 ## Dispositions and follow-ups
 

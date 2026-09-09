@@ -126,7 +126,7 @@ func validRepinExceptionPath(value string) bool {
 // request bodies, and `git add` arguments, so control characters, backticks,
 // and option-like leading dashes are refused.
 func validRepinCompanionPath(value string) bool {
-	if strings.HasPrefix(value, ".github/") {
+	if strings.HasPrefix(value, ".github/") || value == ".github" {
 		return false
 	}
 	clean, err := cleanRepositoryPath(value)
@@ -134,7 +134,15 @@ func validRepinCompanionPath(value string) bool {
 		strings.HasPrefix(clean, "-") || strings.ContainsAny(clean, "\r\n`") {
 		return false
 	}
-	return clean != "." && !strings.Contains(clean, "\x00")
+	if clean == "." {
+		return false
+	}
+	for _, character := range clean {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseUnityEnrollmentRegistry strictly validates the required baseline and

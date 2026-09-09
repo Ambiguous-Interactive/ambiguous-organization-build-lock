@@ -365,6 +365,15 @@ func TestUnityEnrollmentRegistryRejectsInvalidRepinCompanion(t *testing.T) {
 		{"path inside .github", func(value *UnityRepinCompanion) {
 			value.Path = ".github/pin-reference.md"
 		}},
+		{"the .github directory itself", func(value *UnityRepinCompanion) {
+			value.Path = ".github"
+		}},
+		{"nul in path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin\x00reference.md"
+		}},
+		{"tab in path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin\treference.md"
+		}},
 		{"workflow path", func(value *UnityRepinCompanion) {
 			value.Path = ".github/workflows/unity.yml"
 		}},

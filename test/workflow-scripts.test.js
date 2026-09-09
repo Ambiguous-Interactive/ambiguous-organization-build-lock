@@ -842,8 +842,8 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
     }) + "\n"
   );
   const policyPath = path.join(root, "policy.json");
-  const writePolicy = (repinCompanions) => {
-    fs.writeFileSync(policyPath, JSON.stringify({
+  const writePolicy = (repinCompanions, mutate) => {
+    const policy = {
       schemaVersion: 1,
       organization: "Ambiguous-Interactive",
       approvedLockShas: [oldSha, witnessSha, target],
@@ -853,14 +853,18 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
       exceptions: [],
       repinExceptions: [],
       repinCompanions
-    }));
+    };
+    if (mutate) {
+      mutate(policy);
+    }
+    fs.writeFileSync(policyPath, JSON.stringify(policy));
     return policyPath;
   };
-  const runRewrite = (policyCompanions) =>
+  const runRewrite = (policyCompanions, mutate) =>
     childProcess.spawnSync(
       "bash",
       [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
-      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: writePolicy(policyCompanions) } }
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: writePolicy(policyCompanions, mutate) } }
     );
 
   const result = runRewrite([
@@ -979,19 +983,192 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
       stderr: /duplicate repository\/path repinCompanions entry/
     },
     {
-      name: "malformed entry for another repository",
+      name: "unknown entry field",
       companions: [
-        { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/ops/pin-doc.md", mode: "pin-lines" },
-        { repository: "Ambiguous-Interactive/not-enrolled", path: "bogus", mode: "pin-lines" }
+        { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/ops/pin-doc.md", mode: "pin-lines", extra: true }
       ],
-      stderr: /registered canonical repository spelling/
+      stderr: /unknown repinCompanions entry field/
+    },
+    {
+      name: "unknown repinExceptions entry field",
+      companions: [],
+      mutatePolicy: (policy) => {
+        policy.repinExceptions = [{
+          repository: "Ambiguous-Interactive/unity-helpers",
+          path: ".github/workflows/unity.yml",
+          reason: "r",
+          owner: "o",
+          expiresAt: "2099-01-01T00:00:00Z",
+          extra: true
+        }];
+      },
+      stderr: /unknown repinExceptions entry field/
+    },
+    {
+      name: "string schemaVersion",
+      companions: [],
+      mutatePolicy: (policy) => {
+        policy.schemaVersion = "1";
+      },
+      stderr: /schemaVersion 1/
+    },
+    {
+      name: "wrong organization",
+      companions: [],
+      mutatePolicy: (policy) => {
+        policy.organization = "NotAmbiguous";
+      },
+      stderr: /reviewed policy organization/
+    },
+    {
+      name: "unknown approved allowlist key",
+      companions: [
+        { repository: "Ambiguous-Interactive/unity-helpers", path: "policy-snapshot.json", mode: "policy-snapshot" }
+      ],
+      mutatePolicy: (policy) => {
+        policy.approvedExtraShas = ["totally-unreviewed-value"];
+      },
+      stderr: /unknown policy field/
     }
   ];
   for (const invalidPolicy of invalidPolicies) {
-    const invalid = runRewrite(invalidPolicy.companions);
+    const invalid = runRewrite(invalidPolicy.companions, invalidPolicy.mutatePolicy);
     assert.equal(invalid.status, 1, `${invalidPolicy.name}: expected failure, got ${invalid.status}`);
     assert.match(invalid.stderr, invalidPolicy.stderr, invalidPolicy.name);
   }
+});
+
+test("consumer repin fails closed on a stale pin-literal companion and survives hex witnesses", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companions-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  // Authorized in the policy but pinned nowhere: a historical witness that a
+  // mechanical rewrite must never corrupt, embedded here inside a longer hex
+  // constant exactly like a concatenated digest would embed it.
+  const witnessSha = "0854a7d586640e5d12e3559d789c481c232ed044";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target}`,
+      ""
+    ].join("\n")
+  );
+  fs.mkdirSync(path.join(root, "tests"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "tests", "pin-contract.js"),
+    [
+      `const policyCommit = "${oldSha}";`,
+      `const witnessDigest = "9f${witnessSha}aa11";`,
+      ""
+    ].join("\n")
+  );
+  const writePolicy = () => {
+    fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      organization: "Ambiguous-Interactive",
+      approvedLockShas: [oldSha, witnessSha, target],
+      approvedReturnShas: [target],
+      approvedDarwinReturnShas: [],
+      repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+      exceptions: [],
+      repinExceptions: [],
+      repinCompanions: [
+        { repository: "Ambiguous-Interactive/unity-helpers", path: "tests/pin-contract.js", mode: "pin-literal" }
+      ]
+    }));
+  };
+  writePolicy();
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+
+  // The workflows already pin the target, so no pin was removed and the
+  // companion still names only the stale pin. A mechanical rewrite cannot
+  // tell a stale pin constant from a reviewed witness; the run must fail
+  // closed instead of reporting a green "already pinned" row.
+  const divergent = runRewrite();
+  assert.equal(divergent.status, 1, `expected failure, got ${divergent.status}: ${divergent.stdout}`);
+  assert.match(divergent.stderr, /stale pin constant from a reviewed witness/);
+  assert.equal(
+    fs.readFileSync(path.join(root, "tests", "pin-contract.js"), "utf8"),
+    [`const policyCommit = "${oldSha}";`, `const witnessDigest = "9f${witnessSha}aa11";`, ""].join("\n"),
+    "a fail-closed run leaves the companion untouched"
+  );
+
+  // A healed companion names the target as its pin constant beside the
+  // witness; the same no-pin-removed rerun stays green and idempotent.
+  fs.writeFileSync(
+    path.join(root, "tests", "pin-contract.js"),
+    [`const policyCommit = "${target}";`, `const witnessDigest = "9f${witnessSha}aa11";`, ""].join("\n")
+  );
+  const healed = runRewrite();
+  assert.equal(healed.status, 0, healed.stderr);
+  assert.equal(JSON.parse(healed.stdout).changed, 0);
+
+  // Once a workflow pin is removed, the same companion updates its standalone
+  // pin constant while the hex-embedded witness digest survives untouched.
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha}`,
+      ""
+    ].join("\n")
+  );
+  const atomic = runRewrite();
+  assert.equal(atomic.status, 0, atomic.stderr);
+  assert.equal(
+    fs.readFileSync(path.join(root, "tests", "pin-contract.js"), "utf8"),
+    [`const policyCommit = "${target}";`, `const witnessDigest = "9f${witnessSha}aa11";`, ""].join("\n")
+  );
+});
+
+test("consumer repin refuses a companion that is not a regular file", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companions-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${repinOldSha}\n`
+  );
+  const outside = path.join(root, "outside-secret.txt");
+  fs.writeFileSync(outside, "untouched\n");
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, "docs", "snap.json"));
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [repinOldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: [
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/snap.json", mode: "policy-snapshot" }
+    ]
+  }));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+  );
+  assert.equal(result.status, 1, `expected failure, got ${result.status}: ${result.stdout}`);
+  assert.match(result.stderr, /not a regular file/);
+  assert.equal(fs.readFileSync(outside, "utf8"), "untouched\n", "the write never escapes the checkout");
 });
 const repinOldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
 const repinOrganization = "Ambiguous-Interactive";
@@ -1324,7 +1501,7 @@ test("consumer repin commits companion artifacts and lists them in the pull requ
     "utf8"
   );
   assert.match(body, /Reviewed companion artifacts/);
-  assert.match(body, /- `docs\/ops\/pin-doc\.md` \(pin-lines; 1 line\)/);
+  assert.match(body, /- `docs\/ops\/pin-doc\.md` \(pin-lines\)/);
   assert.match(body, /never merges itself/);
 });
 
