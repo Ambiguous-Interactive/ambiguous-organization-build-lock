@@ -1,8 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:34384573493:unity-tests:6000.3.16f1-standalone",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "34384573493",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34384573493",
+    "queuedAt": "2026-09-09T18:50:01.622Z",
+    "acquiredAt": "2026-09-09T18:50:05.214Z",
+    "expiresAt": "2026-09-09T22:50:05.214Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "102577638824"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/unity-helpers:34384573493:unity-tests:6000.3.16f1-standalone",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "34384573493",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34384573493",
+      "queuedAt": "2026-09-09T18:50:01.622Z",
+      "acquiredAt": "2026-09-09T18:50:05.214Z",
+      "expiresAt": "2026-09-09T22:50:05.214Z",
+      "runnerId": "ELI-MACHINE",
+      "jobId": "102577638824"
+    }
+  ],
   "queue": [],
   "reservations": [
     {
@@ -18,23 +46,8 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder job 102577638834 is completed",
       "createdAt": "2026-09-09T18:24:35.447Z"
-    },
-    {
-      "reservationId": "24ebbbc8-0fd3-44d8-8307-4ac0c2c3fdca",
-      "holderId": "Ambiguous-Interactive/unity-helpers:34384573493:unity-tests-single-threaded:6000.3.16f1-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "34384573493",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34384573493",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-09T18:49:29.439Z",
-      "availableAt": "2026-09-09T18:49:30.439Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-09T18:49:29.440Z"
+  "updatedAt": "2026-09-09T18:50:05.214Z"
 }
