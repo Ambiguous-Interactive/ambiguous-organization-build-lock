@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:34401210088:unity-tests:6000.5.2f1-playmode",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "34401210088",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34401210088",
-    "queuedAt": "2026-09-09T22:15:40.497Z",
-    "acquiredAt": "2026-09-09T22:15:44.131Z",
-    "expiresAt": "2026-09-10T02:15:44.131Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "102633384461"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:34401210088:unity-tests:6000.5.2f1-playmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "34401210088",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34401210088",
-      "queuedAt": "2026-09-09T22:15:40.497Z",
-      "acquiredAt": "2026-09-09T22:15:44.131Z",
-      "expiresAt": "2026-09-10T02:15:44.131Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "102633384461"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder job 102577638834 is completed",
       "createdAt": "2026-09-09T18:24:35.447Z"
+    },
+    {
+      "reservationId": "cbbc0213-c693-4d1b-8b95-a75dd3bd5d1a",
+      "holderId": "Ambiguous-Interactive/unity-helpers:34401210088:unity-tests:6000.5.2f1-playmode",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "34401210088",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34401210088",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-09T22:18:44.534Z",
+      "availableAt": "2026-09-09T22:18:45.534Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-09T22:15:44.131Z"
+  "updatedAt": "2026-09-09T22:18:44.534Z"
 }
