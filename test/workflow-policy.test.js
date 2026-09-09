@@ -1618,7 +1618,7 @@ test("consumer repin automation is scheduled, least privilege, and merges only t
   // in the run summary instead of a merge the automation performs itself.
   assert.match(automation, /enablePullRequestAutoMerge/);
   assert.match(automation, /auto-merge was not enabled/);
-  assert.doesNotMatch(automation, /gh pr (un)?hold|ready-for-review/);
+  assert.doesNotMatch(automation, /gh pr ready/);
 });
 
 test("Unity repository onboarding opens a reviewable registry-only PR from trusted main", () => {

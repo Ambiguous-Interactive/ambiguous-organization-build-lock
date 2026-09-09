@@ -438,7 +438,7 @@ ${file_list}
 Repin the organization lock actions to the authorized release ${label}
 (\`${target_sha}\`).
 
-## Review before merge (merge = the adoption decision)
+## Review before merge (leaving auto-merge on is the adoption decision)
 
 - ${mutation_bullet}
 - Reviewed companion artifacts named in the enrollment policy carry the
@@ -516,6 +516,13 @@ enable_repin_auto_merge() {
   pr_id="${method_line%%$'\t'*}"
   merge_method="${method_line#*$'\t'}"
   if [ -z "${merge_method}" ] || [ "${merge_method}" = "${method_line}" ]; then
+    echo "::warning::${repository}: repin offer #${pr_number} has no readable identity or no allowed merge method; auto-merge was not requested." >&2
+    printf '%s\n' "| \`${repository}\` | repin offer #${pr_number} is open; auto-merge was not requested (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
+  # The mutation schema only accepts these merge methods, so an unexpected
+  # value takes the not-requested path instead of a malformed request.
+  if ! [[ "${merge_method}" =~ ^(SQUASH|MERGE|REBASE)$ ]]; then
     echo "::warning::${repository}: repin offer #${pr_number} has no readable identity or no allowed merge method; auto-merge was not requested." >&2
     printf '%s\n' "| \`${repository}\` | repin offer #${pr_number} is open; auto-merge was not requested (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     return 0
