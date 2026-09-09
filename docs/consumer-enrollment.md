@@ -387,7 +387,9 @@ Each consumer whose default branch has a carrying ruleset publishes
 list that GitHub hides from read-only callers. The audit proves freshness by
 comparing every visible field with the live ruleset; any mismatch is a
 finding. Update the file through a reviewed pull request whenever the
-ruleset changes.
+ruleset changes. The central change classifier names this exact file
+Unity-independent, so publishing it never spends a licensed runner cycle;
+any other `.github/` change still requires Unity validation.
 
 ```json
 {
@@ -445,6 +447,12 @@ Before enforcing the aggregate as required:
    policy audit can read its exact workflow commit.
 9. Confirm the exact aggregate context and issuing App in the repository
    ruleset before enforcing it.
+10. Confirm the workflow that reports the required context runs on every pull
+    request. GitHub reports no check for a pull request that a `pull_request`
+    `paths` filter excludes, so the required status never appears there and the
+    ruleset blocks those merges forever. Remove the filter and let the change
+    classifier skip licensed work, or pair the filter with a companion gate
+    that reports the same context on the excluded paths.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

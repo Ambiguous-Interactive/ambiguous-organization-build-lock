@@ -9,10 +9,17 @@ const INDEPENDENT_PREFIXES = [
   ".llm/",
   "progress/"
 ];
+/*
+ * Exact files that cannot change what any licensed Unity job executes. Each one is an input to a
+ * central analyzer, no workflow step reads it, and the attestation contract makes consumers update
+ * it through reviewed pull requests. Without this entry, every ruleset change forced a licensed
+ * runner cycle on every carrying consumer to publish a JSON no Unity step reads.
+ */
 const INDEPENDENT_PATHS = new Set([
   ".cursorrules",
   ".github/copilot-instructions.md",
-  ".github/dependency-ownership.md"
+  ".github/dependency-ownership.md",
+  ".github/merge-policy-attestation.json"
 ]);
 
 function text(value) {
