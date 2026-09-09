@@ -154,6 +154,13 @@ Dispositions of the remaining review notes: audit-side finding codes for
 stale companions are deferred to issue #261 (repin-run visibility only, now
 documented), and the PLAN.md and comment claims were corrected in place.
 
+## Knowledge promotion
+
+No `.llm` resource change: the authoritative companion contract already
+lives in `docs/consumer-enrollment.md` and `docs/operations-runbook.md`,
+which are the consumer-facing references the repository map points to. A
+separate LLM resource would duplicate them and drift.
+
 ## Dispositions and follow-ups
 
 - A repo-wide sweep for the old SHA found IshoBoy `progress/` session
