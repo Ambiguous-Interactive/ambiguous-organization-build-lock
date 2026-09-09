@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/mergepolicy"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -132,9 +133,13 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 		}
 		switch {
 		case strings.Contains(path, "/contents/"):
+			// The audit must read exactly the reviewed attestation path on
+			// the default branch ref; any other read serves 404.
 			rest := strings.TrimPrefix(path, "/repos/")
 			separator := strings.Index(rest, "/contents/")
-			if separator < 0 {
+			if separator < 0 ||
+				rest[separator:] != "/contents/"+filepath.Join(".github", "merge-policy-attestation.json") ||
+				request.URL.Query().Get("ref") == "" {
 				writer.WriteHeader(http.StatusNotFound)
 				return
 			}
@@ -657,6 +662,84 @@ func TestRunReportsAttestedBypassActorAsDrift(t *testing.T) {
 	}
 	if !strings.Contains(audit.Findings[0].Detail, "(attested)") {
 		t.Fatalf("attested evidence must be visible in the detail: %s", content)
+	}
+}
+
+func TestRunFailsClosedWhenAttestationEnvelopeIsInvalid(t *testing.T) {
+	// Every malformed contents envelope must fail the audit closed with a
+	// retrieval finding, never read as an absent file.
+	cases := map[string]string{
+		"non-base64 encoding": `{"content": "eHl6", "encoding": "plain", "size": 3}`,
+		"missing content":     `{"encoding": "base64", "size": 3}`,
+		"undecodable content": `{"content": "!!!not base64!!!", "encoding": "base64", "size": 3}`,
+		"oversized content": fmt.Sprintf(
+			`{"content": %q, "encoding": "base64", "size": %d}`,
+			strings.Repeat("QQ==\n", mergepolicy.MaxAttestationBytes/4+1), mergepolicy.MaxAttestationBytes+64,
+		),
+	}
+	for name, envelope := range cases {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			policyPath := writeRepositoryPolicy(t, directory)
+			expectationsPath := writeExpectations(t, directory,
+				expectationBody("DoxReloaded", "main", "CI Success"),
+				expectationBody("DxMessaging", "master", ""),
+				expectationBody("IshoBoy", "main", ""),
+				expectationBody("qora-redux", "main", ""),
+				expectationBody("unity-builder", "main", ""),
+				expectationBody("unity-helpers", "main", ""),
+			)
+			server, client := newRulesetServer(t)
+			server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] = envelope
+			exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+			if exit != 1 {
+				t.Fatalf("%s: exit = %d, want 1", name, exit)
+			}
+			audit := decodeArtifact(t, content)
+			if audit.Complete {
+				t.Fatalf("%s: a broken envelope must fail the audit closed: %s", name, content)
+			}
+			found := false
+			for _, finding := range audit.Findings {
+				if finding.Repository == "Ambiguous-Interactive/DoxReloaded" &&
+					finding.Code == "merge-policy-retrieval-incomplete" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("%s: retrieval finding is missing: %s", name, content)
+			}
+		})
+	}
+}
+
+func TestRunFailsClosedWhenAttestationReadFails(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	// A non-404 contents failure is ambiguous; it must never be read as
+	// "not published".
+	server.contentsStatus = http.StatusInternalServerError
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("contents read failure exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete || len(audit.Findings) != 6 {
+		t.Fatalf("every repository must fail closed: %s", content)
+	}
+	for _, finding := range audit.Findings {
+		if finding.Code != "merge-policy-retrieval-incomplete" {
+			t.Fatalf("unexpected artifact: %s", content)
+		}
 	}
 }
 

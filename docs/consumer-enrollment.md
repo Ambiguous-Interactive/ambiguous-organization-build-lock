@@ -329,7 +329,7 @@ edits.
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |
 | `unexpected-bypass-actor` | Remove the bypass actor, or record it in `merge-policy-expectations.json` after review. See Merge policy audit. |
-| `merge-policy-attestation-missing` | Publish `.github/merge-policy-attestation.json` on the default branch. See Merge policy audit. |
+| `merge-policy-attestation-missing` | Publish `.github/merge-policy-attestation.json`, or add the carrying ruleset to its `rulesets` list. See Merge policy audit. |
 | `merge-policy-attestation-stale` | Update `.github/merge-policy-attestation.json` to the live ruleset state, or remove entries for rulesets that carry no reviewed context. See Merge policy audit. |
 | `merge-policy-retrieval-incomplete` | No consumer edit. The audit failed to read this repository's live merge settings. Central operators diagnose the run. |
 
@@ -364,7 +364,8 @@ audit reports and opens one deduplicated issue.
   review. A detail that ends with `(attested)` reports an actor the consumer
   attestation published.
 - `merge-policy-attestation-missing`: a carrying ruleset has no bypass
-  evidence and the repository publishes no attestation. Publish the file.
+  evidence and no attestation entry covers it. Publish the file or add the
+  entry.
 - `merge-policy-attestation-stale`: the attestation does not match the live
   ruleset, names a ruleset that carries no reviewed context, or is not valid
   in the reviewed schema. Update the file. When the stale file hides the
@@ -372,6 +373,10 @@ audit reports and opens one deduplicated issue.
 - `merge-policy-retrieval-incomplete`: the audit could not read this
   repository's live merge settings. No consumer edit. Central operators
   diagnose the run.
+
+A central Contents-read failure presents as `merge-policy-attestation-missing`
+in every repository at once, even where files exist. Central operators check
+the run first when the finding appears for all consumers.
 
 ### Merge policy attestation
 
