@@ -65,7 +65,14 @@ reused only when its content matches the current repin exactly; the
 automation never force-updates it. A workflow file listed in a reviewed
 `repinExceptions` policy entry keeps its
 current pin; the pull request body names each preserved file and its review
-expiry. The scheduled enrollment audit reports an expired repin exception and
+expiry. Some consumer files derive their content from the pin: copyable
+examples in operational docs, reviewed pin constants in contract tests, and
+local allowlist snapshots. A reviewed `repinCompanions` policy entry names
+each such file and one mechanical rewrite mode (`pin-lines`, `pin-literal`,
+or `policy-snapshot`). The repin pull request moves those files with the
+pins, so the offered commit is complete. The pull request body names each
+changed companion file and its mode. The scheduled enrollment audit reports
+an expired repin exception and
 a repin exception whose protected file no longer exists. The finding codes
 are `expired-repin-exception` and `stale-repin-exception`, and the audit
 drift issue lists them with the repository and path.

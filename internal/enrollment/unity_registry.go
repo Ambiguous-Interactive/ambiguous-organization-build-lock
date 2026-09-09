@@ -70,6 +70,27 @@ type UnityEnrollmentRegistry struct {
 	Repositories             []UnityEnrollmentRepository `json:"repositories"`
 	Exceptions               []UnityPolicyException      `json:"exceptions"`
 	RepinExceptions          []UnityRepinException       `json:"repinExceptions"`
+	RepinCompanions          []UnityRepinCompanion       `json:"repinCompanions"`
+}
+
+// UnityRepinCompanion is one reviewed consumer file that derives its content
+// from the pinned lock release, so a pin-only repin pull request would be born
+// red without it. The mode names one mechanical rewrite the repin automation
+// may apply; nothing else in the file is ever touched.
+type UnityRepinCompanion struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	Mode       string `json:"mode"`
+}
+
+// repinCompanionModes are the reviewed mechanical rewrites. pin-lines applies
+// the workflow `uses:` pin rewrite to every line of the file; pin-literal
+// replaces a bare occurrence of a currently pinned SHA; policy-snapshot
+// mirrors the reviewed approved*Shas allowlists exactly.
+var repinCompanionModes = map[string]bool{
+	"pin-lines":       true,
+	"pin-literal":     true,
+	"policy-snapshot": true,
 }
 
 // UnityRepinException is a reviewed, expiring permission to skip repinning one
@@ -97,6 +118,23 @@ func validRepinExceptionPath(value string) bool {
 	}
 	rest := strings.TrimPrefix(clean, ".github/workflows/")
 	return !strings.Contains(rest, "/") && !strings.ContainsAny(rest, "\r\n`")
+}
+
+// validRepinCompanionPath requires one normalized repository-relative file
+// outside `.github/`, because the workflow pin rewrite already owns every
+// `.github` YAML file. Companion paths are reproduced in run logs, repin pull
+// request bodies, and `git add` arguments, so control characters, backticks,
+// and option-like leading dashes are refused.
+func validRepinCompanionPath(value string) bool {
+	if strings.HasPrefix(value, ".github/") {
+		return false
+	}
+	clean, err := cleanRepositoryPath(value)
+	if err != nil || clean != value ||
+		strings.HasPrefix(clean, "-") || strings.ContainsAny(clean, "\r\n`") {
+		return false
+	}
+	return clean != "." && !strings.Contains(clean, "\x00")
 }
 
 // ParseUnityEnrollmentRegistry strictly validates the required baseline and
@@ -204,6 +242,27 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 			return UnityEnrollmentRegistry{}, fmt.Errorf("repin exceptions contain a duplicate repository/path entry")
 		}
 		repinExceptions[key] = true
+	}
+	companions := make(map[string]bool)
+	for _, companion := range registry.RepinCompanions {
+		companionKey := strings.ToLower(companion.Repository)
+		if !seen[companionKey] {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion repository is not registered")
+		}
+		if canonicalRepositories[companionKey] != companion.Repository {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion repository spelling is not canonical")
+		}
+		if !validRepinCompanionPath(companion.Path) {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion path must be a normalized repository-relative path outside .github")
+		}
+		if !repinCompanionModes[companion.Mode] {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion mode is not a reviewed mechanical rewrite")
+		}
+		key := companionKey + "\x00" + companion.Path
+		if companions[key] {
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companions contain a duplicate repository/path entry")
+		}
+		companions[key] = true
 	}
 	sort.Slice(registry.Repositories, func(i, j int) bool {
 		return registry.Repositories[i].Repository < registry.Repositories[j].Repository

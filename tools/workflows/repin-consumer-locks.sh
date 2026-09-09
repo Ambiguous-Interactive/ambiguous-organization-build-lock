@@ -77,7 +77,10 @@ rewrite_pins() {
   # untouched, and the target must already be authorized in both allowlists.
   # A reviewed, unexpired repin exception preserves one whole workflow file so
   # a pin-only update cannot move a caller to an action whose input contract
-  # it cannot satisfy.
+  # it cannot satisfy. Reviewed `repinCompanions` files carry the consumer
+  # artifacts that derive from the pin (copyable docs, pin constants, policy
+  # snapshots) through the same mechanical, mode-bound rewrite, so the repin
+  # pull request is never born red.
   local directory="$1" target_sha="$2" target_version="$3" repository="$4"
   node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" "${repository}" <<'EOF'
 const fs = require("node:fs");
@@ -94,17 +97,29 @@ if (!lowered(policy.approvedLockShas).has(targetSha) || !lowered(policy.approved
 const exceptionPattern = /^\.github\/workflows\/[^/]+\.[yY][aA]?[mM][lL]$/;
 const rfc3339Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const singleLine = (value) => !/[\r\n`]/.test(value);
-// Every entry must match the reviewed registry contract, including entries
-// for other repositories, so a standalone rewrite cannot accept a policy the
-// registry parser would reject.
-if (policy.repinExceptions !== undefined && !Array.isArray(policy.repinExceptions)) {
-  throw new Error("Repins require repinExceptions to be a list when present.");
-}
-const entries = policy.repinExceptions || [];
 const canonicalRepositories = new Map();
 for (const value of Array.isArray(policy.repositories) ? policy.repositories : []) {
   canonicalRepositories.set(String(value.repository || "").toLowerCase(), String(value.repository || ""));
 }
+// Companion modes are the reviewed mechanical rewrites. They mirror the
+// registry parser's validation, so a standalone rewrite cannot accept a
+// policy the audit would reject.
+const companionModes = new Set(["pin-lines", "pin-literal", "policy-snapshot"]);
+const validCompanionPath = (value) =>
+  typeof value === "string" && value.length > 0 &&
+  !value.includes("\\") && !value.startsWith("/") && !value.startsWith("-") &&
+  !value.startsWith(".github/") && singleLine(value) &&
+  !value.split("/").includes("..") && path.posix.normalize(value) === value;
+if (policy.repinExceptions !== undefined && !Array.isArray(policy.repinExceptions)) {
+  throw new Error("Repins require repinExceptions to be a list when present.");
+}
+if (policy.repinCompanions !== undefined && !Array.isArray(policy.repinCompanions)) {
+  throw new Error("Repins require repinCompanions to be a list when present.");
+}
+// Every entry must match the reviewed registry contract, including entries
+// for other repositories, so a standalone rewrite cannot accept a policy the
+// registry parser would reject.
+const entries = policy.repinExceptions || [];
 const seenExceptions = new Set();
 for (const entry of entries) {
   const entryRepository = String(entry.repository || "");
@@ -130,6 +145,26 @@ for (const entry of entries) {
   }
   seenExceptions.add(key);
 }
+const companionEntries = policy.repinCompanions || [];
+const seenCompanions = new Set();
+for (const entry of companionEntries) {
+  const entryRepository = String(entry.repository || "");
+  if (canonicalRepositories.get(entryRepository.toLowerCase()) !== entryRepository) {
+    throw new Error("Repins require a registered canonical repository spelling in every repinCompanions entry.");
+  }
+  const entryPath = String(entry.path || "");
+  if (!validCompanionPath(entryPath)) {
+    throw new Error(`Repins require a normalized repository-relative path outside .github in repinCompanions; got ${entryPath}`);
+  }
+  if (!companionModes.has(String(entry.mode || ""))) {
+    throw new Error(`Repins require a reviewed mechanical mode in repinCompanions; got ${entry.mode}`);
+  }
+  const key = `${entryRepository.toLowerCase()}\u0000${entryPath}`;
+  if (seenCompanions.has(key)) {
+    throw new Error("Repins reject a duplicate repository/path repinCompanions entry.");
+  }
+  seenCompanions.add(key);
+}
 const exceptions = new Map();
 for (const entry of entries) {
   if (entry.repository !== repository) {
@@ -142,6 +177,13 @@ for (const entry of entries) {
     );
   }
   exceptions.set(entry.path, entry);
+}
+const companions = [];
+for (const entry of companionEntries) {
+  if (entry.repository !== repository) {
+    continue;
+  }
+  companions.push({ path: entry.path, mode: String(entry.mode) });
 }
 const linePattern =
   /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
@@ -158,8 +200,24 @@ const visit = (entry) => {
   }
 };
 visit(path.join(directory, ".github"));
-const report = { changed: 0, files: [], skipped: [], unmatched: [] };
+const report = { changed: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
+// The pins this rewrite removes, collected from the workflow lines it
+// rewrites. Only these SHAs may move inside pin-literal companions, so a
+// historical SHA quoted for another reason survives untouched.
+const replacedPins = new Set();
+const rewritePinLine = (line) => {
+  const match = linePattern.exec(line);
+  if (!match || match[2] === targetSha) {
+    return line;
+  }
+  replacedPins.add(match[2]);
+  let comment = match[3] || "";
+  if (comment && targetVersion && versionCommentPattern.test(comment.trim())) {
+    comment = ` # ${targetVersion}`;
+  }
+  return `${match[1]}${targetSha}${comment}`;
+};
 for (const filePath of files) {
   const relativePath = path.relative(directory, filePath).split(path.sep).join("/");
   const exception = exceptions.get(relativePath);
@@ -176,16 +234,11 @@ for (const filePath of files) {
   const lines = original.split("\n");
   let fileChanges = 0;
   const rewritten = lines.map((line) => {
-    const match = linePattern.exec(line);
-    if (!match || match[2] === targetSha) {
-      return line;
+    const rewrittenLine = rewritePinLine(line);
+    if (rewrittenLine !== line) {
+      fileChanges += 1;
     }
-    fileChanges += 1;
-    let comment = match[3] || "";
-    if (comment && targetVersion && versionCommentPattern.test(comment.trim())) {
-      comment = ` # ${targetVersion}`;
-    }
-    return `${match[1]}${targetSha}${comment}`;
+    return rewrittenLine;
   });
   if (fileChanges === 0) {
     continue;
@@ -203,6 +256,59 @@ for (const [entryPath, entry] of exceptions) {
     });
   }
 }
+const approvedListKey = /^approved[A-Za-z0-9]*Shas$/;
+for (const companion of companions) {
+  const companionPath = path.join(directory, ...companion.path.split("/"));
+  if (!fs.existsSync(companionPath)) {
+    report.unmatchedCompanions.push({ path: companion.path, mode: companion.mode });
+    continue;
+  }
+  let companionChanges = 0;
+  if (companion.mode === "pin-lines") {
+    const lines = fs.readFileSync(companionPath, "utf8").split("\n");
+    const rewritten = lines.map((line) => {
+      const rewrittenLine = rewritePinLine(line);
+      if (rewrittenLine !== line) {
+        companionChanges += 1;
+      }
+      return rewrittenLine;
+    });
+    if (companionChanges > 0) {
+      fs.writeFileSync(companionPath, `${rewritten.join("\n")}`, "utf8");
+    }
+  } else if (companion.mode === "pin-literal") {
+    const original = fs.readFileSync(companionPath, "utf8");
+    let updated = original;
+    for (const replacedPin of [...replacedPins].sort()) {
+      updated = updated.split(replacedPin).join(targetSha);
+    }
+    if (updated !== original) {
+      companionChanges = 1;
+      fs.writeFileSync(companionPath, updated, "utf8");
+    }
+  } else if (companion.mode === "policy-snapshot") {
+    // Mirror the reviewed allowlists exactly: the same content a consumer
+    // snapshot refresh derives from this policy, so the diff a reviewer reads
+    // is the authorization delta and nothing else.
+    const snapshot = {
+      schemaVersion: policy.schemaVersion,
+      organization: policy.organization
+    };
+    for (const [key, value] of Object.entries(policy)) {
+      if (approvedListKey.test(key)) {
+        snapshot[key] = value;
+      }
+    }
+    const original = fs.readFileSync(companionPath, "utf8");
+    const updated = `${JSON.stringify(snapshot, null, 2)}\n`;
+    if (updated !== original) {
+      companionChanges = 1;
+      fs.writeFileSync(companionPath, updated, "utf8");
+    }
+  }
+  report.changed += companionChanges;
+  report.companions.push({ path: companion.path, mode: companion.mode, lines: companionChanges });
+}
 process.stdout.write(`${JSON.stringify(report)}\n`);
 EOF
 }
@@ -212,7 +318,7 @@ open_repin_pull_request() {
   # the identical-branch recovery path. Arguments are explicit so the two
   # paths cannot drift.
   local repository="$1" branch_name="$2" label="$3" target_sha="$4"
-  local authorization="$5" file_list="$6" preserved_section="$7"
+  local authorization="$5" file_list="$6" preserved_section="$7" companion_section="$8"
   local body_file
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
   cat > "${body_file}" <<EOF
@@ -223,13 +329,16 @@ Repin the organization lock actions to the authorized release ${label}
 
 - Only the \`@<sha>\` suffix of \`uses:\` references to
   \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments.
+- Reviewed companion artifacts named in the enrollment policy carry the
+  consumer files that derive from the pin. Each one moves through one
+  mechanical, mode-bound rewrite.
 - Release authorization evidence: the central authorization pull request for
   this release, merged by a maintainer.
 - Changed references:
 \`\`\`
 ${file_list}
 \`\`\`
-${preserved_section}
+${companion_section}${preserved_section}
 This pull request is opened by central automation. It never merges itself and
 never edits a default branch.
 EOF
@@ -287,11 +396,46 @@ repin_consumer() {
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
+    local companions companion_count
+    if ! companions="$(printf '%s' "${report}" | jq -r '
+      .companions[] | "- `\(.path)` (\(.mode); \(.lines) line\(if .lines == 1 then "" else "s" end))"
+    ')" || ! companion_count="$(printf '%s' "${report}" | jq -er '.companions | length')"; then
+      echo "::error::${repository}: could not read the rewrite report." >&2
+      exit 1
+    fi
+    local unmatched_companions
+    if ! unmatched_companions="$(printf '%s' "${report}" | jq -r '
+      .unmatchedCompanions[] | "- `\(.path)` (\(.mode)) names a repin companion but no file exists at that path; review the enrollment policy entry"
+    ')" || ! printf '%s' "${report}" | jq -e '.unmatchedCompanions' >/dev/null; then
+      echo "::error::${repository}: could not read the rewrite report." >&2
+      exit 1
+    fi
     if [ -n "${preserved}" ]; then
       printf '%s\n' "${preserved}"
     fi
     if [ -n "${unmatched}" ]; then
       printf '%s\n' "${unmatched}" >&2
+    fi
+    if [ -n "${unmatched_companions}" ]; then
+      printf '%s\n' "${unmatched_companions}" >&2
+    fi
+    local companion_section=""
+    if [ "${companion_count}" != "0" ] || [ -n "${unmatched_companions}" ]; then
+      companion_section="
+## Reviewed companion artifacts
+
+These policy-reviewed files derive their content from the pin. Each one moved
+through its reviewed mechanical rewrite:
+
+${companions}
+"
+      if [ -n "${unmatched_companions}" ]; then
+        companion_section="${companion_section}
+### Missing companion files
+
+${unmatched_companions}
+"
+      fi
     fi
     if [ "${changed}" = "0" ]; then
       if [ "${preserved_count}" != "0" ]; then
@@ -340,6 +484,22 @@ repin_consumer() {
     git -C "${directory}" config user.name "github-actions[bot]"
     git -C "${directory}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
     git -C "${directory}" add .github
+    # Companion paths are validated normalized repository-relative paths with
+    # no option-like leading dash, so the explicit -- guard is sufficient.
+    local companion_paths
+    if ! companion_paths="$(printf '%s' "${report}" | jq -r '.companions[] | select(.lines > 0) | .path')"; then
+      echo "::error::${repository}: could not read the companion paths from the rewrite report." >&2
+      exit 1
+    fi
+    while IFS= read -r companion_path; do
+      if [ -z "${companion_path}" ]; then
+        continue
+      fi
+      if ! git -C "${directory}" add -- "${companion_path}"; then
+        echo "::error::${repository}: could not stage the companion artifact ${companion_path}." >&2
+        exit 1
+      fi
+    done <<< "${companion_paths}"
     if git -C "${directory}" diff --cached --quiet; then
       echo "::error::${repository}: staged repin is empty but ${changed} lines were rewritten." >&2
       exit 1
@@ -395,7 +555,7 @@ ${preserved}
       fi
       open_repin_pull_request \
         "${repository}" "${branch_name}" "${label}" "${target_sha}" \
-        "${authorization}" "${file_list}" "${preserved_section}"
+        "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}"
       printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` from the existing branch |" >> "${GITHUB_STEP_SUMMARY}"
       exit 0
     fi
@@ -408,7 +568,7 @@ ${preserved}
     fi
     open_repin_pull_request \
       "${repository}" "${branch_name}" "${label}" "${target_sha}" \
-      "${authorization}" "${file_list}" "${preserved_section}"
+      "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}"
     local lines_word="lines"
     if [ "${changed}" = "1" ]; then
       lines_word="line"
