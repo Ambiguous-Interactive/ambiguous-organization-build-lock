@@ -18,6 +18,8 @@ const (
 // Observed reason codes are emitted by the command that reads live evidence.
 const (
 	CodeRetrievalIncomplete = "merge-policy-retrieval-incomplete"
+	CodeAttestationMissing  = "merge-policy-attestation-missing"
+	CodeAttestationStale    = "merge-policy-attestation-stale"
 )
 
 const (
@@ -34,20 +36,27 @@ type ActiveCheck struct {
 	RulesetID int64
 }
 
-// RuleBypassActor is one bypass identity observed on a ruleset.
+// RuleBypassActor is one bypass identity observed on a ruleset. Attested
+// marks actors whose evidence came from the consumer attestation file
+// instead of the live API response.
 type RuleBypassActor struct {
 	ActorType string
 	ActorID   int64
 	Mode      string
+	Attested  bool
 }
 
-// Ruleset is the observed state of one repository ruleset.
+// Ruleset is the observed state of one repository ruleset. BypassKnown
+// records whether the API response carried the bypass_actors key at all:
+// GitHub omits the key for callers without write access to the ruleset,
+// and an omitted key must never be read as an empty list.
 type Ruleset struct {
 	ID             int64
 	Name           string
 	Enforcement    string
 	RequiredChecks []RequiredCheck
 	BypassActors   []RuleBypassActor
+	BypassKnown    bool
 }
 
 // RequiredCheck is one declared check requirement inside a ruleset.
@@ -188,7 +197,10 @@ func rulesetCarrier(name string, id int64) string {
 	if name == "" {
 		name = "unknown"
 	}
-	return fmt.Sprintf("ruleset %s (id %d)", name, id)
+	// Rule names come from live API evidence, so they are sanitized here at
+	// the only place they reach a published detail. The audit compares the
+	// raw name and required contexts against the consumer attestation.
+	return fmt.Sprintf("ruleset %s (id %d)", SanitizeText(name, MaxContextBytes), id)
 }
 
 func containsContext(checks []RequiredCheck, context string) bool {
@@ -198,6 +210,21 @@ func containsContext(checks []RequiredCheck, context string) bool {
 		}
 	}
 	return false
+}
+
+// CarryingRulesetIDs returns the active rulesets that require a reviewed
+// context, keyed by id. The per-branch rules endpoint is the carriage
+// authority, so a ruleset's own declared checks never make it a carrier.
+func CarryingRulesetIDs(expectation RepositoryExpectation, observed Observed) map[int64]bool {
+	carriers := make(map[int64]bool)
+	for _, check := range observed.ActiveChecks {
+		for _, expected := range expectation.RequiredContexts {
+			if check.Context == expected {
+				carriers[check.RulesetID] = true
+			}
+		}
+	}
+	return carriers
 }
 
 // caseRenamed reports an active requirement that differs from the reviewed
@@ -246,15 +273,7 @@ func bypassFindings(expectation RepositoryExpectation, observed Observed) []Find
 		}
 		return false
 	}
-	// Active rulesets that carry an expected context, keyed by id.
-	carriers := make(map[int64]bool)
-	for _, check := range observed.ActiveChecks {
-		for _, expected := range expectation.RequiredContexts {
-			if check.Context == expected {
-				carriers[check.RulesetID] = true
-			}
-		}
-	}
+	carriers := CarryingRulesetIDs(expectation, observed)
 	findings := make([]Finding, 0)
 	seen := make(map[string]bool)
 	add := func(code, context, detail string) {
@@ -278,14 +297,14 @@ func bypassFindings(expectation RepositoryExpectation, observed Observed) []Find
 			if allowedBypass(expectation.AllowedBypassActors, actor) {
 				continue
 			}
-			add(
-				CodeUnexpectedBypassActor,
-				"",
-				fmt.Sprintf(
-					"%s grants actor type %s id %d bypass mode %s",
-					rulesetCarrier(ruleset.Name, ruleset.ID), actor.ActorType, actor.ActorID, bypassMode(actor.Mode),
-				),
+			detail := fmt.Sprintf(
+				"%s grants actor type %s id %d bypass mode %s",
+				rulesetCarrier(ruleset.Name, ruleset.ID), actor.ActorType, actor.ActorID, bypassMode(actor.Mode),
 			)
+			if actor.Attested {
+				detail += " (attested)"
+			}
+			add(CodeUnexpectedBypassActor, "", detail)
 		}
 	}
 	if expectation.RequireAdminEnforcement &&

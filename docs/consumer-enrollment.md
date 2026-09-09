@@ -256,7 +256,8 @@ Fix the finding with the matching consumer edit. Item numbers refer to the
 Workflow contract above. The exception codes apply to
 `unity-enrollment-policy.json` in this repository. The repository,
 head-revalidation, and merge-policy retrieval codes report central audit
-health, not consumer drift.
+health, not consumer drift. The merge-policy attestation codes are consumer
+edits.
 
 | Code | Consumer fix |
 | --- | --- |
@@ -328,7 +329,9 @@ health, not consumer drift.
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |
 | `unexpected-bypass-actor` | Remove the bypass actor, or record it in `merge-policy-expectations.json` after review. See Merge policy audit. |
-| `merge-policy-retrieval-incomplete` | No consumer edit. The usual cause is structural: GitHub returns ruleset bypass actors only to ruleset-write callers, and the reader App is read-only (issue #254). Central operators diagnose the run. |
+| `merge-policy-attestation-missing` | Publish `.github/merge-policy-attestation.json` on the default branch. See Merge policy audit. |
+| `merge-policy-attestation-stale` | Update `.github/merge-policy-attestation.json` to the live ruleset state, or remove entries for rulesets that carry no reviewed context. See Merge policy audit. |
+| `merge-policy-retrieval-incomplete` | No consumer edit. The audit failed to read this repository's live merge settings. Central operators diagnose the run. |
 
 ## Merge policy audit
 
@@ -340,13 +343,14 @@ repository set and default branches must match `unity-enrollment-policy.json`;
 the audit refuses to run when they drift.
 
 The audit reads live rulesets and classic branch protection with a
-per-repository reader token scoped to Administration read. A failed read is a
-finding, never a pass. GitHub returns ruleset `bypass_actors` only to callers
-with write access to the ruleset. The reader App stays read-only by reviewed
-policy, so a carrying ruleset without bypass evidence fails the audit closed
-(issue #254). Classic branch protection bypass evidence stays readable with
-Administration read. Findings are consumer decisions; the audit reports and
-opens one deduplicated issue.
+per-repository reader token scoped to Administration read and Contents read.
+A failed read is a finding, never a pass. GitHub returns ruleset
+`bypass_actors` only to callers with write access to the ruleset. The reader
+App stays read-only by reviewed policy (issue #254), so the audit fills that
+one blind spot from the consumer-published attestation file and fails closed
+when the file is missing or stale. Classic branch protection bypass evidence
+stays readable with Administration read. Findings are consumer decisions; the
+audit reports and opens one deduplicated issue.
 
 - `missing-required-context`: no active ruleset or branch protection on the
   default branch requires the reviewed aggregate. Add the requirement.
@@ -357,14 +361,57 @@ opens one deduplicated issue.
 - `unexpected-bypass-actor`: a ruleset grants a bypass actor that review did
   not accept, or classic protection lets administrators bypass the aggregate.
   Remove the bypass or record it in `merge-policy-expectations.json` after
-  review.
+  review. A detail that ends with `(attested)` reports an actor the consumer
+  attestation published.
+- `merge-policy-attestation-missing`: a carrying ruleset has no bypass
+  evidence and the repository publishes no attestation. Publish the file.
+- `merge-policy-attestation-stale`: the attestation does not match the live
+  ruleset, names a ruleset that carries no reviewed context, or is not valid
+  in the reviewed schema. Update the file. When the stale file hides the
+  only bypass evidence, the audit also fails closed.
 - `merge-policy-retrieval-incomplete`: the audit could not read this
-  repository's merge settings. No consumer edit. The usual cause is
-  structural. GitHub returns ruleset `bypass_actors` only to callers with
-  write access to the ruleset. The reader App holds read access only, by
-  reviewed policy. The credential decision is tracked in issue #254. Until
-  that decision is made and implemented, the run stays red and the drift
-  issue stays open.
+  repository's live merge settings. No consumer edit. Central operators
+  diagnose the run.
+
+### Merge policy attestation
+
+Each consumer whose default branch has a carrying ruleset publishes
+`.github/merge-policy-attestation.json`. The file attests the `bypass_actors`
+list that GitHub hides from read-only callers. The audit proves freshness by
+comparing every visible field with the live ruleset; any mismatch is a
+finding. Update the file through a reviewed pull request whenever the
+ruleset changes.
+
+```json
+{
+  "schemaVersion": 1,
+  "repository": "Ambiguous-Interactive/DxMessaging",
+  "rulesets": [
+    {
+      "rulesetId": 17663217,
+      "rulesetName": "Required CI - Unity Tests (default branch)",
+      "enforcement": "active",
+      "requiredContexts": [
+        "CI Success",
+        "Unity CI Success",
+        "Devcontainer CI Success"
+      ],
+      "bypassActors": [
+        { "actorType": "Integration", "actorId": 3977200, "bypassMode": "always" }
+      ]
+    }
+  ]
+}
+```
+
+- `rulesets` lists exactly the active rulesets that require a reviewed
+  context on the default branch.
+- `rulesetName`, `enforcement`, and `requiredContexts` must equal the live
+  ruleset state.
+- `bypassActors` uses the same fields as the API response. An omitted
+  `bypassMode` means `always`.
+- Repositories whose reviewed expectations name no required context publish
+  no file. Classic branch protection never needs an attestation.
 
 `unity-builder` is exempt: it is a fork whose paid Windows workflow is a
 controlled manual canary, so it declares no required context. Item 6 of

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,20 +87,23 @@ func writeExpectations(t *testing.T, directory string, bodies ...string) string 
 	return path
 }
 
-// rulesetServer serves the ruleset, per-branch rules, and branch protection
-// endpoints the audit reads. A repository without a configured ruleset list
-// serves an empty list; a branch without configured active rules serves an
-// empty list; a branch without a configured protection payload answers
-// "not protected".
+// rulesetServer serves the ruleset, per-branch rules, branch protection,
+// and contents endpoints the audit reads. A repository without a configured
+// ruleset list serves an empty list; a branch without configured active
+// rules serves an empty list; a branch without a configured protection
+// payload answers "not protected"; a repository without a configured
+// attestation file answers 404, which the audit reads as "not published".
 type rulesetServer struct {
 	*httptest.Server
 	activeRulesPayloads   map[string]string
 	rulesetListPayloads   map[string]string
 	rulesetDetailPayloads map[int64]string
 	protectionPayloads    map[string]string
+	contentsPayloads      map[string]string
 	listStatus            int
 	detailStatus          int
 	protectionStatus      int
+	contentsStatus        int
 	protection404Body     string
 	withNextLink          bool
 	withActiveNextLink    bool
@@ -112,9 +116,11 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 		rulesetListPayloads:   map[string]string{},
 		rulesetDetailPayloads: map[int64]string{},
 		protectionPayloads:    map[string]string{},
+		contentsPayloads:      map[string]string{},
 		listStatus:            http.StatusOK,
 		detailStatus:          http.StatusOK,
 		protectionStatus:      http.StatusOK,
+		contentsStatus:        http.StatusOK,
 		protection404Body:     `{"message": "Branch not protected"}`,
 	}
 	mux := http.NewServeMux()
@@ -125,6 +131,26 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 			return
 		}
 		switch {
+		case strings.Contains(path, "/contents/"):
+			rest := strings.TrimPrefix(path, "/repos/")
+			separator := strings.Index(rest, "/contents/")
+			if separator < 0 {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+			repository := rest[:separator]
+			if server.contentsStatus != http.StatusOK {
+				writer.WriteHeader(server.contentsStatus)
+				return
+			}
+			payload, ok := server.contentsPayloads[repository]
+			if !ok {
+				writer.WriteHeader(http.StatusNotFound)
+				_, _ = writer.Write([]byte(`{"message": "Not Found", "status": "404"}`))
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(payload))
 		case strings.Contains(path, "/rules/branches/"):
 			rest := strings.TrimPrefix(path, "/repos/")
 			separator := strings.Index(rest, "/rules/branches/")
@@ -195,7 +221,7 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 	return server, server.Client()
 }
 
-func detailPayload(id int64, name, enforcement, context, bypassActors string) string {
+func detailPayload(name, context, bypassActors string) string {
 	// An empty string means the field is present and empty (evidence read,
 	// no actors); "OMIT" omits the key entirely, which is how GitHub answers
 	// a caller that cannot see bypass evidence.
@@ -206,7 +232,7 @@ func detailPayload(id int64, name, enforcement, context, bypassActors string) st
 	return fmt.Sprintf(`{
     "id": %d,
     "name": "%s",
-    "enforcement": "%s",
+    "enforcement": "active",
     "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
     %s
     "rules": [
@@ -216,16 +242,54 @@ func detailPayload(id int64, name, enforcement, context, bypassActors string) st
       }
     ],
     "source": {"type": "organization"}
-  }`, id, name, enforcement, bypassSection, context)
+  }`, managedRulesetID, name, bypassSection, context)
 }
 
-func activeRulesJSON(rulesetID int64, contexts ...string) string {
+func activeRulesJSON(contexts ...string) string {
 	checks := make([]string, 0, len(contexts))
 	for _, context := range contexts {
 		checks = append(checks, fmt.Sprintf(`{"context": "%s"}`, context))
 	}
 	return fmt.Sprintf(`[{"ruleset_id": %d, "type": "required_status_checks", "parameters": {"required_status_checks": [%s], "strict_required_status_checks_policy": false}}]`,
-		rulesetID, strings.Join(checks, ", "))
+		managedRulesetID, strings.Join(checks, ", "))
+}
+
+// contentsEnvelope wraps one raw file body in the base64 contents API
+// envelope, wrapped at 60 characters like GitHub serves it.
+func contentsEnvelope(raw string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+	var wrapped strings.Builder
+	for len(encoded) > 0 {
+		cut := len(encoded)
+		if cut > 60 {
+			cut = 60
+		}
+		wrapped.WriteString(encoded[:cut])
+		wrapped.WriteString("\n")
+		encoded = encoded[cut:]
+	}
+	return fmt.Sprintf(`{"content": %q, "encoding": "base64", "size": %d}`, wrapped.String(), len(raw))
+}
+
+func attestationBody(rulesets ...string) string {
+	return fmt.Sprintf(`{
+  "schemaVersion": 1,
+  "repository": "Ambiguous-Interactive/DoxReloaded",
+  "rulesets": [%s]
+}`, strings.Join(rulesets, ",\n"))
+}
+
+func attestedRuleset(name, contexts, actors string) string {
+	if actors == "" {
+		actors = "[]"
+	}
+	return fmt.Sprintf(`{
+    "rulesetId": %d,
+    "rulesetName": "%s",
+    "enforcement": "active",
+    "requiredContexts": %s,
+    "bypassActors": %s
+  }`, managedRulesetID, name, contexts, actors)
 }
 
 func protectionJSON(context string, adminEnforced bool) string {
@@ -386,9 +450,9 @@ func TestRunReportsCleanMergePolicy(t *testing.T) {
 	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
 		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
 	server.rulesetDetailPayloads[managedRulesetID] =
-		detailPayload(managedRulesetID, "Main Protection", "active", "CI Success", "")
+		detailPayload("Main Protection", "CI Success", "")
 	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
-		activeRulesJSON(managedRulesetID, "CI Success")
+		activeRulesJSON("CI Success")
 	server.protectionPayloads["Ambiguous-Interactive/qora-redux/branches/main"] = protectionJSON("Unity CI", true)
 	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
 	if exit != 0 {
@@ -413,7 +477,7 @@ func TestRunReportsMissingContextAndAbsentProtection(t *testing.T) {
 	server.rulesetListPayloads["Ambiguous-Interactive/unity-helpers"] =
 		fmt.Sprintf(`[{"id": %d, "name": "Copilot review", "enforcement": "active"}]`, managedRulesetID)
 	server.rulesetDetailPayloads[managedRulesetID] =
-		detailPayload(managedRulesetID, "Copilot review", "active", "Do The Code Review", "")
+		detailPayload("Copilot review", "Do The Code Review", "")
 	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
 	if exit != 1 {
 		t.Fatalf("drifted audit exit = %d, want 1", exit)
@@ -433,7 +497,7 @@ func TestRunReportsMissingContextAndAbsentProtection(t *testing.T) {
 	}
 }
 
-func TestRunFailsClosedWhenBypassEvidenceIsUnavailable(t *testing.T) {
+func TestRunFailsClosedWhenAttestationIsMissing(t *testing.T) {
 	directory := t.TempDir()
 	policyPath := writeRepositoryPolicy(t, directory)
 	expectationsPath := writeExpectations(t, directory,
@@ -448,11 +512,12 @@ func TestRunFailsClosedWhenBypassEvidenceIsUnavailable(t *testing.T) {
 	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
 		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
 	// A caller without ruleset write access cannot see bypass actors; GitHub
-	// answers with the key absent, which must fail closed, not pass.
+	// answers with the key absent. Without a consumer attestation the audit
+	// must fail closed, not pass.
 	server.rulesetDetailPayloads[managedRulesetID] =
-		detailPayload(managedRulesetID, "Main Protection", "active", "CI Success", "OMIT")
+		detailPayload("Main Protection", "CI Success", "OMIT")
 	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
-		activeRulesJSON(managedRulesetID, "CI Success")
+		activeRulesJSON("CI Success")
 	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
 	if exit != 1 {
 		t.Fatalf("unavailable bypass evidence exit = %d, want 1", exit)
@@ -462,8 +527,194 @@ func TestRunFailsClosedWhenBypassEvidenceIsUnavailable(t *testing.T) {
 		t.Fatalf("missing bypass evidence must fail the audit closed: %s", content)
 	}
 	if len(audit.Findings) != 1 ||
-		audit.Findings[0].Code != "merge-policy-retrieval-incomplete" ||
+		audit.Findings[0].Code != "merge-policy-attestation-missing" ||
 		!strings.Contains(audit.Findings[0].Detail, "Main Protection") {
+		t.Fatalf("unexpected artifact: %s", content)
+	}
+}
+
+func TestRunFillsBypassBlindSpotFromAttestation(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload("Main Protection", "CI Success", "OMIT")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON("CI Success")
+	server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] = contentsEnvelope(attestationBody(
+		attestedRuleset("Main Protection", `["CI Success"]`, ""),
+	))
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 0 {
+		t.Fatalf("attested clean audit exit = %d, artifact: %s", exit, content)
+	}
+	var artifact struct {
+		Complete     bool `json:"complete"`
+		Repositories []struct {
+			Repository         string  `json:"repository"`
+			AttestedRulesetIDs []int64 `json:"attestedRulesetIds"`
+		} `json:"repositories"`
+	}
+	if err := json.Unmarshal([]byte(content), &artifact); err != nil {
+		t.Fatalf("decode artifact: %v", err)
+	}
+	if !artifact.Complete {
+		t.Fatalf("a fresh attestation must complete the audit: %s", content)
+	}
+	attested := 0
+	for _, repository := range artifact.Repositories {
+		if repository.Repository == "Ambiguous-Interactive/DoxReloaded" {
+			attested = len(repository.AttestedRulesetIDs)
+			if attested != 1 || repository.AttestedRulesetIDs[0] != managedRulesetID {
+				t.Fatalf("attested ruleset evidence missing: %s", content)
+			}
+		}
+	}
+	if attested == 0 {
+		t.Fatalf("DoxReloaded is absent from the artifact: %s", content)
+	}
+}
+
+func TestRunFailsClosedWhenAttestationIsStale(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload("Main Protection", "CI Success", "OMIT")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON("CI Success")
+	// The live ruleset requires CI Success; the attestation names a context
+	// that no longer exists, so the attested bypass list is untrusted.
+	server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] = contentsEnvelope(attestationBody(
+		attestedRuleset("Main Protection", `["Legacy Context"]`, ""),
+	))
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("stale attestation exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete {
+		t.Fatalf("a stale attestation must fail the audit closed: %s", content)
+	}
+	if len(audit.Findings) != 1 ||
+		audit.Findings[0].Code != "merge-policy-attestation-stale" {
+		t.Fatalf("unexpected artifact: %s", content)
+	}
+}
+
+func TestRunReportsAttestedBypassActorAsDrift(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload("Main Protection", "CI Success", "OMIT")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON("CI Success")
+	server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] = contentsEnvelope(attestationBody(
+		attestedRuleset("Main Protection", `["CI Success"]`,
+			`[{"actorType": "Integration", "actorId": 3977200, "bypassMode": "always"}]`),
+	))
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("attested bypass drift exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	// The attested actor is real drift, but the evidence is complete: the
+	// run fails on findings, not on retrieval.
+	if !audit.Complete || len(audit.Findings) != 1 ||
+		audit.Findings[0].Code != "unexpected-bypass-actor" {
+		t.Fatalf("unexpected artifact: %s", content)
+	}
+	if !strings.Contains(audit.Findings[0].Detail, "(attested)") {
+		t.Fatalf("attested evidence must be visible in the detail: %s", content)
+	}
+}
+
+func TestRunFailsClosedWhenAttestationIsInvalid(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		contentsEnvelope(`{"schemaVersion": 2, "repository": "Ambiguous-Interactive/DoxReloaded", "rulesets": []}`)
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("invalid attestation exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete || len(audit.Findings) != 1 ||
+		audit.Findings[0].Code != "merge-policy-attestation-stale" {
+		t.Fatalf("an invalid attestation must fail the audit closed: %s", content)
+	}
+}
+
+func TestRunFlagsStaleAttestationWhenLiveEvidenceIsVisible(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	// Live bypass evidence is visible here, so the audit stays complete; the
+	// stale attestation still fails the run until the consumer updates it.
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload("Main Protection", "CI Success", "")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON("CI Success")
+	server.contentsPayloads["Ambiguous-Interactive/DoxReloaded"] = contentsEnvelope(attestationBody(
+		attestedRuleset("Renamed Protection", `["CI Success"]`, ""),
+	))
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("stale attestation with live evidence exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if !audit.Complete || len(audit.Findings) != 1 ||
+		audit.Findings[0].Code != "merge-policy-attestation-stale" {
 		t.Fatalf("unexpected artifact: %s", content)
 	}
 }

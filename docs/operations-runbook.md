@@ -191,7 +191,8 @@ The required steady-state boundary is:
   runners read, and Administration read. Each operation requests only the
   permissions and repositories it needs: preflight uses runner inventory,
   reaping uses Actions/Metadata, the central policy audit uses Contents, and
-  the central merge-policy audit uses Administration read.
+  the central merge-policy audit uses Administration read and Contents read
+  (merge-policy attestations).
 - Writer, reader, and Unity organization secrets use selected-repository
   visibility. They are exposed only to enrolled consumers and to this policy
   repository where an operation requires them.

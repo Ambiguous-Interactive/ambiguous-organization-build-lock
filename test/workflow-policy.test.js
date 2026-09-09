@@ -1536,6 +1536,7 @@ test("organization merge-policy audit is exact, read-only, and fail closed", () 
   assert.equal(token.with["app-id"], "${{ secrets.BUILD_LOCK_READER_APP_ID }}");
   assert.equal(token.with["private-key"], "${{ secrets.BUILD_LOCK_READER_APP_PRIVATE_KEY }}");
   assert.equal(token.with["permission-administration"], "read");
+  assert.equal(token.with["permission-contents"], "read");
   assert.equal(token.with.repositories, "${{ steps.merge-policy-scope.outputs.repositories }}");
   assert.equal(audit.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
   assert.equal(audit["continue-on-error"], "true");

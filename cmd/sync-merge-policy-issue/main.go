@@ -139,6 +139,14 @@ func validateAudit(audit mergepolicy.Audit) error {
 			!branchPattern.MatchString(repository.DefaultBranch) {
 			return fmt.Errorf("invalid audited repository")
 		}
+		if len(repository.AttestedRulesetIDs) > maxRepositories {
+			return fmt.Errorf("audited repository attestation evidence exceeds bound")
+		}
+		for _, rulesetID := range repository.AttestedRulesetIDs {
+			if rulesetID <= 0 {
+				return fmt.Errorf("invalid attested ruleset id")
+			}
+		}
 	}
 	for _, entry := range audit.Inventory {
 		if !repositoryPattern.MatchString(entry.Repository) ||
