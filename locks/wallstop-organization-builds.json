@@ -1,8 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
+  "holder": {
+    "holderId": "Ambiguous-Interactive/qora-redux:34401753661:unity:qora",
+    "repository": "Ambiguous-Interactive/qora-redux",
+    "workflow": "Unity Validation",
+    "job": "unity",
+    "runId": "34401753661",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/34401753661",
+    "queuedAt": "2026-09-09T20:42:21.321Z",
+    "acquiredAt": "2026-09-09T20:42:24.263Z",
+    "expiresAt": "2026-09-10T00:42:24.263Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "102635713986"
+  },
+  "holders": [
+    {
+      "holderId": "Ambiguous-Interactive/qora-redux:34401753661:unity:qora",
+      "repository": "Ambiguous-Interactive/qora-redux",
+      "workflow": "Unity Validation",
+      "job": "unity",
+      "runId": "34401753661",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/qora-redux/actions/runs/34401753661",
+      "queuedAt": "2026-09-09T20:42:21.321Z",
+      "acquiredAt": "2026-09-09T20:42:24.263Z",
+      "expiresAt": "2026-09-10T00:42:24.263Z",
+      "runnerId": "ELI-MACHINE",
+      "jobId": "102635713986"
+    }
+  ],
   "queue": [],
   "reservations": [
     {
@@ -18,23 +46,8 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder job 102577638834 is completed",
       "createdAt": "2026-09-09T18:24:35.447Z"
-    },
-    {
-      "reservationId": "68502dd7-e756-4795-97a0-dea2f9920791",
-      "holderId": "Ambiguous-Interactive/unity-helpers:34401210088:unity-tests:2021.3.45f1-editmode",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "34401210088",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/34401210088",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-09T20:41:43.570Z",
-      "availableAt": "2026-09-09T20:41:44.570Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-09T20:41:43.571Z"
+  "updatedAt": "2026-09-09T20:42:24.263Z"
 }
