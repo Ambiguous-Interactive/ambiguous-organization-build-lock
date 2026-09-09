@@ -142,6 +142,54 @@ func TestAnalyzeReportsUnexpectedRulesetBypassActors(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBypassAcceptanceRequiresTheReviewedMode(t *testing.T) {
+	// An accepted actor is scoped to the reviewed bypass mode. An omitted
+	// mode records the default always mode, so it never accepts a narrower
+	// or wider live mode by accident.
+	cases := []struct {
+		name                 string
+		expectationMode      string
+		observedMode         string
+		wantUnexpectedBypass bool
+	}{
+		{"reviewed default accepts live default", "", "always", false},
+		{"reviewed always accepts live always", "always", "always", false},
+		{"reviewed pull_request accepts live pull_request", "pull_request", "pull_request", false},
+		{"reviewed default refuses a pull_request bypass", "", "pull_request", true},
+		{"reviewed always refuses a pull_request bypass", "always", "pull_request", true},
+		{"reviewed pull_request refuses an always bypass", "pull_request", "always", true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ruleset := ruleset(17663217, "Required CI", "active", "Unity CI Success")
+			ruleset.BypassActors = []RuleBypassActor{
+				{ActorType: "Integration", ActorID: 3977200, Mode: testCase.observedMode, Attested: true},
+			}
+			expectation := expectation()
+			expectation.AllowedBypassActors = []BypassActor{
+				{ActorType: "Integration", ActorID: 3977200, Mode: testCase.expectationMode},
+			}
+			observed := Observed{
+				ActiveChecks: []ActiveCheck{activeCheck("Unity CI Success", 17663217)},
+				Rulesets:     []Ruleset{ruleset},
+			}
+			findings, _ := Analyze(expectation, observed)
+			hasBypassFinding := false
+			for _, finding := range findings {
+				if finding.Code == CodeUnexpectedBypassActor {
+					hasBypassFinding = true
+				}
+			}
+			if hasBypassFinding != testCase.wantUnexpectedBypass {
+				t.Fatalf(
+					"unexpected-bypass-actor = %v, want %v (findings %+v)",
+					hasBypassFinding, testCase.wantUnexpectedBypass, findings,
+				)
+			}
+		})
+	}
+}
+
 func TestAnalyzeBypassEvidenceIgnoresInactiveAndUnrelatedRulesets(t *testing.T) {
 	first := ruleset(2, "inactive carrier", "disabled", "Unity CI Success")
 	first.BypassActors = []RuleBypassActor{{ActorType: "OrganizationAdmin", ActorID: 5, Mode: "always"}}

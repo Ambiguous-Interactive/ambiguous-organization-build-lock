@@ -216,9 +216,14 @@ The workflow mints one installation token per run through the automation App
 operator decision; the token stays scoped to exactly the enrolled repository
 list with Contents write, Pull requests write, and Workflows write
 (workflow-file edits are refused without that permission). The reader App
-never gains write. The automation never merges, never force-pushes, never
-edits a default branch, and never uses a PAT. Merging the repin pull request
-is the consumer's adoption decision.
+never gains write. The automation never force-pushes, never edits a default
+branch, and never uses a PAT. Each offer it opens enables auto-merge, so
+GitHub merges only after the consumer's required checks and merge rules pass
+(decision on #266, 2026-09-09). The request happens once at offer creation;
+a later consumer disable is never undone. A refused request leaves the offer
+open, keeps the run green, and adds one summary row, so the gap stays
+operator-visible. The repository-level opt-out is the `Allow auto-merge`
+setting.
 
 ## Credential and App boundary
 

@@ -14,7 +14,9 @@
       "defaultBranch": "master",
       "requiredContexts": ["Unity CI Success"],
       "requireAdminEnforcement": true,
-      "allowedBypassActors": []
+      "allowedBypassActors": [
+        { "actorType": "Integration", "actorId": 3977200, "mode": "always" }
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/IshoBoy",

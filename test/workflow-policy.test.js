@@ -1558,7 +1558,7 @@ test("organization merge-policy audit is exact, read-only, and fail closed", () 
   assert.equal(trustedCheckout.with.ref, "main");
 });
 
-test("consumer repin automation is scheduled, least privilege, and never merges", () => {
+test("consumer repin automation is scheduled, least privilege, and merges only through gated auto-merge", () => {
   const text = readWorkflow("repin-consumer-locks.yml");
   const automation = readWorkflowScript("repin-consumer-locks.sh");
   const facts = JSON.parse(
@@ -1612,6 +1612,13 @@ test("consumer repin automation is scheduled, least privilege, and never merges"
   assert.doesNotMatch(automation, /gh pr merge|gh pr .*--merge|push[^\n]*--force/);
   assert.doesNotMatch(automation, /https:\/\/[^$\s]*@github\.com/);
   assert.match(automation, /CONSUMER_PUSH_AUTHORIZATION="\$\{authorization\}"/);
+
+  // The direct merge command stays out; the only merge path is the GraphQL
+  // auto-merge request, made once per new offer, with every failure recorded
+  // in the run summary instead of a merge the automation performs itself.
+  assert.match(automation, /enablePullRequestAutoMerge/);
+  assert.match(automation, /auto-merge was not enabled/);
+  assert.doesNotMatch(automation, /gh pr ready/);
 });
 
 test("Unity repository onboarding opens a reviewable registry-only PR from trusted main", () => {

@@ -1372,6 +1372,21 @@ function consumerRepinHarness(t, consumerStates) {
     if (state.failClose) {
       fs.writeFileSync(path.join(prState, name, "fail-close"), "1\n");
     }
+    if (state.failAutoMerge) {
+      fs.writeFileSync(path.join(prState, name, "fail-automerge"), "1\n");
+    }
+    if (state.noMergeMethods) {
+      fs.writeFileSync(path.join(prState, name, "no-merge-methods"), "1\n");
+    }
+    if (state.mergeMethodsMergeOnly) {
+      fs.writeFileSync(path.join(prState, name, "merge-methods-merge-only"), "1\n");
+    }
+    if (state.mergeMethodsRebaseOnly) {
+      fs.writeFileSync(path.join(prState, name, "merge-methods-rebase-only"), "1\n");
+    }
+    if (state.malformedPrUrl) {
+      fs.writeFileSync(path.join(prState, name, "malformed-pr-url"), "1\n");
+    }
   }
 
   writeExecutable(path.join(shims, "gh"), [
@@ -1439,6 +1454,69 @@ function consumerRepinHarness(t, consumerStates) {
     '  printf \'create %s %s\\n\' "${head}" "${title}" >> "${TEST_EVENTS}"',
     '  name="${repository#*/}"',
     '  if [ -n "${bodyfile:-}" ]; then cp "${bodyfile}" "${TEST_PR_STATE}/${name}/last-body.md"; fi',
+    '  # gh pr create prints the pull request URL on success; the script parses',
+    '  # the number out of it for the auto-merge request.',
+    '  counter_file="${TEST_PR_STATE}/${name}/next-pr-number"',
+    '  number="$(cat "${counter_file}" 2>/dev/null || echo 899)"',
+    '  number=$((number + 1))',
+    '  printf \'%s\\n\' "${number}" > "${counter_file}"',
+    '  # A malformed output makes the script parse a URL that matches no pull',
+    '  # request, so the auto-merge request cannot read its offer identity.',
+    '  if [ -f "${TEST_PR_STATE}/${name}/malformed-pr-url" ]; then',
+    '    printf \'unexpected error\\n\'',
+    '    exit 0',
+    '  fi',
+    '  printf \'https://github.com/%s/%s/pull/%s\\n\' "${repository%%/*}" "${name}" "${number}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then',
+    '  query=""; jqexpr="."; owner=""; name=""; number=""; node_id=""; merge_method=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--jq" ]; then jqexpr="${argument}"; fi',
+    '    case "${previous}" in',
+    '      "-f")',
+    '        case "${argument}" in',
+    '          query=*) query="${argument#query=}";;',
+    '          owner=*) owner="${argument#owner=}";;',
+    '          name=*) name="${argument#name=}";;',
+    '          id=*) node_id="${argument#id=}";;',
+    '          method=*) merge_method="${argument#method=}";;',
+    '        esac',
+    '        ;;',
+    '      "-F") case "${argument}" in number=*) number="${argument#number=}";; esac ;;',
+    '    esac',
+    '    previous="${argument}"',
+    '  done',
+    '  case "${query}" in',
+    '    *"pullRequest(number"*)',
+    '      printf \'prid %s %s %s\\n\' "${owner}" "${name}" "${number}" >> "${TEST_EVENTS}"',
+    '      # The fixtures shape the allowed-methods answer so the script\'s own',
+    '      # SQUASH, MERGE, REBASE preference runs for real.',
+    '      if [ -f "${TEST_PR_STATE}/${name}/no-merge-methods" ]; then',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":false,"mergeCommitAllowed":false,"rebaseMergeAllowed":false}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      elif [ -f "${TEST_PR_STATE}/${name}/merge-methods-merge-only" ]; then',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":false,"mergeCommitAllowed":true,"rebaseMergeAllowed":false}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      elif [ -f "${TEST_PR_STATE}/${name}/merge-methods-rebase-only" ]; then',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":false,"mergeCommitAllowed":false,"rebaseMergeAllowed":true}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      else',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":true,"mergeCommitAllowed":true,"rebaseMergeAllowed":false}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      fi',
+    '      ;;',
+    '    *"enablePullRequestAutoMerge"*)',
+    '      target_name="$(printf \'%s\' "${node_id}" | sed -n \'s/^PR_\\(.*\\)_test$/\\1/p\')"',
+    '      printf \'automerge %s\\n\' "${target_name}" >> "${TEST_EVENTS}"',
+    '      printf \'automerge-method %s %s\\n\' "${target_name}" "${merge_method}" >> "${TEST_EVENTS}"',
+    '      if [ -f "${TEST_PR_STATE}/${target_name}/fail-automerge" ]; then',
+    '        printf \'GraphQL: Auto-merge is not allowed for this repository (enablePullRequestAutoMerge)\\n\' >&2',
+    '        exit 1',
+    '      fi',
+    '      printf \'{"data":{"enablePullRequestAutoMerge":{"pullRequest":{"number":901}}}}\\n\' | jq -r "${jqexpr}"',
+    '      ;;',
+    '    *)',
+    '      printf \'test shim received an unexpected graphql query: %s\\n\' "${query}" >&2',
+    '      exit 64',
+    '  esac',
     "  exit 0",
     "fi",
     "exit 64"
@@ -1562,6 +1640,87 @@ test("consumer repin leaves a repin branch with different content untouched", (t
   );
 });
 
+test("consumer repin keeps the run green when auto-merge is refused", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { failAutoMerge: true }
+  });
+
+  const result = harness.run();
+
+  // A refused auto-merge request never fails the run and never removes the
+  // offer: the merge gates stay with the consumer, and the summary row keeps
+  // the gap operator-visible.
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /::warning::Ambiguous-Interactive\/dxmessaging: repin offer #[0-9]+ is open but auto-merge was not enabled/);
+  assert.match(result.stderr, /Allow auto-merge/);
+  const events = repinEventLog(harness);
+  assert.equal(events.filter((event) => event.startsWith("create ")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("automerge ")).length, 1, "the refused request is attempted once");
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not enabled \(see the job log\) \|/);
+});
+
+test("consumer repin records a repository where no merge method allows auto-merge", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { noMergeMethods: true }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /no readable identity or no allowed merge method/);
+  const events = repinEventLog(harness);
+  assert.equal(events.filter((event) => event.startsWith("prid ")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("automerge ")).length, 0, "no mutation is sent without an allowed merge method");
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not requested \(see the job log\) \|/);
+});
+
+test("consumer repin picks the single allowed merge method on restricted repositories", async (t) => {
+  const cases = [
+    { fixture: "merge-methods-merge-only", state: { mergeMethodsMergeOnly: true }, method: "MERGE" },
+    { fixture: "merge-methods-rebase-only", state: { mergeMethodsRebaseOnly: true }, method: "REBASE" }
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.fixture, (subtest) => {
+      const harness = consumerRepinHarness(subtest, {
+        "dxmessaging": testCase.state
+      });
+
+      const result = harness.run();
+
+      assert.equal(result.status, 0, result.stderr);
+      const events = repinEventLog(harness);
+      assert.equal(events.filter((event) => event.startsWith("automerge ")).length, 1, "the mutation fires once");
+      assert.deepEqual(events.filter((event) => event.startsWith("automerge-method ")), [
+        `automerge-method dxmessaging ${testCase.method}`
+      ]);
+      const summary = fs.readFileSync(harness.summaryPath, "utf8");
+      assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1\.14\.0` \(1 line\) \|/);
+    });
+  }
+});
+
+test("consumer repin keeps the run green when the pull request URL is unreadable", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { malformedPrUrl: true }
+  });
+
+  const result = harness.run();
+
+  // A URL that matches no pull request leaves the offer open without an
+  // auto-merge request: the run stays green and the summary row keeps the
+  // gap operator-visible.
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /::warning::Ambiguous-Interactive\/dxmessaging: opened the repin offer but could not read its pull request URL/);
+  const events = repinEventLog(harness);
+  assert.equal(events.filter((event) => event.startsWith("prid ")).length, 0);
+  assert.equal(events.filter((event) => event.startsWith("automerge")).length, 0);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer is open; auto-merge was not requested \(see the job log\) \|/);
+});
+
 test("consumer repin pushes and opens a pull request when no branch exists", (t) => {
   const harness = consumerRepinHarness(t, { "dxmessaging": {} });
 
@@ -1624,7 +1783,35 @@ test("consumer repin commits companion artifacts and lists them in the pull requ
   );
   assert.match(body, /Reviewed companion artifacts/);
   assert.match(body, /- `docs\/ops\/pin-doc\.md` \(pin-lines\)/);
-  assert.match(body, /never merges itself/);
+  assert.match(body, /enables auto-merge on this pull request/);
+  assert.doesNotMatch(body, /never merges itself/);
+});
+
+test("consumer repin enables auto-merge on every offer it opens", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true },
+    "dxmessaging": {}
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const events = repinEventLog(harness);
+  // Both open paths (fresh push and identical-branch recovery) request
+  // auto-merge exactly once, immediately after the offer is created.
+  assert.equal(
+    events.filter((event) => event.startsWith(`create ${harness.branchName} `)).length,
+    2,
+    "each consumer opens one offer"
+  );
+  for (const name of ["unity-helpers", "dxmessaging"]) {
+    const prid = events.filter((event) => event.startsWith(`prid Ambiguous-Interactive ${name} `));
+    const automerge = events.filter((event) => event === `automerge ${name}`);
+    assert.equal(prid.length, 1, `${name}: the offer identity is read once`);
+    assert.equal(automerge.length, 1, `${name}: auto-merge is requested once`);
+  }
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1\.14\.0` \(1 line\) \|/);
 });
 
 test("consumer repin never duplicates an open pull request", (t) => {
@@ -1638,6 +1825,9 @@ test("consumer repin never duplicates an open pull request", (t) => {
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` is already open \|/);
   assert.equal(repinEventLog(harness).filter((event) => event.startsWith("create")).length, 0);
+  // A later run never re-requests auto-merge on an existing offer, so a
+  // consumer who disabled auto-merge keeps that decision.
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("automerge")).length, 0);
   assert.equal(
     harness.branches.get("unity-helpers"),
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)

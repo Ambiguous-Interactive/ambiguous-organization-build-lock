@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 088)
+## Current state (2026-09-09, session 089)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -137,8 +137,25 @@ impact on licensed-resource safety and consumer CI churn.
   commented pins). Dependabot cannot rewrite companions or see release
   authorization, so the central repin offer stays the complete update and
   an unauthorized Dependabot bump fails closed as `unapproved-lock-ref`.
-  Full zero-touch adoption (auto-merge of green offers) waits on the
-  operator reversal of the automation-never-merges directive.
+- The v1.14.2 adoption cohort completed (2026-09-09): the three repin
+  offers merged with their companions (unity-helpers #751, IshoBoy #877,
+  qora-redux #382), and DxMessaging adopted through #568. The scheduled
+  enrollment audit now reports 27 findings, all unity-helpers, all behind
+  the open structural PR unity-helpers #749; its merge closes #113
+  automatically on the first clean run.
+- Session 089 answered #266 (operator decision, option 2): the repin
+  automation enables auto-merge on every offer it opens, with the merge
+  method chosen from the repository's allowed methods (squash preferred).
+  The request happens once at creation; a consumer disable is respected;
+  a refused request keeps the run green with a summary row. The
+  repository-level opt-out is the `Allow auto-merge` setting.
+- Session 089 answered the last #255 review item (operator decision):
+  the DxMessaging ruleset 17663217 Integration actor 3977200 (attested,
+  mode `always`) is now recorded in `merge-policy-expectations.json`, and
+  expectation bypass actors carry a reviewed bypass mode. The live audit
+  re-run confirms only the unity-helpers merge gate remains; when
+  unity-helpers #749 merges, a complete clean audit closes #255 and #113
+  automatically.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -167,8 +184,10 @@ impact on licensed-resource safety and consumer CI churn.
 
 - [x] Zero-touch repin automation: the central `Repin consumer lock
       references` workflow opens repin pull requests in enrolled
-      repositories for every newly authorized release (operator directive
-      2026-09-07). Consumers merge; the automation never does.
+      repositories for every newly authorized release. Session 089 added
+      auto-merge (operator decision on #266): offers merge on green without
+      a click; a per-repository `Allow auto-merge` opt-out restores a
+      manual gate.
 - [x] Confirm the automation App's registered permissions include
       Pull requests write and Workflows write (org-wide installation is the
       standing operator configuration). Operator-confirmed 2026-09-07; no
@@ -189,9 +208,9 @@ impact on licensed-resource safety and consumer CI churn.
       consumer-closed offer is a decline, so the automation never re-offers
       it.
       DxMessaging adopted the pins in its own PR #554. unity-helpers
-      declined the earlier repin by closing #738. The v1.14.2 offers are
-      open with their companion fixes pushed (#751, #877, #382);
-      their merges are consumer decisions.
+      declined the earlier repin by closing #738. The v1.14.2 offers
+      merged on 2026-09-09 (#751, #877, #382), and DxMessaging adopted
+      through #568.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
