@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-08, session 082)
+## Current state (2026-09-09, session 083)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -86,8 +86,17 @@ impact on licensed-resource safety and consumer CI churn.
   checks. #254 records the credential decision: read-only paths are
   live-proven and documented insufficient, so only a ruleset-write
   credential or #252 option 3 remains. The finding-code contract no longer
-  tells operators to "check Administration read" (session 082). The run
-  stays red until that decision is made and implemented.
+  tells operators to "check Administration read" (session 082).
+- The operator chose #252 option 3 (2026-09-09): consumer-attested ruleset
+  bypass evidence. The audit now fills that one blind spot from
+  `.github/merge-policy-attestation.json`, proves the file is fresh
+  against the live ruleset, and fails closed while a carrying ruleset has
+  no attestation (session 083). True drift cleared live with operator
+  approval: DoxReloaded ruleset 22595536 now requires `CI Success`, and
+  qora-redux branch protection no longer lets administrators bypass.
+  Remaining before the audit is green: attestation PRs DoxReloaded #815,
+  DxMessaging #564, and IshoBoy #873 (consumer decisions), the DxMessaging
+  Integration 3977200 bypass review, and the unity-helpers merge gate.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
