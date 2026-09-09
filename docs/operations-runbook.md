@@ -146,9 +146,15 @@ request per repository on the stable branch prefix `automation/repin-lock-`.
 The per-repository result is recorded in the run summary; any repository
 failure keeps the run red. Idempotency: a repository with no stale reference
 is skipped, and an open repin pull request for the same target is never
-duplicated. A closed repin pull request is a consumer answer: the automation
-skips that repository with a summary row instead of re-offering the same
-repin, and it never updates the branch underneath the closed pull request. A
+duplicated. When the rewrite moves no pin, no permitted lock-pin change
+remains to reach the authorized release. The automation closes every open
+pull request whose head branch matches `automation/repin-lock-<short sha>`
+as superseded. The close comment names the release. The run summary records
+the count. Offers on any other branch are never touched. A closed repin
+pull request is final for that target, whoever closed it. A consumer close
+is a decline. The automation skips that repository with a summary row, and
+it never updates the branch underneath the closed pull request; a manual
+reopen can restore the offer. A
 repin branch without an open or closed pull request is a partially failed
 run; the next run reuses it only when its content matches the current repin
 exactly, opens the pull request from it, and never force-updates a branch

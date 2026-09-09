@@ -1199,7 +1199,7 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
     path.join(workflows, "unity.yml"),
     `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${sha}\n`
   );
-  writePin(repinOldSha);
+  writePin(state.atTarget ? releaseSha : repinOldSha);
   for (const [relativePath, content] of Object.entries(state.companionFiles || {})) {
     const filePath = path.join(seed, relativePath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -1282,8 +1282,25 @@ function consumerRepinHarness(t, consumerStates) {
   fs.mkdirSync(prState, { recursive: true });
   for (const [name, state] of Object.entries(consumerStates)) {
     fs.mkdirSync(path.join(prState, name), { recursive: true });
-    fs.writeFileSync(path.join(prState, name, "open"), `${state.openPrs || 0}\n`);
-    fs.writeFileSync(path.join(prState, name, "closed"), `${state.closedPrs || 0}\n`);
+    // The fixtures are the raw pull-request lists the GitHub API would
+    // return; the shim applies the state and head filters and the script's
+    // own --jq filter, so the ownership filter runs for real.
+    const open = [];
+    for (let index = 0; index < (state.openPrs || 0); index += 1) {
+      open.push({ number: 700 + index, headRefName: branchName });
+    }
+    for (const offer of state.openOffers || []) {
+      open.push({ number: offer.number, headRefName: offer.head });
+    }
+    const closed = [];
+    for (let index = 0; index < (state.closedPrs || 0); index += 1) {
+      closed.push({ number: 800 + index, headRefName: branchName });
+    }
+    fs.writeFileSync(path.join(prState, name, "open.json"), JSON.stringify(open));
+    fs.writeFileSync(path.join(prState, name, "closed.json"), JSON.stringify(closed));
+    if (state.failClose) {
+      fs.writeFileSync(path.join(prState, name, "fail-close"), "1\n");
+    }
   }
 
   writeExecutable(path.join(shims, "gh"), [
@@ -1296,15 +1313,38 @@ function consumerRepinHarness(t, consumerStates) {
     '  exec git clone "${TEST_CLONE_BASE}/${repository}.git" "${directory}" "$@"',
     "fi",
     'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
-    '  repository=""; state="open"',
+    '  repository=""; state="open"; head=""; jqexpr=""',
     '  previous=""',
     '  for argument in "$@"; do',
     '    if [ "${previous}" = "--repo" ]; then repository="${argument}"; fi',
     '    if [ "${previous}" = "--state" ]; then state="${argument}"; fi',
+    '    if [ "${previous}" = "--head" ]; then head="${argument}"; fi',
+    '    if [ "${previous}" = "--jq" ]; then jqexpr="${argument}"; fi',
     '    previous="${argument}"',
     "  done",
     '  name="${repository#*/}"',
-    '  cat "${TEST_PR_STATE}/${name}/${state}"',
+    '  state_file="${TEST_PR_STATE}/${name}/${state}.json"',
+    '  # gh prints string results raw, like jq -r.',
+    '  if [ -n "${head}" ]; then',
+    '    jq -r --arg head "${head}" \'[.[] | select(.headRefName == $head)] | \'"${jqexpr}" "${state_file}"',
+    "  else",
+    '    jq -r "${jqexpr}" "${state_file}"',
+    "  fi",
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "pr" ] && [ "$2" = "close" ]; then',
+    '  number="$3"',
+    '  repository=""; comment=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--repo" ]; then repository="${argument}"; fi',
+    '    if [ "${previous}" = "--comment" ]; then comment="${argument}"; fi',
+    '    previous="${argument}"',
+    "  done",
+    '  name="${repository#*/}"',
+    '  printf \'close %s %s\\n\' "${name}" "${number}" >> "${TEST_EVENTS}"',
+    '  printf \'%s\' "${comment}" > "${TEST_PR_STATE}/${name}/last-close-comment.md"',
+    '  if [ -f "${TEST_PR_STATE}/${name}/fail-close" ]; then exit 1; fi',
     "  exit 0",
     "fi",
     'if [ "$1" = "pr" ] && [ "$2" = "create" ]; then',
@@ -1391,7 +1431,7 @@ test("consumer repin skips a closed repin pull request and stays green", (t) => 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /left the closed repin pull request in place/);
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
-  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` was closed; consumers decide adoption \|/);
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` was closed; a closed offer is never re-offered \|/);
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
   assert.equal(
     repinEventLog(harness).filter((event) => event.startsWith("create")).length,
@@ -1520,6 +1560,95 @@ test("consumer repin never duplicates an open pull request", (t) => {
     harness.branches.get("unity-helpers"),
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
   );
+});
+
+test("consumer repin closes superseded offers when the default branch already pins the target", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": {
+      atTarget: true,
+      openOffers: [
+        // A foreign-head pull request is never the automation's offer.
+        { number: 900, head: "consumer/own-work" },
+        { number: 801, head: "automation/repin-lock-300501e" }
+      ]
+    },
+    "dxmessaging": {}
+  });
+  // The default branch adopted the target outside the offer, so an open
+  // offer for the current target is redundant too.
+  const openPath = path.join(harness.root, "pr-state", "unity-helpers", "open.json");
+  const open = JSON.parse(fs.readFileSync(openPath, "utf8"));
+  open.push({ number: 751, headRefName: harness.branchName });
+  fs.writeFileSync(openPath, JSON.stringify(open));
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("close")), [
+    "close unity-helpers 801",
+    "close unity-helpers 751"
+  ]);
+  assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("create")), [
+    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+  ]);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 2 superseded repin offer\(s\) \|/);
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+  const comment = fs.readFileSync(
+    path.join(harness.root, "pr-state", "unity-helpers", "last-close-comment.md"),
+    "utf8"
+  );
+  assert.match(comment, /superseded/);
+  assert.match(comment, new RegExp(harness.releaseSha));
+});
+
+test("consumer repin keeps offers open while the default branch still needs the pin", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": {
+      automation: true,
+      openPrs: 1,
+      openOffers: [{ number: 751, head: "automation/repin-lock-300501e" }]
+    }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("close")).length, 0);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` is already open \|/);
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
+  );
+});
+
+test("consumer repin records an already pinned repository without offers", (t) => {
+  const harness = consumerRepinHarness(t, { "unity-helpers": { atTarget: true } });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0` \|/);
+  assert.equal(repinEventLog(harness).filter((event) => !event.startsWith("clone")).length, 0);
+});
+
+test("consumer repin fails closed when a superseded offer cannot be closed", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": {
+      atTarget: true,
+      openOffers: [{ number: 801, head: "automation/repin-lock-300501e" }],
+      failClose: true
+    }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /could not close the superseded repin offers/);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| failed; see the job log \|/);
 });
 
 const authorizationScriptPath = path.join(scriptsRoot, "open-release-authorization-pr.sh");
