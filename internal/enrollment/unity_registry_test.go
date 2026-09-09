@@ -323,6 +323,123 @@ func TestUnityEnrollmentRegistryRejectsDuplicateRepinException(t *testing.T) {
 	}
 }
 
+func TestUnityEnrollmentRegistryRetainsValidRepinCompanions(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.RepinCompanions = []UnityRepinCompanion{
+		{
+			Repository: "Ambiguous-Interactive/DxMessaging",
+			Path:       "docs/ops/ci-and-github-settings.md",
+			Mode:       "pin-lines",
+		},
+		{
+			Repository: "Ambiguous-Interactive/IshoBoy",
+			Path:       "scripts/build_lock_policy.json",
+			Mode:       "policy-snapshot",
+		},
+		{
+			Repository: "Ambiguous-Interactive/qora-redux",
+			Path:       "tests/ci/unity-workflow-contract.test.mjs",
+			Mode:       "pin-literal",
+		},
+	}
+	parsed, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.RepinCompanions) != 3 {
+		t.Fatalf("repin companions were not retained: %#v", parsed.RepinCompanions)
+	}
+}
+
+func TestUnityEnrollmentRegistryRejectsInvalidRepinCompanion(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*UnityRepinCompanion)
+	}{
+		{"unregistered repository", func(value *UnityRepinCompanion) {
+			value.Repository = "Ambiguous-Interactive/not-enrolled"
+		}},
+		{"non-canonical repository", func(value *UnityRepinCompanion) {
+			value.Repository = "Ambiguous-Interactive/DXMESSAGING"
+		}},
+		{"path inside .github", func(value *UnityRepinCompanion) {
+			value.Path = ".github/pin-reference.md"
+		}},
+		{"the .github directory itself", func(value *UnityRepinCompanion) {
+			value.Path = ".github"
+		}},
+		{"nul in path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin\x00reference.md"
+		}},
+		{"tab in path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin\treference.md"
+		}},
+		{"workflow path", func(value *UnityRepinCompanion) {
+			value.Path = ".github/workflows/unity.yml"
+		}},
+		{"escaping path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/../secrets.txt"
+		}},
+		{"non-normalized path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/./pin-reference.md"
+		}},
+		{"absolute path", func(value *UnityRepinCompanion) {
+			value.Path = "/docs/pin-reference.md"
+		}},
+		{"windows path", func(value *UnityRepinCompanion) {
+			value.Path = `docs\pin-reference.md`
+		}},
+		{"option-like path", func(value *UnityRepinCompanion) {
+			value.Path = "-docs/pin-reference.md"
+		}},
+		{"backtick path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin`-reference.md"
+		}},
+		{"multiline path", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin\n-reference.md"
+		}},
+		{"unknown mode", func(value *UnityRepinCompanion) {
+			value.Mode = "rewrite-everything"
+		}},
+		{"empty mode", func(value *UnityRepinCompanion) {
+			value.Mode = ""
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := validUnityRegistry()
+			registry.RepinCompanions = []UnityRepinCompanion{{
+				Repository: "Ambiguous-Interactive/DxMessaging",
+				Path:       "docs/ops/ci-and-github-settings.md",
+				Mode:       "pin-lines",
+			}}
+			testCase.mutate(&registry.RepinCompanions[0])
+			if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err == nil {
+				t.Fatalf("invalid repin companion %q passed", testCase.name)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRegistryRejectsDuplicateRepinCompanion(t *testing.T) {
+	registry := validUnityRegistry()
+	entry := UnityRepinCompanion{
+		Repository: "Ambiguous-Interactive/DxMessaging",
+		Path:       "docs/ops/ci-and-github-settings.md",
+		Mode:       "pin-lines",
+	}
+	registry.RepinCompanions = []UnityRepinCompanion{entry, entry}
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err == nil {
+		t.Fatal("duplicate repin companion passed")
+	}
+	second := entry
+	second.Path = "docs/ops/ambiguous-release-migration.md"
+	registry.RepinCompanions = []UnityRepinCompanion{entry, second}
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err != nil {
+		t.Fatalf("distinct repin companion paths failed: %v", err)
+	}
+}
+
 func TestUnityEnrollmentRegistryRejectsUnknownAndTrailingJSON(t *testing.T) {
 	content := encodeRegistry(t, validUnityRegistry())
 	withUnknown := strings.Replace(string(content), `"schemaVersion":1`, `"schemaVersion":1,"unknown":true`, 1)

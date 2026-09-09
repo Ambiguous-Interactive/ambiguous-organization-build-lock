@@ -140,11 +140,12 @@ authorization merge.
 
 For each enrolled repository the workflow clones the default branch, rewrites
 only the `@<sha>` suffix of `uses:` references to this repository's actions
-(plus a matching `# vX.Y.Z` comment), and opens one pull request per
-repository on the stable branch prefix `automation/repin-lock-`. The
-per-repository result is recorded in the run summary; any repository failure
-keeps the run red. Idempotency: a repository with no stale reference is
-skipped, and an open repin pull request for the same target is never
+(plus a matching `# vX.Y.Z` comment), carries the reviewed companion files
+named in the policy through their mechanical rewrites, and opens one pull
+request per repository on the stable branch prefix `automation/repin-lock-`.
+The per-repository result is recorded in the run summary; any repository
+failure keeps the run red. Idempotency: a repository with no stale reference
+is skipped, and an open repin pull request for the same target is never
 duplicated. A closed repin pull request is a consumer answer: the automation
 skips that repository with a summary row instead of re-offering the same
 repin, and it never updates the branch underneath the closed pull request. A
@@ -169,6 +170,24 @@ whose protected file no longer exists on the audited default branch become
 `expired-repin-exception` and `stale-repin-exception` findings in the drift
 issue. Keep the rewrite behavior unchanged; the audit finding is the visible
 report, and the rewrite failure is the safety gate.
+
+A reviewed `repinCompanions` entry in `unity-enrollment-policy.json` names
+one consumer file that derives its content from the pin, with one mechanical
+rewrite mode. `pin-lines` applies the same `uses:` pin rewrite to every line
+of the file. `pin-literal` replaces the pinned SHAs that this rewrite
+removes, as standalone tokens only, so a SHA embedded in a longer hex
+constant survives. When a rewrite removes no pin, a `pin-literal` companion
+that names no target pin anywhere still carries a stale pin, and the rewrite
+fails closed: it cannot tell a stale pin constant from a reviewed historical
+witness, so an operator updates that file by hand. `policy-snapshot` mirrors
+the reviewed `approved*Shas` lists exactly, the same content a consumer
+snapshot refresh derives from the policy. The registry parser rejects a
+malformed entry, and the rewrite accepts only the reviewed policy fields.
+The rewrite lists each changed companion in the run log and the pull
+request body. A companion whose file no longer exists is reported in both
+places. That visibility comes from repin runs only; the enrollment audit
+has no companion finding, so a stale entry in a repository that no longer
+receives repin offers stays invisible until the next repin.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by

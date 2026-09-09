@@ -113,6 +113,17 @@ impact on licensed-resource safety and consumer CI churn.
   (#562). The remaining #255 findings are the DxMessaging Integration
   3977200 bypass review and the unity-helpers merge gate; the next
   scheduled merge-policy audit re-states the live set.
+- Session 086 repaired the v1.14.2 repin offers: every red offer had one
+  root cause, a reviewed consumer artifact that derives from the pin. The
+  policy now declares `repinCompanions`, and the repin rewrite carries each
+  declared file through one mechanical mode (`pin-lines`, `pin-literal`,
+  `policy-snapshot`). Outcomes: unity-helpers #751 green end to end after a
+  parity-test fix (assert reviewed verdict fields, tolerate reviewed
+  additive fields); IshoBoy #877 and qora-redux #382 green after their
+  companion commits; DxMessaging's maintainer closed offer #567 in favor of
+  their own #568, which absorbed the complete pin cohort. DoxReloaded's
+  stale v1.14.0 offer #801 closed as superseded. unity-helpers #749 is
+  green with reviewer feedback answered; merges stay consumer decisions.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -162,9 +173,9 @@ impact on licensed-resource safety and consumer CI churn.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a closed
       offer is a decline, so the automation never re-offers it.
       DxMessaging adopted the pins in its own PR #554. unity-helpers
-      declined the earlier repin by closing #738. The v1.14.2
-      authorization (#247) merged after that morning's scheduled run, so
-      the fresh v1.14.2 offers open on the next scheduled run.
+      declined the earlier repin by closing #738. The v1.14.2 offers are
+      open with their companion fixes pushed (#751, #567, #877, #382);
+      their merges are consumer decisions.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
