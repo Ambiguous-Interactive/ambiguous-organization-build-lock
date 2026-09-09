@@ -230,6 +230,15 @@ for (const entry of companionEntries) {
 const linePattern =
   /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
 const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
+const versionGrammar = /^v\d+\.\d+\.\d+$/;
+// The version comment is a machine-readable contract, so the target version
+// must be a release tag. The scheduled resolver emits only `vX.Y.Z` tags;
+// this check also fails the standalone rewrite closed.
+if (targetVersion && !versionGrammar.test(targetVersion)) {
+  throw new Error(
+    `Repins require a vMAJOR.MINOR.PATCH target version; got ${JSON.stringify(targetVersion)}.`
+  );
+}
 const files = [];
 const visit = (entry) => {
   for (const item of fs.readdirSync(entry, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -257,12 +266,13 @@ const rewritePinLine = (line) => {
   // A moved pin normalizes its release comment: a `# vX.Y.Z` comment tracks
   // the new release, a missing comment gains it so every moved pin stays
   // human-readable and Dependabot-visible, and any other reviewed witness
-  // comment survives untouched.
+  // comment survives untouched. An unknown target version changes no
+  // comment: a stale version label is better evidence than a deleted one.
   const rawComment = (match[3] || "").trim();
-  if (rawComment === "" || versionCommentPattern.test(rawComment)) {
-    return `${match[1]}${targetSha}${targetVersion ? ` # ${targetVersion}` : ""}`;
+  if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
+    return `${match[1]}${targetSha} # ${targetVersion}`;
   }
-  return `${match[1]}${targetSha}${match[3]}`;
+  return `${match[1]}${targetSha}${match[3] || ""}`;
 };
 for (const filePath of files) {
   const relativePath = path.relative(directory, filePath).split(path.sep).join("/");

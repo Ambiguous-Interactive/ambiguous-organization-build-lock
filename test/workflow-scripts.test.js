@@ -647,6 +647,64 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.match(malformed.stderr, /40-character commit SHA/);
 });
 
+test("moved pin comments follow the disposition matrix for every comment and version shape", (t) => {
+  // Each case is one moved pin under one target version. The scheduled
+  // resolver only emits `vX.Y.Z` tags; the empty version proves the rewrite
+  // never deletes a reviewed label when the tag is unknown, and the
+  // malformed version proves the version comment stays a machine-readable
+  // contract.
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const prefix = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@";
+  const cases = [
+    { comment: "", version: "v1.14.0", expected: `${target} # v1.14.0` },
+    { comment: " # v1.13.0", version: "v1.14.0", expected: `${target} # v1.14.0` },
+    { comment: " # post-v1.10.0", version: "v1.14.0", expected: `${target} # post-v1.10.0` },
+    { comment: "", version: "", expected: `${target}` },
+    { comment: " # v1.13.0", version: "", expected: `${target} # v1.13.0` },
+    { comment: " # post-v1.10.0", version: "", expected: `${target} # post-v1.10.0` }
+  ];
+  for (const testCase of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const workflows = path.join(root, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflows, "unity.yml"),
+      `${prefix}${oldSha}${testCase.comment}\n`
+    );
+    const result = childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, testCase.version, "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+      `${prefix}${testCase.expected}\n`,
+      `comment ${JSON.stringify(testCase.comment)} at version ${JSON.stringify(testCase.version)}`
+    );
+  }
+
+  const injection = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
+  t.after(() => fs.rmSync(injection, { recursive: true, force: true }));
+  const workflows = path.join(injection, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.writeFileSync(path.join(workflows, "unity.yml"), `${prefix}${oldSha}\n`);
+  const hostile = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", injection, target, "v1.14.0\nrun: exploit", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8" }
+  );
+  assert.equal(hostile.status, 1);
+  assert.match(hostile.stderr, /vMAJOR\.MINOR\.PATCH target version/);
+  assert.equal(
+    fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+    `${prefix}${oldSha}\n`,
+    "a fail-closed run leaves the pin untouched"
+  );
+});
+
 test("consumer repin preserves reviewed compatibility exceptions and fails closed on expiry", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-exceptions-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

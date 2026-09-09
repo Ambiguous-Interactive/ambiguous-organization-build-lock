@@ -163,12 +163,18 @@ that holds other work.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
-(2026-09-09 issue 263). Dependabot cannot carry companion rewrites or
+(2026-09-09 issue 263). The rewrite accepts only a `vMAJOR.MINOR.PATCH`
+target version and fails closed otherwise; the scheduled resolver emits
+only that grammar. Dependabot cannot carry companion rewrites or
 release authorization: a pin to an unauthorized SHA fails closed as
 `unapproved-lock-ref`, and a companion repository that merges a
 Dependabot-only pin update leaves its offered commit incomplete. The central
-repin offer stays the complete update; when either merge answers the
-adoption first, the run closes the other offer as superseded.
+repin offer stays the complete update. When either merge answers the
+adoption first, the next run closes a superseded central offer; a
+Dependabot pull request is outside the automation branch filter, so the
+run never touches it. A repin branch pushed before the comment
+normalization reads as different content; delete such a branch once, and
+the next run pushes a fresh one.
 
 A reviewed, expiring `repinExceptions` entry in
 `unity-enrollment-policy.json` protects one workflow file in one repository

@@ -97,8 +97,9 @@ tests would stay red. Dependabot proposes an update when a release
 publishes, before the release is authorized, and that pin fails closed as
 `unapproved-lock-ref`; the pull request stays red until the central
 authorization pull request merges. After that merge, a rebase makes the
-Dependabot pull request green, and merging either pull request answers the
-adoption; the other offer then closes as superseded.
+Dependabot pull request green. Merging either pull request answers the
+adoption. The next repin run closes a superseded central offer; it never
+touches a Dependabot pull request.
 
 ## Workflow contract
 
