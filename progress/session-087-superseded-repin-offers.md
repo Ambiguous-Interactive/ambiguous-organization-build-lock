@@ -89,6 +89,21 @@ An independent adversarial review found six findings; all are fixed:
    job now also closes superseded offers. Renamed to "Repin consumer lock
    pull requests" with the workflow-policy test updated.
 
+## Bugbot round
+
+Cursor Bugbot found one issue on pull request #264: the offer close scan
+used `gh pr list` without a limit, so its default page cap of 30 newest pull
+requests could hide a stale offer. Fixed:
+
+- The offer scan passes `--limit 0`, which fetches every open pull request.
+- The test harness now applies the default 30 cap faithfully (server-side
+  state and head filters first, then the cap), and a new test buries the
+  stale offer behind 31 newer foreign pull requests. The test is red
+  without the fix and green with it.
+- The remaining `gh pr list` call sites are head-filtered existence checks.
+  GitHub filters server-side before the cap applies, so a nonzero count can
+  never truncate to zero; no change needed there.
+
 ## Verification
 
 - `node --test test/workflow-scripts.test.js`: 40 pass, 0 fail, three

@@ -1313,22 +1313,29 @@ function consumerRepinHarness(t, consumerStates) {
     '  exec git clone "${TEST_CLONE_BASE}/${repository}.git" "${directory}" "$@"',
     "fi",
     'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then',
-    '  repository=""; state="open"; head=""; jqexpr=""',
+    '  repository=""; state="open"; head=""; jqexpr=""; limit="30"',
     '  previous=""',
     '  for argument in "$@"; do',
     '    if [ "${previous}" = "--repo" ]; then repository="${argument}"; fi',
     '    if [ "${previous}" = "--state" ]; then state="${argument}"; fi',
     '    if [ "${previous}" = "--head" ]; then head="${argument}"; fi',
     '    if [ "${previous}" = "--jq" ]; then jqexpr="${argument}"; fi',
+    '    if [ "${previous}" = "--limit" ]; then limit="${argument}"; fi',
     '    previous="${argument}"',
     "  done",
     '  name="${repository#*/}"',
     '  state_file="${TEST_PR_STATE}/${name}/${state}.json"',
-    '  # gh prints string results raw, like jq -r.',
+    '  # gh filters server-side by state and head, then caps the page at',
+    '  # 30 items unless --limit 0 fetches all. String results print raw.',
     '  if [ -n "${head}" ]; then',
-    '    jq -r --arg head "${head}" \'[.[] | select(.headRefName == $head)] | \'"${jqexpr}" "${state_file}"',
+    "    filtered='[.[] | select(.headRefName == $head)]'",
+    '  else',
+    "    filtered='.'",
+    '  fi',
+    '  if [ "${limit}" = "0" ]; then',
+    '    jq -r --arg head "${head}" "${filtered} | ${jqexpr}" "${state_file}"',
     "  else",
-    '    jq -r "${jqexpr}" "${state_file}"',
+    '    jq -r --arg head "${head}" --argjson limit "${limit}" "${filtered} | .[0:\\$limit] | ${jqexpr}" "${state_file}"',
     "  fi",
     "  exit 0",
     "fi",
@@ -1632,6 +1639,29 @@ test("consumer repin records an already pinned repository without offers", (t) =
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0` \|/);
   assert.equal(repinEventLog(harness).filter((event) => !event.startsWith("clone")).length, 0);
+});
+
+test("consumer repin closes a superseded offer buried under newer pull requests", (t) => {
+  // gh returns the newest pull requests first and caps the default page at
+  // 30. The stale offer sorts behind 31 newer foreign pull requests, so the
+  // scan must fetch past the default page to see it.
+  const openOffers = [];
+  for (let index = 0; index < 31; index += 1) {
+    openOffers.push({ number: 900 + index, head: `consumer/feature-${index}` });
+  }
+  openOffers.push({ number: 801, head: "automation/repin-lock-300501e" });
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { atTarget: true, openOffers }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("close")), [
+    "close unity-helpers 801"
+  ]);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 1 superseded repin offer\(s\) \|/);
 });
 
 test("consumer repin fails closed when a superseded offer cannot be closed", (t) => {

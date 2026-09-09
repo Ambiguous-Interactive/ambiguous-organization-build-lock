@@ -459,6 +459,7 @@ close_superseded_offers() {
   if ! open_offers="$(GH_TOKEN="${authorization}" gh pr list \
     --repo "${repository}" \
     --state open \
+    --limit 0 \
     --json number,headRefName \
     --jq '.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv')"; then
     echo "::error::${repository}: could not list open repin offers." >&2
