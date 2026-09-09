@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:34401685078:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Performance Numbers",
-    "job": "perf-benchmarks",
-    "runId": "34401685078",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34401685078",
-    "queuedAt": "2026-09-09T21:31:43.469Z",
-    "acquiredAt": "2026-09-09T21:31:45.068Z",
-    "expiresAt": "2026-09-10T01:31:45.068Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "102634917269"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:34401685078:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "34401685078",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34401685078",
-      "queuedAt": "2026-09-09T21:31:43.469Z",
-      "acquiredAt": "2026-09-09T21:31:45.068Z",
-      "expiresAt": "2026-09-10T01:31:45.068Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "102634917269"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder job 102577638834 is completed",
       "createdAt": "2026-09-09T18:24:35.447Z"
+    },
+    {
+      "reservationId": "1f5f2cd3-3ee8-4968-9f24-f5d19be20c29",
+      "holderId": "Ambiguous-Interactive/DxMessaging:34401685078:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "34401685078",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34401685078",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-09T21:40:09.282Z",
+      "availableAt": "2026-09-09T21:40:10.282Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-09T21:31:45.068Z"
+  "updatedAt": "2026-09-09T21:40:09.283Z"
 }
