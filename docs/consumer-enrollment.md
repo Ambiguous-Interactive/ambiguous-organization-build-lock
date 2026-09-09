@@ -387,7 +387,9 @@ Each consumer whose default branch has a carrying ruleset publishes
 list that GitHub hides from read-only callers. The audit proves freshness by
 comparing every visible field with the live ruleset; any mismatch is a
 finding. Update the file through a reviewed pull request whenever the
-ruleset changes.
+ruleset changes. The central change classifier names this exact file
+Unity-independent, so publishing it never spends a licensed runner cycle;
+any other `.github/` change still requires Unity validation.
 
 ```json
 {

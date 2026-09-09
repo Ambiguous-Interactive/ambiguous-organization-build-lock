@@ -22,6 +22,7 @@ test("central classifier skips only audited independent paths", () => {
     ".cursorrules",
     ".github/copilot-instructions.md",
     ".github/dependency-ownership.md",
+    ".github/merge-policy-attestation.json",
     ".github/ISSUE_TEMPLATE/bug.yml",
     ".llm/context.md",
     "progress/session.md"
@@ -33,6 +34,8 @@ test("central classifier skips only audited independent paths", () => {
     "docs/README.md",
     ".github/workflows/unity.yml",
     ".github/actions/example/action.yml",
+    ".github/merge-policy-attestation.copy.json",
+    ".github/merge-policy-attestation.json.bak",
     "Assets/Game.cs",
     "Packages/manifest.json",
     "progressive/code.cs"
@@ -40,6 +43,7 @@ test("central classifier skips only audited independent paths", () => {
     assert.equal(isUnityIndependent(changedPath), false, changedPath);
   }
   assert.equal(classifyUnityChanges([]), true);
+  assert.equal(classifyUnityChanges([".github/merge-policy-attestation.json"]), false);
   assert.equal(classifyUnityChanges(["README.md", ".llm/context.md"]), false);
   assert.equal(classifyUnityChanges(["README.md", "Assets/Game.cs"]), true);
   assert.throws(() => classifyUnityChanges([""]), /non-empty/);

@@ -53,6 +53,30 @@ filter excludes. The rule and the fix are recorded in issue #258.
   five-repository class sweep, and the optional analyzer follow-up.
 - Issue #255 comment: status and consumer-side disposition.
 
+## Bugbot feedback and the classifier floor
+
+Cursor Bugbot flagged the new gate comment for over-promising: it claimed
+inert pull requests stay cheap, while the PR's own headline file,
+`.github/merge-policy-attestation.json`, is not classifier-independent
+under the pinned release. The pinned classifier's declared-independence
+grammar accepts only `dir/**`, and `.github/**` is refused because it
+would cover `.github/workflows/`. Verified against the pin: #815 ran the
+licensed Unity leg for exactly this reason.
+
+- DoxReloaded #815 commit `644953d80` states the exact independent set and
+  records that this pull request runs the licensed leg once.
+- The central classifier floor now names
+  `.github/merge-policy-attestation.json` independent, the same exact-file
+  class as `.github/dependency-ownership.md`: it is an input to a central
+  analyzer, no workflow step reads it (verified by search over
+  DoxReloaded), and the attestation contract forces reviewed updates on
+  every ruleset change. Without the entry, each ruleset change would spend
+  a licensed runner cycle on every carrying consumer. Tests lock the exact
+  file and reject sibling paths. The consumer pin moves with the next
+  authorized release; the repin automation offers it.
+- `docs/consumer-enrollment.md` documents the independence in the
+  attestation contract section.
+
 ## Verification
 
 - DoxReloaded local gates over the edited workflow: YAML parse,
@@ -74,3 +98,6 @@ filter excludes. The rule and the fix are recorded in issue #258.
   without a companion gate (#258).
 - Before enforcing an aggregate on unity-helpers, apply item 10; its
   workflows have not been read against the rule yet (#255 finding).
+- Move the consumer `classify-unity-changes` pins to the release that
+  carries the attestation-file independence; the repin automation offers
+  it to enrolled repositories after authorization.
