@@ -26,8 +26,11 @@ var (
 
 func unityAuditPolicy() UnityEnrollmentPolicy {
 	return UnityEnrollmentPolicy{
-		ApprovedLockSHAs:      []string{testSHA},
-		ApprovedReturnSHAs:    []string{testSHA},
+		ApprovedLockSHAs:   []string{testSHA},
+		ApprovedReturnSHAs: []string{testSHA},
+		RequiredContexts: map[string][]string{
+			"Ambiguous-Interactive/fixture": {"aggregate"},
+		},
 		ProtectedBranches:     []string{"main"},
 		AllowWorkflowDispatch: true,
 		Now:                   time.Date(2026, time.July, 27, 0, 0, 0, 0, time.UTC),
@@ -5373,5 +5376,556 @@ jobs:
 	}
 	if len(result.Inventory) != 0 || len(result.Findings) != 0 {
 		t.Fatalf("inactive repository was retained: %#v", result)
+	}
+}
+
+func gateCompanionWorkflow(trigger, jobID string) string {
+	return "name: Companion gate\n" + trigger + "jobs:\n  " + jobID + `:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+`
+}
+
+func TestUnityEnrollmentRejectsUnreportableAggregateGate(t *testing.T) {
+	base := unityWorkflow(safeLicensedSteps(), safeAggregate())
+	tests := []struct {
+		name       string
+		mutate     func(string) string
+		companions map[string]string
+		expect     string
+	}{
+		{
+			name: "paths allowlist without companion",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "paths-ignore without companion",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n      - '.llm/**'\n  push:",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "companion allowlist misses an ignored pattern",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n      - '.llm/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    paths:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "companion allowlist covers every ignored pattern",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n      - '.llm/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    paths:\n      - 'docs/**'\n      - '.llm/**'\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "companion filter is also negative",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "unfiltered companion reports the context",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "scalar companion trigger reports the context",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on: pull_request\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "companion reports a different context",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n", "other"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "unfiltered pull_request_target covers the filtered gate",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  pull_request_target:\n  push:",
+					1,
+				)
+			},
+			expect: "",
+		},
+		{
+			name: "push filter alone stays clean",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  push:\n    branches: [main]",
+					"  push:\n    branches: [main]\n    paths:\n      - 'Assets/**'",
+					1,
+				)
+			},
+			expect: "",
+		},
+		{
+			name: "expression context name fails closed",
+			mutate: func(value string) string {
+				value = strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()",
+					"  aggregate:\n    name: Aggregate ${{ github.ref }}\n    if: always()",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    paths:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "matrix context name fails closed",
+			mutate: func(value string) string {
+				value = strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()",
+					"  aggregate:\n    if: always()\n    strategy:\n      fail-fast: false\n      matrix:\n        leg: [one]\n",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "empty paths allowlist without companion",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths: []\n  push:",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "both path filter kinds reject the trigger",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "both path filter kinds accept an unfiltered companion",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "two filtered triggers keep the intersection blind set",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  pull_request_target:\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    paths:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "push-only workflow never reports the required context",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:\n    branches: [main]",
+					"on:\n  push:\n    branches: [main]",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "push-only workflow accepts an unfiltered companion",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:\n    branches: [main]",
+					"on:\n  push:\n    branches: [main]",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "branch filter naming a foreign base branch fails closed",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    branches: [dev]\n  push:",
+					1,
+				)
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "lockstep companion must run for the protected branch",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    branches: [main]\n    paths:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "",
+		},
+		{
+			name: "lockstep companion on a foreign branch fails closed",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    branches: [main]\n    paths-ignore:\n      - 'docs/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n    branches: [dev]\n    paths:\n      - 'docs/**'\n", "aggregate"),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "companion job that skips pull requests proves nothing",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": strings.Replace(
+					gateCompanionWorkflow("on:\n  pull_request:\n", "aggregate"),
+					"    runs-on: ubuntu-latest",
+					"    if: github.event_name == 'push'\n    runs-on: ubuntu-latest",
+					1,
+				),
+			},
+			expect: "filtered-aggregate-gate",
+		},
+		{
+			name: "companion job without a condition reports the context",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  pull_request:\n  push:",
+					"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+					1,
+				)
+			},
+			companions: map[string]string{
+				".github/workflows/gate.yml": gateCompanionWorkflow(
+					"on:\n  pull_request:\n", "aggregate"),
+			},
+			expect: "",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			files := map[string]string{
+				".github/workflows/unity.yml": testCase.mutate(base),
+			}
+			for path, companion := range testCase.companions {
+				files[path] = companion
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(files), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			has := strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate")
+			if testCase.expect == "" && has {
+				t.Fatalf("covered aggregate gate produced findings: %#v", result.Findings)
+			}
+			if testCase.expect != "" && !has {
+				t.Fatalf("unreportable aggregate gate passed: %#v", result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentSkipsUnrequiredAggregateContexts(t *testing.T) {
+	gate := strings.Replace(
+		unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		"on:\n  pull_request:\n  push:",
+		"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n  push:",
+		1,
+	)
+	policy := unityAuditPolicy()
+	policy.RequiredContexts = map[string][]string{
+		"Ambiguous-Interactive/fixture": {"unrelated"},
+	}
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": gate,
+	}), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("unrequired aggregate context was flagged: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentAcceptsExpressionCompanionName(t *testing.T) {
+	gate := strings.Replace(
+		unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		"on:\n  pull_request:\n  push:",
+		"on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n      - '.llm/**'\n  push:",
+		1,
+	)
+	companion := `name: Companion gate
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.llm/**'
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+  report:
+    name: ${{ (needs.classify.result != 'success') && 'aggregate' || 'Companion not applicable' }}
+    needs:
+      - classify
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+`
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": gate,
+		".github/workflows/gate.yml":  companion,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("expression companion name was not matched: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentCompanionNeedsCannotProveCoverage(t *testing.T) {
+	gate := strings.Replace(
+		unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		"on:\n  pull_request:\n  push:",
+		"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+		1,
+	)
+	companion := `name: Companion gate
+on:
+  pull_request:
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+  report:
+    name: aggregate
+    needs:
+      - classify
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+`
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": gate,
+		".github/workflows/gate.yml":  companion,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("needs-skipped companion passed: %#v", result.Findings)
+	}
+	overridden := strings.Replace(
+		companion,
+		"    name: aggregate\n    needs:",
+		"    name: aggregate\n    if: ${{ always() }}\n    needs:",
+		1,
+	)
+	covered, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": gate,
+		".github/workflows/gate.yml":  overridden,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(covered.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("always() companion was not matched: %#v", covered.Findings)
+	}
+}
+
+func TestUnityEnrollmentFailsClosedOnUnprovableUnfilteredGate(t *testing.T) {
+	value := strings.Replace(
+		unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		"  aggregate:\n    if: always()",
+		"  aggregate:\n    name: Aggregate ${{ github.ref }}\n    if: always()",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": value,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("unprovable unfiltered aggregate passed: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentMatrixCompanionNameProvesNothing(t *testing.T) {
+	gate := strings.Replace(
+		unityWorkflow(safeLicensedSteps(), safeAggregate()),
+		"on:\n  pull_request:\n  push:",
+		"on:\n  pull_request:\n    paths:\n      - 'Assets/**'\n  push:",
+		1,
+	)
+	companion := `name: Companion gate
+on:
+  pull_request:
+jobs:
+  report:
+    name: ${{ 'aggregate' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [one]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+`
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": gate,
+		".github/workflows/gate.yml":  companion,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
+		t.Fatalf("matrix companion name proved coverage: %#v", result.Findings)
 	}
 }

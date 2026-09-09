@@ -5,10 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+// requiredContextPattern mirrors the reviewed context contract of
+// internal/mergepolicy/expectations.go so one accepted spelling passes both
+// audits.
+var requiredContextPattern = regexp.MustCompile(`^[A-Za-z0-9_.+ /()-]{1,128}$`)
+
+// maxRequiredContextsPerRepository mirrors the merge-policy count bound.
+const maxRequiredContextsPerRepository = 32
 
 const (
 	MaxUnityEnrollmentPolicyBytes = 64 * 1024
@@ -41,11 +50,14 @@ var minimumUnityEnrollmentRepositoriesByFold = func() map[string]requiredUnityRe
 }()
 
 // UnityEnrollmentRepository declares one exact default-branch audit target.
+// RequiredContexts repeats the reviewed merge-policy contexts whose reporting
+// workflow must provably run on every pull request.
 type UnityEnrollmentRepository struct {
-	Repository            string `json:"repository"`
-	DefaultBranch         string `json:"defaultBranch"`
-	Fork                  bool   `json:"fork"`
-	AllowWorkflowDispatch bool   `json:"allowWorkflowDispatch"`
+	Repository            string   `json:"repository"`
+	DefaultBranch         string   `json:"defaultBranch"`
+	Fork                  bool     `json:"fork"`
+	AllowWorkflowDispatch bool     `json:"allowWorkflowDispatch"`
+	RequiredContexts      []string `json:"requiredContexts,omitempty"`
 }
 
 // UnityEnrollmentRegistry is the reviewed organization audit contract.
@@ -208,6 +220,30 @@ func ValidateUnityEnrollmentRepository(repository UnityEnrollmentRepository) err
 	}
 	if !validRefName(repository.DefaultBranch) {
 		return fmt.Errorf("unity enrollment default branch is invalid")
+	}
+	return validateRequiredContexts(repository.RequiredContexts)
+}
+
+// validateRequiredContexts keeps every reviewed aggregate context a literal,
+// single-line check name with the same reviewed spelling and count bound the
+// merge-policy audit accepts in internal/mergepolicy/expectations.go. An
+// empty list means the repository requires no aggregate, so no reporting
+// workflow needs provable pull-request coverage.
+func validateRequiredContexts(contexts []string) error {
+	if len(contexts) > maxRequiredContextsPerRepository {
+		return fmt.Errorf("unity enrollment policy requires too many contexts for one repository")
+	}
+	seen := make(map[string]bool, len(contexts))
+	for _, context := range contexts {
+		if context == "" || strings.TrimSpace(context) != context ||
+			strings.ContainsAny(context, "\r\n") ||
+			!requiredContextPattern.MatchString(context) {
+			return fmt.Errorf("unity enrollment required context must be a trimmed single-line name")
+		}
+		if seen[context] {
+			return fmt.Errorf("unity enrollment policy contains a duplicate required context")
+		}
+		seen[context] = true
 	}
 	return nil
 }

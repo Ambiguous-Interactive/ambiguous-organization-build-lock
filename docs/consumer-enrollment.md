@@ -276,6 +276,7 @@ edits.
 | `expired-repin-exception` | Renew or remove the expired `repinExceptions` entry. See Release authorization. |
 | `fallback-cleanup-not-always` | Guard the fallback job with `always()` and the source-job condition shape. See item 8. |
 | `fallback-cleanup-not-hosted` | Run the fallback job on `ubuntu-latest`. See item 8. |
+| `filtered-aggregate-gate` | Report the aggregate on every pull request: remove the trigger path filter, or pair one `paths-ignore` trigger with a companion gate whose `paths` list contains every ignored pattern. See item 10 of the canary. |
 | `foreign-action-reference` | Use action files only from this repository. See Preconditions item 7. |
 | `ineligible-unity-trigger` | Restrict licensed work to the eligible trusted triggers. See Preconditions item 2. |
 | `invalid-acquire-pr-head-revalidation` | Give acquire the exact current-head revalidation inputs. See item 4. |
@@ -452,7 +453,18 @@ Before enforcing the aggregate as required:
     `paths` filter excludes, so the required status never appears there and the
     ruleset blocks those merges forever. Remove the filter and let the change
     classifier skip licensed work, or pair the filter with a companion gate
-    that reports the same context on the excluded paths.
+    that reports the same context on the excluded paths. The enrollment audit
+    reports `filtered-aggregate-gate` when no workflow in the repository
+    provably reports a required context on every pull request. The audit
+    proves coverage only through literal shapes: an unfiltered companion
+    trigger that runs for the protected branch, or for one `paths-ignore`
+    trigger a companion `paths` list that contains every ignored pattern and
+    runs for the protected branch. The companion reporting job carries no
+    condition and no `needs` dependency, or exactly `always()`, and may not
+    exclude pull request events. A matrix job or a malformed trigger proves
+    no exact context and fails closed. A literal job `name` names the
+    context directly; an expression `name` counts only through its exact
+    single-quoted literal.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

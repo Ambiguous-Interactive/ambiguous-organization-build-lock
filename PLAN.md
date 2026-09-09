@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 084)
+## Current state (2026-09-09, session 085)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -94,15 +94,25 @@ impact on licensed-resource safety and consumer CI churn.
   no attestation (session 083). True drift cleared live with operator
   approval: DoxReloaded ruleset 22595536 now requires `CI Success`, and
   qora-redux branch protection no longer lets administrators bypass.
-  Remaining before the audit is green: attestation PRs DoxReloaded #815,
-  DxMessaging #564, and IshoBoy #873 (consumer decisions), the DxMessaging
-  Integration 3977200 bypass review, and the unity-helpers merge gate.
 - Session 084 repaired the merge gate that ruleset 22595536 exposed
   (#258): the DoxReloaded workflow withheld `CI Success` from every pull
   request its `pull_request` paths filter excluded, so attestation PR
   #815 was blocked permanently. #815 now also removes the filter; the
   classifier still skips licensed work on inert pull requests. The
   contract is documented as item 10 of the enrollment canary checklist.
+- Session 085 closed the #258 analyzer follow-up: the enrollment audit
+  reports `filtered-aggregate-gate` when no workflow provably reports a
+  reviewed required context on every pull request. Required contexts moved
+  into `unity-enrollment-policy.json`, locked to
+  `merge-policy-expectations.json` by a contract test. Coverage proofs are
+  literal and fail-closed; the live audit over all six consumers is
+  byte-identical to the scheduled baseline (27 unity-helpers findings,
+  behind consumer PR #749).
+- The three merge-policy attestation PRs merged (DoxReloaded #815,
+  DxMessaging #564, IshoBoy #873) and DxMessaging drift fixes merged
+  (#562). The remaining #255 findings are the DxMessaging Integration
+  3977200 bypass review and the unity-helpers merge gate; the next
+  scheduled merge-policy audit re-states the live set.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

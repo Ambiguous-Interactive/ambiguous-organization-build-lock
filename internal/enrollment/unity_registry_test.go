@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -330,5 +331,57 @@ func TestUnityEnrollmentRegistryRejectsUnknownAndTrailingJSON(t *testing.T) {
 	}
 	if _, err := ParseUnityEnrollmentRegistry(append(content, []byte(` {}`)...)); err == nil {
 		t.Fatal("trailing JSON passed")
+	}
+}
+
+func TestUnityEnrollmentRegistryValidatesRequiredContexts(t *testing.T) {
+	registry := validUnityRegistry()
+	for index := range registry.Repositories {
+		registry.Repositories[index].RequiredContexts = []string{"Unity CI Success"}
+	}
+	parsed, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry))
+	if err != nil {
+		t.Fatalf("valid required contexts failed: %v", err)
+	}
+	for _, repository := range parsed.Repositories {
+		if len(repository.RequiredContexts) != 1 ||
+			repository.RequiredContexts[0] != "Unity CI Success" {
+			t.Fatalf("required contexts were not retained: %#v", repository.RequiredContexts)
+		}
+	}
+	tests := []struct {
+		name     string
+		contexts []string
+	}{
+		{name: "blank context", contexts: []string{""}},
+		{name: "untrimmed context", contexts: []string{" Unity CI Success"}},
+		{name: "multiline context", contexts: []string{"Unity CI\nSuccess"}},
+		{name: "tab context", contexts: []string{"Unity\tCI Success"}},
+		{name: "duplicate context", contexts: []string{"Unity CI Success", "Unity CI Success"}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			invalid := validUnityRegistry()
+			invalid.Repositories[0].RequiredContexts = testCase.contexts
+			if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, invalid)); err == nil {
+				t.Fatal("invalid required contexts passed")
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentRegistryCapsRequiredContexts(t *testing.T) {
+	registry := validUnityRegistry()
+	contexts := make([]string, 0, 33)
+	for index := 0; index <= 32; index++ {
+		contexts = append(contexts, fmt.Sprintf("Context %d", index))
+	}
+	registry.Repositories[0].RequiredContexts = contexts
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err == nil {
+		t.Fatal("too many required contexts passed")
+	}
+	registry.Repositories[0].RequiredContexts = contexts[:32]
+	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err != nil {
+		t.Fatalf("bounded required contexts failed: %v", err)
 	}
 }

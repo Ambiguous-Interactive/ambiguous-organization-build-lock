@@ -37,37 +37,53 @@
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "defaultBranch": "main",
       "fork": false,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": [
+        "CI Success"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/DxMessaging",
       "defaultBranch": "master",
       "fork": false,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": [
+        "Unity CI Success"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/IshoBoy",
       "defaultBranch": "main",
       "fork": false,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": [
+        "Unity CI Success"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/qora-redux",
       "defaultBranch": "main",
       "fork": false,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": [
+        "Unity CI"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/unity-builder",
       "defaultBranch": "main",
       "fork": true,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": []
     },
     {
       "repository": "Ambiguous-Interactive/unity-helpers",
       "defaultBranch": "main",
       "fork": false,
-      "allowWorkflowDispatch": true
+      "allowWorkflowDispatch": true,
+      "requiredContexts": [
+        "Unity CI Success"
+      ]
     }
   ],
   "exceptions": [
