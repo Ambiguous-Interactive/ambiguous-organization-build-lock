@@ -254,11 +254,15 @@ const rewritePinLine = (line) => {
     return line;
   }
   replacedPins.add(match[2]);
-  let comment = match[3] || "";
-  if (comment && targetVersion && versionCommentPattern.test(comment.trim())) {
-    comment = ` # ${targetVersion}`;
+  // A moved pin normalizes its release comment: a `# vX.Y.Z` comment tracks
+  // the new release, a missing comment gains it so every moved pin stays
+  // human-readable and Dependabot-visible, and any other reviewed witness
+  // comment survives untouched.
+  const rawComment = (match[3] || "").trim();
+  if (rawComment === "" || versionCommentPattern.test(rawComment)) {
+    return `${match[1]}${targetSha}${targetVersion ? ` # ${targetVersion}` : ""}`;
   }
-  return `${match[1]}${targetSha}${comment}`;
+  return `${match[1]}${targetSha}${match[3]}`;
 };
 for (const filePath of files) {
   const relativePath = path.relative(directory, filePath).split(path.sep).join("/");
@@ -407,7 +411,8 @@ open_repin_pull_request() {
   local body_file
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
   local mutation_bullet="Only the \`@<sha>\` suffix of \`uses:\` references to
-  \`${lock_repository_prefix%/*}\` changed, plus matching \`# vX.Y.Z\` comments."
+  \`${lock_repository_prefix%/*}\` changed, plus \`# vX.Y.Z\` version comments
+  (updated or added)."
   local references_section=""
   if [ -z "${file_list}" ]; then
     mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."
