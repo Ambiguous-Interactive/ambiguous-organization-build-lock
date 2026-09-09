@@ -57,8 +57,15 @@ as an open pull request, not as a silent absence.
 After each authorization merge, the central `Repin consumer lock references`
 workflow opens repin pull requests in enrolled repositories. Each pull request
 moves the repository's lock action references to the newly authorized release.
-Merging it is the consumer's adoption decision; the automation never merges.
-A closed repin offer stays closed: the automation never re-offers that
+The automation enables auto-merge on every offer it opens, so GitHub merges
+the offer once every required check and merge rule passes; no click is
+needed. The merge gates stay with the consumer: a repository can turn off its
+`Allow auto-merge` setting, or disable auto-merge on one offer, and merge by
+hand. The automation requests auto-merge once, when it opens the offer; it
+never re-enables it on a later run, so a consumer who disables auto-merge
+keeps that decision. When GitHub refuses the request, the run stays green,
+the offer stays open for a manual merge, and the run summary records the
+gap. A closed repin offer stays closed: the automation never re-offers that
 repin, and it leaves the repin branch untouched. A consumer close is a
 decline; a manual reopen can restore the offer. A new release
 opens a new repin pull request. When no permitted lock-pin change remains
@@ -392,9 +399,10 @@ audit reports and opens one deduplicated issue.
   active on the default branch. Set its enforcement to active.
 - `unexpected-bypass-actor`: a ruleset grants a bypass actor that review did
   not accept, or classic protection lets administrators bypass the aggregate.
-  Remove the bypass or record it in `merge-policy-expectations.json` after
-  review. A detail that ends with `(attested)` reports an actor the consumer
-  attestation published.
+  Remove the bypass or record the actor in `merge-policy-expectations.json`
+  after review, with its exact type, id, and bypass mode; an omitted mode
+  records the default `always` mode. A detail that ends with `(attested)`
+  reports an actor the consumer attestation published.
 - `merge-policy-attestation-missing`: a carrying ruleset has no bypass
   evidence and no attestation entry covers it. Publish the file or add the
   entry.

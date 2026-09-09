@@ -1372,6 +1372,12 @@ function consumerRepinHarness(t, consumerStates) {
     if (state.failClose) {
       fs.writeFileSync(path.join(prState, name, "fail-close"), "1\n");
     }
+    if (state.failAutoMerge) {
+      fs.writeFileSync(path.join(prState, name, "fail-automerge"), "1\n");
+    }
+    if (state.noMergeMethods) {
+      fs.writeFileSync(path.join(prState, name, "no-merge-methods"), "1\n");
+    }
   }
 
   writeExecutable(path.join(shims, "gh"), [
@@ -1439,6 +1445,55 @@ function consumerRepinHarness(t, consumerStates) {
     '  printf \'create %s %s\\n\' "${head}" "${title}" >> "${TEST_EVENTS}"',
     '  name="${repository#*/}"',
     '  if [ -n "${bodyfile:-}" ]; then cp "${bodyfile}" "${TEST_PR_STATE}/${name}/last-body.md"; fi',
+    '  # gh pr create prints the pull request URL on success; the script parses',
+    '  # the number out of it for the auto-merge request.',
+    '  counter_file="${TEST_PR_STATE}/${name}/next-pr-number"',
+    '  number="$(cat "${counter_file}" 2>/dev/null || echo 899)"',
+    '  number=$((number + 1))',
+    '  printf \'%s\\n\' "${number}" > "${counter_file}"',
+    '  printf \'https://github.com/%s/%s/pull/%s\\n\' "${repository%%/*}" "${name}" "${number}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then',
+    '  query=""; jqexpr="."; owner=""; name=""; number=""; node_id=""',
+    '  previous=""',
+    '  for argument in "$@"; do',
+    '    if [ "${previous}" = "--jq" ]; then jqexpr="${argument}"; fi',
+    '    case "${previous}" in',
+    '      "-f")',
+    '        case "${argument}" in',
+    '          query=*) query="${argument#query=}";;',
+    '          owner=*) owner="${argument#owner=}";;',
+    '          name=*) name="${argument#name=}";;',
+    '          id=*) node_id="${argument#id=}";;',
+    '        esac',
+    '        ;;',
+    '      "-F") case "${argument}" in number=*) number="${argument#number=}";; esac ;;',
+    '    esac',
+    '    previous="${argument}"',
+    '  done',
+    '  case "${query}" in',
+    '    *"pullRequest(number"*)',
+    '      printf \'prid %s %s %s\\n\' "${owner}" "${name}" "${number}" >> "${TEST_EVENTS}"',
+    '      if [ -f "${TEST_PR_STATE}/${name}/no-merge-methods" ]; then',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":false,"mergeCommitAllowed":false,"rebaseMergeAllowed":false}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      else',
+    '        printf \'{"data":{"repository":{"pullRequest":{"id":"PR_%s_test"},"squashMergeAllowed":true,"mergeCommitAllowed":true,"rebaseMergeAllowed":false}}}\\n\' "${name}" | jq -r "${jqexpr}"',
+    '      fi',
+    '      ;;',
+    '    *"enablePullRequestAutoMerge"*)',
+    '      target_name="$(printf \'%s\' "${node_id}" | sed -n \'s/^PR_\\(.*\\)_test$/\\1/p\')"',
+    '      printf \'automerge %s\\n\' "${target_name}" >> "${TEST_EVENTS}"',
+    '      if [ -f "${TEST_PR_STATE}/${target_name}/fail-automerge" ]; then',
+    '        printf \'GraphQL: Auto-merge is not allowed for this repository (enablePullRequestAutoMerge)\\n\' >&2',
+    '        exit 1',
+    '      fi',
+    '      printf \'{"data":{"enablePullRequestAutoMerge":{"pullRequest":{"number":901}}}}\\n\' | jq -r "${jqexpr}"',
+    '      ;;',
+    '    *)',
+    '      printf \'test shim received an unexpected graphql query: %s\\n\' "${query}" >&2',
+    '      exit 64',
+    '  esac',
     "  exit 0",
     "fi",
     "exit 64"
@@ -1562,6 +1617,42 @@ test("consumer repin leaves a repin branch with different content untouched", (t
   );
 });
 
+test("consumer repin keeps the run green when auto-merge is refused", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { failAutoMerge: true }
+  });
+
+  const result = harness.run();
+
+  // A refused auto-merge request never fails the run and never removes the
+  // offer: the merge gates stay with the consumer, and the summary row keeps
+  // the gap operator-visible.
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /::warning::Ambiguous-Interactive\/dxmessaging: repin offer #[0-9]+ is open but auto-merge was not enabled/);
+  assert.match(result.stderr, /Allow auto-merge/);
+  const events = repinEventLog(harness);
+  assert.equal(events.filter((event) => event.startsWith("create ")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("automerge ")).length, 1, "the refused request is attempted once");
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not enabled \(see the job log\) \|/);
+});
+
+test("consumer repin records a repository where no merge method allows auto-merge", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { noMergeMethods: true }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /no readable identity or no allowed merge method/);
+  const events = repinEventLog(harness);
+  assert.equal(events.filter((event) => event.startsWith("prid ")).length, 1);
+  assert.equal(events.filter((event) => event.startsWith("automerge ")).length, 0, "no mutation is sent without an allowed merge method");
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not requested \(see the job log\) \|/);
+});
+
 test("consumer repin pushes and opens a pull request when no branch exists", (t) => {
   const harness = consumerRepinHarness(t, { "dxmessaging": {} });
 
@@ -1624,7 +1715,35 @@ test("consumer repin commits companion artifacts and lists them in the pull requ
   );
   assert.match(body, /Reviewed companion artifacts/);
   assert.match(body, /- `docs\/ops\/pin-doc\.md` \(pin-lines\)/);
-  assert.match(body, /never merges itself/);
+  assert.match(body, /enables auto-merge on this pull request/);
+  assert.doesNotMatch(body, /never merges itself/);
+});
+
+test("consumer repin enables auto-merge on every offer it opens", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true },
+    "dxmessaging": {}
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const events = repinEventLog(harness);
+  // Both open paths (fresh push and identical-branch recovery) request
+  // auto-merge exactly once, immediately after the offer is created.
+  assert.equal(
+    events.filter((event) => event.startsWith(`create ${harness.branchName} `)).length,
+    2,
+    "each consumer opens one offer"
+  );
+  for (const name of ["unity-helpers", "dxmessaging"]) {
+    const prid = events.filter((event) => event.startsWith(`prid Ambiguous-Interactive ${name} `));
+    const automerge = events.filter((event) => event === `automerge ${name}`);
+    assert.equal(prid.length, 1, `${name}: the offer identity is read once`);
+    assert.equal(automerge.length, 1, `${name}: auto-merge is requested once`);
+  }
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1\.14\.0` \(1 line\) \|/);
 });
 
 test("consumer repin never duplicates an open pull request", (t) => {
@@ -1638,6 +1757,9 @@ test("consumer repin never duplicates an open pull request", (t) => {
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` is already open \|/);
   assert.equal(repinEventLog(harness).filter((event) => event.startsWith("create")).length, 0);
+  // A later run never re-requests auto-merge on an existing offer, so a
+  // consumer who disabled auto-merge keeps that decision.
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("automerge")).length, 0);
   assert.equal(
     harness.branches.get("unity-helpers"),
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)

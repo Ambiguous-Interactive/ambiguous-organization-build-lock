@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # Open reviewed pull requests that repin consumer lock action references to
-# the newest authorized release. Consumers merge the pull request; this
-# script never merges, never force-pushes, and never edits a default branch.
-# A closed repin pull request is a consumer answer: the automation never
-# re-offers that repin and never updates its branch underneath it.
+# the newest authorized release. Each new offer enables auto-merge, so GitHub
+# merges it only after every consumer gate passes; a consumer can still merge
+# by hand or disable auto-merge. A closed repin pull request is a consumer
+# answer: the automation never re-offers that repin, never force-pushes, and
+# never edits a default branch.
 
 # The reviewed enrollment policy that drives scope and repin exceptions.
 # REPIN_POLICY_PATH overrides it for tests.
@@ -445,19 +446,91 @@ Repin the organization lock actions to the authorized release ${label}
   mechanical, mode-bound rewrite.
 - Release authorization evidence: the central authorization pull request for
   this release, merged by a maintainer.
+- The automation enables auto-merge on this pull request. The merge then
+  fires only when every required check and merge rule passes. Disable
+  auto-merge on this pull request to merge by hand instead.
 ${references_section}${companion_section}${preserved_section}
-This pull request is opened by central automation. It never merges itself and
-never edits a default branch.
+Central automation opens this pull request and enables auto-merge. It never
+edits a default branch and never force-pushes.
 EOF
-  if ! GH_TOKEN="${authorization}" gh pr create \
+  local pr_url
+  if ! pr_url="$(GH_TOKEN="${authorization}" gh pr create \
     --repo "${repository}" \
     --head "${branch_name}" \
     --title "Repin organization lock actions to ${label}" \
-    --body-file "${body_file}"; then
+    --body-file "${body_file}")"; then
     echo "::error::${repository}: could not open the repin pull request." >&2
     exit 1
   fi
   rm -f "${body_file}"
+  enable_repin_auto_merge "${repository}" "${authorization}" "${pr_url}"
+}
+
+enable_repin_auto_merge() {
+  # Option 2 of issue 266: the offer merges itself once every consumer gate
+  # passes, so adoption needs no click. The gates already are the review:
+  # the enrollment audit fails closed on an unauthorized pin, and the
+  # consumer's required contexts and merge rules still apply. The request is
+  # one-time, made when the offer is created. A later consumer change, such
+  # as disabling auto-merge on the pull request, is respected and never
+  # undone. Every failure is best-effort: the offer stays open for a manual
+  # merge, a warning names the gap in the job log, and a summary row keeps
+  # it operator-visible.
+  local repository="$1" authorization="$2" pr_url="$3"
+  local pr_number
+  if [[ "${pr_url}" =~ ^https://github.com/[^/]+/[^/]+/pull/([0-9]+)$ ]]; then
+    pr_number="${BASH_REMATCH[1]}"
+  else
+    echo "::warning::${repository}: opened the repin offer but could not read its pull request URL; auto-merge was not requested." >&2
+    printf '%s\n' "| \`${repository}\` | repin offer is open; auto-merge was not requested (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
+  # An omitted mergeMethod defaults to merge commits, which many consumers
+  # disallow. Read the allowed methods with the offer identity in one call
+  # and prefer squash: each offer is one reviewed commit.
+  local method_line
+  if ! method_line="$(GH_TOKEN="${authorization}" gh api graphql \
+    -f owner="${repository%%/*}" \
+    -f name="${repository#*/}" \
+    -F number="${pr_number}" \
+    -f query='query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) { id }
+        squashMergeAllowed
+        mergeCommitAllowed
+        rebaseMergeAllowed
+      }
+    }' \
+    --jq '.data.repository as $r |
+      (($r.squashMergeAllowed | not) and ($r.mergeCommitAllowed | not) and ($r.rebaseMergeAllowed | not)) as $noneAllowed |
+      if ($r.pullRequest.id // "" | startswith("PR_") | not) or $noneAllowed then ""
+      elif $r.squashMergeAllowed then "\($r.pullRequest.id)\tSQUASH"
+      elif $r.mergeCommitAllowed then "\($r.pullRequest.id)\tMERGE"
+      else "\($r.pullRequest.id)\tREBASE"
+      end')"; then
+    echo "::warning::${repository}: could not read the repin offer #${pr_number} identity; auto-merge was not requested." >&2
+    printf '%s\n' "| \`${repository}\` | repin offer #${pr_number} is open; auto-merge was not requested (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
+  local pr_id merge_method
+  pr_id="${method_line%%$'\t'*}"
+  merge_method="${method_line#*$'\t'}"
+  if [ -z "${merge_method}" ] || [ "${merge_method}" = "${method_line}" ]; then
+    echo "::warning::${repository}: repin offer #${pr_number} has no readable identity or no allowed merge method; auto-merge was not requested." >&2
+    printf '%s\n' "| \`${repository}\` | repin offer #${pr_number} is open; auto-merge was not requested (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
+  if ! GH_TOKEN="${authorization}" gh api graphql \
+    -f id="${pr_id}" \
+    -f method="${merge_method}" \
+    -f query='mutation($id: ID!, $method: PullRequestMergeMethod!) {
+      enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: $method}) { pullRequest { number } }
+    }' \
+    --jq '.data.enablePullRequestAutoMerge.pullRequest.number' >/dev/null; then
+    echo "::warning::${repository}: repin offer #${pr_number} is open but auto-merge was not enabled; the offer waits for a manual merge. Common causes: the repository setting \`Allow auto-merge\` is off, or the ${merge_method} merge method is disallowed." >&2
+    printf '%s\n' "| \`${repository}\` | repin offer #${pr_number} is open; auto-merge was not enabled (see the job log) |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
 }
 
 close_superseded_offers() {
