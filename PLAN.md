@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 087)
+## Current state (2026-09-09, session 088)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -131,6 +131,14 @@ impact on licensed-resource safety and consumer CI churn.
   `docs/consumer-enrollment.md` publishes the verdict-compare contract:
   consumer tests assert reviewed verdict fields and tolerate reviewed
   additive fields.
+- Session 088 answered #263: the repin rewrite normalizes release version
+  comments, so every moved pin carries `# vX.Y.Z` and stays Dependabot-
+  visible (live proof: DoxReloaded Dependabot #775 tracked exactly the
+  commented pins). Dependabot cannot rewrite companions or see release
+  authorization, so the central repin offer stays the complete update and
+  an unauthorized Dependabot bump fails closed as `unapproved-lock-ref`.
+  Full zero-touch adoption (auto-merge of green offers) waits on the
+  operator reversal of the automation-never-merges directive.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
