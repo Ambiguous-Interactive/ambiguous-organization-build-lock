@@ -3391,3 +3391,30 @@ test("privileged Dependabot auto-merge workflow does not check out PR code", () 
   assert.match(text, /^\s*pull_request_target:\s*$/m);
   assert.doesNotMatch(text, /uses:\s*actions\/checkout@/);
 });
+
+test("enrollment required contexts stay synchronized with merge-policy expectations", () => {
+  const policy = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "unity-enrollment-policy.json"), "utf8")
+  );
+  const expectations = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "merge-policy-expectations.json"), "utf8")
+  );
+  const audited = new Map(
+    policy.repositories.map((repository) => [repository.repository, repository.requiredContexts ?? []])
+  );
+  const reviewed = new Map(
+    expectations.repositories.map((repository) => [repository.repository, repository.requiredContexts ?? []])
+  );
+  assert.deepEqual(
+    [...audited.keys()].sort(),
+    [...reviewed.keys()].sort(),
+    "the enrollment policy and merge-policy expectations must cover the same repositories"
+  );
+  for (const [repository, contexts] of audited) {
+    assert.deepEqual(
+      contexts,
+      reviewed.get(repository),
+      `${repository} required contexts must match merge-policy expectations`
+    );
+  }
+});

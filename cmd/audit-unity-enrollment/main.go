@@ -82,6 +82,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			ApprovedDarwinReturnSHAs: registry.ApprovedDarwinReturnSHAs,
 			Exceptions:               registry.Exceptions,
 			RepinExceptions:          registry.RepinExceptions,
+			RequiredContexts:         requiredContexts(registry),
 			ProtectedBranches:        []string{repository.DefaultBranch},
 			AllowWorkflowDispatch:    repository.AllowWorkflowDispatch,
 			Now:                      time.Now().UTC(),
@@ -149,6 +150,14 @@ func loadExactSnapshot(
 func repositoryName(repository string) string {
 	segments := strings.Split(repository, "/")
 	return segments[len(segments)-1]
+}
+
+func requiredContexts(registry enrollment.UnityEnrollmentRegistry) map[string][]string {
+	contexts := make(map[string][]string, len(registry.Repositories))
+	for _, repository := range registry.Repositories {
+		contexts[repository.Repository] = repository.RequiredContexts
+	}
+	return contexts
 }
 
 func canonicalRemote(remote, repository string) bool {

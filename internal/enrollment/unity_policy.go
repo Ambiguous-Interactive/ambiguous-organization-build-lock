@@ -101,13 +101,16 @@ type UnityPolicyException struct {
 }
 
 // UnityEnrollmentPolicy defines the immutable lock versions and narrow
-// exceptions accepted by an organization enrollment audit.
+// exceptions accepted by an organization enrollment audit. RequiredContexts
+// repeats the reviewed merge-policy contexts per repository: only those
+// aggregate reports must provably run on every pull request.
 type UnityEnrollmentPolicy struct {
 	ApprovedLockSHAs         []string               `json:"approvedLockShas"`
 	ApprovedReturnSHAs       []string               `json:"approvedReturnShas"`
 	ApprovedDarwinReturnSHAs []string               `json:"approvedDarwinReturnShas"`
 	Exceptions               []UnityPolicyException `json:"exceptions"`
 	RepinExceptions          []UnityRepinException  `json:"repinExceptions"`
+	RequiredContexts         map[string][]string    `json:"-"`
 	ProtectedBranches        []string               `json:"-"`
 	AllowWorkflowDispatch    bool                   `json:"-"`
 	Now                      time.Time              `json:"-"`
@@ -136,7 +139,16 @@ type unityPolicyAnalyzer struct {
 	approvedDarwinReturns map[string]bool
 	exceptions            map[string]UnityPolicyException
 	usedExceptions        map[string]bool
+	requiredContexts      map[string]bool
 	now                   time.Time
+}
+
+func requiredContextSet(contexts []string) map[string]bool {
+	set := make(map[string]bool, len(contexts))
+	for _, context := range contexts {
+		set[context] = true
+	}
+	return set
 }
 
 type flattenedUnityStep struct {
@@ -288,6 +300,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		approvedDarwinReturns: approvedDarwinReturns,
 		exceptions:            exceptions,
 		usedExceptions:        make(map[string]bool),
+		requiredContexts:      requiredContextSet(policy.RequiredContexts[snapshot.Repository]),
 		now:                   now,
 	}
 	result := UnityEnrollmentResult{
@@ -519,8 +532,22 @@ func (a *unityPolicyAnalyzer) auditFallbackCleanup(
 		!sourceMatched {
 		a.analyzer.add("invalid-fallback-release", workflowPath, jobName)
 	}
-	if !a.hasFallbackAggregate(workflow, workflowPath, jobs, jobName, sourceJob) {
+	if aggregateName, aggregateJob, ok := a.hasFallbackAggregate(
+		workflow,
+		workflowPath,
+		jobs,
+		jobName,
+		sourceJob,
+	); !ok {
 		a.analyzer.add("missing-fallback-aggregate", workflowPath, jobName)
+	} else {
+		a.auditAggregateGateReporting(
+			workflow,
+			workflowPath,
+			aggregateName,
+			aggregateJob,
+			protectedBranches,
+		)
 	}
 }
 
@@ -856,8 +883,23 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if selfHostedJob(job) && !needsAny(job, preflightJobs) {
 		a.analyzer.add("missing-runner-preflight", workflowPath, jobName)
 	}
-	if !a.hasAggregate(workflow, workflowPath, jobs, jobName, job, preflightJobs) {
+	if aggregateName, aggregateJob, ok := a.hasAggregate(
+		workflow,
+		workflowPath,
+		jobs,
+		jobName,
+		job,
+		preflightJobs,
+	); !ok {
 		a.analyzer.add("missing-unity-aggregate", workflowPath, jobName)
+	} else {
+		a.auditAggregateGateReporting(
+			workflow,
+			workflowPath,
+			aggregateName,
+			aggregateJob,
+			protectedBranches,
+		)
 	}
 }
 
@@ -4682,12 +4724,13 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 	licensedJob string,
 	licensedJobNode *yaml.Node,
 	preflightJobs map[string]bool,
-) bool {
+) (string, *yaml.Node, bool) {
 	requiredPreflights := neededCandidates(licensedJobNode, preflightJobs)
 	if len(requiredPreflights) == 0 {
-		return false
+		return "", nil, false
 	}
 	for index := 0; index < len(jobs.Content); index += 2 {
+		jobName := jobs.Content[index].Value
 		job := jobs.Content[index+1]
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
 			!conditionIsSafeAlways(mappingValue(job, "if")) ||
@@ -4715,12 +4758,12 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 							"",
 							workflowPath,
 						)) {
-					return true
+					return jobName, job, true
 				}
 			}
 		}
 	}
-	return false
+	return "", nil, false
 }
 
 func (a *unityPolicyAnalyzer) hasFallbackAggregate(
@@ -4728,11 +4771,12 @@ func (a *unityPolicyAnalyzer) hasFallbackAggregate(
 	workflowPath string,
 	jobs *yaml.Node,
 	fallbackJob, sourceJob string,
-) bool {
+) (string, *yaml.Node, bool) {
 	if sourceJob == "" {
-		return false
+		return "", nil, false
 	}
 	for index := 0; index < len(jobs.Content); index += 2 {
+		jobName := jobs.Content[index].Value
 		job := jobs.Content[index+1]
 		unsafeFailFast, matrixErr := unsafeMatrixFailFast(job)
 		if !needsAny(job, map[string]bool{fallbackJob: true}) ||
@@ -4757,7 +4801,7 @@ func (a *unityPolicyAnalyzer) hasFallbackAggregate(
 				fallbackJob,
 				workflowPath,
 			) {
-				return true
+				return jobName, job, true
 			}
 			if !affirmativeCondition(mappingValue(step, "if")) ||
 				!criticalNodeFailurePropagates(step) {
@@ -4791,11 +4835,333 @@ func (a *unityPolicyAnalyzer) hasFallbackAggregate(
 				fallbackFound = fallbackFound || checkedJob == fallbackJob
 			}
 			if valid && sourceFound && fallbackFound {
-				return true
+				return jobName, job, true
 			}
 		}
 	}
+	return "", nil, false
+}
+
+// pullRequestEventFilter describes the path and branch filters of one
+// pull_request flavored trigger. A zero filter is an unfiltered trigger that
+// starts for every pull request, including protected-branch pull requests.
+type pullRequestEventFilter struct {
+	filtered        bool
+	allowlist       bool
+	patterns        []string
+	runsOnProtected bool
+}
+
+// pullRequestEventConfigs iterates the declared pull_request flavored events
+// with their optional trigger configuration. The traversal matches the
+// `on:` interpretation in workflowPREvents so both readers cannot drift.
+type pullRequestEventConfig struct {
+	name   string
+	config *yaml.Node
+}
+
+func pullRequestEventConfigs(workflow *yaml.Node) ([]pullRequestEventConfig, error) {
+	on := mappingValue(workflow, "on")
+	if on == nil {
+		return nil, nil
+	}
+	var configs []pullRequestEventConfig
+	switch on.Kind {
+	case yaml.ScalarNode:
+		configs = append(configs, pullRequestEventConfig{name: on.Value})
+	case yaml.SequenceNode:
+		for _, event := range on.Content {
+			if event.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("on sequence entries must be scalars")
+			}
+			configs = append(configs, pullRequestEventConfig{name: event.Value})
+		}
+	case yaml.MappingNode:
+		for index := 0; index < len(on.Content); index += 2 {
+			if on.Content[index].Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("on mapping keys must be scalars")
+			}
+			configs = append(configs, pullRequestEventConfig{
+				name:   on.Content[index].Value,
+				config: on.Content[index+1],
+			})
+		}
+	default:
+		return nil, fmt.Errorf("on must be a scalar, sequence, or mapping")
+	}
+	return configs, nil
+}
+
+// pullRequestEventFilters returns one filter per pull_request flavored event
+// the workflow declares. A declared event without a mapping value, a types
+// sequence, or a branch list stays unfiltered: only `paths` and
+// `paths-ignore` can withhold the workflow by changed content.
+func pullRequestEventFilters(
+	workflow *yaml.Node,
+	protectedBranches map[string]bool,
+) ([]pullRequestEventFilter, error) {
+	configs, err := pullRequestEventConfigs(workflow)
+	if err != nil {
+		return nil, err
+	}
+	filters := make([]pullRequestEventFilter, 0, len(configs))
+	for _, event := range configs {
+		if event.name != "pull_request" && event.name != "pull_request_target" {
+			continue
+		}
+		filter := pullRequestEventFilter{runsOnProtected: true}
+		if event.config != nil && event.config.Kind == yaml.MappingNode {
+			paths := mappingValue(event.config, "paths")
+			ignore := mappingValue(event.config, "paths-ignore")
+			switch {
+			case paths != nil && ignore != nil:
+				// GitHub rejects this trigger, so no static shape proves
+				// coverage. Model it as an allowlist with no patterns: only
+				// an unfiltered companion covers it.
+				filter.filtered, filter.allowlist = true, true
+			case paths != nil:
+				patterns, err := scalarPatterns(paths)
+				if err != nil {
+					return nil, err
+				}
+				filter.filtered, filter.allowlist, filter.patterns = true, true, patterns
+			case ignore != nil:
+				patterns, err := scalarPatterns(ignore)
+				if err != nil {
+					return nil, err
+				}
+				filter.filtered, filter.patterns = true, patterns
+			}
+			branchAllow := mappingValue(event.config, "branches")
+			branchDeny := mappingValue(event.config, "branches-ignore")
+			if branchAllow != nil || branchDeny != nil {
+				filter.runsOnProtected = triggerRunsOnProtectedBranches(
+					branchAllow,
+					branchDeny,
+					protectedBranches,
+				)
+			}
+		}
+		filters = append(filters, filter)
+	}
+	return filters, nil
+}
+
+// triggerRunsOnProtectedBranches proves the trigger still starts for a
+// protected branch. Only exact literal membership proves it: a glob, or the
+// mutually rejected combination of both keys, fails closed.
+func triggerRunsOnProtectedBranches(
+	allow, deny *yaml.Node,
+	protectedBranches map[string]bool,
+) bool {
+	if allow != nil && deny != nil {
+		return false
+	}
+	allowPatterns, err := scalarPatterns(allow)
+	if err != nil {
+		return false
+	}
+	if allow != nil {
+		for _, pattern := range allowPatterns {
+			if protectedBranches[pattern] {
+				return true
+			}
+		}
+		return false
+	}
+	denyPatterns, err := scalarPatterns(deny)
+	if err != nil {
+		return false
+	}
+	for _, pattern := range denyPatterns {
+		if protectedBranches[pattern] || strings.ContainsAny(pattern, "*?[]") {
+			return false
+		}
+	}
+	return true
+}
+
+func scalarPatterns(node *yaml.Node) ([]string, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("trigger path filters must be a sequence")
+	}
+	patterns := make([]string, 0, len(node.Content))
+	for _, pattern := range node.Content {
+		if pattern.Kind != yaml.ScalarNode {
+			return nil, fmt.Errorf("trigger path filter entries must be scalars")
+		}
+		patterns = append(patterns, pattern.Value)
+	}
+	return patterns, nil
+}
+
+// reportedCheckContext names the status check context a job reports. GitHub
+// reports the literal job `name` when present, else the job id. An expression
+// name or a matrix expansion resolves per run and per leg, so the gate side
+// of the coverage check treats both as unprovable and returns empty.
+func reportedCheckContext(jobID string, job *yaml.Node) string {
+	strategy := mappingValue(job, "strategy")
+	if strategy != nil && mappingValue(strategy, "matrix") != nil {
+		return ""
+	}
+	name := mappingValue(job, "name")
+	if name == nil || name.Kind != yaml.ScalarNode {
+		return jobID
+	}
+	if strings.Contains(name.Value, "${{") {
+		return ""
+	}
+	return name.Value
+}
+
+// workflowReportsContext proves some job of the workflow reports the context
+// on pull requests. The job must run unconditionally: no condition and no
+// `needs` dependency, or exactly `always()`, which overrides needs-based
+// skipping. A skipped required check counts as passing, so a job that can
+// skip proves a false green, and a condition that excludes the pull request
+// events proves nothing. An expression name counts only through its exact
+// single-quoted literal, the one string form GitHub expressions use; which
+// expression arm resolves stays a reviewed companion decision.
+func workflowReportsContext(workflow *yaml.Node, context string) bool {
+	jobs := mappingValue(workflow, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		return false
+	}
+	events, err := workflowPREvents(workflow)
+	if err != nil {
+		return false
+	}
+	for index := 0; index < len(jobs.Content); index += 2 {
+		job := jobs.Content[index+1]
+		condition := mappingValue(job, "if")
+		always := conditionIsSafeAlways(condition)
+		if mappingValue(job, "needs") != nil && !always {
+			continue
+		}
+		if condition != nil && (!always || jobExcludedFromEvents(condition, events)) {
+			continue
+		}
+		if reportedCheckContext(jobs.Content[index].Value, job) == context {
+			return true
+		}
+		name := mappingValue(job, "name")
+		strategy := mappingValue(job, "strategy")
+		if name != nil && name.Kind == yaml.ScalarNode &&
+			(strategy == nil || mappingValue(strategy, "matrix") == nil) &&
+			strings.Contains(name.Value, "${{") &&
+			strings.Contains(name.Value, "'"+context+"'") {
+			return true
+		}
+	}
 	return false
+}
+
+func patternsContain(patterns, wanted []string) bool {
+	for _, pattern := range wanted {
+		found := false
+		for _, candidate := range patterns {
+			if candidate == pattern {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// soleIgnoredPatterns reports the ignored pattern list when exactly one
+// filtered pull_request trigger remains and still starts for a protected
+// branch. Two or more filtered triggers have an intersection blind set that
+// no literal list provably covers, and a trigger that excludes the protected
+// branches proves nothing about them.
+func soleIgnoredPatterns(filters []pullRequestEventFilter) ([]string, bool) {
+	if len(filters) != 1 || !filters[0].filtered ||
+		filters[0].allowlist || !filters[0].runsOnProtected {
+		return nil, false
+	}
+	return filters[0].patterns, true
+}
+
+// auditAggregateGateReporting keeps every reviewed required context
+// reportable on every pull request. GitHub reports no check for a workflow a
+// path filter excluded, so a ruleset that requires the context blocks such
+// merges with no re-runnable check. Coverage is proven statically: some
+// workflow that reports the same context starts on every protected-branch
+// pull request, or for one paths-ignore trigger a companion paths list
+// contains every ignored pattern. Aggregates that report an unrequired
+// context may stay filtered.
+func (a *unityPolicyAnalyzer) auditAggregateGateReporting(
+	workflow *yaml.Node,
+	workflowPath, aggregateJobName string,
+	aggregateJob *yaml.Node,
+	protectedBranches map[string]bool,
+) {
+	if len(a.requiredContexts) == 0 {
+		return
+	}
+	gateFilters, err := pullRequestEventFilters(workflow, protectedBranches)
+	if err != nil {
+		// A malformed trigger proves no coverage.
+		a.analyzer.add("filtered-aggregate-gate", workflowPath, aggregateJobName)
+		return
+	}
+	context := reportedCheckContext(aggregateJobName, aggregateJob)
+	if context == "" {
+		// An expression name or a matrix expansion cannot prove which exact
+		// context this job reports, so it fails closed while the repository
+		// requires any context.
+		a.analyzer.add("filtered-aggregate-gate", workflowPath, aggregateJobName)
+		return
+	}
+	if !a.requiredContexts[context] {
+		// No ruleset requires this context, so its filter is a deliberate
+		// cost choice and blocks no merge.
+		return
+	}
+	for _, filter := range gateFilters {
+		if !filter.filtered && filter.runsOnProtected {
+			return
+		}
+	}
+	// Every declared pull_request flavor is filtered or excludes the
+	// protected branches, or the workflow declares none: no pull request can
+	// rely on this workflow reporting the required context.
+	ignored, lockstep := soleIgnoredPatterns(gateFilters)
+	for path := range a.analyzer.snapshot.Files {
+		if path == workflowPath ||
+			!strings.HasPrefix(path, ".github/workflows/") ||
+			!isYAML(path) {
+			continue
+		}
+		companion, err := a.analyzer.node(path)
+		if err != nil || !workflowReportsContext(companion, context) {
+			continue
+		}
+		companionFilters, err := pullRequestEventFilters(companion, protectedBranches)
+		if err != nil {
+			continue
+		}
+		for _, filter := range companionFilters {
+			if !filter.filtered && filter.runsOnProtected {
+				return
+			}
+		}
+		if lockstep {
+			for _, filter := range companionFilters {
+				if filter.filtered && filter.allowlist && filter.runsOnProtected &&
+					patternsContain(filter.patterns, ignored) {
+					return
+				}
+			}
+		}
+	}
+	a.analyzer.add("filtered-aggregate-gate", workflowPath, aggregateJobName)
 }
 
 type validationGateReferences struct {

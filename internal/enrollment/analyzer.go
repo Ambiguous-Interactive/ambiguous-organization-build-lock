@@ -731,34 +731,14 @@ func validateNode(node *yaml.Node, file string) error {
 
 func workflowPREvents(workflow *yaml.Node) (map[string]bool, error) {
 	events := make(map[string]bool)
-	on := mappingValue(workflow, "on")
-	if on == nil {
-		return events, nil
+	configs, err := pullRequestEventConfigs(workflow)
+	if err != nil {
+		return nil, err
 	}
-	add := func(value string) {
-		if value == "pull_request" || value == "pull_request_target" {
-			events[value] = true
+	for _, event := range configs {
+		if event.name == "pull_request" || event.name == "pull_request_target" {
+			events[event.name] = true
 		}
-	}
-	switch on.Kind {
-	case yaml.ScalarNode:
-		add(on.Value)
-	case yaml.SequenceNode:
-		for _, event := range on.Content {
-			if event.Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("on sequence entries must be scalars")
-			}
-			add(event.Value)
-		}
-	case yaml.MappingNode:
-		for index := 0; index < len(on.Content); index += 2 {
-			if on.Content[index].Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("on mapping keys must be scalars")
-			}
-			add(on.Content[index].Value)
-		}
-	default:
-		return nil, fmt.Errorf("on must be a scalar, sequence, or mapping")
 	}
 	return events, nil
 }
