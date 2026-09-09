@@ -445,6 +445,12 @@ Before enforcing the aggregate as required:
    policy audit can read its exact workflow commit.
 9. Confirm the exact aggregate context and issuing App in the repository
    ruleset before enforcing it.
+10. Confirm the workflow that reports the required context runs on every pull
+    request. GitHub reports no check for a pull request that a `pull_request`
+    `paths` filter excludes, so the required status never appears there and the
+    ruleset blocks those merges forever. Remove the filter and let the change
+    classifier skip licensed work, or pair the filter with a companion gate
+    that reports the same context on the excluded paths.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

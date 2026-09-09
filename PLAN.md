@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 083)
+## Current state (2026-09-09, session 084)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -97,6 +97,12 @@ impact on licensed-resource safety and consumer CI churn.
   Remaining before the audit is green: attestation PRs DoxReloaded #815,
   DxMessaging #564, and IshoBoy #873 (consumer decisions), the DxMessaging
   Integration 3977200 bypass review, and the unity-helpers merge gate.
+- Session 084 repaired the merge gate that ruleset 22595536 exposed
+  (#258): the DoxReloaded workflow withheld `CI Success` from every pull
+  request its `pull_request` paths filter excluded, so attestation PR
+  #815 was blocked permanently. #815 now also removes the filter; the
+  classifier still skips licensed work on inert pull requests. The
+  contract is documented as item 10 of the enrollment canary checklist.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
