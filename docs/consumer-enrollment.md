@@ -58,9 +58,14 @@ After each authorization merge, the central `Repin consumer lock references`
 workflow opens repin pull requests in enrolled repositories. Each pull request
 moves the repository's lock action references to the newly authorized release.
 Merging it is the consumer's adoption decision; the automation never merges.
-Closing a repin pull request is the same decision: the automation does not
-re-offer that repin, and it leaves the repin branch untouched. A new release
-opens a new repin pull request. A repin branch without a pull request is
+A closed repin offer stays closed: the automation never re-offers that
+repin, and it leaves the repin branch untouched. A consumer close is a
+decline; a manual reopen can restore the offer. A new release
+opens a new repin pull request. When no permitted lock-pin change remains
+to reach the authorized release, the automation closes every open offer
+whose head branch matches its `automation/repin-lock-<short sha>` name.
+The run summary records the count, and the offer branches stay untouched.
+A repin branch without a pull request is
 reused only when its content matches the current repin exactly; the
 automation never force-updates it. A workflow file listed in a reviewed
 `repinExceptions` policy entry keeps its
@@ -472,6 +477,13 @@ Before enforcing the aggregate as required:
     no exact context and fails closed. A literal job `name` names the
     context directly; an expression `name` counts only through its exact
     single-quoted literal.
+11. Confirm every consumer test that reads a central runtime verdict asserts
+    the reviewed fields. Tolerate reviewed additive fields. Central releases
+    add verdict fields by review; additive fields are central evolution, not
+    consumer drift. A test that deep-equals a whole verdict object breaks on
+    each addition. The repin offer that carries the addition then fails.
+    Sweep onboarding reviews for strict verdict compares before the
+    repository joins the enrollment.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

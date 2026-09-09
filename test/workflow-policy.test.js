@@ -1569,7 +1569,7 @@ test("consumer repin automation is scheduled, least privilege, and never merges"
   const checkout = steps.find((step) => step.name === "Checkout trusted policy repository");
   const scope = steps.find((step) => step.name === "Resolve enrollment scope from reviewed registry");
   const token = steps.find((step) => step.name === "Mint consumer-scoped repin token");
-  const repin = steps.find((step) => step.name === "Open consumer repin pull requests");
+  const repin = steps.find((step) => step.name === "Repin consumer lock pull requests");
   const concurrency = workflowConcurrency(text);
 
   assert.ok(job);

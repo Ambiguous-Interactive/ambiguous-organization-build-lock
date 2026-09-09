@@ -445,6 +445,45 @@ EOF
   rm -f "${body_file}"
 }
 
+close_superseded_offers() {
+  # The rewrite moved no pin, so no permitted lock-pin change remains to
+  # reach the authorized release. An open repin offer is then superseded: it
+  # offers a pin move the default branch already satisfies or outruns. Close
+  # every open offer on the automation's exact branch grammar
+  # `automation/repin-lock-<7 hex>`. Offers on any other branch name are
+  # never this automation's, so the grammar filter protects them. A closed
+  # offer never re-opens, the branch stays untouched, and a future release
+  # opens a new offer.
+  local repository="$1" label="$2" target_sha="$3" authorization="$4"
+  local open_offers
+  if ! open_offers="$(GH_TOKEN="${authorization}" gh pr list \
+    --repo "${repository}" \
+    --state open \
+    --limit 0 \
+    --json number,headRefName \
+    --jq '.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv')"; then
+    echo "::error::${repository}: could not list open repin offers." >&2
+    return 1
+  fi
+  local closed=0 offer_number offer_branch
+  while IFS=$'\t' read -r offer_number offer_branch; do
+    [ -n "${offer_number}" ] || continue
+    if ! GH_TOKEN="${authorization}" gh pr close "${offer_number}" \
+      --repo "${repository}" \
+      --comment "No permitted lock-pin change remains to reach the authorized
+release ${label} (\`${target_sha}\`). This offer is superseded, so the
+automation closes it. A future release opens a new offer." >/dev/null; then
+      echo "::error::${repository}: could not close superseded repin offer #${offer_number} (${offer_branch})." >&2
+      return 1
+    fi
+    closed=$((closed + 1))
+  done <<< "${open_offers}"
+  if [ "${closed}" != "0" ]; then
+    echo "${repository}: closed ${closed} superseded repin offer(s); no permitted lock-pin change remains to reach ${label}." >&2
+  fi
+  printf '%s\n' "${closed}"
+}
+
 repin_consumer() {
   # The caller inspects this function's result, which makes bash ignore
   # errexit for the whole body, including subshells. Every fallible command
@@ -529,11 +568,22 @@ ${unmatched_companions}
 "
       fi
     fi
+    # The rewrite moved nothing: no permitted lock-pin change remains to
+    # reach the authorized release.
     if [ "${changed}" = "0" ]; then
+      local superseded_count
+      if ! superseded_count="$(close_superseded_offers "${repository}" "${label}" "${target_sha}" "${authorization}")"; then
+        echo "::error::${repository}: could not close the superseded repin offers." >&2
+        exit 1
+      fi
+      local superseded_note=""
+      if [ "${superseded_count}" != "0" ]; then
+        superseded_note="; closed ${superseded_count} superseded repin offer(s)"
+      fi
       if [ "${preserved_count}" != "0" ]; then
-        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\`; ${preserved_count} file(s) preserved by reviewed repin exceptions |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\`; ${preserved_count} file(s) preserved by reviewed repin exceptions${superseded_note} |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
       else
-        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\` |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+        printf '%s\n' "| \`${repository}\` | already pinned to \`${label}\`${superseded_note} |" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
       fi
       exit 0
     fi
@@ -562,11 +612,13 @@ ${unmatched_companions}
       exit 1
     fi
     if [ "${closed_prs}" != "0" ]; then
-      # Merging or closing the repin pull request is the consumer's adoption
-      # decision. Re-offering the same repin would override that decision, so
-      # the repository is skipped and the summary records the state.
+      # Merging or closing the repin pull request is final for that target,
+      # whoever closed it: a consumer close is a decline, and an automation
+      # close removed a superseded offer. Re-offering would override that
+      # state, so the repository is skipped and the summary records it. The
+      # branch stays in place, so a manual reopen can restore an offer.
       printf '%s\n' "${repository}: a repin pull request for ${label} was closed; the automation left the closed repin pull request in place." >&2
-      printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` was closed; consumers decide adoption |" >> "${GITHUB_STEP_SUMMARY}"
+      printf '%s\n' "| \`${repository}\` | repin pull request for \`${label}\` was closed; a closed offer is never re-offered |" >> "${GITHUB_STEP_SUMMARY}"
       exit 0
     fi
     if ! git -C "${directory}" checkout -B "${branch_name}"; then

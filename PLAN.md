@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 085)
+## Current state (2026-09-09, session 087)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -124,6 +124,13 @@ impact on licensed-resource safety and consumer CI churn.
   their own #568, which absorbed the complete pin cohort. DoxReloaded's
   stale v1.14.0 offer #801 closed as superseded. unity-helpers #749 is
   green with reviewer feedback answered; merges stay consumer decisions.
+- Session 087 answered the #261 follow-ups: the repin run now closes its
+  own open offers as superseded when the default branch needs no lock-pin
+  change to reach the authorized release (branch-prefix filter, summary
+  row, failed close keeps the run red), and canary item 11 in
+  `docs/consumer-enrollment.md` publishes the verdict-compare contract:
+  consumer tests assert reviewed verdict fields and tolerate reviewed
+  additive fields.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -167,14 +174,15 @@ impact on licensed-resource safety and consumer CI churn.
       all six enrolled snapshots (0 findings, complete): DoxReloaded #810
       (also repins its unapproved refs to v1.14.2, superseding automation
       offer #801 and Dependabot #775) and qora-redux #374 merged 2026-09-08;
-      DxMessaging #562 and unity-helpers #749 (structural only; its pins stay
-      at v1.14.0 per its maintainer decision) remain open. Their merges are
-      consumer decisions.
-      IshoBoy closed repin offer #855 unadopted (2026-09-07); a closed
-      offer is a decline, so the automation never re-offers it.
+      DxMessaging #562 merged 2026-09-09, and unity-helpers #749 (structural
+      only; its pins stay at v1.14.0 per its maintainer decision) remains
+      open. Their merges are consumer decisions.
+      IshoBoy closed repin offer #855 unadopted (2026-09-07); a
+      consumer-closed offer is a decline, so the automation never re-offers
+      it.
       DxMessaging adopted the pins in its own PR #554. unity-helpers
       declined the earlier repin by closing #738. The v1.14.2 offers are
-      open with their companion fixes pushed (#751, #567, #877, #382);
+      open with their companion fixes pushed (#751, #877, #382);
       their merges are consumer decisions.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.

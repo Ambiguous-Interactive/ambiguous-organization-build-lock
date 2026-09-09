@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   repin:
-    name: Open consumer repin pull requests
+    name: Repin consumer lock pull requests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -43,7 +43,7 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      - name: Open consumer repin pull requests
+      - name: Repin consumer lock pull requests
         env:
           CONSUMER_AUTHORIZATION: ${{ steps.repin-token.outputs.token }}
         run: bash tools/workflows/repin-consumer-locks.sh repin-consumers
