@@ -331,7 +331,9 @@ func contextsOf(checks []RequiredCheck) []string {
 func allowedBypass(allowed []BypassActor, actor RuleBypassActor) bool {
 	for _, candidate := range allowed {
 		if candidate.ActorType == actor.ActorType && candidate.ActorID == actor.ActorID {
-			return true
+			// Acceptance is scoped to the reviewed bypass mode; an omitted
+			// reviewed mode records the default always mode.
+			return bypassMode(candidate.Mode) == bypassMode(actor.Mode)
 		}
 	}
 	return false

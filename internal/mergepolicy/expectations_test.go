@@ -20,7 +20,7 @@ func validExpectationBody() string {
     "requiredContexts": ["Unity CI Success"],
     "requireAdminEnforcement": true,
     "allowedBypassActors": [
-      {"actorType": "OrganizationAdmin", "actorId": 5}
+      {"actorType": "OrganizationAdmin", "actorId": 5, "mode": "always"}
     ]
   }`
 }
@@ -41,7 +41,8 @@ func TestParseExpectationsAcceptsReviewedFile(t *testing.T) {
 		!expectation.RequireAdminEnforcement ||
 		len(expectation.AllowedBypassActors) != 1 ||
 		expectation.AllowedBypassActors[0].ActorType != "OrganizationAdmin" ||
-		expectation.AllowedBypassActors[0].ActorID != 5 {
+		expectation.AllowedBypassActors[0].ActorID != 5 ||
+		expectation.AllowedBypassActors[0].Mode != "always" {
 		t.Fatalf("parsed expectation does not match the reviewed file: %+v", expectation)
 	}
 }
@@ -77,6 +78,7 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 		"unknown actor type":         `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "allowedBypassActors": [{"actorType": "Wizard", "actorId": 1}]}`,
 		"nonpositive actor id":       `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "allowedBypassActors": [{"actorType": "Team", "actorId": 0}]}`,
 		"duplicate actor":            `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "allowedBypassActors": [{"actorType": "Team", "actorId": 3}, {"actorType": "Team", "actorId": 3}]}`,
+		"invalid bypass mode":        `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "allowedBypassActors": [{"actorType": "Team", "actorId": 3, "mode": "whenever"}]}`,
 		"too many repositories": func() string {
 			entries := make([]string, 0, MaxRepositories+1)
 			for index := 0; index <= MaxRepositories; index++ {

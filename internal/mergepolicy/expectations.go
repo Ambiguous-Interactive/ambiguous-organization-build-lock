@@ -72,9 +72,12 @@ var (
 )
 
 // BypassActor is one reviewed identity allowed to bypass a required check.
+// Mode records the reviewed bypass mode; an omitted mode is the default
+// always mode, so a narrower live grant is never accepted by accident.
 type BypassActor struct {
 	ActorType string `json:"actorType"`
 	ActorID   int64  `json:"actorId"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // RepositoryExpectation is the reviewed merge policy for one consumer
@@ -168,7 +171,7 @@ func ParseExpectations(content []byte) (Expectations, error) {
 		}
 		actorKeys := make(map[string]bool, len(expectation.AllowedBypassActors))
 		for _, actor := range expectation.AllowedBypassActors {
-			if !validActorType(actor.ActorType) || actor.ActorID <= 0 {
+			if !validActorType(actor.ActorType) || actor.ActorID <= 0 || !validBypassMode(actor.Mode) {
 				return Expectations{}, fmt.Errorf("merge policy expectations contain an invalid bypass actor")
 			}
 			actorKey := actor.ActorType + "\x00" + fmt.Sprint(actor.ActorID)
