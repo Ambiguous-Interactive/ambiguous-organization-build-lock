@@ -138,7 +138,7 @@ func newRulesetServer(t *testing.T) (*rulesetServer, *http.Client) {
 			rest := strings.TrimPrefix(path, "/repos/")
 			separator := strings.Index(rest, "/contents/")
 			if separator < 0 ||
-				rest[separator:] != "/contents/"+filepath.Join(".github", "merge-policy-attestation.json") ||
+				rest[separator:] != "/contents/.github/merge-policy-attestation.json" ||
 				request.URL.Query().Get("ref") == "" {
 				writer.WriteHeader(http.StatusNotFound)
 				return
@@ -667,14 +667,31 @@ func TestRunReportsAttestedBypassActorAsDrift(t *testing.T) {
 
 func TestRunFailsClosedWhenAttestationEnvelopeIsInvalid(t *testing.T) {
 	// Every malformed contents envelope must fail the audit closed with a
-	// retrieval finding, never read as an absent file.
+	// retrieval finding, never read as an absent file. The two oversize
+	// cases pin each size bound independently: one exceeds the declared
+	// size only, the other exceeds the encoded length only.
+	oversizedEncoded := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("A", 49153)))
+	var wrapped strings.Builder
+	for len(oversizedEncoded) > 0 {
+		cut := len(oversizedEncoded)
+		if cut > 60 {
+			cut = 60
+		}
+		wrapped.WriteString(oversizedEncoded[:cut])
+		wrapped.WriteString("\n")
+		oversizedEncoded = oversizedEncoded[cut:]
+	}
 	cases := map[string]string{
 		"non-base64 encoding": `{"content": "eHl6", "encoding": "plain", "size": 3}`,
 		"missing content":     `{"encoding": "base64", "size": 3}`,
 		"undecodable content": `{"content": "!!!not base64!!!", "encoding": "base64", "size": 3}`,
-		"oversized content": fmt.Sprintf(
+		"oversized declared size": fmt.Sprintf(
+			`{"content": "eHl6", "encoding": "base64", "size": %d}`,
+			mergepolicy.MaxAttestationBytes+1,
+		),
+		"oversized encoded length": fmt.Sprintf(
 			`{"content": %q, "encoding": "base64", "size": %d}`,
-			strings.Repeat("QQ==\n", mergepolicy.MaxAttestationBytes/4+1), mergepolicy.MaxAttestationBytes+64,
+			wrapped.String(), 49153,
 		),
 	}
 	for name, envelope := range cases {

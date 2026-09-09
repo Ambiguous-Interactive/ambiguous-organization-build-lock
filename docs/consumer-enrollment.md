@@ -374,8 +374,10 @@ audit reports and opens one deduplicated issue.
   repository's live merge settings. No consumer edit. Central operators
   diagnose the run.
 
-A central Contents-read failure presents as `merge-policy-attestation-missing`
-in every repository at once, even where files exist. Central operators check
+A missing file and a central Contents-read permission failure both answer
+404, so both present as `merge-policy-attestation-missing` in every
+repository that has a carrying ruleset. Other contents read failures
+present as `merge-policy-retrieval-incomplete`. Central operators check
 the run first when the finding appears for all consumers.
 
 ### Merge policy attestation
