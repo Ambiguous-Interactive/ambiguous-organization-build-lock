@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 089)
+## Current state (2026-09-09, session 090)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -156,6 +156,11 @@ impact on licensed-resource safety and consumer CI churn.
   re-run confirms only the unity-helpers merge gate remains; when
   unity-helpers #749 merges, a complete clean audit closes #255 and #113
   automatically.
+- Session 090 re-verified the green baseline after the #267 merge: main
+  CI green, the full local verification suite green, no open or draft
+  pull requests, and no failed runs. Every open issue waits on an
+  external decision or live evidence; the auto-merge path awaits its
+  first live offer at the next authorized release.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -197,20 +202,13 @@ impact on licensed-resource safety and consumer CI churn.
       per-reason-code fix contract is published in
       `docs/consumer-enrollment.md` and linked from the drift issue.
       Session 079 opened reviewed fix pull requests for every one of the
-      64 findings, each verified against the unmodified local analyzer over
-      all six enrolled snapshots (0 findings, complete): DoxReloaded #810
-      (also repins its unapproved refs to v1.14.2, superseding automation
-      offer #801 and Dependabot #775) and qora-redux #374 merged 2026-09-08;
-      DxMessaging #562 merged 2026-09-09, and unity-helpers #749 (structural
-      only; its pins stay at v1.14.0 per its maintainer decision) remains
-      open. Their merges are consumer decisions.
+      64 findings, each verified against the unmodified local analyzer
+      over all six enrolled snapshots (0 findings, complete). All merged
+      except unity-helpers #749 (structural only; its pins stay at
+      v1.14.0 per its maintainer decision). Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
-      it.
-      DxMessaging adopted the pins in its own PR #554. unity-helpers
-      declined the earlier repin by closing #738. The v1.14.2 offers
-      merged on 2026-09-09 (#751, #877, #382), and DxMessaging adopted
-      through #568.
+      it. unity-helpers declined the earlier repin by closing #738.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
       first complete clean run.
 
