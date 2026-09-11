@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-11, session 091)
+## Current state (2026-09-11, session 092)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -139,10 +139,7 @@ impact on licensed-resource safety and consumer CI churn.
   an unauthorized Dependabot bump fails closed as `unapproved-lock-ref`.
 - The v1.14.2 adoption cohort completed (2026-09-09): the three repin
   offers merged with their companions (unity-helpers #751, IshoBoy #877,
-  qora-redux #382), and DxMessaging adopted through #568. The scheduled
-  enrollment audit now reports 27 findings, all unity-helpers, all behind
-  the open structural PR unity-helpers #749; its merge closes #113
-  automatically on the first clean run.
+  qora-redux #382), and DxMessaging adopted through #568.
 - Session 089 answered #266 (operator decision, option 2): the repin
   automation enables auto-merge on every offer it opens, with the merge
   method chosen from the repository's allowed methods (squash preferred).
@@ -154,7 +151,7 @@ impact on licensed-resource safety and consumer CI churn.
   mode `always`) is now recorded in `merge-policy-expectations.json`, and
   expectation bypass actors carry a reviewed bypass mode. The live audit
   re-run confirms only the unity-helpers merge gate remains; when
-  unity-helpers #749 merges, a complete clean audit closes #255 and #113
+  unity-helpers #749 merges, a complete clean audit closes #255
   automatically.
 - Session 090 re-verified the green baseline after the #267 merge: main
   CI green, the full local verification suite green, no open or draft
@@ -170,6 +167,18 @@ impact on licensed-resource safety and consumer CI churn.
   hypothesis against real peer activity. The consumer half (classify the
   engine-assertion zero-failed-leaves signature, retry once inside the
   held lock) is published as canary item 12 of the enrollment contract.
+- Session 092 worked the live evidence queue. unity-helpers #749 merged
+  (2026-09-11) and cleared all 27 unity-helpers findings; the first clean
+  merge-policy audit closes #255. The same enrollment audit caught one
+  fresh finding: DxMessaging #580 inserted an input guard between the
+  current-PR-head guard and the editor gate, so the gate left the reviewed
+  prefix (`missing-unity-editor-check`). Root cause, a reviewed consumer
+  fix (DxMessaging #582), and a doc clarification of the prefix rule are
+  recorded; the unmodified local analyzer reports 0 findings over all six
+  snapshots with the fix applied. For #269, lock-state history proves no
+  peer held the lock in either casualty window and both casualties started
+  23-62s after a peer returned on the same physical runner; a full re-run
+  reproduced the signature, so the class is not always transient.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -212,14 +221,17 @@ impact on licensed-resource safety and consumer CI churn.
       `docs/consumer-enrollment.md` and linked from the drift issue.
       Session 079 opened reviewed fix pull requests for every one of the
       64 findings, each verified against the unmodified local analyzer
-      over all six enrolled snapshots (0 findings, complete). All merged
-      except unity-helpers #749 (structural only; its pins stay at
-      v1.14.0 per its maintainer decision). Merges are consumer decisions.
+      over all six enrolled snapshots (0 findings, complete). unity-helpers
+      #749 merged 2026-09-11, clearing its 27 structural findings. New
+      drift reopens the count: session 092 opened DxMessaging #582 for the
+      `missing-unity-editor-check` regression that #580 introduced.
+      Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
-      first complete clean run.
+      first complete clean run. #113 reopens on any new drift, as it did
+      for the DxMessaging prefix regression.
 
 ## Blocked on authority or evidence (do not start here)
 
