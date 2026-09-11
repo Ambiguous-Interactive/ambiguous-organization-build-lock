@@ -1521,7 +1521,7 @@ test("organization merge-policy audit is exact, read-only, and fail closed", () 
   assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), false);
   assert.equal(hasEffectivePermission(text, job.text, "issues", "write"), true);
   assert.equal(workflowHasTrigger(text, "schedule"), true);
-  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), false);
+  assert.equal(workflowHasTrigger(text, "workflow_dispatch"), true);
   assert.equal(workflowHasTrigger(text, "pull_request"), false);
   const concurrency = workflowConcurrency(text);
   assert.equal(hasStableConcurrencyGroup(concurrency), true);
@@ -3047,6 +3047,7 @@ test("scheduled manual workflows declare stable concurrency", () => {
     "auto-release.yml",
     "dx-unity-automation-audit.yml",
     "lock-recovery-audit.yml",
+    "merge-policy-audit.yml",
     "reap-stale-locks.yml",
     "reaper-delivery-audit.yml",
     "repin-consumer-locks.yml"
