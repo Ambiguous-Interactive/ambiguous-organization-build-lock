@@ -134,6 +134,30 @@ commit):
   their own `createdAt`; the reservation-present fixture moved before the
   window start so the case keeps testing the `present` classification.
 
+PR review round 2 (Cursor Bugbot on commit 3c0e7bc82, fixed in the
+follow-up commit):
+
+- Medium: schema-5 incidents persist `reportedAt`, never `createdAt`. The
+  reducer read `createdAt`, `parseTime` mapped the missing field to epoch,
+  and every incident classified as `incident-present`, hiding mid-window
+  openings. The fixture invented a `createdAt` production never writes.
+  Fixed: classification and event time now use `reportedAt`; a missing or
+  unreadable value classifies as `incident-created` (the direction that
+  cannot hide an opening) and falls back to the snapshot time. The fixture
+  uses the production field; a missing-`reportedAt` case pins the
+  classification.
+- Medium: the snapshot cap still spent its fetches on the oldest commits
+  overall, which after the windowing fix are the skew buffer. On a busy
+  lock the buffer could consume the whole cap and leave the reported window
+  unobserved (`partial` with no events despite in-window commits). Fixed:
+  the fetch budget now splits by the listing's commit dates. The snapshot
+  cap is spent on the oldest in-window commits, and at most two buffer
+  commits nearest the session opening are fetched for context. In-window
+  drops are truncation; buffer drops are by design because pre-session
+  activity is never published. An end-to-end test with 30 buffer commits
+  pins that exactly the two nearest are fetched and the in-window events
+  still report `ok`.
+
 Bounds re-checked: one absolute 30-second deadline with an abort signal,
 at most 2 attempts per read, at most 25 snapshots, at most 100 events.
 The `since` filter uses the acquirer's clock against GitHub commit

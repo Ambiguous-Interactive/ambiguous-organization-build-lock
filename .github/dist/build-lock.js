@@ -46,6 +46,10 @@ const PEER_TIMELINE_DEADLINE_MS = 30 * 1000;
 // Ceiling on lock-state snapshots replayed for one timeline. Each snapshot is
 // one contents read; together they stay well inside the timeline deadline.
 const PEER_TIMELINE_MAX_SNAPSHOTS = 25;
+// Buffer commits (older than the session start by the listing's skewed clock)
+// are never reported, so at most this many, the ones nearest the session
+// opening, are fetched for context. They cannot consume the snapshot cap.
+const PEER_TIMELINE_BUFFER_SNAPSHOTS = 2;
 // Ceiling on published events so a pathological window cannot produce an
 // unbounded output or summary.
 const PEER_TIMELINE_MAX_EVENTS = 100;
@@ -2713,7 +2717,8 @@ function peerTimelineEvents(snapshots, selfHolderId, sessionStartMs) {
     });
   const incidentEvent = (kind, snapshot, incident) =>
     add({
-      time: kind === "incident-created" ? String(incident.createdAt || snapshot.time) : snapshot.time,
+      // Schema-5 incidents persist `reportedAt`, never `createdAt`.
+      time: kind === "incident-created" ? String(incident.reportedAt || snapshot.time) : snapshot.time,
       kind,
       incidentId: incident.incidentId,
       reason: incident.reason
@@ -2771,7 +2776,12 @@ function peerTimelineEvents(snapshots, selfHolderId, sessionStartMs) {
     }
     const incidentId = snapshot.incident ? String(snapshot.incident.incidentId) : "";
     if (incidentId && incidentId !== previousIncidentId) {
-      const kind = parseTime(snapshot.incident.createdAt) <= start ? "incident-present" : "incident-created";
+      // Incidents carry `reportedAt`; a missing value must not read as epoch
+      // and silently force the "present" classification.
+      const reportedAtMs = Date.parse(snapshot.incident.reportedAt || "");
+      const kind = Number.isFinite(reportedAtMs) && reportedAtMs <= start
+        ? "incident-present"
+        : "incident-created";
       incidentEvent(kind, snapshot, snapshot.incident);
     }
     previousIncidentId = incidentId;
@@ -2823,16 +2833,25 @@ async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
     if (!Array.isArray(commits)) {
       return { status: "unavailable", reason: "lock-state commit listing was malformed", events: [] };
     }
-    // The listing is newest-first. The snapshot cap keeps the OLDEST commits in
-    // the window: they carry the session's opening state, which decides the
-    // "peer was already present" classification, while the newest commits only
-    // repeat the release itself. Any drop is reported as partial.
-    const truncatedBySnapshots = commits.length > PEER_TIMELINE_MAX_SNAPSHOTS;
+    // The listing is newest-first and reaches back into the skew buffer, but
+    // only snapshots at or after the session start are ever reported. Split the
+    // selection: the snapshot cap is spent on the OLDEST in-window commits,
+    // which reach back toward the session opening, and at most a couple of
+    // buffer commits nearest the opening are fetched for context. Without the
+    // split, a busy lock's buffer writes could consume the whole cap and leave
+    // the reported window unobserved. In-window drops are truncation; buffer
+    // drops are by design, because pre-session activity is never published.
+    const commitTime = (commit) =>
+      parseTime(commit && commit.commit && commit.commit.author && commit.commit.author.date);
+    const inWindow = commits.filter((commit) => commitTime(commit) >= parsedSessionStart);
+    const buffer = commits.filter((commit) => commitTime(commit) < parsedSessionStart).slice(0, PEER_TIMELINE_BUFFER_SNAPSHOTS);
+    const truncatedBySnapshots = inWindow.length > PEER_TIMELINE_MAX_SNAPSHOTS;
     const truncatedByCommits = commits.length >= 100;
+    const selected = [...buffer.slice().reverse(), ...inWindow.slice(-PEER_TIMELINE_MAX_SNAPSHOTS).reverse()];
     const snapshots = [];
     let truncatedByBudget = false;
     let gaps = false;
-    for (const commit of commits.slice(-PEER_TIMELINE_MAX_SNAPSHOTS).reverse()) {
+    for (const commit of selected) {
       if (!commit || !commit.sha) {
         gaps = true;
         continue;
