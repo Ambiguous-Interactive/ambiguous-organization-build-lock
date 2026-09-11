@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/DxMessaging:34636522017:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
-    "repository": "Ambiguous-Interactive/DxMessaging",
-    "workflow": "Performance Numbers",
-    "job": "perf-benchmarks",
-    "runId": "34636522017",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34636522017",
-    "queuedAt": "2026-09-11T19:03:56.617Z",
-    "acquiredAt": "2026-09-11T19:03:59.411Z",
-    "expiresAt": "2026-09-11T23:03:59.411Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "103385733332"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxMessaging:34636522017:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
-      "repository": "Ambiguous-Interactive/DxMessaging",
-      "workflow": "Performance Numbers",
-      "job": "perf-benchmarks",
-      "runId": "34636522017",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34636522017",
-      "queuedAt": "2026-09-11T19:03:56.617Z",
-      "acquiredAt": "2026-09-11T19:03:59.411Z",
-      "expiresAt": "2026-09-11T23:03:59.411Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "103385733332"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "unity-return-400006",
       "createdAt": "2026-09-11T19:06:41.887Z"
+    },
+    {
+      "reservationId": "e7b0b909-4aa8-472d-b425-a3f18ec4bd65",
+      "holderId": "Ambiguous-Interactive/DxMessaging:34636522017:perf-benchmarks:perf-6000.5.2f1-standalone-internal",
+      "repository": "Ambiguous-Interactive/DxMessaging",
+      "workflow": "Performance Numbers",
+      "job": "perf-benchmarks",
+      "runId": "34636522017",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/34636522017",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-11T19:06:48.808Z",
+      "availableAt": "2026-09-11T19:06:49.808Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-11T19:06:41.887Z"
+  "updatedAt": "2026-09-11T19:06:48.808Z"
 }
