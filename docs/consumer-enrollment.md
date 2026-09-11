@@ -332,7 +332,7 @@ edits.
 | `missing-runner-preflight` | Add the hosted registration preflight and make the licensed job depend on it. See item 2. |
 | `missing-typed-release` | Add the typed central release step. See item 7. |
 | `missing-unity-aggregate` | Emit the exact-shape hosted aggregate that covers the licensed job. See item 10 and the exact static shape note. |
-| `missing-unity-editor-check` | Invoke the pinned `ensure-unity-editor` action with the exact inputs. See item 3. |
+| `missing-unity-editor-check` | Invoke the pinned `ensure-unity-editor` action with the exact inputs in the reviewed prefix: in new or edited workflows only the current-PR-head guard may precede it. See item 3. |
 | `missing-unity-return` | Run the pinned central `return-unity-license` action. See item 7. |
 | `mutable-acquire-ref` | Pin acquire to a full 40-character commit SHA. |
 | `mutable-action-ref` | Pin every remote action to a reviewed full commit SHA. See item 1. |
