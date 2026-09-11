@@ -305,7 +305,10 @@ reader access. Treat either condition as scope drift.
    Waiting jobs are removed from the queue even when they never acquired.
    Invalid or contradictory evidence is degraded to unknown; under schema 4 or
    newer, any removed held capacity is quarantined. The release step fails only
-   after exact ownership cleanup.
+   after exact ownership cleanup. After the release write, the release action
+   also publishes the redacted `peer-timeline` output and a job-summary table
+   with the peer holder, reservation, and incident events observed on the
+   lock-state branch during this holder's session window.
 8. The stable aggregate fails on preflight failure, cancellation, unexpected
    skip, partial matrix execution, missing return evidence, or failed release.
 
@@ -313,6 +316,23 @@ Automatic concurrency must not cancel a job after it can acquire. A superseded
 run should exit before acquire; once acquired, it finishes activation, work,
 return, and release. Manual cancellation remains fail-closed and may create a
 runner quarantine.
+
+### Session-phase casualty correlation
+
+A licensed run that dies inside the editor with zero failed test cases is not
+proof of a code failure. To tell an editor-session casualty from a real red
+suite, read the run's release `peer-timeline` evidence:
+
+- `status=ok` means the bounded replay saw the whole window without gaps and
+  lists the peer holder acquires and returns it observed. Treat the list as
+  best-effort evidence within those bounds, not as an absolute guarantee.
+- `status=partial` means the replay was truncated or had gaps. Treat the
+  window as unproven, not as proof of absence or presence.
+- `status=unavailable` means the history could not be read. Same disposition.
+- `status=not-applicable` means the run never held a session.
+
+The evidence carries holder IDs, runner IDs, reason codes, and timestamps only.
+It never contains logs. It is correlation evidence, not proof of cause.
 
 ## Operator quick reference
 

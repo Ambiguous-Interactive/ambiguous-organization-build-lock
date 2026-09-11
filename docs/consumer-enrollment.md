@@ -511,6 +511,13 @@ Before enforcing the aggregate as required:
     each addition. The repin offer that carries the addition then fails.
     Sweep onboarding reviews for strict verdict compares before the
     repository joins the enrollment.
+12. Confirm the licensed job separates an engine-internal assertion with zero
+    failed test-case leaves from a real red suite. Give the signature its own
+    stable reason (for example `editor-session-crash`) and retry the affected
+    test phase once inside the held lock. Keep a second failure red. Surface
+    the release step's redacted `peer-timeline` output next to the failure so
+    an editor-session casualty can be checked against peer lock activity in
+    the same window.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

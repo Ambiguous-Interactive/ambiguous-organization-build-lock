@@ -333,7 +333,8 @@ test("release accepts the physical runner identity required by schema 3", () => 
     "resource-health",
     "resource-reason",
     "report-degraded",
-    "report-validation-error"
+    "report-validation-error",
+    "peer-timeline"
   ]) {
     assert.match(release, new RegExp(`^  ${output}:`, "m"));
   }

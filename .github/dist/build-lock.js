@@ -39,6 +39,25 @@ const MIN_RELEASE_RETRY_DEADLINE_SECONDS = 30;
 // Share of the release budget the preparatory calls may spend before the
 // lock-state read and write, which keep the remainder.
 const RELEASE_PREPARATION_BUDGET_SHARE = 0.25;
+// The peer timeline is correlation evidence for an operator, not safety
+// evidence. It runs after the release write with its own small wall clock so a
+// slow or failing history read can never delay or degrade the release itself.
+const PEER_TIMELINE_DEADLINE_MS = 30 * 1000;
+// Ceiling on lock-state snapshots replayed for one timeline. Each snapshot is
+// one contents read; together they stay well inside the timeline deadline.
+const PEER_TIMELINE_MAX_SNAPSHOTS = 25;
+// Buffer commits (older than the session start by the listing's skewed clock)
+// are never reported, so at most this many, the ones nearest the session
+// opening, are fetched for context. They cannot consume the snapshot cap.
+const PEER_TIMELINE_BUFFER_SNAPSHOTS = 2;
+// Ceiling on published events so a pathological window cannot produce an
+// unbounded output or summary.
+const PEER_TIMELINE_MAX_EVENTS = 100;
+// The commits listing filters by `since`, which is the acquirer's clock, while
+// commit timestamps come from GitHub's clock. The buffer absorbs that skew so
+// the admission write itself is never missed; the reducer still carries each
+// peer's exact admission time, so the wider window cannot misorder anything.
+const PEER_TIMELINE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const DEFAULT_AUTH_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_RELEASE_COOLDOWN_SECONDS = 6 * 60;
 const DEFAULT_PR_HEAD_TTL_MS = 60 * 1000;
@@ -2346,6 +2365,13 @@ function writeReleaseOutputs(config, identity, result, cleanupResult = cleanupRe
   writeOutput("resource-reason", result.resourceReason || config.resourceReport?.reason || "");
   writeOutput("report-degraded", String(config.resourceReportDegraded === true));
   writeOutput("report-validation-error", config.resourceReportValidationError || "");
+  // Every release publishes the peer-timeline output so consumers can key on
+  // it unconditionally. Releases that never held a session report
+  // not-applicable; an unreachable history reports unavailable.
+  writeOutput(
+    "peer-timeline",
+    JSON.stringify(result.peerTimeline || { status: "unavailable", events: [] })
+  );
 }
 
 function firstHolderContext(holders) {
@@ -2360,6 +2386,11 @@ async function cleanupIdentity(config, identity, options = {}) {
   const maxAttempts = options.maxAttempts || 10;
   const conflictDelayMs = options.conflictDelayMs === undefined ? 1000 : options.conflictDelayMs;
   let ambiguousCleanup = null;
+  // The held session's own admission time, captured from the first state read
+  // that still shows the caller's holder entry. Release publishes the peer
+  // timeline over [sessionAcquiredAt, release]; a noop or queue-only cleanup
+  // has no held session and leaves this null.
+  let sessionAcquiredAt = null;
 
   const reconcileAmbiguousCleanup = (current, state, sha, heldBy, heldByRunUrl) => {
     if (!ambiguousCleanup || current.reservationId) {
@@ -2414,6 +2445,15 @@ async function cleanupIdentity(config, identity, options = {}) {
       // The attempt fence still prevents a late cleanup from deleting a newer rerun.
       return BigInt(identity.runAttempt) >= BigInt(entry.runAttempt);
     };
+    // Capture the held session's own admission time from the first read that
+    // still shows the entry. Release publishes the peer timeline over
+    // [sessionAcquiredAt, release]; a later read never widens the window.
+    if (sessionAcquiredAt === null) {
+      const selfHolder = state.holders.find(ownsEntry);
+      if (selfHolder) {
+        sessionAcquiredAt = selfHolder.acquiredAt;
+      }
+    }
     let incident = state.schemaVersion >= 5 ? state.activeIncident : null;
     let incidentCreated = false;
     if (state.schemaVersion >= 5 && options.resourceHealth === "blocked") {
@@ -2506,7 +2546,7 @@ async function cleanupIdentity(config, identity, options = {}) {
     if (!changed) {
       if (ambiguousCleanup) {
         return reconcileAmbiguousCleanup(
-          { released: false, queueCleaned: false, ...incidentResult },
+          { released: false, queueCleaned: false, sessionAcquiredAt, ...incidentResult },
           state,
           sha || "",
           heldBy,
@@ -2516,6 +2556,7 @@ async function cleanupIdentity(config, identity, options = {}) {
       return {
         released: false,
         queueCleaned: false,
+        sessionAcquiredAt,
         sha: sha || "",
         heldBy,
         heldByRunUrl,
@@ -2557,6 +2598,7 @@ async function cleanupIdentity(config, identity, options = {}) {
     return reconcileAmbiguousCleanup({
       released,
       queueCleaned,
+      sessionAcquiredAt,
       sha: write.sha,
       heldBy,
       heldByRunUrl,
@@ -2568,6 +2610,340 @@ async function cleanupIdentity(config, identity, options = {}) {
   }
 
   throw new Error(`Failed to clean up ${config.lockName} after repeated CAS conflicts.`);
+}
+
+// ---------------------------------------------------------------------------
+// Peer timeline
+//
+// A licensed session that died inside the editor leaves a red required check
+// whose cause no consumer can see: the assertion context lives in a redacted
+// log, and the question "was another lock holder active during my session
+// window?" lives only in lock-state history (issue #269, like #223 section 3
+// before it). This section reconstructs that window from the lock-state
+// branch's own commit history and publishes a redacted event list.
+//
+// This is correlation evidence only. It never changes a release outcome, it
+// never blocks the release, and it publishes nothing that is not already
+// public in the lock-state branch: holder IDs, runner IDs, reason codes, and
+// timestamps. No logs, no credential material, no run URLs beyond those the
+// state already carries.
+// ---------------------------------------------------------------------------
+
+function peerTimelineSnapshot(commitTime, rawText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  // Schema-1 history carries a single mirrored `holder`; newer schema files
+  // carry the `holders` array. Accept both so a migration-era window does not
+  // misclassify peers.
+  const holders = Array.isArray(parsed.holders)
+    ? parsed.holders.filter((holder) => holder && typeof holder === "object" && holder.holderId)
+    : parsed.holder && typeof parsed.holder === "object" && parsed.holder.holderId
+      ? [parsed.holder]
+      : [];
+  const reservations = Array.isArray(parsed.reservations)
+    ? parsed.reservations.filter(
+        (reservation) => reservation && typeof reservation === "object" && reservation.reservationId
+      )
+    : [];
+  const incident =
+    parsed.activeIncident && typeof parsed.activeIncident === "object" && parsed.activeIncident.incidentId
+      ? parsed.activeIncident
+      : null;
+  return {
+    time: String(parsed.updatedAt || commitTime || ""),
+    holders,
+    reservations,
+    incident
+  };
+}
+
+function peerTimelineRow(event) {
+  return Object.fromEntries(
+    Object.entries(event).filter(([, value]) => value !== undefined && value !== "")
+  );
+}
+
+// Reduce oldest-first snapshots into redacted peer events. Only snapshots at
+// or after the session start are reported: the commit listing reaches back by
+// a clock-skew buffer, and peer activity that ends inside that buffer never
+// overlapped the session. A peer observed at a reported snapshot is classified
+// by its own state timestamp ("present" when it was admitted at or before the
+// session start, "acquired" afterwards) and reported once. A reported holder
+// or reservation missing from a later reported snapshot is a removal; nothing
+// observed only before the session start is ever published. The caller's own
+// holder and its own release reservation are filtered out first, so a session
+// never reports itself as peer activity.
+function peerTimelineEvents(snapshots, selfHolderId, sessionStartMs) {
+  const events = [];
+  let truncated = false;
+  let reportedSnapshots = 0;
+  // An unusable session start reports every snapshot; the collector has
+  // already refused to run without a parseable start, so this only guards
+  // direct callers.
+  const start = Number.isFinite(sessionStartMs) ? sessionStartMs : 0;
+  const add = (event) => {
+    if (events.length >= PEER_TIMELINE_MAX_EVENTS) {
+      truncated = true;
+      return;
+    }
+    events.push(peerTimelineRow(event));
+  };
+  const holderEvent = (kind, snapshot, holder) =>
+    add({
+      time: kind === "peer-returned" ? snapshot.time : String(holder.acquiredAt || snapshot.time),
+      kind,
+      holderId: holder.holderId,
+      repository: holder.repository,
+      runId: holder.runId,
+      runnerId: holder.runnerId
+    });
+  const reservationEvent = (kind, snapshot, reservation) =>
+    add({
+      time: kind === "reservation-removed" ? snapshot.time : String(reservation.createdAt || snapshot.time),
+      kind,
+      reservationState: reservation.state,
+      runnerId: reservation.runnerId,
+      holderId: reservation.holderId,
+      repository: reservation.repository,
+      availableAt: reservation.availableAt,
+      reason: reservation.reason
+    });
+  const incidentEvent = (kind, snapshot, incident) =>
+    add({
+      // Schema-5 incidents persist `reportedAt`, never `createdAt`.
+      time: kind === "incident-created" ? String(incident.reportedAt || snapshot.time) : snapshot.time,
+      kind,
+      incidentId: incident.incidentId,
+      reason: incident.reason
+    });
+
+  let reportedHolders = new Map();
+  let reportedReservations = new Map();
+  const emittedHolders = new Set();
+  const emittedReservations = new Set();
+  let previousIncidentId = "";
+  snapshots.forEach((rawSnapshot) => {
+    // Self exclusion happens once, here, for every event kind. The release
+    // write that removes this holder and starts its cooldown reservation is
+    // inside the replay window; without the filter the session would report
+    // its own release as peer activity.
+    const snapshot = {
+      ...rawSnapshot,
+      holders: rawSnapshot.holders.filter((holder) => holder.holderId !== selfHolderId),
+      reservations: rawSnapshot.reservations.filter((reservation) => reservation.holderId !== selfHolderId)
+    };
+    if (parseTime(snapshot.time) < start) {
+      return;
+    }
+    reportedSnapshots++;
+    const seenHolders = new Map();
+    const seenReservations = new Map();
+    for (const holder of snapshot.holders) {
+      seenHolders.set(holder.holderId, holder);
+      if (emittedHolders.has(holder.holderId)) {
+        continue;
+      }
+      emittedHolders.add(holder.holderId);
+      const kind = parseTime(holder.acquiredAt) <= start ? "peer-present" : "peer-acquired";
+      holderEvent(kind, snapshot, holder);
+    }
+    for (const reservation of snapshot.reservations) {
+      seenReservations.set(reservation.reservationId, reservation);
+      if (emittedReservations.has(reservation.reservationId)) {
+        continue;
+      }
+      emittedReservations.add(reservation.reservationId);
+      const kind =
+        parseTime(reservation.createdAt) <= start ? "reservation-present" : "reservation-created";
+      reservationEvent(kind, snapshot, reservation);
+    }
+    for (const [holderId, holder] of reportedHolders) {
+      if (!seenHolders.has(holderId)) {
+        holderEvent("peer-returned", snapshot, holder);
+      }
+    }
+    for (const [reservationId, reservation] of reportedReservations) {
+      if (!seenReservations.has(reservationId)) {
+        reservationEvent("reservation-removed", snapshot, reservation);
+      }
+    }
+    const incidentId = snapshot.incident ? String(snapshot.incident.incidentId) : "";
+    if (incidentId && incidentId !== previousIncidentId) {
+      // Incidents carry `reportedAt`; a missing value must not read as epoch
+      // and silently force the "present" classification.
+      const reportedAtMs = Date.parse(snapshot.incident.reportedAt || "");
+      const kind = Number.isFinite(reportedAtMs) && reportedAtMs <= start
+        ? "incident-present"
+        : "incident-created";
+      incidentEvent(kind, snapshot, snapshot.incident);
+    }
+    previousIncidentId = incidentId;
+    reportedHolders = seenHolders;
+    reportedReservations = seenReservations;
+  });
+  return { events, truncated, reportedSnapshots };
+}
+
+// Replay the lock-state branch history for [sessionAcquiredAt, now] into a
+// redacted event list. Diagnostic-only: every failure degrades to a status the
+// caller publishes; nothing here throws to the release path.
+async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
+  if (!sessionAcquiredAt) {
+    return { status: "not-applicable", events: [] };
+  }
+  const parsedSessionStart = Date.parse(sessionAcquiredAt);
+  if (!Number.isFinite(parsedSessionStart)) {
+    return { status: "unavailable", reason: "session admission time is not a valid timestamp", events: [] };
+  }
+  const controller = new AbortController();
+  const deadlineAt = Date.now() + PEER_TIMELINE_DEADLINE_MS;
+  const timer = setTimeout(
+    () => controller.abort(new Error("peer timeline budget elapsed")),
+    PEER_TIMELINE_DEADLINE_MS
+  );
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+  // One absolute deadline bounds every read; a small attempt ceiling keeps a
+  // fast-failing endpoint from burning the whole budget on backoff sleeps.
+  const apiOptions = { signal: controller.signal, deadlineAt, maxAttempts: 2 };
+  try {
+    const since = new Date(parsedSessionStart - PEER_TIMELINE_CLOCK_SKEW_MS).toISOString();
+    const encodedPath = config.statePath
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    const { owner, repo } = config.lockRepo;
+    const commits = await api(
+      "GET",
+      `/repos/${owner}/${repo}/commits?path=${encodedPath}` +
+        `&sha=${encodeURIComponent(config.stateBranch)}` +
+        `&since=${encodeURIComponent(since)}&per_page=100`,
+      undefined,
+      config.token,
+      apiOptions
+    );
+    if (!Array.isArray(commits)) {
+      return { status: "unavailable", reason: "lock-state commit listing was malformed", events: [] };
+    }
+    // The listing is newest-first and reaches back into the skew buffer, but
+    // only snapshots at or after the session start are ever reported. Split the
+    // selection: the snapshot cap is spent on the OLDEST in-window commits,
+    // which reach back toward the session opening, and at most a couple of
+    // buffer commits nearest the opening are fetched for context. Without the
+    // split, a busy lock's buffer writes could consume the whole cap and leave
+    // the reported window unobserved. In-window drops are truncation; buffer
+    // drops are by design, because pre-session activity is never published.
+    const commitTime = (commit) =>
+      parseTime(commit && commit.commit && commit.commit.author && commit.commit.author.date);
+    const inWindow = commits.filter((commit) => commitTime(commit) >= parsedSessionStart);
+    const buffer = commits.filter((commit) => commitTime(commit) < parsedSessionStart).slice(0, PEER_TIMELINE_BUFFER_SNAPSHOTS);
+    const truncatedBySnapshots = inWindow.length > PEER_TIMELINE_MAX_SNAPSHOTS;
+    const truncatedByCommits = commits.length >= 100;
+    const selected = [...buffer.slice().reverse(), ...inWindow.slice(-PEER_TIMELINE_MAX_SNAPSHOTS).reverse()];
+    const snapshots = [];
+    let truncatedByBudget = false;
+    let gaps = false;
+    for (const commit of selected) {
+      if (!commit || !commit.sha) {
+        gaps = true;
+        continue;
+      }
+      if (controller.signal.aborted) {
+        truncatedByBudget = true;
+        break;
+      }
+      const commitTime =
+        (commit.commit && commit.commit.author && commit.commit.author.date) || "";
+      let data = null;
+      try {
+        data = await api(
+          "GET",
+          `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(commit.sha)}`,
+          undefined,
+          config.token,
+          apiOptions
+        );
+      } catch (readError) {
+        if (isAbortError(readError, controller.signal)) {
+          // The shared timeline budget is spent; keep what was collected.
+          truncatedByBudget = true;
+          break;
+        }
+        gaps = true;
+        continue;
+      }
+      const snapshot = peerTimelineSnapshot(commitTime, base64Decode(data && data.content));
+      if (!snapshot) {
+        gaps = true;
+        continue;
+      }
+      snapshots.push(snapshot);
+    }
+    const { events, truncated, reportedSnapshots } = peerTimelineEvents(
+      snapshots,
+      identity.holderId,
+      parsedSessionStart
+    );
+    // A replay that never reached a snapshot inside the session window cannot
+    // call itself a clean observation of that window.
+    const unobservedWindow = snapshots.length > 0 && reportedSnapshots === 0;
+    const partial =
+      truncated || truncatedBySnapshots || truncatedByCommits || truncatedByBudget || gaps || unobservedWindow;
+    return {
+      status: partial ? "partial" : "ok",
+      windowFrom: sessionAcquiredAt,
+      ...(partial ? { truncated: true } : {}),
+      events
+    };
+  } catch (error) {
+    return { status: "unavailable", reason: oneLine(error.message), events: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function appendPeerTimelineSummary(peerTimeline, holderId) {
+  if (!peerTimeline || peerTimeline.status === "not-applicable") {
+    return;
+  }
+  const count = Array.isArray(peerTimeline.events) ? peerTimeline.events.length : 0;
+  // Holder IDs and reason codes come from state that peers write. Render each
+  // as an inline code span so it cannot inject markdown into the summary, and
+  // escape pipes because GFM splits cells on them even inside code spans.
+  const cell = (value) =>
+    value
+      ? `\`${oneLine(value).replace(/`/g, "'").replace(/\|/g, "\\|")}\``
+      : "";
+  const header =
+    `### Peer lock activity for ${cell(holderId)}\n\n` +
+    `Status: ${peerTimeline.status}${peerTimeline.reason ? ` (${oneLine(peerTimeline.reason)})` : ""}; ` +
+    `window from ${peerTimeline.windowFrom || "unknown"}; ${count} event(s).` +
+    `${peerTimeline.truncated ? " The window was truncated; see the peer-timeline output." : ""}\n`;
+  const lines = [header];
+  if (count > 0) {
+    lines.push("| time | kind | holder | runner | detail |", "| --- | --- | --- | --- | --- |");
+    for (const event of peerTimeline.events) {
+      const detail =
+        event.reservationState || event.incidentId
+          ? [event.reservationState, event.incidentId, event.reason].filter(Boolean).join(" ")
+          : event.reason || "";
+      lines.push(
+        `| ${cell(event.time)} | ${cell(event.kind)} | ${cell(event.holderId)} | ` +
+        `${cell(event.runnerId)} | ${cell(detail)} |`
+      );
+    }
+  } else if (peerTimeline.status !== "unavailable") {
+    lines.push("No peer holder, reservation, or incident activity was observed in the window.\n");
+  }
+  appendSummary(lines.join("\n"));
 }
 
 function observationText(config, observation, attempts, elapsedMs) {
@@ -3593,6 +3969,10 @@ async function release(config) {
       unverified.code = "LOCK_STATE_UNVERIFIED";
       throw unverified;
     }
+    // The release is recorded; now publish the correlation evidence. This runs
+    // after the state write with its own budget and can never alter the
+    // release result above.
+    result.peerTimeline = await collectPeerTimeline(config, identity, result.sessionAcquiredAt);
   } catch (error) {
     if (
       isUnrecordedReleaseError(error) &&
@@ -3644,6 +4024,15 @@ async function release(config) {
   const releaseMessage = explicitReleaseMessage(cleanupResult, config.lockName);
   appendSummary(releaseMessage);
   console.log(releaseMessage);
+  if (result.peerTimeline && result.peerTimeline.status !== "not-applicable") {
+    const timelineEventCount = Array.isArray(result.peerTimeline.events)
+      ? result.peerTimeline.events.length
+      : 0;
+    console.log(
+      `Peer timeline: status=${result.peerTimeline.status} events=${timelineEventCount}.`
+    );
+  }
+  appendPeerTimelineSummary(result.peerTimeline, identity.holderId);
   console.log("::endgroup::");
   if (config.resourceReportDegraded) {
     throw new Error(
@@ -4367,6 +4756,7 @@ module.exports = {
   authorizeCaller,
   boundedRetryDelayMs,
   cleanupIdentity,
+  collectPeerTimeline,
   config,
   createAppJwt,
   createGitHubAppAuth,
@@ -4378,6 +4768,7 @@ module.exports = {
   isRetryableResponse,
   normalizeState,
   parseReleaseReport,
+  peerTimelineEvents,
   postCleanup,
   queueEntryIsFinished,
   readLockConfig,

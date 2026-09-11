@@ -99,6 +99,16 @@ outputs:
     description: "true when invalid cleanup-report inputs were replaced with unknown/healthy evidence before exact ownership cleanup."
   report-validation-error:
     description: Stable validation error code when report-degraded is true.
+  peer-timeline:
+    description: >-
+      Single-line JSON with redacted peer lock activity for the held session
+      window: status (ok, partial, unavailable, or not-applicable), windowFrom
+      when a session was replayed, truncated on degraded replays, reason when
+      unavailable, and one event per peer holder acquire or return, per peer
+      reservation, and per global incident. Holder IDs, runner IDs, reason
+      codes, and timestamps only; never logs. Diagnostic evidence for
+      session-phase casualty correlation; the release outcome never depends
+      on it.
 runs:
   using: node24
   main: ../../dist/release.js

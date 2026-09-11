@@ -23,6 +23,7 @@ const {
   isRetryableResponse,
   normalizeState,
   parseReleaseReport,
+  peerTimelineEvents,
   postCleanup,
   queueEntryIsFinished,
   readLockConfig,
@@ -129,7 +130,8 @@ const releaseOutputNames = [
   "resource-health",
   "resource-reason",
   "report-degraded",
-  "report-validation-error"
+  "report-validation-error",
+  "peer-timeline"
 ];
 
 const reapOutputNames = ["reaped", "state-sha"];
@@ -10651,4 +10653,535 @@ test("account health activation is a drained one-way schema 5 migration", async 
       }
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Peer timeline (issue #269): the release publishes redacted lock activity for
+// the held session window so a consumer can correlate a session-phase casualty
+// with peer holder activity without reading any raw log.
+// ---------------------------------------------------------------------------
+
+function timelineHolder(repository, runId, acquiredAt) {
+  return {
+    holderId: `${repository}:${runId}:perf-benchmarks:editmode`,
+    repository,
+    workflow: "Perf",
+    job: "perf-benchmarks",
+    runId,
+    runAttempt: "1",
+    runUrl: `https://github.com/${repository}/actions/runs/${runId}`,
+    queuedAt: acquiredAt,
+    acquiredAt,
+    expiresAt: "2999-01-01T00:00:00.000Z",
+    runnerId: `${repository}-runner`
+  };
+}
+
+function timelineSnapshot(time, { holders = [], reservations = [], incident = null } = {}) {
+  return { time, holders, reservations, incident };
+}
+
+test("peer timeline reducer derives peer, reservation, and incident events from state snapshots", () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const cases = [
+    {
+      name: "a peer holding at window start and returning mid-window yields present then returned",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:58:00.000Z")] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self] })
+      ],
+      expected: [
+        { kind: "peer-present", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-05T23:58:00.000Z" },
+        { kind: "peer-returned", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:10:00.000Z" }
+      ]
+    },
+    {
+      name: "a peer that acquires mid-window and holds through the release is not reported as returned",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-06T00:05:00.000Z")] })
+      ],
+      expected: [
+        { kind: "peer-acquired", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:05:00.000Z" }
+      ]
+    },
+    {
+      name: "a peer that acquires and returns entirely inside the window yields both events",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-06T00:05:00.000Z")] }),
+        timelineSnapshot("2026-06-06T00:20:00.000Z", { holders: [self] })
+      ],
+      expected: [
+        { kind: "peer-acquired", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:05:00.000Z" },
+        { kind: "peer-returned", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:20:00.000Z" }
+      ]
+    },
+    {
+      name: "this run's own holder rows never become peer events",
+      snapshots: [timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] })],
+      expected: []
+    },
+    {
+      name: "the release snapshot that removes this run is not reported as a peer return",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:58:00.000Z")] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [timelineHolder("peer/repo", "555", "2026-06-05T23:58:00.000Z")] })
+      ],
+      expected: [{ kind: "peer-present", holderId: "peer/repo:555:perf-benchmarks:editmode" }]
+    },
+    {
+      name: "this run's own release reservation never becomes a peer reservation event",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", {
+          holders: [],
+          reservations: [lifecycleReservation(self)]
+        })
+      ],
+      expected: []
+    },
+    {
+      name: "a reservation created mid-window is published with its redacted lifecycle fields",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", {
+          holders: [self],
+          reservations: [lifecycleReservation(timelineHolder("peer/repo", "555", "2026-06-06T00:05:00.000Z"))]
+        })
+      ],
+      expected: [
+        {
+          kind: "reservation-created",
+          reservationState: "quarantine",
+          runnerId: "peer/repo-runner",
+          holderId: "peer/repo:555:perf-benchmarks:editmode",
+          reason: "cleanup outcome unknown"
+        }
+      ]
+    },
+    {
+      name: "a reservation present at window start is reported as present, and its removal as removed",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", {
+          holders: [self],
+          reservations: [lifecycleReservation(timelineHolder("peer/repo", "555", "2026-06-05T23:00:00.000Z"), { createdAt: "2026-06-05T23:00:00.000Z" })]
+        }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self] })
+      ],
+      expected: [
+        { kind: "reservation-present", reservationState: "quarantine" },
+        { kind: "reservation-removed", runnerId: "peer/repo-runner", time: "2026-06-06T00:10:00.000Z" }
+      ]
+    },
+    {
+      name: "a global incident created mid-window is published with its reviewed reason",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", {
+          holders: [self],
+          incident: { incidentId: "incident-abc", reason: "unity-account-limit-20111", reportedAt: "2026-06-06T00:08:00.000Z" }
+        })
+      ],
+      expected: [
+        { kind: "incident-created", incidentId: "incident-abc", reason: "unity-account-limit-20111", time: "2026-06-06T00:08:00.000Z" }
+      ]
+    },
+    {
+      name: "an incident without a readable reportedAt is never misread as present at the window opening",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:05:00.000Z", {
+          holders: [self],
+          incident: { incidentId: "incident-abc", reason: "unity-account-limit-20111" }
+        })
+      ],
+      expected: [
+        { kind: "incident-created", incidentId: "incident-abc", reason: "unity-account-limit-20111", time: "2026-06-06T00:05:00.000Z" }
+      ]
+    },
+    {
+      name: "rows omit fields the evidence does not carry instead of publishing empty strings",
+      snapshots: [
+        timelineSnapshot("2026-06-06T00:00:00.000Z", {
+          holders: [{ ...timelineHolder("peer/repo", "555", "2026-06-05T23:58:00.000Z"), runnerId: undefined }]
+        })
+      ],
+      expected: [{ kind: "peer-present", runnerId: undefined }]
+    },
+    {
+      name: "a peer that acquires and returns inside the clock-skew buffer is never reported",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-05T23:58:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self] })
+      ],
+      expected: []
+    },
+    {
+      name: "a peer admitted before the session that holds into it is reported present once",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self] })
+      ],
+      expected: [
+        { kind: "peer-present", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-05T23:56:30.000Z" },
+        { kind: "peer-returned", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:10:00.000Z" }
+      ]
+    },
+    {
+      name: "a peer that returns inside the buffer and never overlaps the session is never reported",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:50:00.000Z")] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self] })
+      ],
+      expected: []
+    }
+  ];
+
+  for (const testCase of cases) {
+    const startMs = Date.parse(testCase.sessionStart || testCase.snapshots[0].time);
+    const { events, truncated } = peerTimelineEvents(testCase.snapshots, self.holderId, startMs);
+    assert.equal(truncated, false, testCase.name);
+    assert.equal(events.length, testCase.expected.length, testCase.name);
+    for (const [index, expected] of testCase.expected.entries()) {
+      for (const [key, value] of Object.entries(expected)) {
+        assert.equal(events[index][key], value, `${testCase.name}: event ${index} field ${key}`);
+      }
+      // Redaction contract: no event carries log-shaped or URL fields.
+      for (const forbidden of ["workflow", "job", "runUrl", "runAttempt", "queuedAt", "expiresAt", "reservationId"]) {
+        assert.equal(forbidden in events[index], false, `${testCase.name}: event ${index} must omit ${forbidden}`);
+      }
+    }
+  }
+});
+
+test("peer timeline reducer truncates at its event ceiling and reports it", () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const holders = [self];
+  for (let index = 0; index < 150; index++) {
+    holders.push(timelineHolder("peer/repo", String(1000 + index), "2026-06-06T00:00:00.000Z"));
+  }
+  const { events, truncated } = peerTimelineEvents(
+    [timelineSnapshot("2026-06-06T00:00:00.000Z", { holders })],
+    self.holderId,
+    Date.parse("2026-06-06T00:00:00.000Z")
+  );
+  assert.equal(events.length, 100);
+  assert.equal(truncated, true);
+});
+
+test("release publishes a redacted peer timeline for its session window", async () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const peer = timelineHolder("peer/repo", "555", "2026-06-06T00:05:00.000Z");
+  const before = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:05:00.000Z" };
+  const overlapping = { ...lifecycleState([self, peer]), updatedAt: "2026-06-06T00:05:30.000Z" };
+  const afterPeerReturned = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:09:00.000Z" };
+  // A peer that acquires and returns entirely inside the clock-skew buffer,
+  // before the session opened: real lock history, never session activity.
+  const preSessionCycler = timelineHolder("ghost/repo", "777", "2026-06-05T23:56:00.000Z");
+  const insideBuffer = { ...lifecycleState([self, preSessionCycler]), updatedAt: "2026-06-05T23:57:00.000Z" };
+  const snapshotsByRef = {
+    "commit-0": insideBuffer,
+    "commit-1": before,
+    "commit-2": overlapping,
+    "commit-3": afterPeerReturned
+  };
+  let state = before;
+
+  await withTempFile(async (summaryFile) => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_STEP_SUMMARY: summaryFile, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+              snapshotsByRef["commit-4"] = state;
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            if (parsed.searchParams.has("ref") && parsed.searchParams.get("ref") !== "lock-state") {
+              const snapshot = snapshotsByRef[parsed.searchParams.get("ref")];
+              return snapshot ? base64Content(snapshot, parsed.searchParams.get("ref")) : jsonResponse(404, { message: "unknown ref" });
+            }
+            return base64Content(state, "state-before-read");
+          }
+          if (parsed.pathname === "/repos/o/r/commits") {
+            assert.equal(parsed.searchParams.get("path"), "locks/wallstop-organization-builds.json");
+            assert.equal(parsed.searchParams.get("sha"), "lock-state");
+            // The session started at 00:00:00; the listing must reach back
+            // past it by the clock-skew buffer to a 23:55:00 `since`.
+            assert.equal(parsed.searchParams.get("since"), "2026-06-05T23:55:00.000Z");
+            // commit-4 is the release write itself: self removed, self
+            // cooldown reservation created. Neither may become an event.
+            // commit-0 is inside the skew buffer: the ghost peer cycled
+            // before the session opened and must not be reported either.
+            return jsonResponse(200, [
+              { sha: "commit-4", commit: { author: { date: "2026-06-06T00:10:00.000Z" } } },
+              { sha: "commit-3", commit: { author: { date: "2026-06-06T00:09:00.000Z" } } },
+              { sha: "commit-2", commit: { author: { date: "2026-06-06T00:05:30.000Z" } } },
+              { sha: "commit-1", commit: { author: { date: "2026-06-06T00:00:00.000Z" } } },
+              { sha: "commit-0", commit: { author: { date: "2026-06-05T23:57:00.000Z" } } }
+            ]);
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({
+            runnerId: self.runnerId,
+            holderIdSuffix: "editmode",
+            resourceSafe: true,
+            resourceReason: "cleanup-confirmed"
+          }));
+        });
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, releaseOutputNames);
+        assert.equal(outputs.released, "true");
+        assert.equal(outputs["cleanup-result"], "cooldown-started");
+        const timeline = JSON.parse(outputs["peer-timeline"]);
+        assert.equal(timeline.status, "ok");
+        assert.equal(timeline.windowFrom, "2026-06-06T00:00:00.000Z");
+        assert.deepEqual(
+          timeline.events.map((event) => `${event.kind}:${event.holderId}`),
+          [
+            "peer-acquired:peer/repo:555:perf-benchmarks:editmode",
+            "peer-returned:peer/repo:555:perf-benchmarks:editmode"
+          ]
+        );
+        assert.equal(timeline.events[0].time, "2026-06-06T00:05:00.000Z");
+        assert.equal(timeline.events[1].time, "2026-06-06T00:09:00.000Z");
+      });
+    });
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    assert.match(summary, /### Peer lock activity for `owner\/repo:123:perf-benchmarks:editmode`/);
+    assert.match(summary, /\| `peer-acquired` \| `peer\/repo:555:perf-benchmarks:editmode` \|/);
+  });
+  assert.deepEqual(state.holders, []);
+});
+
+test("release keeps its outcome when peer timeline history cannot be read", async () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const state = lifecycleState([self]);
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            return base64Content(state, "state-before-read");
+          }
+          if (parsed.pathname === "/repos/o/r/commits") {
+            return jsonResponse(500, { message: "history is unavailable" });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async (logs) => {
+          await release(semaphoreConfig({ runnerId: self.runnerId, holderIdSuffix: "editmode" }));
+          const outputs = readEnvironmentFile(outputFile);
+          assert.equal(outputs.released, "true");
+          const timeline = JSON.parse(outputs["peer-timeline"]);
+          assert.equal(timeline.status, "unavailable");
+          assert.match(timeline.reason, /history is unavailable|500/);
+          assert.deepEqual(timeline.events, []);
+          assert.match(logs.join("\n"), /Peer timeline: status=unavailable/);
+        });
+      });
+    });
+  });
+});
+
+test("release reports a not-applicable peer timeline when it never held a session", async () => {
+  const other = timelineHolder("other/repo", "999", "2026-06-06T00:00:00.000Z");
+  const state = lifecycleState([other]);
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              return jsonResponse(200, { content: { sha: "state-after-write" } });
+            }
+            return base64Content(state, "state-before-read");
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({ runnerId: "owner/repo-runner" }));
+          const outputs = readEnvironmentFile(outputFile);
+          assert.equal(outputs.released, "false");
+          const timeline = JSON.parse(outputs["peer-timeline"]);
+          assert.equal(timeline.status, "not-applicable");
+          assert.deepEqual(timeline.events, []);
+        });
+      });
+    });
+  });
+});
+
+test("release marks the peer timeline partial when a history snapshot cannot be parsed", async () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const peer = timelineHolder("peer/repo", "555", "2026-06-06T00:06:00.000Z");
+  const before = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:00:00.000Z" };
+  const afterPeerAcquired = { ...lifecycleState([self, peer]), updatedAt: "2026-06-06T00:09:00.000Z" };
+  const state = before;
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            if (parsed.searchParams.has("ref") && parsed.searchParams.get("ref") !== "lock-state") {
+              const ref = parsed.searchParams.get("ref");
+              if (ref === "commit-2") {
+                return jsonResponse(200, { content: Buffer.from("not json", "utf8").toString("base64"), sha: ref });
+              }
+              const snapshot = ref === "commit-1" ? before : afterPeerAcquired;
+              return base64Content(snapshot, ref);
+            }
+            return base64Content(state, "state-before-read");
+          }
+          if (parsed.pathname === "/repos/o/r/commits") {
+            return jsonResponse(200, [
+              { sha: "commit-3", commit: { author: { date: "2026-06-06T00:09:00.000Z" } } },
+              { sha: "commit-2", commit: { author: { date: "2026-06-06T00:05:30.000Z" } } },
+              { sha: "commit-1", commit: { author: { date: "2026-06-06T00:00:00.000Z" } } }
+            ]);
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({ runnerId: self.runnerId, holderIdSuffix: "editmode" }));
+          const outputs = readEnvironmentFile(outputFile);
+          assert.equal(outputs.released, "true");
+          const timeline = JSON.parse(outputs["peer-timeline"]);
+          assert.equal(timeline.status, "partial");
+          assert.equal(timeline.truncated, true);
+          // The parseable snapshots on both sides of the gap still yield the
+          // peer event; only the gap snapshot's information is lost.
+          assert.deepEqual(
+            timeline.events.map((event) => event.kind),
+            ["peer-acquired"]
+          );
+          assert.equal(timeline.events[0].time, "2026-06-06T00:06:00.000Z");
+        });
+      });
+    });
+  });
+});
+
+test("release spends its peer-timeline snapshot budget inside the session window", async () => {
+  const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
+  const peer = timelineHolder("peer/repo", "555", "2026-06-06T00:05:00.000Z");
+  const cycler = timelineHolder("ghost/repo", "777", "2026-06-05T23:20:00.000Z");
+  const bufferState = { ...lifecycleState([self, cycler]), updatedAt: "2026-06-05T23:30:00.000Z" };
+  const windowOpen = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:00:00.000Z" };
+  const overlapping = { ...lifecycleState([self, peer]), updatedAt: "2026-06-06T00:05:30.000Z" };
+  const afterPeerReturned = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:09:00.000Z" };
+  const snapshotByRef = (ref) => {
+    if (ref.startsWith("buffer-")) {
+      return { ...bufferState, updatedAt: `2026-06-05T23:${String(30 + Number(ref.slice(7))).padStart(2, "0")}:00.000Z` };
+    }
+    if (ref === "window-1") return windowOpen;
+    if (ref === "window-2") return overlapping;
+    if (ref === "window-3") return afterPeerReturned;
+    return null;
+  };
+  const fetched = [];
+  // A busy lock: 30 lock-state writes inside the clock-skew buffer, then the
+  // session's own history. The listing is newest-first, as the API returns.
+  // The buffer must not consume the snapshot budget.
+  const bufferCommits = [];
+  for (let index = 0; index < 30; index++) {
+    bufferCommits.push({
+      sha: `buffer-${index}`,
+      commit: { author: { date: `2026-06-05T23:${String(30 - index).padStart(2, "0")}:00.000Z` } }
+    });
+  }
+
+  await withActionEnv(semaphoreActionEnv, async () => {
+    await withTempFile(async (outputFile) => {
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+            return jsonResponse(200, { object: { sha: "branch-sha" } });
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 2, runnerSerialization: true, resourceLifecycle: true, releaseCooldownSeconds: 1 }, "cfg");
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            if (options.method === "PUT") {
+              return jsonResponse(200, { content: { sha: "state-after-release" } });
+            }
+            if (parsed.searchParams.has("ref") && parsed.searchParams.get("ref") !== "lock-state") {
+              const ref = parsed.searchParams.get("ref");
+              fetched.push(ref);
+              const snapshot = snapshotByRef(ref);
+              return snapshot ? base64Content(snapshot, ref) : jsonResponse(404, { message: "unknown ref" });
+            }
+            return base64Content(windowOpen, "state-before-read");
+          }
+          if (parsed.pathname === "/repos/o/r/commits") {
+            return jsonResponse(200, [
+              { sha: "window-3", commit: { author: { date: "2026-06-06T00:09:00.000Z" } } },
+              { sha: "window-2", commit: { author: { date: "2026-06-06T00:05:30.000Z" } } },
+              { sha: "window-1", commit: { author: { date: "2026-06-06T00:00:00.000Z" } } },
+              ...bufferCommits
+            ]);
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await release(semaphoreConfig({ runnerId: self.runnerId, holderIdSuffix: "editmode" }));
+          const outputs = readEnvironmentFile(outputFile);
+          assert.equal(outputs.released, "true");
+          const bufferFetches = fetched.filter((ref) => ref.startsWith("buffer-"));
+          assert.equal(bufferFetches.length, 2);
+          assert.deepEqual(bufferFetches, ["buffer-1", "buffer-0"]);
+          const timeline = JSON.parse(outputs["peer-timeline"]);
+          assert.equal(timeline.status, "ok");
+          assert.deepEqual(
+            timeline.events.map((event) => `${event.kind}:${event.holderId}`),
+            [
+              "peer-acquired:peer/repo:555:perf-benchmarks:editmode",
+              "peer-returned:peer/repo:555:perf-benchmarks:editmode"
+            ]
+          );
+        });
+      });
+    });
+  });
 });
