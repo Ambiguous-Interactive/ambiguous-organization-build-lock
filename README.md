@@ -357,6 +357,18 @@ Validation codes are `invalid-resource-safe`,
 `confirmed-cleanup-reason-mismatch`, `cleanup-confirmed-status-mismatch`, and
 `resource-safe-contradiction`.
 
+After the release is recorded, the release action also publishes a redacted
+`peer-timeline` output and a job-summary table. It replays the lock-state branch
+history for this holder's session window and lists each peer holder acquire or
+return, each reservation, and each global incident. The evidence carries holder
+IDs, runner IDs, reason codes, and timestamps only, never logs. A release that
+never held a session reports `not-applicable`; an unreachable history reports
+`unavailable`. The timeline is correlation evidence for operators and consumers:
+a licensed run that died inside the editor with zero failed test cases can be
+checked against real peer activity in the same window, instead of being read as
+an unexplained red suite. It never changes a release outcome, and a release
+never waits for it beyond its own small bounded budget.
+
 Cleanup ownership is keyed to the exact logical `holderId`. In schema 3, a
 monotonic run-attempt fence prevents a late older attempt from deleting a newer
 rerun. `runnerId` controls admission only: a same-attempt fallback cleanup may

@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-09, session 090)
+## Current state (2026-09-11, session 091)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -161,6 +161,15 @@ impact on licensed-resource safety and consumer CI churn.
   pull requests, and no failed runs. Every open issue waits on an
   external decision or live evidence; the auto-merge path awaits its
   first live offer at the next authorized release.
+- Session 091 answered the lock-side half of #269: the release action now
+  publishes a redacted `peer-timeline` output and job-summary table
+  replaying lock-state history for the holder's session window (peer
+  acquires and returns, reservations, incidents). It is bounded,
+  diagnostic-only evidence that never delays the release beyond its own
+  small budget, so a consumer can finally test the acquisition-side
+  hypothesis against real peer activity. The consumer half (classify the
+  engine-assertion zero-failed-leaves signature, retry once inside the
+  held lock) is published as canary item 12 of the enrollment contract.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
