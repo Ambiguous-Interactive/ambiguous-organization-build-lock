@@ -2666,17 +2666,24 @@ function peerTimelineRow(event) {
   );
 }
 
-// Reduce oldest-first snapshots into redacted peer events. The first snapshot
-// reports what was already present when the window opened ("present"); later
-// appearances are creations ("acquired", "reservation", "incident"), and a
-// holder or reservation missing from a later snapshot is a removal. The
-// caller's own holder and its own release reservation are filtered out first,
-// so a session never reports itself as peer activity. Each event carries the
-// state's own timestamps, so the wider `since` window used to list commits
-// cannot misorder anything.
-function peerTimelineEvents(snapshots, selfHolderId) {
+// Reduce oldest-first snapshots into redacted peer events. Only snapshots at
+// or after the session start are reported: the commit listing reaches back by
+// a clock-skew buffer, and peer activity that ends inside that buffer never
+// overlapped the session. A peer observed at a reported snapshot is classified
+// by its own state timestamp ("present" when it was admitted at or before the
+// session start, "acquired" afterwards) and reported once. A reported holder
+// or reservation missing from a later reported snapshot is a removal; nothing
+// observed only before the session start is ever published. The caller's own
+// holder and its own release reservation are filtered out first, so a session
+// never reports itself as peer activity.
+function peerTimelineEvents(snapshots, selfHolderId, sessionStartMs) {
   const events = [];
   let truncated = false;
+  let reportedSnapshots = 0;
+  // An unusable session start reports every snapshot; the collector has
+  // already refused to run without a parseable start, so this only guards
+  // direct callers.
+  const start = Number.isFinite(sessionStartMs) ? sessionStartMs : 0;
   const add = (event) => {
     if (events.length >= PEER_TIMELINE_MAX_EVENTS) {
       truncated = true;
@@ -2712,10 +2719,12 @@ function peerTimelineEvents(snapshots, selfHolderId) {
       reason: incident.reason
     });
 
-  let previousHolders = new Map();
-  let previousReservations = new Map();
+  let reportedHolders = new Map();
+  let reportedReservations = new Map();
+  const emittedHolders = new Set();
+  const emittedReservations = new Set();
   let previousIncidentId = "";
-  snapshots.forEach((rawSnapshot, index) => {
+  snapshots.forEach((rawSnapshot) => {
     // Self exclusion happens once, here, for every event kind. The release
     // write that removes this holder and starts its cooldown reservation is
     // inside the replay window; without the filter the session would report
@@ -2725,42 +2734,51 @@ function peerTimelineEvents(snapshots, selfHolderId) {
       holders: rawSnapshot.holders.filter((holder) => holder.holderId !== selfHolderId),
       reservations: rawSnapshot.reservations.filter((reservation) => reservation.holderId !== selfHolderId)
     };
-    const opening = index === 0;
+    if (parseTime(snapshot.time) < start) {
+      return;
+    }
+    reportedSnapshots++;
     const seenHolders = new Map();
     const seenReservations = new Map();
     for (const holder of snapshot.holders) {
       seenHolders.set(holder.holderId, holder);
-      if (holder.holderId === selfHolderId || previousHolders.has(holder.holderId)) {
+      if (emittedHolders.has(holder.holderId)) {
         continue;
       }
-      holderEvent(opening ? "peer-present" : "peer-acquired", snapshot, holder);
+      emittedHolders.add(holder.holderId);
+      const kind = parseTime(holder.acquiredAt) <= start ? "peer-present" : "peer-acquired";
+      holderEvent(kind, snapshot, holder);
     }
     for (const reservation of snapshot.reservations) {
       seenReservations.set(reservation.reservationId, reservation);
-      if (previousReservations.has(reservation.reservationId)) {
+      if (emittedReservations.has(reservation.reservationId)) {
         continue;
       }
-      reservationEvent(opening ? "reservation-present" : "reservation-created", snapshot, reservation);
+      emittedReservations.add(reservation.reservationId);
+      const kind =
+        parseTime(reservation.createdAt) <= start ? "reservation-present" : "reservation-created";
+      reservationEvent(kind, snapshot, reservation);
     }
-    for (const [holderId, holder] of previousHolders) {
+    for (const [holderId, holder] of reportedHolders) {
       if (!seenHolders.has(holderId)) {
         holderEvent("peer-returned", snapshot, holder);
       }
     }
-    for (const [reservationId, reservation] of previousReservations) {
+    for (const [reservationId, reservation] of reportedReservations) {
       if (!seenReservations.has(reservationId)) {
         reservationEvent("reservation-removed", snapshot, reservation);
       }
     }
     const incidentId = snapshot.incident ? String(snapshot.incident.incidentId) : "";
     if (incidentId && incidentId !== previousIncidentId) {
-      incidentEvent(opening ? "incident-present" : "incident-created", snapshot, snapshot.incident);
+      const kind = parseTime(snapshot.incident.createdAt) <= start ? "incident-present" : "incident-created";
+      incidentEvent(kind, snapshot, snapshot.incident);
     }
     previousIncidentId = incidentId;
-    previousHolders = seenHolders;
-    previousReservations = seenReservations;
+    reportedHolders = seenHolders;
+    reportedReservations = seenReservations;
   });
-  return { events, truncated };
+  return { events, truncated, reportedSnapshots };
 }
 
 // Replay the lock-state branch history for [sessionAcquiredAt, now] into a
@@ -2850,8 +2868,16 @@ async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
       }
       snapshots.push(snapshot);
     }
-    const { events, truncated } = peerTimelineEvents(snapshots, identity.holderId);
-    const partial = truncated || truncatedBySnapshots || truncatedByCommits || truncatedByBudget || gaps;
+    const { events, truncated, reportedSnapshots } = peerTimelineEvents(
+      snapshots,
+      identity.holderId,
+      parsedSessionStart
+    );
+    // A replay that never reached a snapshot inside the session window cannot
+    // call itself a clean observation of that window.
+    const unobservedWindow = snapshots.length > 0 && reportedSnapshots === 0;
+    const partial =
+      truncated || truncatedBySnapshots || truncatedByCommits || truncatedByBudget || gaps || unobservedWindow;
     return {
       status: partial ? "partial" : "ok",
       windowFrom: sessionAcquiredAt,

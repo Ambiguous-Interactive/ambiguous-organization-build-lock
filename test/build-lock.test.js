@@ -10765,7 +10765,7 @@ test("peer timeline reducer derives peer, reservation, and incident events from 
       snapshots: [
         timelineSnapshot("2026-06-06T00:00:00.000Z", {
           holders: [self],
-          reservations: [lifecycleReservation(timelineHolder("peer/repo", "555", "2026-06-05T23:00:00.000Z"))]
+          reservations: [lifecycleReservation(timelineHolder("peer/repo", "555", "2026-06-05T23:00:00.000Z"), { createdAt: "2026-06-05T23:00:00.000Z" })]
         }),
         timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self] })
       ],
@@ -10795,11 +10795,44 @@ test("peer timeline reducer derives peer, reservation, and incident events from 
         })
       ],
       expected: [{ kind: "peer-present", runnerId: undefined }]
+    },
+    {
+      name: "a peer that acquires and returns inside the clock-skew buffer is never reported",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-05T23:58:00.000Z", { holders: [self] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self] })
+      ],
+      expected: []
+    },
+    {
+      name: "a peer admitted before the session that holds into it is reported present once",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:56:30.000Z")] }),
+        timelineSnapshot("2026-06-06T00:10:00.000Z", { holders: [self] })
+      ],
+      expected: [
+        { kind: "peer-present", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-05T23:56:30.000Z" },
+        { kind: "peer-returned", holderId: "peer/repo:555:perf-benchmarks:editmode", time: "2026-06-06T00:10:00.000Z" }
+      ]
+    },
+    {
+      name: "a peer that returns inside the buffer and never overlaps the session is never reported",
+      sessionStart: "2026-06-06T00:00:00.000Z",
+      snapshots: [
+        timelineSnapshot("2026-06-05T23:57:00.000Z", { holders: [self, timelineHolder("peer/repo", "555", "2026-06-05T23:50:00.000Z")] }),
+        timelineSnapshot("2026-06-06T00:05:00.000Z", { holders: [self] })
+      ],
+      expected: []
     }
   ];
 
   for (const testCase of cases) {
-    const { events, truncated } = peerTimelineEvents(testCase.snapshots, self.holderId);
+    const startMs = Date.parse(testCase.sessionStart || testCase.snapshots[0].time);
+    const { events, truncated } = peerTimelineEvents(testCase.snapshots, self.holderId, startMs);
     assert.equal(truncated, false, testCase.name);
     assert.equal(events.length, testCase.expected.length, testCase.name);
     for (const [index, expected] of testCase.expected.entries()) {
@@ -10820,7 +10853,11 @@ test("peer timeline reducer truncates at its event ceiling and reports it", () =
   for (let index = 0; index < 150; index++) {
     holders.push(timelineHolder("peer/repo", String(1000 + index), "2026-06-06T00:00:00.000Z"));
   }
-  const { events, truncated } = peerTimelineEvents([timelineSnapshot("2026-06-06T00:00:00.000Z", { holders })], self.holderId);
+  const { events, truncated } = peerTimelineEvents(
+    [timelineSnapshot("2026-06-06T00:00:00.000Z", { holders })],
+    self.holderId,
+    Date.parse("2026-06-06T00:00:00.000Z")
+  );
   assert.equal(events.length, 100);
   assert.equal(truncated, true);
 });
@@ -10831,7 +10868,12 @@ test("release publishes a redacted peer timeline for its session window", async 
   const before = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:05:00.000Z" };
   const overlapping = { ...lifecycleState([self, peer]), updatedAt: "2026-06-06T00:05:30.000Z" };
   const afterPeerReturned = { ...lifecycleState([self]), updatedAt: "2026-06-06T00:09:00.000Z" };
+  // A peer that acquires and returns entirely inside the clock-skew buffer,
+  // before the session opened: real lock history, never session activity.
+  const preSessionCycler = timelineHolder("ghost/repo", "777", "2026-06-05T23:56:00.000Z");
+  const insideBuffer = { ...lifecycleState([self, preSessionCycler]), updatedAt: "2026-06-05T23:57:00.000Z" };
   const snapshotsByRef = {
+    "commit-0": insideBuffer,
     "commit-1": before,
     "commit-2": overlapping,
     "commit-3": afterPeerReturned
@@ -10869,11 +10911,14 @@ test("release publishes a redacted peer timeline for its session window", async 
             assert.equal(parsed.searchParams.get("since"), "2026-06-05T23:55:00.000Z");
             // commit-4 is the release write itself: self removed, self
             // cooldown reservation created. Neither may become an event.
+            // commit-0 is inside the skew buffer: the ghost peer cycled
+            // before the session opened and must not be reported either.
             return jsonResponse(200, [
               { sha: "commit-4", commit: { author: { date: "2026-06-06T00:10:00.000Z" } } },
               { sha: "commit-3", commit: { author: { date: "2026-06-06T00:09:00.000Z" } } },
               { sha: "commit-2", commit: { author: { date: "2026-06-06T00:05:30.000Z" } } },
-              { sha: "commit-1", commit: { author: { date: "2026-06-06T00:00:00.000Z" } } }
+              { sha: "commit-1", commit: { author: { date: "2026-06-06T00:00:00.000Z" } } },
+              { sha: "commit-0", commit: { author: { date: "2026-06-05T23:57:00.000Z" } } }
             ]);
           }
           return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });

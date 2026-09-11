@@ -114,6 +114,26 @@ Round 2 verified every fix against the runtime and confirmed no new
 safety or fail-closed regressions. `node --test test/build-lock.test.js`
 (443 pass) and `ci.sh javascript` (exit 0) green after the fixes.
 
+PR review round (Cursor Bugbot on commit ea87ae1a9, fixed in the follow-up
+commit):
+
+- Medium: the commit listing reaches back by the 5-minute skew buffer, but
+  the reducer treated its first snapshot as the window opening. A peer that
+  acquired and returned entirely inside the buffer was published as
+  `peer-present`/`peer-returned` with `status=ok`. With the live 1-second
+  cooldown that is a normal busy-lock pattern, not a rare skew case.
+  Fixed: the reducer now takes the parsed session start. Only snapshots at
+  or after the start are reported; pre-session snapshots are tracked but
+  never published; a peer observed at a reported snapshot is classified by
+  its own state timestamp (`present` when admitted at or before the start,
+  `acquired` afterwards); removals are only derived between reported
+  snapshots. A replay that never reaches a snapshot inside the window
+  reports `partial` instead of a lying `ok`. Three new reducer cases and a
+  pre-session buffer commit in the end-to-end release test pin the fix.
+- Reservations and incidents follow the same window rules, classified by
+  their own `createdAt`; the reservation-present fixture moved before the
+  window start so the case keeps testing the `present` classification.
+
 Bounds re-checked: one absolute 30-second deadline with an abort signal,
 at most 2 attempts per read, at most 25 snapshots, at most 100 events.
 The `since` filter uses the acquirer's clock against GitHub commit
