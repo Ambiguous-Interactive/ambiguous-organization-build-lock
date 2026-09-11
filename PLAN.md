@@ -105,9 +105,9 @@ impact on licensed-resource safety and consumer CI churn.
   reviewed required context on every pull request. Required contexts moved
   into `unity-enrollment-policy.json`, locked to
   `merge-policy-expectations.json` by a contract test. Coverage proofs are
-  literal and fail-closed; the live audit over all six consumers is
-  byte-identical to the scheduled baseline (27 unity-helpers findings,
-  behind consumer PR #749).
+  literal and fail-closed; on 2026-09-09 the live audit over all six
+  consumers was byte-identical to the scheduled baseline (then 27
+  unity-helpers findings, behind consumer PR #749).
 - The three merge-policy attestation PRs merged (DoxReloaded #815,
   DxMessaging #564, IshoBoy #873) and DxMessaging drift fixes merged
   (#562). The remaining #255 findings are the DxMessaging Integration
@@ -172,13 +172,14 @@ impact on licensed-resource safety and consumer CI churn.
   merge-policy audit closes #255. The same enrollment audit caught one
   fresh finding: DxMessaging #580 inserted an input guard between the
   current-PR-head guard and the editor gate, so the gate left the reviewed
-  prefix (`missing-unity-editor-check`). Root cause, a reviewed consumer
-  fix (DxMessaging #582), and a doc clarification of the prefix rule are
-  recorded; the unmodified local analyzer reports 0 findings over all six
-  snapshots with the fix applied. For #269, lock-state history proves no
-  peer held the lock in either casualty window and both casualties started
-  23-62s after a peer returned on the same physical runner; a full re-run
-  reproduced the signature, so the class is not always transient.
+  prefix (`missing-unity-editor-check`). Session 092 recorded the root
+  cause and opened the reviewed consumer fix (DxMessaging #582). The doc
+  row now names the prefix rule. The unmodified local analyzer reports 0
+  findings over all six snapshots with the fix applied. For #269,
+  lock-state history proves no peer held the lock in either casualty
+  window. Both casualties started 40-62s after a peer returned on the
+  same physical runner. A full re-run reproduced the signature, so the
+  class is not always transient.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -230,8 +231,8 @@ impact on licensed-resource safety and consumer CI churn.
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.
 - [ ] After M3, the scheduled audit closes alert #113 automatically on the
-      first complete clean run. #113 reopens on any new drift, as it did
-      for the DxMessaging prefix regression.
+      first complete clean run. #113 stays open while any drift finding
+      stands, as it did through the DxMessaging prefix regression.
 
 ## Blocked on authority or evidence (do not start here)
 

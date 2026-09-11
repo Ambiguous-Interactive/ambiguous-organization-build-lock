@@ -11,7 +11,7 @@ the same enrollment audit run caught one fresh drift.
 Falsifiable hypotheses:
 
 1. The new DxMessaging finding is a real contract regression, not an
-   analyzer defect: some edit moved the `ensure-unity-editor` gate out of
+   analyzer defect: an edit moved the `ensure-unity-editor` gate out of
    its reviewed prefix.
 2. Lock-state branch history can settle #269's correlation question for
    the two recorded casualty attempts the way the new `peer-timeline`
@@ -30,18 +30,18 @@ Falsifiable hypotheses:
 Observed: run 34649869100 (2026-09-11 21:32 UTC) reported 1 finding over
 119 active jobs: DxMessaging `.github/workflows/unity-tests.yml` job
 `unity-tests`, `missing-unity-editor-check`. unity-helpers no longer
-appears; #749 merged at 21:32 UTC.
+appears; #749 merged at 2026-09-11 21:32 UTC.
 
 Reproduced locally: all six consumers checked out at the exact audited
 commits, the unmodified `cmd/audit-unity-enrollment` reported
 `complete=true`, 119 active jobs, the same single finding.
 
-Root cause: DxMessaging #580 (merged 15:51 UTC) inserted a one-minute
-input mutual-exclusion guard between the current-PR-head guard and the
-editor gate. Contract item 3 fixes the reviewed prefix; the gate moved to
-step three, so the literal-shape check failed. The audit is correct; the
-docs already state the position rule, but the finding table's fix text
-did not name it.
+Root cause: DxMessaging #580 (merged 2026-09-11 15:51 UTC) inserted a
+one-minute input mutual-exclusion guard between the current-PR-head guard
+and the editor gate. Contract item 3 fixes the reviewed prefix; the gate
+moved to step three, so the literal-shape check failed. The audit is
+correct. The docs already state the position rule, but the finding
+table's fix text did not name it.
 
 Fix: DxMessaging #582 moves the guard to directly after the gate. It still
 fails before any checkout, credential reference, or lock acquisition.
@@ -61,34 +61,36 @@ suite-setup Baselib TLS assertion, zero failed leaves, clean confirmed
 return). The PR's later green run used a commit that edits a PlayMode
 test file, so it is not a same-sources control.
 
-Lock-state replay for both casualty windows:
+Lock-state replay for both casualty windows (2026-09-10):
 
 - Attempt 1 (22:40:19Z-22:43:47Z): single holder (qora-redux, runner
   `ELI-MACHINE`), empty queue, no reservations, no incident. A
   unity-helpers session (editor 6000.3.16f1) returned on the same runner
-  at 22:39:17Z; its cooldown cleared 22:39:34Z; qora acquired 45s later.
+  at 22:39:17Z. Its cooldown cleared at 22:39:34Z. qora acquired 62s
+  after the return and 45s after the cooldown cleared.
 - Attempt 2 (23:10:31Z-23:14:00Z): same single-holder shape. An IshoBoy
   session returned on the same runner at 23:09:51Z; cooldown cleared
-  23:10:08Z; qora acquired 23s later.
+  23:10:08Z. qora acquired 40s after the return and 23s after the
+  cooldown cleared.
 - Base rate: 85% of acquires over the last three days follow a release
   within 60s (median 30s, 705 acquires), so return proximity alone is not
   diagnostic.
 
 Inference posted on #269: no concurrent peer existed in either window, so
-the concurrent-race hypothesis weakens. Both casualties started seconds
-after a peer's license return on the same physical runner, which points at
-cross-session machine state. Distinguishing facts from inference is
-explicit in the comment.
+the concurrent-race hypothesis weakens. Both casualties started 40-62s
+after a peer's license return on the same physical runner. This points at
+cross-session machine state. The comment separates these facts from the
+inference.
 
 ## Change
 
 - `docs/consumer-enrollment.md`: the `missing-unity-editor-check` fix row
-  now names the reviewed prefix rule, so the next consumer sees the
-  position contract without reading item 3 in full.
+  now names the reviewed prefix rule for new or edited workflows. The next
+  consumer sees the position contract without reading item 3 in full.
 - `PLAN.md`: current state moved to session 092; the 27-finding and
   #113-close claims replaced with the merged state; the M3 drive item
   records the new drift and its consumer PR; the #113 item notes that the
-  alert reopens on new drift.
+  alert stays open while a finding stands.
 - No production code changed. The analyzer behaved correctly; widening it
   for the consumer's guard step would weaken the reviewed prefix for no
   safety gain.
@@ -97,8 +99,11 @@ explicit in the comment.
 
 - `go run ./cmd/audit-unity-enrollment` over six exact snapshots: before
   the consumer fix, 1 finding; after, 0 findings, complete, 119 jobs.
-- Full local suite: see the session PR checks. `node --test test/*.test.js`,
-  `go test ./...`, `go vet ./...`, and the harness check run before handoff.
+- Full local suite ran green before handoff: the harness check, all
+  `test/*.test.js` suites, `go test ./...`, `go test -race ./...`,
+  `go vet ./...`, both `go mod verify` and `go mod tidy -diff` checks,
+  `golangci-lint run`, both `tools/workflows/ci.sh` lanes, and the
+  workflow credential audit.
 - DxMessaging #582: diff moves six lines; no workflow behavior change.
 
 ## Blocked items unchanged
