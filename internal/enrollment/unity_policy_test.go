@@ -2758,6 +2758,77 @@ func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T
 	}
 }
 
+func TestUnityEnrollmentAcceptsLiteralStandaloneProfileOnVersionMatrix(t *testing.T) {
+	if !strings.Contains(
+		trustedEditorMatrixProfile,
+		`"`+trustedEditorStandalone+`"`,
+	) {
+		t.Fatalf(
+			"the reviewed profile expression drifted from the standalone literal: %q",
+			trustedEditorMatrixProfile,
+		)
+	}
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"        mode: [EditMode]\n",
+		"        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+		1,
+	)
+	workflow = strings.ReplaceAll(
+		workflow,
+		"          unity-version: 6000.5.2f1\n",
+		"          unity-version: ${{ matrix.unity-version }}\n",
+	)
+	workflow = strings.Replace(
+		workflow,
+		"          provisioning-profile: EditorOnly",
+		"          provisioning-profile: "+trustedEditorStandalone,
+		1,
+	)
+	workflow = strings.ReplaceAll(
+		workflow,
+		"          holder-id-suffix: qora\n",
+		"          holder-id-suffix: ${{ matrix.unity-version }}\n",
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("literal standalone profile on a static version matrix produced findings: %#v", result.Findings)
+	}
+	for _, mutation := range []struct {
+		name    string
+		profile string
+	}{
+		{name: "unknown profile", profile: "StandaloneLinuxIl2cpp"},
+		{name: "dynamic profile", profile: "${{ env.PROVISIONING_PROFILE }}"},
+	} {
+		t.Run("profile "+mutation.name, func(t *testing.T) {
+			mutated := strings.Replace(
+				workflow,
+				"          provisioning-profile: "+trustedEditorStandalone,
+				"          provisioning-profile: "+mutation.profile,
+				1,
+			)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": mutated,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"missing-unity-editor-check",
+			) {
+				t.Fatalf("unsafe literal profile passed: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentRejectsUnboundedCentralReturnVersionMatrix(t *testing.T) {
 	base := strings.ReplaceAll(
 		unityWorkflow(centralReturnSteps(), safeAggregate()),

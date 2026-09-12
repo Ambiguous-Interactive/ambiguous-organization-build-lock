@@ -69,6 +69,7 @@ const (
 	trustedEditorGateSuffix     = ` -DiagnosticsPath unity-editor-check.json -CiManagedOnly -RequireHealthyExisting`
 	trustedEditorInstallRoot    = `${{ runner.tool_cache }}\u6-v3`
 	trustedEditorDiagnostics    = "unity-editor-check.json"
+	trustedEditorStandalone     = "StandaloneWindowsIl2Cpp"
 	trustedEditorMatrixProfile  = `${{ fromJSON('{"editmode":"EditorOnly","playmode":"EditorOnly","standalone":"StandaloneWindowsIl2Cpp"}')[matrix.test-mode] }}`
 	trustedEditorShell          = `pwsh -NoProfile -NonInteractive -Command ". '{0}'"`
 )
@@ -1214,7 +1215,16 @@ func trustedEditorGateCommandWithProfile(version, profile string) string {
 		profile + trustedEditorGateSuffix
 }
 
+// trustedEditorGateProfile admits exactly the reviewed provisioning-profile
+// inputs. The literal StandaloneWindowsIl2Cpp profile verifies the IL2CPP
+// player module on every leg, so it can only over-provision relative to the
+// reviewed per-mode expression; it never lets a standalone leg skip that
+// verification. The unsafe direction, an EditorOnly profile beside standalone
+// work, stays rejected by the shape rules below.
 func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
+	if profile == trustedEditorStandalone {
+		return true
+	}
 	strategy := mappingValue(job, "strategy")
 	matrix := mappingValue(strategy, "matrix")
 	if matrix == nil {

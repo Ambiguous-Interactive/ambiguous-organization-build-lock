@@ -133,9 +133,13 @@ touches a Dependabot pull request.
    editor. The action carries the trusted validator payload, invokes it without
    a command shell, and exposes the validated executable through the
    `editor-path` output, so
-   consumers need neither a `unity-helpers` checkout nor a diagnostics-binding
-   run step. The profile is `EditorOnly` unless the reviewed static
-   `matrix.test-mode` map selects `StandaloneWindowsIl2Cpp` for `standalone`.
+    consumers need neither a `unity-helpers` checkout nor a diagnostics-binding
+    run step. The profile is `EditorOnly`, the literal
+    `StandaloneWindowsIl2Cpp` (it verifies the IL2CPP player module on every
+    leg, so a version-only matrix may use it even when the selected modes are
+    dynamic), or the reviewed static `matrix.test-mode` map that selects
+    `StandaloneWindowsIl2Cpp` for `standalone`. An `EditorOnly` profile beside
+    a static `standalone` matrix value stays rejected.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.
    The only permitted preceding step is the approved immutable, exact-input

@@ -4,7 +4,36 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-11, session 093)
+## Current state (2026-09-12, session 094)
+
+- Session 093 closed the last #255 finding, and #255 closed live
+  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
+  24 active contexts, 0 findings, complete). Root cause: unity-helpers
+  #749 added the universal `Unity CI Success` reporter, but required-
+  context enforcement lives in a ruleset, which no pull request can
+  create. The operator created ruleset 22983578 on unity-helpers `main`
+  (mirrors the reviewed DoxReloaded template: active, default branch,
+  requires `Unity CI Success`, no bypass actors). Two follow-ups were
+  needed before the audit went clean: the new carrying ruleset made the
+  audit fail closed with `merge-policy-attestation-missing` until
+  unity-helpers published its attestation (PR #768), and the
+  branch-rules endpoint lagged the new ruleset on the first re-audit.
+  The merge-policy audit also gained `workflow_dispatch`, so a live fix
+  is verifiable on demand; the reviewed contract test now requires that
+  trigger.
+- Session 094 worked fresh enrollment drift. The 2026-09-12 08:33 UTC
+  audit (run 34683538355) reported 8 findings over 121 active jobs.
+  Root causes: qora-redux #395 and unity-helpers #765 set
+  `cancel-in-progress: true` on licensed concurrency scopes, and
+  unity-helpers #765 also replaced the reviewed static `test-mode`
+  matrix with a literal `StandaloneWindowsIl2Cpp` profile that the
+  reviewed vocabulary did not admit. The vocabulary now admits the
+  literal profile (it verifies the IL2CPP player module on every leg,
+  so it can only over-provision; the `EditorOnly`-beside-`standalone`
+  direction stays rejected). Reviewed consumer fixes are open:
+  unity-helpers #772 and qora-redux #396. Verified with the unmodified
+  analyzer over all six snapshots: only the DxMessaging finding stands
+  (covered by open consumer fix #582).
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -176,23 +205,8 @@ impact on licensed-resource safety and consumer CI churn.
   findings over all six snapshots with the fix applied. For #269,
   lock-state history proves no peer held the lock in either casualty
    window. Both casualties started 40-62s after a peer returned on the
-   same physical runner. A full re-run reproduced the signature, so the
-   class is not always transient.
-- Session 093 closed the last #255 finding, and #255 closed live
-  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
-  24 active contexts, 0 findings, complete). Root cause: unity-helpers
-  #749 added the universal `Unity CI Success` reporter, but required-
-  context enforcement lives in a ruleset, which no pull request can
-  create. The operator created ruleset 22983578 on unity-helpers `main`
-  (mirrors the reviewed DoxReloaded template: active, default branch,
-  requires `Unity CI Success`, no bypass actors). Two follow-ups were
-  needed before the audit went clean: the new carrying ruleset made the
-  audit fail closed with `merge-policy-attestation-missing` until
-  unity-helpers published its attestation (PR #768), and the
-  branch-rules endpoint lagged the new ruleset on the first re-audit.
-  The merge-policy audit also gained `workflow_dispatch`, so a live fix
-  is verifiable on demand; the reviewed contract test now requires that
-  trigger.
+    same physical runner. A full re-run reproduced the signature, so the
+    class is not always transient.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -236,10 +250,12 @@ impact on licensed-resource safety and consumer CI churn.
       Session 079 opened reviewed fix pull requests for every one of the
       64 findings, each verified against the unmodified local analyzer
       over all six enrolled snapshots (0 findings, complete). unity-helpers
-      #749 merged 2026-09-11, clearing its 27 structural findings. New
-      drift reopens the count: session 092 opened DxMessaging #582 for the
-      `missing-unity-editor-check` regression that #580 introduced.
-      Merges are consumer decisions.
+      #749 merged 2026-09-11, clearing its 27 structural findings. Session
+      092 opened DxMessaging #582 for the `missing-unity-editor-check`
+      regression that #580 introduced. Session 094 opened qora-redux #396
+      and unity-helpers #772 for the `unsafe-workflow-cancellation`
+      regressions and the unreviewed profile shape, and admitted the
+      literal standalone profile centrally. Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.
