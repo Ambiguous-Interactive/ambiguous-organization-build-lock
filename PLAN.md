@@ -4,8 +4,20 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-12, session 094)
+## Current state (2026-09-12, session 095)
 
+- Session 095 drove the #274 flip PRs to green. All three red consumer PRs
+  shared one root cause: a reviewed consumer artifact still pinned the old
+  contract shape. Fixes pushed: IshoBoy #902 (contract test requires literal
+  `cancel-in-progress: true`, 105 tests pass), DoxReloaded #832 (policy
+  validator pin flipped), unity-helpers #772 reopened after the static-matrix
+  content was rebased onto the 3.6.0 release merge (#773), and DxMessaging
+  #582 needed no commit. The unmodified analyzer over all six consumers at
+  the four PR heads reports `findings=0 complete=true` over 121 active jobs.
+  Merges are consumer decisions; the first complete clean audit closes #113.
+  One evidence gap recorded: the 18:34:19Z cancellation of #582's queued
+  runs is unattributable from retained evidence (watchdog exonerated by its
+  own log; no lock incident in the window).
 - Session 093 closed the last #255 finding, and #255 closed live
   (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
   24 active contexts, 0 findings, complete). Root cause: unity-helpers
@@ -260,8 +272,10 @@ impact on licensed-resource safety and consumer CI churn.
       cancellation contract per #274: the audit now enforces literal
       `cancel-in-progress: true` on workflow scopes that reach acquire
       (`unsafe-workflow-queue` / `unsafe-job-queue`), and flip pull
-      requests cover DoxReloaded, DxMessaging, IshoBoy, and
-      unity-helpers `release.yml`. Merges are consumer decisions.
+      requests cover DoxReloaded (#832), DxMessaging (#584, merged),
+      IshoBoy (#902), and unity-helpers (`release.yml`, carried by
+      reopened #772 together with the static version matrix restore).
+      Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.
