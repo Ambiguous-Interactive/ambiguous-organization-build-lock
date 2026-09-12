@@ -178,14 +178,18 @@ impact on licensed-resource safety and consumer CI churn.
    window. Both casualties started 40-62s after a peer returned on the
    same physical runner. A full re-run reproduced the signature, so the
    class is not always transient.
-- Session 093 closed the last #255 finding. Root cause: unity-helpers
+- Session 093 closed the last #255 finding, and #255 closed live
+  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
+  24 active contexts, 0 findings, complete). Root cause: unity-helpers
   #749 added the universal `Unity CI Success` reporter, but required-
   context enforcement lives in a ruleset, which no pull request can
   create. The operator created ruleset 22983578 on unity-helpers `main`
   (mirrors the reviewed DoxReloaded template: active, default branch,
-  requires `Unity CI Success`, no bypass actors). The unmodified local
-  analyzer then reported a complete clean audit over all six consumers
-  (24 active contexts, 0 findings); the next scheduled run closes #255.
+  requires `Unity CI Success`, no bypass actors). Two follow-ups were
+  needed before the audit went clean: the new carrying ruleset made the
+  audit fail closed with `merge-policy-attestation-missing` until
+  unity-helpers published its attestation (PR #768), and the
+  branch-rules endpoint lagged the new ruleset on the first re-audit.
   The merge-policy audit also gained `workflow_dispatch`, so a live fix
   is verifiable on demand; the reviewed contract test now requires that
   trigger.
