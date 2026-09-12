@@ -4747,6 +4747,7 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 		job := jobs.Content[index+1]
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
 			!conditionIsSafeAlways(mappingValue(job, "if")) ||
+			unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 			!criticalNodeFailurePropagates(job) {
 			continue
 		}

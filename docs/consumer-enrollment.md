@@ -252,8 +252,11 @@ touches a Dependabot pull request.
     cancellation signals and releases before activation, the licensed
     cleanup chain runs under `if: always()`, and the scheduled reaper
     recovers a holder whose runner died. An existing job-level group must
-    cancel too; aggregate-reporter jobs keep the literal false default so a
-    cancelled reporter cannot leave the required context unreported.
+    cancel too, and a group that omits `cancel-in-progress` fails closed.
+    Aggregate-reporter jobs keep the literal false default in their own
+    group so a sibling cannot cancel the report; run-level cancellation of
+    a superseded run is fine, because the successor run reports the
+    context instead.
 
 The conditional classifier and aggregate have an exact static shape. All five
 referenced jobs must be distinct and must not define workflow/job `env`,

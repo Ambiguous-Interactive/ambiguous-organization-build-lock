@@ -70,9 +70,10 @@ Contract change (this session's pull request):
   `unsafe-job-queue` (an existing job-level group that does not cancel;
   an absent job group defers to the workflow scope).
 - Aggregate-reporter jobs keep the opposite rule
-  (`unsafeAggregateConcurrency`): a cancelled reporter leaves the
-  required context unreported, so an existing block there must stay
-  literal false.
+  (`unsafeAggregateConcurrency`): an existing block there must stay
+  literal false so a sibling cannot cancel the report, and a group that
+  omits `cancel-in-progress` now fails closed. Run-level cancellation of
+  a superseded run is fine: the successor run reports the context.
 - `fail-fast: false` on licensed matrices is unchanged: a sibling must
   never cancel another leg's cleanup.
 - Item 11 of `docs/consumer-enrollment.md`, the two finding rows, the

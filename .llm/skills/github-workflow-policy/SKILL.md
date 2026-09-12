@@ -9,13 +9,15 @@ description: Apply repository GitHub Actions safety policy. Use when editing wor
 - Use full immutable commit SHAs for third-party actions.
 - Grant the smallest job/workflow permissions required.
 - Every workflow concurrency scope capable of reaching licensed acquire must
-  literally set `cancel-in-progress: true`; a queued superseded run wastes the
-  paid seat. Cancellation stays safe: the acquire action traps signals and
-  releases before activation, the licensed cleanup chain runs under `if:
-  always()`, and the scheduled reaper recovers dead holders. An existing
-  job-level group must cancel too, while aggregate-reporter jobs keep the
-  literal false default so a cancelled reporter cannot leave the required
-  context unreported.
+  have a block that literally sets `cancel-in-progress: true`; a queued
+  superseded run wastes the paid seat. Cancellation stays safe: the acquire
+  action traps signals and releases before activation, the licensed cleanup
+  chain runs under `if: always()`, and the scheduled reaper recovers dead
+  holders. An existing job-level group must cancel too, and a group that
+  omits `cancel-in-progress` fails closed. Aggregate-reporter jobs keep the
+  literal false default in their own group so a sibling cannot cancel the
+  report; run-level cancellation of a superseded run is fine, because the
+  successor run reports the context instead.
 - Cancellation supersedes an older pending member of the same group as well.
   Periodic work must not share a concurrency group with proof-bearing
   recovery. Keep recovery outside automatic concurrency cancellation or

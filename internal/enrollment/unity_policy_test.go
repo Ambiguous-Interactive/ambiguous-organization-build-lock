@@ -2592,6 +2592,17 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 				)
 			},
 		},
+		{
+			name: "job group with a cancellation expression",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()\n",
+					"  aggregate:\n    concurrency:\n      group: aggregate\n      cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n    if: always()\n",
+					1,
+				)
+			},
+		},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

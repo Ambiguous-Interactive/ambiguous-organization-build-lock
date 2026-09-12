@@ -1036,22 +1036,28 @@ func unsafeConcurrency(node *yaml.Node) bool {
 
 // unsafeJobConcurrency reports an existing job concurrency scope that would
 // re-queue what the workflow scope cancels. A job block is optional: when it
-// is absent, the workflow scope governs supersession. When it exists, it must
-// cancel like the workflow scope does.
+// is absent, the workflow scope governs supersession. When it exists, it
+// must cancel like the workflow scope does; a group that omits the key
+// defaults to queueing and fails closed.
 func unsafeJobConcurrency(node *yaml.Node) bool {
-	cancel, present := concurrencyCancelValue(node)
-	if !present {
+	if node == nil || node.Kind != yaml.MappingNode {
 		return false
+	}
+	cancel := mappingValue(node, "cancel-in-progress")
+	if cancel == nil {
+		return true
 	}
 	return !literalTrue(cancel)
 }
 
-// unsafeAggregateConcurrency reports an aggregate-reporter job whose
-// concurrency can cancel it. A cancelled reporter leaves the required
-// context unreported, so an existing block must keep the literal false
-// default; an absent block already inherits GitHub's non-cancelling
-// behavior. This is the opposite of the licensed-work rule and applies only
-// to jobs that exist to report an aggregate truthfully.
+// unsafeAggregateConcurrency reports an aggregate-reporter job whose own
+// concurrency can cancel it before it reports. An existing block must keep
+// the literal false default, and an absent block already inherits GitHub's
+// non-cancelling behavior, so the reporter survives sibling cancellation
+// inside its run. Run-level cancellation of a superseded run is fine: the
+// successor run reports the context instead. This is the opposite of the
+// licensed-work rule and applies only to jobs that exist to report an
+// aggregate truthfully.
 func unsafeAggregateConcurrency(node *yaml.Node) bool {
 	cancel, present := concurrencyCancelValue(node)
 	if !present {
