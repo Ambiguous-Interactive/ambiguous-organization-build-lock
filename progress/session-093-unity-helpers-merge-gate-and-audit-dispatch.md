@@ -70,6 +70,48 @@ Diagnostic note: a first local run reported `complete=false` with six
 prefix itself, so every request authenticated as `Bearer Bearer ...`.
 No code change; the tooling behaved fail-closed as designed.
 
+## Second gap: the carrying ruleset needs bypass evidence
+
+The audit run triggered by the PR merge on main (34660170332) failed
+closed as designed: `merge-policy-attestation-missing` for unity-helpers
+ruleset 22983578, `complete=false`, 23 active contexts. Two causes:
+
+1. Once unity-helpers carries a ruleset, the session-083 contract
+   demands bypass-actor evidence. The CI reader mints
+   `administration: read` only, and GitHub returns `bypass_actors` keys
+   only to ruleset-write callers, so `BypassKnown` stays false without
+   a consumer attestation. The earlier clean local run used the
+   operator's administrator token, which does see `bypass_actors`; it
+   therefore never exercised the stricter CI path. Lesson recorded:
+   local verification with a write-capable token cannot prove the CI
+   reader's view.
+2. The per-branch rules endpoint had not yet propagated the new
+   ruleset's requirement at run time (23 contexts, not 24). It
+   reported the requirement on later reads without any further change.
+
+Fix: unity-helpers pull request #768 published the reviewed
+`.github/merge-policy-attestation.json` for ruleset 22983578 with an
+empty bypass list, matching the DoxReloaded schema. Prettier formatting
+was corrected once (their repo style collapses single-element arrays).
+A maintainer merged `main` into the branch mid-review, which restarted
+the required Unity run; the failed legs were re-run and the required
+`Unity CI Success` aggregate reported success. #768 merged 2026-09-12
+06:12 UTC.
+
+## Observed closure of #255
+
+The new `workflow_dispatch` trigger ran the audit on main immediately
+after the attestation merge (run 34677521508, 2026-09-12 06:12 UTC):
+`Audited 6/6 enrolled repositories; active-contexts=24 findings=0
+complete=true`, then `Merge policy audit is complete and clean; drift
+alert is closed.` Issue #255 closed at 06:12:43 UTC. The on-demand
+trigger is proven in production; the next scheduled run re-states the
+same clean state.
+
+Adversarial review of this session found the record defects above
+(closure claimed before it was observed; the failed CI verification
+missing; one garbled line). They are corrected here and in PLAN.md.
+
 ## Fix: on-demand merge-policy audit
 
 Session friction observed: the scheduled run cannot be re-run
@@ -82,14 +124,19 @@ Change: `.github/workflows/merge-policy-audit.yml` gains
 `workflow_dispatch`. The contract test
 (`organization merge-policy audit is exact, read-only, and fail closed`)
 now requires the trigger. The trigger does not weaken any fail-closed
-path: the job stays read-only over ` Administration read` plus
-`issues: write`, keeps its stable serial concurrency group, and fails
-closed on incomplete retrieval. Sibling audits
-(`dx-unity-automation-audit.yml`, the enrollment audit's request
-workflow) already carry the same trigger.
+path: the job keeps `contents: read` and `issues: write`, mints an
+`administration: read` reader token, keeps its stable serial
+concurrency group, and fails closed on incomplete retrieval. Sibling
+audits (`dx-unity-automation-audit.yml`, the enrollment audit's request
+workflow) already carry the same trigger. A dispatched run executes the
+workflow file from the dispatched ref with secret access; the pinned
+`ref: main` checkout and the read-only job keep the audited evidence
+trusted, and the enrollment audit keeps its stricter `workflow_run`
+request pattern.
 
 ## Other open issues
 
+- #255: closed live on 2026-09-12 (evidence above).
 - #113: the single finding waits on consumer merge DxMessaging #582
   (still open, consumer decision). Nothing to do here.
 - #269: lock-side work is complete (#270); the consumer half is canary
@@ -102,7 +149,11 @@ workflow) already carry the same trigger.
 ## Verification
 
 - `go test ./internal/mergepolicy ./cmd/audit-merge-policy` green.
-- Local live audit: complete, 0 findings (evidence above).
+- Local live audit with the administrator token: complete, 0 findings.
+  Superseded as closure evidence by the CI-reader run above, which also
+  proves the stricter attestation path.
+- Dispatched audit run 34677521508 on main: 6/6 repositories, 24 active
+  contexts, 0 findings, complete; #255 closed automatically.
 - `node --test test/*.test.js`, `go test ./...`, `go vet ./...`,
   `go test -race ./...`, actionlint, shellcheck, module checks, and the
   credential audit run in the PR verification; see the pull request.
