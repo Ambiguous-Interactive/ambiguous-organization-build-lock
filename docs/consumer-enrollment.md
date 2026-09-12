@@ -245,8 +245,15 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
-11. Disable automatic cancellation for every scope that can terminate a job
-    after acquire. Superseded runs exit before acquire; holders finish cleanup.
+11. Cancel superseded runs for every workflow scope that can terminate a job
+    after acquire: a literal `cancel-in-progress: true` on the workflow
+    concurrency group. A queued superseded run wastes a paid self-hosted
+    seat. Cancellation stays safe because the acquire action traps
+    cancellation signals and releases before activation, the licensed
+    cleanup chain runs under `if: always()`, and the scheduled reaper
+    recovers a holder whose runner died. An existing job-level group must
+    cancel too; aggregate-reporter jobs keep the literal false default so a
+    cancelled reporter cannot leave the required context unreported.
 
 The conditional classifier and aggregate have an exact static shape. All five
 referenced jobs must be distinct and must not define workflow/job `env`,
@@ -361,14 +368,14 @@ edits.
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
 | `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
 | `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |
-| `unsafe-job-cancellation` | Use literal `cancel-in-progress: false` on the job concurrency group. See item 11. |
+| `unsafe-job-queue` | Remove the job concurrency group, or set literal `cancel-in-progress: true` on it. See item 11. |
 | `unsafe-job-container` | Run licensed work directly on the self-hosted runner, not in a container. See item 6. |
 | `unsafe-matrix-fail-fast` | Set `fail-fast: false` on licensed matrices. |
 | `unsafe-node-options` | Remove workflow or job `env` that can preload Node before the immutable gate. See item 3. |
 | `unsafe-return-execution-environment` | Return only on an admitted self-hosted runner with isolation and a timeout. See item 7. |
 | `unsafe-unity-editor-check` | Keep the editor gate success-dependent and failure-propagating. See item 3. |
 | `unsafe-unity-editor-provisioning` | Remove editor install, repair, or provisioning steps. Rely on the central gate. See item 3. |
-| `unsafe-workflow-cancellation` | Use literal `cancel-in-progress: false` on the workflow concurrency group. See item 11. |
+| `unsafe-workflow-queue` | Set literal `cancel-in-progress: true` on the workflow concurrency group. See item 11. |
 | `missing-required-context` | Require the aggregate context on the default branch. See Merge policy audit. |
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |

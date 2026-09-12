@@ -21,20 +21,24 @@ impact on licensed-resource safety and consumer CI churn.
   The merge-policy audit also gained `workflow_dispatch`, so a live fix
   is verifiable on demand; the reviewed contract test now requires that
   trigger.
-- Session 094 worked fresh enrollment drift. The 2026-09-12 08:33 UTC
-  audit (run 34683538355) reported 8 findings over 121 active jobs.
-  Root causes: qora-redux #395 and unity-helpers #765 set
-  `cancel-in-progress: true` on licensed concurrency scopes, and
-  unity-helpers #765 also replaced the reviewed static `test-mode`
-  matrix with a literal `StandaloneWindowsIl2Cpp` profile that the
-  reviewed vocabulary did not admit. The vocabulary now admits the
-  literal profile on a static matrix (it verifies the IL2CPP player
-  module on every leg, so it can only over-provision; the
-  `EditorOnly`-beside-`standalone` direction and unenumerable matrices
-  stay rejected). Reviewed consumer fixes are open:
-  unity-helpers #772 and qora-redux #396. Verified with the unmodified
-  analyzer over all six snapshots: only the DxMessaging finding stands
-  (covered by open consumer fix #582).
+- Session 094 worked fresh enrollment drift and the operator pivot. The
+  2026-09-12 08:33 UTC audit (run 34683538355) reported 8 findings over
+  121 active jobs: qora-redux #395 and unity-helpers #765 set
+  `cancel-in-progress: true` on licensed scopes, and unity-helpers #765
+  also used a literal `StandaloneWindowsIl2Cpp` profile outside the
+  reviewed vocabulary. Mid-session the operator opened #274: cancellation
+  replaces queueing, because queued superseded runs waste paid seats. The
+  contract now enforces literal `cancel-in-progress: true` on workflow
+  scopes that reach acquire (`unsafe-workflow-queue` /
+  `unsafe-job-queue`), keeps aggregate reporters on literal false, and
+  admits the literal standalone profile on a static matrix. The acquire
+  action's signal cleanup, the `always()` cleanup chain, and the reaper
+  are the resilience evidence. Reviewed consumer changes: qora-redux
+  #396 closed (its main already cancels), unity-helpers #772 retargeted
+  to the static matrix restore plus the `release.yml` flip, and new flip
+  pull requests for DoxReloaded, DxMessaging, and IshoBoy. Verified with
+  the unmodified analyzer over all six snapshots; remaining findings are
+  the flip surface plus the two known consumer regressions.
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
   (superseded within minutes; discovery offers only the newest release).
@@ -252,10 +256,12 @@ impact on licensed-resource safety and consumer CI churn.
       over all six enrolled snapshots (0 findings, complete). unity-helpers
       #749 merged 2026-09-11, clearing its 27 structural findings. Session
       092 opened DxMessaging #582 for the `missing-unity-editor-check`
-      regression that #580 introduced. Session 094 opened qora-redux #396
-      and unity-helpers #772 for the `unsafe-workflow-cancellation`
-      regressions and the unreviewed profile shape, and admitted the
-      literal standalone profile centrally. Merges are consumer decisions.
+      regression that #580 introduced. Session 094 pivoted the
+      cancellation contract per #274: the audit now enforces literal
+      `cancel-in-progress: true` on workflow scopes that reach acquire
+      (`unsafe-workflow-queue` / `unsafe-job-queue`), and flip pull
+      requests cover DoxReloaded, DxMessaging, IshoBoy, and
+      unity-helpers `release.yml`. Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.

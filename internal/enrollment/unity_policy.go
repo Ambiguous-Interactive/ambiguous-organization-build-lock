@@ -469,10 +469,10 @@ func (a *unityPolicyAnalyzer) auditFallbackCleanup(
 	allowWorkflowDispatch bool,
 ) {
 	if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
-		a.analyzer.add("unsafe-workflow-cancellation", workflowPath, jobName)
+		a.analyzer.add("unsafe-workflow-queue", workflowPath, jobName)
 	}
-	if unsafeConcurrency(mappingValue(job, "concurrency")) {
-		a.analyzer.add("unsafe-job-cancellation", workflowPath, jobName)
+	if unsafeJobConcurrency(mappingValue(job, "concurrency")) {
+		a.analyzer.add("unsafe-job-queue", workflowPath, jobName)
 	}
 	if unsafe, err := unsafeMatrixFailFast(job); err != nil || unsafe {
 		a.analyzer.add("unsafe-matrix-fail-fast", workflowPath, jobName)
@@ -663,10 +663,10 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		a.analyzer.add("unsafe-hosted-unity-runner", workflowPath, jobName)
 	}
 	if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
-		a.analyzer.add("unsafe-workflow-cancellation", workflowPath, jobName)
+		a.analyzer.add("unsafe-workflow-queue", workflowPath, jobName)
 	}
-	if unsafeConcurrency(mappingValue(job, "concurrency")) {
-		a.analyzer.add("unsafe-job-cancellation", workflowPath, jobName)
+	if unsafeJobConcurrency(mappingValue(job, "concurrency")) {
+		a.analyzer.add("unsafe-job-queue", workflowPath, jobName)
 	}
 	if unsafe, err := unsafeMatrixFailFast(job); err != nil || unsafe {
 		a.analyzer.add("unsafe-matrix-fail-fast", workflowPath, jobName)
@@ -4798,7 +4798,7 @@ func (a *unityPolicyAnalyzer) hasFallbackAggregate(
 			!criticalNodeFailurePropagates(job) ||
 			scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
 			mappingValue(job, "environment") != nil ||
-			unsafeConcurrency(mappingValue(job, "concurrency")) ||
+			unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 			matrixErr != nil ||
 			unsafeFailFast {
 			continue
@@ -5204,7 +5204,7 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 		!validationJobIsolationSafe(workflow, aggregateJob) ||
 		mappingValue(aggregateJob, "environment") != nil ||
 		mappingValue(step, "env") != nil ||
-		unsafeConcurrency(mappingValue(aggregateJob, "concurrency")) ||
+		unsafeAggregateConcurrency(mappingValue(aggregateJob, "concurrency")) ||
 		matrixErr != nil ||
 		unsafeFailFast {
 		return false
@@ -5295,7 +5295,7 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		mappingValue(job, "if") != nil ||
 		mappingValue(job, "needs") != nil ||
 		mappingValue(job, "environment") != nil ||
-		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 		!criticalNodeFailurePropagates(job) ||
 		matrixErr != nil ||
 		unsafeFailFast {
@@ -5373,7 +5373,7 @@ func (a *unityPolicyAnalyzer) validationPreflightMatches(
 		!trustedRevisionGuard(mappingValue(job, "if")) ||
 		mappingValue(job, "needs") != nil ||
 		mappingValue(job, "environment") != nil ||
-		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 		!criticalNodeFailurePropagates(job) ||
 		matrixErr != nil ||
 		unsafeFailFast {
@@ -5714,7 +5714,7 @@ func trustedSkipAggregateEnforces(
 		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
 		!validationJobIsolationSafe(workflow, job) ||
 		mappingValue(job, "environment") != nil ||
-		unsafeConcurrency(mappingValue(job, "concurrency")) ||
+		unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 		!affirmativeCondition(mappingValue(step, "if")) ||
 		!criticalNodeFailurePropagates(step) ||
 		scalarValue(mappingValue(step, "shell")) != "bash" {

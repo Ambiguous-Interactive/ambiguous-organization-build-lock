@@ -7,7 +7,7 @@ immutable reviewed commit SHAs.
 ```yaml
 concurrency:
   group: licensed-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   licensed:

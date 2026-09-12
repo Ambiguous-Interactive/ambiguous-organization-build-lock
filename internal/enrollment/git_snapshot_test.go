@@ -25,7 +25,7 @@ func TestGitSnapshotStaysBoundToExactCommit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	unsafe := workflow("concurrency: { group: fixture, cancel-in-progress: true }\n", "", directAcquireStep())
+	unsafe := workflow("concurrency: { group: fixture, cancel-in-progress: false }\n", "", directAcquireStep())
 	if err := os.WriteFile(workflowPath, []byte(unsafe), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestGitSnapshotStaysBoundToExactCommit(t *testing.T) {
 	runGit(t, repositoryRoot, "commit", "-q", "-m", "unsafe")
 	unsafeSHA := runGit(t, repositoryRoot, "rev-parse", "HEAD")
 
-	safe := workflow("concurrency: { group: fixture, cancel-in-progress: false }\n", "", directAcquireStep())
+	safe := workflow("concurrency: { group: fixture, cancel-in-progress: true }\n", "", directAcquireStep())
 	if err := os.WriteFile(workflowPath, []byte(safe), 0o600); err != nil {
 		t.Fatal(err)
 	}

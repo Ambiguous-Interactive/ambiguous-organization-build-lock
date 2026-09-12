@@ -106,10 +106,10 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 				continue
 			}
 			if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
-				a.add("unsafe-workflow-cancellation", workflowPath, jobName)
+				a.add("unsafe-workflow-queue", workflowPath, jobName)
 			}
-			if unsafeConcurrency(mappingValue(jobs.Content[index+1], "concurrency")) {
-				a.add("unsafe-job-cancellation", workflowPath, jobName)
+			if unsafeJobConcurrency(mappingValue(jobs.Content[index+1], "concurrency")) {
+				a.add("unsafe-job-queue", workflowPath, jobName)
 			}
 			unsafeFailFast, err := unsafeMatrixFailFast(jobs.Content[index+1])
 			if err != nil {
@@ -1017,15 +1017,59 @@ func normalizeConditionTerm(value string) string {
 	return normalized.String()
 }
 
+// unsafeConcurrency reports a workflow concurrency scope that can reach the
+// organization Unity lock but does not cancel superseded runs. A queued or
+// duplicated superseded run wastes a paid self-hosted seat, so the reviewed
+// shape is a workflow block with a literal `cancel-in-progress: true`
+// (issue #274). Cancellation is safe for licensed work: the acquire action
+// traps cancellation signals and releases before activation, the licensed
+// cleanup chain runs under `if: always()`, and the scheduled reaper recovers
+// a holder whose runner died. An absent workflow block, `false`, quoted
+// values, and expressions all fail closed.
 func unsafeConcurrency(node *yaml.Node) bool {
-	if node == nil {
+	cancel, present := concurrencyCancelValue(node)
+	if !present {
+		return true
+	}
+	return !literalTrue(cancel)
+}
+
+// unsafeJobConcurrency reports an existing job concurrency scope that would
+// re-queue what the workflow scope cancels. A job block is optional: when it
+// is absent, the workflow scope governs supersession. When it exists, it must
+// cancel like the workflow scope does.
+func unsafeJobConcurrency(node *yaml.Node) bool {
+	cancel, present := concurrencyCancelValue(node)
+	if !present {
 		return false
 	}
-	cancel := mappingValue(node, "cancel-in-progress")
-	if cancel == nil {
+	return !literalTrue(cancel)
+}
+
+// unsafeAggregateConcurrency reports an aggregate-reporter job whose
+// concurrency can cancel it. A cancelled reporter leaves the required
+// context unreported, so an existing block must keep the literal false
+// default; an absent block already inherits GitHub's non-cancelling
+// behavior. This is the opposite of the licensed-work rule and applies only
+// to jobs that exist to report an aggregate truthfully.
+func unsafeAggregateConcurrency(node *yaml.Node) bool {
+	cancel, present := concurrencyCancelValue(node)
+	if !present {
 		return false
 	}
 	return cancel.Kind != yaml.ScalarNode || cancel.Tag != "!!bool" || cancel.Value != "false"
+}
+
+func concurrencyCancelValue(node *yaml.Node) (*yaml.Node, bool) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	cancel := mappingValue(node, "cancel-in-progress")
+	return cancel, cancel != nil
+}
+
+func literalTrue(cancel *yaml.Node) bool {
+	return cancel.Kind == yaml.ScalarNode && cancel.Tag == "!!bool" && cancel.Value == "true"
 }
 
 func unsafeMatrixFailFast(job *yaml.Node) (bool, error) {

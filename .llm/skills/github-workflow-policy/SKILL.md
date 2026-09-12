@@ -8,13 +8,19 @@ description: Apply repository GitHub Actions safety policy. Use when editing wor
 
 - Use full immutable commit SHAs for third-party actions.
 - Grant the smallest job/workflow permissions required.
-- Every concurrency scope capable of reaching licensed acquire must literally
-  set `cancel-in-progress: false`.
-- `cancel-in-progress: false` protects the running member but GitHub can still
-  replace an older pending member of the same group. Periodic work must not
-  share a concurrency group with proof-bearing recovery. Keep recovery outside
-  automatic concurrency cancellation or isolate it from periodic groups, and
-  preserve CAS/exact-ID fencing for any resulting concurrent state attempts.
+- Every workflow concurrency scope capable of reaching licensed acquire must
+  literally set `cancel-in-progress: true`; a queued superseded run wastes the
+  paid seat. Cancellation stays safe: the acquire action traps signals and
+  releases before activation, the licensed cleanup chain runs under `if:
+  always()`, and the scheduled reaper recovers dead holders. An existing
+  job-level group must cancel too, while aggregate-reporter jobs keep the
+  literal false default so a cancelled reporter cannot leave the required
+  context unreported.
+- Cancellation supersedes an older pending member of the same group as well.
+  Periodic work must not share a concurrency group with proof-bearing
+  recovery. Keep recovery outside automatic concurrency cancellation or
+  isolate it from periodic groups, and preserve CAS/exact-ID fencing for any
+  resulting concurrent state attempts.
 - Licensed matrices set `strategy.fail-fast: false`.
 - Keep credentials out of command text, URLs, diagnostics, and direct secret
   interpolation in shell.

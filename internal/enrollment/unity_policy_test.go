@@ -46,7 +46,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: unity-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   preflight:
     runs-on: ubuntu-latest
@@ -3509,7 +3509,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: unity-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   static-validation:
     runs-on: ubuntu-latest

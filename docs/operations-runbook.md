@@ -313,10 +313,12 @@ reader access. Treat either condition as scope drift.
 8. The stable aggregate fails on preflight failure, cancellation, unexpected
    skip, partial matrix execution, missing return evidence, or failed release.
 
-Automatic concurrency must not cancel a job after it can acquire. A superseded
-run should exit before acquire; once acquired, it finishes activation, work,
-return, and release. Manual cancellation remains fail-closed and may create a
-runner quarantine.
+A workflow scope that can acquire must cancel superseded runs with a literal
+`cancel-in-progress: true`; a queued superseded run wastes the seat. The
+acquire action traps cancellation signals and releases before activation, the
+licensed cleanup chain runs under `if: always()`, and the scheduled reaper
+recovers a holder whose runner died. Manual cancellation stays fail-closed and
+may create a runner quarantine.
 
 ### Session-phase casualty correlation
 
