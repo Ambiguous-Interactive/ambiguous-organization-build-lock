@@ -36,7 +36,7 @@ artifact still pinned the pre-#274 contract shape.
   concurrency.cancel-in-progress: false`. Same class. Test bug.
 - DxMessaging #582: no code failure. Its Unity and performance runs were
   cancelled mid-flight at 18:34:19Z (see the evidence-gap note below). Its
-  branch already carried the flip through the master merge `4aa11a9`; the
+  branch already carried the flip through the master merge `4aa11a99`; the
   flip itself merged as DxMessaging #584.
 
 ## Fixes pushed
@@ -62,6 +62,9 @@ artifact still pinned the pre-#274 contract shape.
   `.github/unity-versions.json`. Fix pushed as `f1bc22b0`: the
   centralization term requires that same canonical match. Local proof with
   pwsh 7.4.6: the suite exits 0 with no error annotations on `f1bc22b0`.
+- DxMessaging #582: needed no commit. The branch already carried the flip
+  (master merge `4aa11a99`); its runs re-queued. The flip itself merged as
+  DxMessaging #584.
 
 Succession after the fixes landed: DoxReloaded closed #832 and folded it
 into #835, which merged and carries the flip plus the validator pin on
@@ -70,9 +73,6 @@ restates the static version axis, drops the stale dynamic-axis suite pin
 (the same gap `f1bc22b0` fixed), and moves the release export off the
 licensed path. The analyzer proof below was taken at the documented PR
 heads and is unaffected by the successions.
-- DxMessaging #582: needed no commit. The branch already carried the flip
-  (master merge `4aa11a9`); its runs re-queued. The flip itself merged as
-  DxMessaging #584.
 
 ## Analyzer proof
 
