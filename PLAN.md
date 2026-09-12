@@ -4,7 +4,7 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-11, session 092)
+## Current state (2026-09-11, session 093)
 
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
@@ -150,9 +150,7 @@ impact on licensed-resource safety and consumer CI churn.
   the DxMessaging ruleset 17663217 Integration actor 3977200 (attested,
   mode `always`) is now recorded in `merge-policy-expectations.json`, and
   expectation bypass actors carry a reviewed bypass mode. The live audit
-  re-run confirms only the unity-helpers merge gate remains; when
-  unity-helpers #749 merges, a complete clean audit closes #255
-  automatically.
+  re-run confirms only the unity-helpers merge gate remains.
 - Session 090 re-verified the green baseline after the #267 merge: main
   CI green, the full local verification suite green, no open or draft
   pull requests, and no failed runs. Every open issue waits on an
@@ -177,9 +175,20 @@ impact on licensed-resource safety and consumer CI churn.
   row now names the prefix rule. The unmodified local analyzer reports 0
   findings over all six snapshots with the fix applied. For #269,
   lock-state history proves no peer held the lock in either casualty
-  window. Both casualties started 40-62s after a peer returned on the
-  same physical runner. A full re-run reproduced the signature, so the
-  class is not always transient.
+   window. Both casualties started 40-62s after a peer returned on the
+   same physical runner. A full re-run reproduced the signature, so the
+   class is not always transient.
+- Session 093 closed the last #255 finding. Root cause: unity-helpers
+  #749 added the universal `Unity CI Success` reporter, but required-
+  context enforcement lives in a ruleset, which no pull request can
+  create. The operator created ruleset 22983578 on unity-helpers `main`
+  (mirrors the reviewed DoxReloaded template: active, default branch,
+  requires `Unity CI Success`, no bypass actors). The unmodified local
+  analyzer then reported a complete clean audit over all six consumers
+  (24 active contexts, 0 findings); the next scheduled run closes #255.
+  The merge-policy audit also gained `workflow_dispatch`, so a live fix
+  is verifiable on demand; the reviewed contract test now requires that
+  trigger.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

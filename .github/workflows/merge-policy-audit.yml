@@ -15,6 +15,7 @@ on:
       - "unity-enrollment-policy.json"
   schedule:
     - cron: "41 8 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
