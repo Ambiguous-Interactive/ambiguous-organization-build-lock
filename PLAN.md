@@ -17,13 +17,14 @@ impact on licensed-resource safety and consumer CI churn.
   verified with pwsh; #772 was then superseded by #776, which restates the
   static axis and moves the release export off the licensed path).
   DxMessaging #584 carries the flip and merged 2026-09-12 19:57 UTC;
-  #582 (the prefix fix) needed no commit. The unmodified analyzer over
-  all six consumers at the PR heads reports `findings=0 complete=true`
-  over 121 active jobs. Licensed-leg CI was still running at session
-  close; merges are consumer decisions, and the first complete clean
-  audit closes #113. One evidence gap recorded as #277: the 18:34:19Z
-  cancellation of #582's queued runs is unattributable from retained
-  evidence.
+  #582 (the prefix fix) needed no commit and merged at 21:09 UTC. The
+  unmodified analyzer over all six consumers at the PR heads reports
+  `findings=0 complete=true` over 121 active jobs. IshoBoy #902 closed
+  the session CLEAN (all checks green, merge is the consumer's click);
+  unity-helpers #776 was BLOCKED in CI at session close, and the first
+  complete clean audit after it merges closes #113. One evidence gap
+  recorded as #277: the 18:34:19Z cancellation of #582's queued runs is
+  unattributable from retained evidence.
 - Session 093 closed the last #255 finding, and #255 closed live
   (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
   24 active contexts, 0 findings, complete). Root cause: unity-helpers
