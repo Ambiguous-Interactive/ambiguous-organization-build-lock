@@ -1,4 +1,4 @@
-# Session 095: drive the licensed-cancellation flip to green
+# Session 095: drive the licensed-cancellation flip cohort toward merge
 
 Date: 2026-09-12. Main CI was green at `00dc0471c` (#275). No open or draft
 pull requests existed in this repository. The session worked the open
@@ -11,13 +11,13 @@ The enrollment audit pushed by the #275 merge (run 34714868795,
 19:40 UTC) reported 19 findings over 121 active jobs:
 
 - DoxReloaded 2 (`unsafe-workflow-queue`, `build-deploy.yml`)
-- DxMessaging 7 (6 `unsafe-workflow-queue`, 1 `missing-unity-editor-check`)
+- DxMessaging 6 (5 `unsafe-workflow-queue`, 1 `missing-unity-editor-check`)
 - IshoBoy 6 (`unsafe-workflow-queue`, three workflows)
 - unity-helpers 5 (`unsafe-workflow-queue` on `release.yml`, plus the four
   dynamic-matrix codes on `unity-tests.yml`)
 
 DxMessaging #584 (the cancellation flip) merged at 19:57 UTC and cleared its
-six `unsafe-workflow-queue` findings, leaving 14 when the session started
+five `unsafe-workflow-queue` findings, leaving 14 when the session started
 working. The remaining fixes were three open consumer pull requests and one
 closed one (unity-helpers #772). Three of the four vehicles were red.
 
@@ -62,6 +62,14 @@ artifact still pinned the pre-#274 contract shape.
   `.github/unity-versions.json`. Fix pushed as `f1bc22b0`: the
   centralization term requires that same canonical match. Local proof with
   pwsh 7.4.6: the suite exits 0 with no error annotations on `f1bc22b0`.
+
+Succession after the fixes landed: DoxReloaded closed #832 and folded it
+into #835, which merged and carries the flip plus the validator pin on
+`main`. unity-helpers closed #772 again as superseded by #776, which
+restates the static version axis, drops the stale dynamic-axis suite pin
+(the same gap `f1bc22b0` fixed), and moves the release export off the
+licensed path. The analyzer proof below was taken at the documented PR
+heads and is unaffected by the successions.
 - DxMessaging #582: needed no commit. The branch already carried the flip
   (master merge `4aa11a9`); its runs re-queued. The flip itself merged as
   DxMessaging #584.
