@@ -6,18 +6,21 @@ impact on licensed-resource safety and consumer CI churn.
 
 ## Current state (2026-09-12, session 095)
 
-- Session 095 drove the #274 flip PRs to green. All three red consumer PRs
-  shared one root cause: a reviewed consumer artifact still pinned the old
-  contract shape. Fixes pushed: IshoBoy #902 (contract test requires literal
-  `cancel-in-progress: true`, 105 tests pass), DoxReloaded #832 (policy
-  validator pin flipped), unity-helpers #772 reopened after the static-matrix
-  content was rebased onto the 3.6.0 release merge (#773), and DxMessaging
-  #582 needed no commit. The unmodified analyzer over all six consumers at
-  the four PR heads reports `findings=0 complete=true` over 121 active jobs.
-  Merges are consumer decisions; the first complete clean audit closes #113.
-  One evidence gap recorded: the 18:34:19Z cancellation of #582's queued
-  runs is unattributable from retained evidence (watchdog exonerated by its
-  own log; no lock incident in the window).
+- Session 095 drove the #274 flip cohort toward merge. All three red
+  consumer PRs shared one root cause: a reviewed consumer artifact still
+  pinned the old contract shape. Fixes pushed: IshoBoy #902 (contract test
+  requires literal `cancel-in-progress: true`, 105 tests pass), DoxReloaded
+  #832 (policy validator pin flipped), unity-helpers #772 reopened after the
+  static-matrix content was rebased onto the 3.6.0 release merge (#773),
+  plus its `unity-workflow-matrix-contract` suite fix (`f1bc22b0`, verified
+  with pwsh). DxMessaging #584 carries the flip and merged 2026-09-12
+  19:57 UTC; #582 (the prefix fix) needed no commit. The unmodified
+  analyzer over all six consumers at the four PR heads reports
+  `findings=0 complete=true` over 121 active jobs. Licensed-leg CI was
+  still running at session close; merges are consumer decisions, and the
+  first complete clean audit closes #113. One evidence gap recorded as
+  #277: the 18:34:19Z cancellation of #582's queued runs is
+  unattributable from retained evidence.
 - Session 093 closed the last #255 finding, and #255 closed live
   (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
   24 active contexts, 0 findings, complete). Root cause: unity-helpers
