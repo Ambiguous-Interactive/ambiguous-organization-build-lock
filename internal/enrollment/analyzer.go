@@ -1038,10 +1038,14 @@ func unsafeConcurrency(node *yaml.Node) bool {
 // re-queue what the workflow scope cancels. A job block is optional: when it
 // is absent, the workflow scope governs supersession. When it exists, it
 // must cancel like the workflow scope does; a group that omits the key
-// defaults to queueing and fails closed.
+// defaults to queueing and fails closed, and so does a scalar shorthand
+// block, which GitHub treats the same way.
 func unsafeJobConcurrency(node *yaml.Node) bool {
-	if node == nil || node.Kind != yaml.MappingNode {
+	if node == nil {
 		return false
+	}
+	if node.Kind != yaml.MappingNode {
+		return true
 	}
 	cancel := mappingValue(node, "cancel-in-progress")
 	if cancel == nil {

@@ -133,6 +133,7 @@ func TestCancellationPolicyDirectBoundaries(t *testing.T) {
 		{name: "quoted true fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: 'true' }\n", wantCode: "unsafe-workflow-queue"},
 		{name: "job false with literal true workflow", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: false }\n", wantCode: "unsafe-job-queue"},
 		{name: "job group without a cancellation key fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity }\n", wantCode: "unsafe-job-queue"},
+		{name: "job scalar shorthand fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: unity\n", wantCode: "unsafe-job-queue"},
 		{name: "job expression fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency:\n      group: unity\n      cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n", wantCode: "unsafe-job-queue"},
 		{name: "absent job scope defers to the workflow scope", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n"},
 		{name: "both scopes literal true", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: true }\n"},
