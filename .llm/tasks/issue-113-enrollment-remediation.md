@@ -14,8 +14,10 @@ scripts cannot be proven safely by static analysis.
 ## Safety boundary
 
 - Never classify missing or ambiguous cleanup as safe.
-- Preserve exact acquire identity, same-runner activation/return, hosted
-  fallback cleanup, and literal `cancel-in-progress: false`.
+- Preserve exact acquire identity, same-runner activation/return, and hosted
+  fallback cleanup. Superseded by #274 (2026-09-12): scopes that can reach
+  acquire now use literal `cancel-in-progress: true`; aggregate reporters
+  keep literal `false`.
 - Do not expose reader, writer, or Unity credentials to untrusted revisions.
 - An aggregate may pass a skip only for an exact modeled untrusted or audited
   non-Unity branch.
