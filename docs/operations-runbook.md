@@ -278,9 +278,10 @@ reader access. Treat either condition as scope drift.
    diagnostics parser on the critical path. An approved immutable, exact-input
    current-head guard may run first; no other step may precede the editor gate.
    Workflow-, job-, and gate-level `env` mappings are absent so inherited values
-   cannot preload the action's Node runtime. The profile is `EditorOnly`, or the
-   reviewed static `matrix.test-mode` map selects
-   `StandaloneWindowsIl2Cpp` only for `standalone`. The release must match the
+   cannot preload the action's Node runtime. The profile is `EditorOnly`, the
+   literal `StandaloneWindowsIl2Cpp` on a static matrix, or the reviewed
+   static `matrix.test-mode` map that selects `StandaloneWindowsIl2Cpp` only
+   for `standalone`. The release must match the
    editor action's version; only a bounded static `matrix.unity-version` axis
    may supply both dynamically. The optional current-head guard, editor gate,
    and acquire omit `if` so each inherits the preceding step's successful

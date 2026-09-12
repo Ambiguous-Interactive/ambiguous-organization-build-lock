@@ -55,12 +55,15 @@ live result exactly: 6/6 repositories, 121 active jobs, 8 findings.
 ## Fix
 
 - Central: `trustedEditorGateProfile` now admits the literal
-  `StandaloneWindowsIl2Cpp`. It verifies the IL2CPP player module on
-  every leg, so it can only over-provision. The unsafe direction, an
-  `EditorOnly` profile beside a static `standalone` matrix value, stays
-  rejected, and the legacy `run:`-based gate keeps its own narrow
-  profile check. Item 3 of `docs/consumer-enrollment.md` documents the
-  third admitted shape.
+  `StandaloneWindowsIl2Cpp` on a static matrix. It verifies the IL2CPP
+  player module on every leg, so it can only over-provision. The unsafe
+  direction, an `EditorOnly` profile beside a static `standalone` matrix
+  value, stays rejected. The admission sits after the matrix-shape
+  checks, so include-based and dynamic matrices keep the general
+  rejection: an unenumerable leg set cannot prove the per-leg pins. The
+  legacy `run:`-based gate keeps its own narrow profile check, now with
+  its own red mutation. Item 3 of `docs/consumer-enrollment.md` and the
+  runbook paragraph document the third admitted shape.
 - Consumer: unity-helpers #772 restores per-HEAD groups with literal
   `cancel-in-progress: false` on both licensed workflows, removes the
   benchmarks top-level group (dispatch-only workflow, so repeated
@@ -81,12 +84,21 @@ live result exactly: 6/6 repositories, 121 active jobs, 8 findings.
   fixes applied: 1 finding (DxMessaging `missing-unity-editor-check`,
   covered by open consumer fix #582), `complete=true`.
 - New data-driven Go tests: the literal profile on a static version
-  matrix audits clean; unknown and dynamic literal profiles stay
-  rejected; the reviewed expression is asserted to embed the standalone
-  literal, which locks the constant-drift failure class caught during
-  development (a mistyped concatenation made two downgrade mutations
-  apply nothing and turned them green; the mutation tests failed loudly
-  and the drift was fixed).
+  matrix audits clean; the same literal beside a static `test-mode` axis
+  audits clean (over-provisioning); unknown and dynamic literal profiles
+  stay rejected; include-based and dynamic whole matrices stay rejected
+  with the literal profile; the legacy script gate rejects the literal;
+  the reviewed expression is asserted to equal its exact reviewed text,
+  which locks the constant-drift failure class caught during development
+  (a mistyped concatenation made two downgrade mutations apply nothing
+  and turned them green; the mutation tests failed loudly and the drift
+  was fixed).
+- Adversarial review round one found the admission sat before the
+  matrix-shape checks, so include-based and dynamic whole matrices were
+  admitted without doc or test coverage, plus a stale runbook sentence,
+  two untested shapes, and formatting nits. All are fixed in this
+  record's scope; the reordered admission and new mutations cover the
+  found shapes.
 - qora-redux: 65/66 contract tests pass; the one failure fails on
   pristine `main` in this container too. Full `npm test`: 364 pass,
   39 fail, identical to pristine `main`. No new failures.

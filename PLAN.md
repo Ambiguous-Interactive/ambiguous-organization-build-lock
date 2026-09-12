@@ -28,13 +28,13 @@ impact on licensed-resource safety and consumer CI churn.
   unity-helpers #765 also replaced the reviewed static `test-mode`
   matrix with a literal `StandaloneWindowsIl2Cpp` profile that the
   reviewed vocabulary did not admit. The vocabulary now admits the
-  literal profile (it verifies the IL2CPP player module on every leg,
-  so it can only over-provision; the `EditorOnly`-beside-`standalone`
-  direction stays rejected). Reviewed consumer fixes are open:
+  literal profile on a static matrix (it verifies the IL2CPP player
+  module on every leg, so it can only over-provision; the
+  `EditorOnly`-beside-`standalone` direction and unenumerable matrices
+  stay rejected). Reviewed consumer fixes are open:
   unity-helpers #772 and qora-redux #396. Verified with the unmodified
   analyzer over all six snapshots: only the DxMessaging finding stands
   (covered by open consumer fix #582).
-
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
   (superseded within minutes; discovery offers only the newest release).
@@ -204,9 +204,9 @@ impact on licensed-resource safety and consumer CI churn.
   row now names the prefix rule. The unmodified local analyzer reports 0
   findings over all six snapshots with the fix applied. For #269,
   lock-state history proves no peer held the lock in either casualty
-   window. Both casualties started 40-62s after a peer returned on the
-    same physical runner. A full re-run reproduced the signature, so the
-    class is not always transient.
+  window. Both casualties started 40-62s after a peer returned on the
+  same physical runner. A full re-run reproduced the signature, so the
+  class is not always transient.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 

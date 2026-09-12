@@ -1216,15 +1216,15 @@ func trustedEditorGateCommandWithProfile(version, profile string) string {
 }
 
 // trustedEditorGateProfile admits exactly the reviewed provisioning-profile
-// inputs. The literal StandaloneWindowsIl2Cpp profile verifies the IL2CPP
-// player module on every leg, so it can only over-provision relative to the
-// reviewed per-mode expression; it never lets a standalone leg skip that
-// verification. The unsafe direction, an EditorOnly profile beside standalone
-// work, stays rejected by the shape rules below.
+// inputs on exactly the reviewed matrix shapes. The literal
+// StandaloneWindowsIl2Cpp profile verifies the IL2CPP player module on every
+// leg, so it can only over-provision relative to the reviewed per-mode
+// expression; it never lets a standalone leg skip that verification. It stays
+// bound to a static matrix: include-based and dynamic matrices keep the
+// general rejection, because the audit cannot enumerate their legs. The
+// unsafe direction, an EditorOnly profile beside standalone work, stays
+// rejected by the shape rules below.
 func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
-	if profile == trustedEditorStandalone {
-		return true
-	}
 	strategy := mappingValue(job, "strategy")
 	matrix := mappingValue(strategy, "matrix")
 	if matrix == nil {
@@ -1233,6 +1233,9 @@ func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
 	if matrix.Kind != yaml.MappingNode ||
 		mappingValue(matrix, "include") != nil {
 		return false
+	}
+	if profile == trustedEditorStandalone {
+		return true
 	}
 	modes := mappingValue(matrix, "test-mode")
 	if modes == nil {
