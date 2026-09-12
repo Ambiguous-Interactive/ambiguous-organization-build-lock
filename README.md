@@ -108,10 +108,15 @@ hosted fallback release's typed `cleanup-result`. The gate fails closed unless
 the jobs form one of three complete matrices: untrusted skip, classified
 non-Unity skip, or successful licensed validation with fallback `noop`.
 
-Every workflow-level, job-level, and called-workflow concurrency scope capable
-of reaching licensed acquire must literally set `cancel-in-progress: false`.
-Do not use an expression that can evaluate to `true` on any licensed path. For
-pull requests, reject a superseded run before expensive setup and pass the same
+Every workflow-level concurrency scope capable of reaching licensed acquire
+must have a block that literally sets `cancel-in-progress: true`: a queued
+superseded run wastes a paid seat. The acquire action traps cancellation
+signals and releases before activation, the licensed cleanup chain runs under
+`if: always()`, and the scheduled reaper recovers a holder whose runner died.
+An existing job-level group must cancel too; an aggregate-reporter job keeps
+the literal `false` default so a cancelled reporter cannot leave the required
+context unreported — the successor run reports it instead. For pull requests,
+reject a superseded run before expensive setup and pass the same
 immutable event identity to acquire for periodic FIFO revalidation:
 
 ```yaml

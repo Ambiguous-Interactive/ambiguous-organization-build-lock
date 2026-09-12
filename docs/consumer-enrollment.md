@@ -132,10 +132,15 @@ touches a Dependabot pull request.
    install, download, repair, move, quarantine, or otherwise provision an
    editor. The action carries the trusted validator payload, invokes it without
    a command shell, and exposes the validated executable through the
-   `editor-path` output, so
-   consumers need neither a `unity-helpers` checkout nor a diagnostics-binding
-   run step. The profile is `EditorOnly` unless the reviewed static
-   `matrix.test-mode` map selects `StandaloneWindowsIl2Cpp` for `standalone`.
+   `editor-path` output, so consumers need neither a `unity-helpers`
+   checkout nor a diagnostics-binding run step. The profile is
+   `EditorOnly`, the literal `StandaloneWindowsIl2Cpp` on a static matrix
+   (it verifies the IL2CPP player module on every leg, so sequential
+   per-mode steps may use it), or the reviewed static `matrix.test-mode`
+   map that selects `StandaloneWindowsIl2Cpp` for `standalone`. An
+   `EditorOnly` profile beside a static `standalone` matrix value stays
+   rejected, and the literal profile does not lift the include-based and
+   dynamic matrix rejections.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.
    The only permitted preceding step is the approved immutable, exact-input
@@ -240,8 +245,18 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
-11. Disable automatic cancellation for every scope that can terminate a job
-    after acquire. Superseded runs exit before acquire; holders finish cleanup.
+11. Cancel superseded runs for every workflow scope that can terminate a job
+    after acquire: a literal `cancel-in-progress: true` on the workflow
+    concurrency group. A queued superseded run wastes a paid self-hosted
+    seat. Cancellation stays safe because the acquire action traps
+    cancellation signals and releases before activation, the licensed
+    cleanup chain runs under `if: always()`, and the scheduled reaper
+    recovers a holder whose runner died. An existing job-level group must
+    cancel too, and a group that omits `cancel-in-progress` fails closed.
+    Aggregate-reporter jobs keep the literal false default in their own
+    group so a sibling cannot cancel the report; run-level cancellation of
+    a superseded run is fine, because the successor run reports the
+    context instead.
 
 The conditional classifier and aggregate have an exact static shape. All five
 referenced jobs must be distinct and must not define workflow/job `env`,
@@ -356,14 +371,14 @@ edits.
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
 | `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
 | `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |
-| `unsafe-job-cancellation` | Use literal `cancel-in-progress: false` on the job concurrency group. See item 11. |
+| `unsafe-job-queue` | Remove the job concurrency group, or set literal `cancel-in-progress: true` on it. See item 11. |
 | `unsafe-job-container` | Run licensed work directly on the self-hosted runner, not in a container. See item 6. |
 | `unsafe-matrix-fail-fast` | Set `fail-fast: false` on licensed matrices. |
 | `unsafe-node-options` | Remove workflow or job `env` that can preload Node before the immutable gate. See item 3. |
 | `unsafe-return-execution-environment` | Return only on an admitted self-hosted runner with isolation and a timeout. See item 7. |
 | `unsafe-unity-editor-check` | Keep the editor gate success-dependent and failure-propagating. See item 3. |
 | `unsafe-unity-editor-provisioning` | Remove editor install, repair, or provisioning steps. Rely on the central gate. See item 3. |
-| `unsafe-workflow-cancellation` | Use literal `cancel-in-progress: false` on the workflow concurrency group. See item 11. |
+| `unsafe-workflow-queue` | Set literal `cancel-in-progress: true` on the workflow concurrency group. See item 11. |
 | `missing-required-context` | Require the aggregate context on the default branch. See Merge policy audit. |
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |

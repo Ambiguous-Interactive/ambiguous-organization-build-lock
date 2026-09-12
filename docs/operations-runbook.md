@@ -278,9 +278,10 @@ reader access. Treat either condition as scope drift.
    diagnostics parser on the critical path. An approved immutable, exact-input
    current-head guard may run first; no other step may precede the editor gate.
    Workflow-, job-, and gate-level `env` mappings are absent so inherited values
-   cannot preload the action's Node runtime. The profile is `EditorOnly`, or the
-   reviewed static `matrix.test-mode` map selects
-   `StandaloneWindowsIl2Cpp` only for `standalone`. The release must match the
+   cannot preload the action's Node runtime. The profile is `EditorOnly`, the
+   literal `StandaloneWindowsIl2Cpp` on a static matrix, or the reviewed
+   static `matrix.test-mode` map that selects `StandaloneWindowsIl2Cpp` only
+   for `standalone`. The release must match the
    editor action's version; only a bounded static `matrix.unity-version` axis
    may supply both dynamically. The optional current-head guard, editor gate,
    and acquire omit `if` so each inherits the preceding step's successful
@@ -312,10 +313,12 @@ reader access. Treat either condition as scope drift.
 8. The stable aggregate fails on preflight failure, cancellation, unexpected
    skip, partial matrix execution, missing return evidence, or failed release.
 
-Automatic concurrency must not cancel a job after it can acquire. A superseded
-run should exit before acquire; once acquired, it finishes activation, work,
-return, and release. Manual cancellation remains fail-closed and may create a
-runner quarantine.
+A workflow scope that can acquire must cancel superseded runs with a literal
+`cancel-in-progress: true`; a queued superseded run wastes the seat. The
+acquire action traps cancellation signals and releases before activation, the
+licensed cleanup chain runs under `if: always()`, and the scheduled reaper
+recovers a holder whose runner died. Manual cancellation stays fail-closed and
+may create a runner quarantine.
 
 ### Session-phase casualty correlation
 

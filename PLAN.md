@@ -4,8 +4,41 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-11, session 093)
+## Current state (2026-09-12, session 094)
 
+- Session 093 closed the last #255 finding, and #255 closed live
+  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
+  24 active contexts, 0 findings, complete). Root cause: unity-helpers
+  #749 added the universal `Unity CI Success` reporter, but required-
+  context enforcement lives in a ruleset, which no pull request can
+  create. The operator created ruleset 22983578 on unity-helpers `main`
+  (mirrors the reviewed DoxReloaded template: active, default branch,
+  requires `Unity CI Success`, no bypass actors). Two follow-ups were
+  needed before the audit went clean: the new carrying ruleset made the
+  audit fail closed with `merge-policy-attestation-missing` until
+  unity-helpers published its attestation (PR #768), and the
+  branch-rules endpoint lagged the new ruleset on the first re-audit.
+  The merge-policy audit also gained `workflow_dispatch`, so a live fix
+  is verifiable on demand; the reviewed contract test now requires that
+  trigger.
+- Session 094 worked fresh enrollment drift and the operator pivot. The
+  2026-09-12 08:33 UTC audit (run 34683538355) reported 8 findings over
+  121 active jobs: qora-redux #395 and unity-helpers #765 set
+  `cancel-in-progress: true` on licensed scopes, and unity-helpers #765
+  also used a literal `StandaloneWindowsIl2Cpp` profile outside the
+  reviewed vocabulary. Mid-session the operator opened #274: cancellation
+  replaces queueing, because queued superseded runs waste paid seats. The
+  contract now enforces literal `cancel-in-progress: true` on workflow
+  scopes that reach acquire (`unsafe-workflow-queue` /
+  `unsafe-job-queue`), keeps aggregate reporters on literal false, and
+  admits the literal standalone profile on a static matrix. The acquire
+  action's signal cleanup, the `always()` cleanup chain, and the reaper
+  are the resilience evidence. Reviewed consumer changes: qora-redux
+  #396 closed (its main already cancels), unity-helpers #772 retargeted
+  to the static matrix restore plus the `release.yml` flip, and new flip
+  pull requests for DoxReloaded, DxMessaging, and IshoBoy. Verified with
+  the unmodified analyzer over all six snapshots; remaining findings are
+  the flip surface plus the two known consumer regressions.
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
   (superseded within minutes; discovery offers only the newest release).
@@ -175,24 +208,9 @@ impact on licensed-resource safety and consumer CI churn.
   row now names the prefix rule. The unmodified local analyzer reports 0
   findings over all six snapshots with the fix applied. For #269,
   lock-state history proves no peer held the lock in either casualty
-   window. Both casualties started 40-62s after a peer returned on the
-   same physical runner. A full re-run reproduced the signature, so the
-   class is not always transient.
-- Session 093 closed the last #255 finding, and #255 closed live
-  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
-  24 active contexts, 0 findings, complete). Root cause: unity-helpers
-  #749 added the universal `Unity CI Success` reporter, but required-
-  context enforcement lives in a ruleset, which no pull request can
-  create. The operator created ruleset 22983578 on unity-helpers `main`
-  (mirrors the reviewed DoxReloaded template: active, default branch,
-  requires `Unity CI Success`, no bypass actors). Two follow-ups were
-  needed before the audit went clean: the new carrying ruleset made the
-  audit fail closed with `merge-policy-attestation-missing` until
-  unity-helpers published its attestation (PR #768), and the
-  branch-rules endpoint lagged the new ruleset on the first re-audit.
-  The merge-policy audit also gained `workflow_dispatch`, so a live fix
-  is verifiable on demand; the reviewed contract test now requires that
-  trigger.
+  window. Both casualties started 40-62s after a peer returned on the
+  same physical runner. A full re-run reproduced the signature, so the
+  class is not always transient.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -236,10 +254,14 @@ impact on licensed-resource safety and consumer CI churn.
       Session 079 opened reviewed fix pull requests for every one of the
       64 findings, each verified against the unmodified local analyzer
       over all six enrolled snapshots (0 findings, complete). unity-helpers
-      #749 merged 2026-09-11, clearing its 27 structural findings. New
-      drift reopens the count: session 092 opened DxMessaging #582 for the
-      `missing-unity-editor-check` regression that #580 introduced.
-      Merges are consumer decisions.
+      #749 merged 2026-09-11, clearing its 27 structural findings. Session
+      092 opened DxMessaging #582 for the `missing-unity-editor-check`
+      regression that #580 introduced. Session 094 pivoted the
+      cancellation contract per #274: the audit now enforces literal
+      `cancel-in-progress: true` on workflow scopes that reach acquire
+      (`unsafe-workflow-queue` / `unsafe-job-queue`), and flip pull
+      requests cover DoxReloaded, DxMessaging, IshoBoy, and
+      unity-helpers `release.yml`. Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.

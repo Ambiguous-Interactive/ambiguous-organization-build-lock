@@ -96,8 +96,10 @@ when the development-container files are present.
 
 ## Non-negotiable safety rules
 
-- Licensed paths queue: every concurrency scope that can reach acquire uses
-  literal `cancel-in-progress: false`; licensed matrices use `fail-fast: false`.
+- Licensed paths cancel: every workflow concurrency scope that can reach
+  acquire has a block with literal `cancel-in-progress: true`; an existing
+  job-level group cancels too, while aggregate-reporter groups keep literal
+  `false`; licensed matrices use `fail-fast: false`.
 - Remote actions in policy and documentation use immutable full commit SHAs or
   explicit immutable placeholders.
 - Admission, runner inventory, lifecycle cleanup, and incident recovery fail

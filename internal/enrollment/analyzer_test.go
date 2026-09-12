@@ -16,6 +16,10 @@ func fixture(files map[string]string) Snapshot {
 	return Snapshot{Repository: "Ambiguous-Interactive/fixture", SHA: testSHA, Files: contents}
 }
 
+const safeWorkflowConcurrency = "concurrency: { group: fixture, cancel-in-progress: true }\n"
+
+const safeJobConcurrency = "    concurrency: { group: unity, cancel-in-progress: true }\n"
+
 func workflow(workflowConcurrency, jobConcurrency, steps string) string {
 	return "name: Fixture\n" + workflowConcurrency + "jobs:\n  unity:\n" + jobConcurrency + "    runs-on: ubuntu-latest\n    steps:\n" + steps
 }
@@ -83,7 +87,7 @@ func TestForeignOrganizationActionFilesAreRejected(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
-				".github/workflows/unity.yml": workflow("", "", "      - uses: "+testCase.uses+"\n"),
+				".github/workflows/unity.yml": workflow(safeWorkflowConcurrency, "", "      - uses: "+testCase.uses+"\n"),
 			}))
 			if err != nil {
 				t.Fatal(err)
@@ -104,7 +108,7 @@ func TestForeignOrganizationActionFilesAreRejected(t *testing.T) {
 
 func TestForeignOrganizationActionFilesAreRejectedThroughCompositeActions(t *testing.T) {
 	findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
-		".github/workflows/unity.yml":        workflow("", "", "      - uses: ./.github/actions/wrapper\n"),
+		".github/workflows/unity.yml":        workflow(safeWorkflowConcurrency, "", "      - uses: ./.github/actions/wrapper\n"),
 		".github/actions/wrapper/action.yml": "name: wrapper\nruns:\n  using: composite\n  steps:\n    - uses: Ambiguous-Interactive/unity-helpers/.github/actions/validate-unity-license@" + testSHA + "\n",
 	}))
 	if err != nil {
@@ -122,15 +126,20 @@ func TestCancellationPolicyDirectBoundaries(t *testing.T) {
 		jobConcurrency      string
 		wantCode            string
 	}{
-		{name: "absent concurrency"},
-		{name: "literal false scopes", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: false }\n"},
-		{name: "workflow true", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", wantCode: "unsafe-workflow-cancellation"},
-		{name: "workflow expression", workflowConcurrency: "concurrency:\n  group: fixture\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n", wantCode: "unsafe-workflow-cancellation"},
-		{name: "quoted false fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: 'false' }\n", wantCode: "unsafe-workflow-cancellation"},
-		{name: "job true", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: true }\n", wantCode: "unsafe-job-cancellation"},
-		{name: "repository identity is case insensitive", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", wantCode: "unsafe-workflow-cancellation"},
-		{name: "Windows action path is case insensitive", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", wantCode: "unsafe-workflow-cancellation"},
-		{name: "filesystem-normalized action path is licensed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", wantCode: "unsafe-workflow-cancellation"},
+		{name: "absent scopes", wantCode: "unsafe-workflow-queue"},
+		{name: "literal false scopes", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: false }\n", wantCode: "unsafe-workflow-queue"},
+		{name: "workflow false with literal true job", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: true }\n", wantCode: "unsafe-workflow-queue"},
+		{name: "workflow expression", workflowConcurrency: "concurrency:\n  group: fixture\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n", wantCode: "unsafe-workflow-queue"},
+		{name: "quoted true fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: 'true' }\n", wantCode: "unsafe-workflow-queue"},
+		{name: "job false with literal true workflow", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: false }\n", wantCode: "unsafe-job-queue"},
+		{name: "job group without a cancellation key fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity }\n", wantCode: "unsafe-job-queue"},
+		{name: "job scalar shorthand fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: unity\n", wantCode: "unsafe-job-queue"},
+		{name: "job expression fails closed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency:\n      group: unity\n      cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n", wantCode: "unsafe-job-queue"},
+		{name: "absent job scope defers to the workflow scope", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n"},
+		{name: "both scopes literal true", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: true }\n", jobConcurrency: "    concurrency: { group: unity, cancel-in-progress: true }\n"},
+		{name: "repository identity is case insensitive", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", wantCode: "unsafe-workflow-queue"},
+		{name: "Windows action path is case insensitive", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", wantCode: "unsafe-workflow-queue"},
+		{name: "filesystem-normalized action path is licensed", workflowConcurrency: "concurrency: { group: fixture, cancel-in-progress: false }\n", wantCode: "unsafe-workflow-queue"},
 	}
 
 	for _, testCase := range tests {
@@ -180,7 +189,7 @@ func TestCancellationPolicyMatrixFailFastBoundaries(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
-				".github/workflows/unity.yml": workflow("", testCase.strategy, directAcquireStep()),
+				".github/workflows/unity.yml": workflow(safeWorkflowConcurrency, safeJobConcurrency+testCase.strategy, directAcquireStep()),
 			}))
 			if err != nil {
 				t.Fatal(err)
@@ -205,89 +214,89 @@ func TestCancellationPolicyTransitiveBoundaries(t *testing.T) {
 		{
 			name: "unsafe static sibling is unrelated",
 			files: map[string]string{
-				".github/workflows/main.yml": "jobs:\n  static:\n    concurrency: { group: static, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo static\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
+				".github/workflows/main.yml": safeWorkflowConcurrency + "jobs:\n  static:\n    concurrency: { group: static, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo static\n  unity:\n" + safeJobConcurrency + "    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 			},
 		},
 		{
 			name: "similarly named remote action is not acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "concurrency: { group: static, cancel-in-progress: true }\njobs:\n  static:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock-extra@" + testSHA + "\n",
+				".github/workflows/main.yml": "concurrency: { group: static, cancel-in-progress: false }\njobs:\n  static:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock-extra@" + testSHA + "\n",
 			},
 		},
 		{
 			name: "external reusable call fails closed and marks caller licensed",
 			files: map[string]string{
-				".github/workflows/main.yml": "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: true }\n    uses: Ambiguous-Interactive/remote/.github/workflows/unity.yml@" + testSHA + "\n",
+				".github/workflows/main.yml": "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: false }\n    uses: Ambiguous-Interactive/remote/.github/workflows/unity.yml@" + testSHA + "\n",
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:call",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:call",
 		},
 		{
 			name: "caller job can cancel called workflow",
 			files: map[string]string{
-				".github/workflows/main.yml":   "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: true }\n    uses: ./.github/workflows/called.yml\n",
+				".github/workflows/main.yml":   "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: false }\n    uses: ./.github/workflows/called.yml\n",
 				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:call",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:call",
 		},
 		{
 			name: "called workflow top level can cancel holder",
 			files: map[string]string{
 				".github/workflows/main.yml":   "jobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
-				".github/workflows/called.yml": "on: workflow_call\nconcurrency: { group: called, cancel-in-progress: true }\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
+				".github/workflows/called.yml": "on: workflow_call\nconcurrency: { group: called, cancel-in-progress: false }\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 			},
-			wantCode: "unsafe-workflow-cancellation:.github/workflows/called.yml:unity",
+			wantCode: "unsafe-workflow-queue:.github/workflows/called.yml:unity",
 		},
 		{
 			name: "called workflow leaf job can cancel holder",
 			files: map[string]string{
 				".github/workflows/main.yml":   "jobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
-				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    concurrency: { group: leaf, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
+				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    concurrency: { group: leaf, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/called.yml:unity",
+			wantCode: "unsafe-job-queue:.github/workflows/called.yml:unity",
 		},
 		{
 			name: "nested composite acquire propagates to caller",
 			files: map[string]string{
-				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: true }\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
+				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: false }\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
 				".github/actions/outer/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n",
 				".github/actions/inner/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
-			wantCode: "unsafe-workflow-cancellation:.github/workflows/main.yml:unity",
+			wantCode: "unsafe-workflow-queue:.github/workflows/main.yml:unity",
 		},
 		{
 			name: "caller workflow cancellation propagates through reusable and nested composites",
 			files: map[string]string{
-				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: true }\njobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
+				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: false }\njobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
 				".github/workflows/called.yml":     "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
 				".github/actions/outer/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n",
 				".github/actions/inner/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
-			wantCode: "unsafe-workflow-cancellation:.github/workflows/main.yml:call",
+			wantCode: "unsafe-workflow-queue:.github/workflows/main.yml:call",
 		},
 		{
 			name: "caller job cancellation propagates through reusable and nested composites",
 			files: map[string]string{
-				".github/workflows/main.yml":       "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: true }\n    uses: ./.github/workflows/called.yml\n",
+				".github/workflows/main.yml":       "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: false }\n    uses: ./.github/workflows/called.yml\n",
 				".github/workflows/called.yml":     "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
 				".github/actions/outer/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n",
 				".github/actions/inner/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:call",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:call",
 		},
 		{
 			name: "two reusable workflow levels propagate acquire",
 			files: map[string]string{
-				".github/workflows/main.yml":   "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: true }\n    uses: ./.github/workflows/middle.yml\n",
+				".github/workflows/main.yml":   "jobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: false }\n    uses: ./.github/workflows/middle.yml\n",
 				".github/workflows/middle.yml": "on: workflow_call\njobs:\n  call:\n    uses: ./.github/workflows/leaf.yml\n",
 				".github/workflows/leaf.yml":   "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:call",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:call",
 		},
 		{
-			name: "literal false is safe across reusable and composite boundaries",
+			name: "literal true is safe across reusable and composite boundaries",
 			files: map[string]string{
-				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: false }\njobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: false }\n    uses: ./.github/workflows/called.yml\n",
-				".github/workflows/called.yml":     "on: workflow_call\nconcurrency: { group: called, cancel-in-progress: false }\njobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
+				".github/workflows/main.yml":       "concurrency: { group: main, cancel-in-progress: true }\njobs:\n  call:\n    concurrency: { group: call, cancel-in-progress: true }\n    uses: ./.github/workflows/called.yml\n",
+				".github/workflows/called.yml":     "on: workflow_call\nconcurrency: { group: called, cancel-in-progress: true }\njobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n",
 				".github/actions/outer/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n",
 				".github/actions/inner/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
@@ -295,18 +304,18 @@ func TestCancellationPolicyTransitiveBoundaries(t *testing.T) {
 		{
 			name: "action yaml fallback propagates acquire",
 			files: map[string]string{
-				".github/workflows/main.yml":           "jobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/licensed\n",
+				".github/workflows/main.yml":           "jobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/licensed\n",
 				".github/actions/licensed/action.yaml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:unity",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:unity",
 		},
 		{
 			name: "root composite action propagates acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "jobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./\n",
+				".github/workflows/main.yml": "jobs:\n  unity:\n    concurrency: { group: unity, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./\n",
 				"action.yml":                 "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
-			wantCode: "unsafe-job-cancellation:.github/workflows/main.yml:unity",
+			wantCode: "unsafe-job-queue:.github/workflows/main.yml:unity",
 		},
 	}
 
@@ -333,17 +342,17 @@ func TestCancellationPolicyTransitiveBoundaries(t *testing.T) {
 
 func TestCancellationPolicyReportsEveryUnsafeLicensedLeaf(t *testing.T) {
 	findings, err := AnalyzeCancellationSafety(fixture(map[string]string{
-		".github/workflows/main.yml": "concurrency: { group: main, cancel-in-progress: true }\njobs:\n  first:\n    concurrency: { group: first, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep() + "  second:\n    concurrency: { group: second, cancel-in-progress: true }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
+		".github/workflows/main.yml": "concurrency: { group: main, cancel-in-progress: false }\njobs:\n  first:\n    concurrency: { group: first, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep() + "  second:\n    concurrency: { group: second, cancel-in-progress: false }\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep(),
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	codes := findingCodes(findings)
 	for _, expected := range []string{
-		"unsafe-workflow-cancellation:.github/workflows/main.yml:first",
-		"unsafe-workflow-cancellation:.github/workflows/main.yml:second",
-		"unsafe-job-cancellation:.github/workflows/main.yml:first",
-		"unsafe-job-cancellation:.github/workflows/main.yml:second",
+		"unsafe-workflow-queue:.github/workflows/main.yml:first",
+		"unsafe-workflow-queue:.github/workflows/main.yml:second",
+		"unsafe-job-queue:.github/workflows/main.yml:first",
+		"unsafe-job-queue:.github/workflows/main.yml:second",
 	} {
 		if !strings.Contains(codes, expected) {
 			t.Fatalf("expected %s among all findings, got %s", expected, codes)
@@ -362,13 +371,13 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "direct PR job is guarded at both boundaries",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + guard + acquireDirect,
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + guard + acquireDirect,
 			},
 		},
 		{
 			name: "push-only workflow needs no PR guard",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: push\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
+				".github/workflows/main.yml": "on: push\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 		},
 		{
@@ -381,63 +390,63 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "wrong immutable guard is invalid",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + currentHeadGuard("      ", strings.Repeat("b", 40)) + acquireDirect,
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + currentHeadGuard("      ", strings.Repeat("b", 40)) + acquireDirect,
 			},
 			wantCode: "invalid-current-head-guard",
 		},
 		{
 			name: "conditional guard is invalid",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(guard, "      - uses:", "      - if: success()\n        uses:", 1) + acquireDirect,
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(guard, "      - uses:", "      - if: success()\n        uses:", 1) + acquireDirect,
 			},
 			wantCode: "invalid-current-head-guard",
 		},
 		{
 			name: "missing guard immediately before acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + acquireDirect,
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - run: echo setup\n" + acquireDirect,
 			},
 			wantCode: "missing-pre-lock-current-head-guard",
 		},
 		{
 			name: "PR acquire must embed exact FIFO head revalidation inputs",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + "      - uses: " + acquire + "\n",
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + "      - uses: " + acquire + "\n",
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
 			name: "PR acquire rejects a different token expression",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ github.token }}", "${{ secrets.OTHER_TOKEN }}", 1),
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ github.token }}", "${{ secrets.OTHER_TOKEN }}", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
 			name: "PR acquire requires exact App credential environment",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "        env:\n          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n", "", 1),
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "        env:\n          BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}\n          BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}\n", "", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
 			name: "PR acquire rejects a different App credential binding",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ secrets.BUILD_LOCK_APP_ID }}", "${{ secrets.OTHER_APP_ID }}", 1),
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "${{ secrets.BUILD_LOCK_APP_ID }}", "${{ secrets.OTHER_APP_ID }}", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
 			name: "PR acquire rejects an older immutable implementation",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), testSHA, strings.Repeat("b", 40), 1),
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), testSHA, strings.Repeat("b", 40), 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
 		{
 			name: "PR acquire rejects step environment injection",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "          BUILD_LOCK_APP_ID:", "          NODE_OPTIONS: --require ./payload.js\n          BUILD_LOCK_APP_ID:", 1),
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + guard + strings.Replace(directAcquireStep(), "          BUILD_LOCK_APP_ID:", "          NODE_OPTIONS: --require ./payload.js\n          BUILD_LOCK_APP_ID:", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
 		},
@@ -465,7 +474,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "pre acquire guard may run for a superset of entry conditions",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: steps.ready == 'true'\n        uses:", 1) +
 					conditionalAcquireStep("steps.ready == 'true' && github.event_name == 'pull_request'"),
 			},
@@ -473,7 +482,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "pre acquire guard may not be more restrictive than entry",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: steps.ready == 'true' && steps.extra == 'true'\n        uses:", 1) +
 					"      - if: steps.ready == 'true'\n        uses: " + acquire + "\n",
 			},
@@ -482,7 +491,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "guard cannot condition itself on its eventual skipped outcome",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - id: head_guard\n        if: steps.head_guard.outcome == 'skipped'\n        uses:", 1) +
 					"      - if: success() && steps.head_guard.outcome == 'skipped'\n        uses: " + acquire + "\n",
 			},
@@ -500,7 +509,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "guard cannot depend on step-specific github context",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: github.action == 'require-current-pr-head'\n        uses:", 1) +
 					"      - if: success() && github.action == 'require-current-pr-head'\n        uses: " + acquire + "\n",
 			},
@@ -509,7 +518,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "guard rejects Node preload environment injection",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - env:\n          NODE_OPTIONS: --require ./fake-guard-hook.js\n        uses:", 1) +
 					acquireDirect,
 			},
@@ -518,7 +527,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "implicit success guard does not cover always acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
 					"      - if: always()\n        uses: " + acquire + "\n",
 			},
@@ -527,7 +536,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "matching always guard does not gate acquire on guard success",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: always()\n        uses:", 1) +
 					"      - if: always()\n        uses: " + acquire + "\n",
 			},
@@ -536,7 +545,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "always guard covers acquire explicitly gated on success",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: always()\n        uses:", 1) +
 					conditionalAcquireStep("always() && success()"),
 			},
@@ -544,7 +553,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "unconditional guard covers status free disjunction acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
 					conditionalAcquireStep("steps.a == 'true' || steps.b == 'true'"),
 			},
@@ -552,7 +561,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "top level OR cannot bypass explicit success conjunct",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
 					"      - if: success() && false || always()\n        uses: " + acquire + "\n",
 			},
@@ -561,7 +570,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "parenthesized OR remains one safe conjunct",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: (steps.a == 'true' || steps.b == 'true')\n        uses:", 1) +
 					conditionalAcquireStep("success() && (steps.a == 'true' || steps.b == 'true')"),
 			},
@@ -569,7 +578,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "implicit success guard does not cover failure acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
 					"      - if: failure()\n        uses: " + acquire + "\n",
 			},
@@ -578,7 +587,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "matching failure guard does not gate acquire on guard success",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: failure()\n        uses:", 1) +
 					"      - if: failure()\n        uses: " + acquire + "\n",
 			},
@@ -587,7 +596,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "implicit success guard does not cover cancelled acquire",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					guard +
 					"      - if: cancelled()\n        uses: " + acquire + "\n",
 			},
@@ -596,7 +605,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "matching cancelled guard does not gate acquire on guard success",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: cancelled()\n        uses:", 1) +
 					"      - if: cancelled()\n        uses: " + acquire + "\n",
 			},
@@ -605,7 +614,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "status function text inside a string retains implicit success",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: contains('failure(', steps.value)\n        uses:", 1) +
 					"      - if: always() && contains('failure(', steps.value)\n        uses: " + acquire + "\n",
 			},
@@ -614,7 +623,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "condition comparison preserves quoted whitespace",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
+				".github/workflows/main.yml": "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard +
 					strings.Replace(guard, "      - uses:", "      - if: steps.value == 'a b'\n        uses:", 1) +
 					"      - if: steps.value == 'ab'\n        uses: " + acquire + "\n",
 			},
@@ -623,7 +632,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "AND event exclusion is proven non PR",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: [pull_request, push]\njobs:\n  unity:\n    if: github.event_name == 'push' && success()\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
+				".github/workflows/main.yml": "on: [pull_request, push]\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    if: github.event_name == 'push' && success()\n    runs-on: ubuntu-latest\n    steps:\n" + acquireDirect,
 			},
 		},
 		{
@@ -643,21 +652,21 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "PR reachability propagates through called workflow",
 			files: map[string]string{
-				".github/workflows/main.yml":   "on: pull_request\njobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
-				".github/workflows/called.yml": "on: workflow_call\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + acquireDirect,
+				".github/workflows/main.yml":   "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  call:\n    uses: ./.github/workflows/called.yml\n",
+				".github/workflows/called.yml": "on: workflow_call\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + acquireDirect,
 			},
 		},
 		{
 			name: "nested composite requires its own pre acquire guard",
 			files: map[string]string{
-				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/workflows/main.yml":          "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
 				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + acquireStep("    "),
 			},
 		},
 		{
 			name: "unguarded nested composite acquire fails",
 			files: map[string]string{
-				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/workflows/main.yml":          "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
 				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n",
 			},
 			wantCode: "missing-pre-lock-current-head-guard",
@@ -665,7 +674,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "guarded nested composite acquire still requires exact revalidation inputs",
 			files: map[string]string{
-				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/workflows/main.yml":          "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
 				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + "    - uses: " + acquire + "\n",
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
@@ -673,7 +682,7 @@ func TestCurrentHeadGuardPolicyBoundaries(t *testing.T) {
 		{
 			name: "nested composite acquire rejects environment injection",
 			files: map[string]string{
-				".github/workflows/main.yml":          "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
+				".github/workflows/main.yml":          "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + guard + "      - uses: ./.github/actions/licensed\n",
 				".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + currentHeadGuard("    ", testSHA) + strings.Replace(acquireStep("    "), "        BUILD_LOCK_APP_ID:", "        NODE_OPTIONS: --require ./payload.js\n        BUILD_LOCK_APP_ID:", 1),
 			},
 			wantCode: "invalid-acquire-pr-head-revalidation",
@@ -726,7 +735,7 @@ func TestCancellationPolicyValidatesSnapshotIdentity(t *testing.T) {
 }
 
 func TestRequiredAcquirePolicyCanRollOutIndependently(t *testing.T) {
-	workflowText := "on: pull_request\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep()
+	workflowText := "on: pull_request\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + directAcquireStep()
 	findings, err := AnalyzePolicy(
 		fixture(map[string]string{".github/workflows/main.yml": workflowText}),
 		Policy{RequiredAcquireSHA: testSHA},
@@ -761,7 +770,7 @@ func TestRequiredAcquirePolicyAppliesToEveryTriggerAndComposite(t *testing.T) {
 		{
 			name: "push workflow",
 			files: map[string]string{
-				".github/workflows/main.yml": "on: push\njobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(directAcquireStep(), testSHA, staleSHA, 1),
+				".github/workflows/main.yml": "on: push\n" + safeWorkflowConcurrency + "jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" + strings.Replace(directAcquireStep(), testSHA, staleSHA, 1),
 			},
 		},
 		{
@@ -795,9 +804,9 @@ func TestRequiredAcquirePolicyAppliesToEveryTriggerAndComposite(t *testing.T) {
 
 func TestCancellationPolicyRequiresImmutableAcquirePins(t *testing.T) {
 	tests := []map[string]string{
-		{".github/workflows/unity.yml": workflow("", "", "      - uses: "+lockActionPrefix+"acquire-build-lock@v1\n")},
+		{".github/workflows/unity.yml": workflow(safeWorkflowConcurrency, "", "      - uses: "+lockActionPrefix+"acquire-build-lock@v1\n")},
 		{
-			".github/workflows/unity.yml":         workflow("", "", "      - uses: ./.github/actions/licensed\n"),
+			".github/workflows/unity.yml":         workflow(safeWorkflowConcurrency, "", "      - uses: ./.github/actions/licensed\n"),
 			".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + lockActionPrefix + "acquire-build-lock@main\n",
 		},
 	}
@@ -820,13 +829,13 @@ func TestCancellationPolicyTraversesPastFirstLicensedReference(t *testing.T) {
 		{
 			name: "job finds later mutable acquire",
 			files: map[string]string{
-				".github/workflows/unity.yml": workflow("", "", directAcquireStep()+"      - uses: "+lockActionPrefix+"acquire-build-lock@main\n"),
+				".github/workflows/unity.yml": workflow(safeWorkflowConcurrency, "", directAcquireStep()+"      - uses: "+lockActionPrefix+"acquire-build-lock@main\n"),
 			},
 		},
 		{
 			name: "composite finds later cycle",
 			files: map[string]string{
-				".github/workflows/unity.yml":      workflow("", "", "      - uses: ./.github/actions/outer\n"),
+				".github/workflows/unity.yml":      workflow(safeWorkflowConcurrency, "", "      - uses: ./.github/actions/outer\n"),
 				".github/actions/outer/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: " + acquire + "\n    - uses: ./.github/actions/cycle\n",
 				".github/actions/cycle/action.yml": "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/cycle\n",
 			},

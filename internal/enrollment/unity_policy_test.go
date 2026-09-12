@@ -46,7 +46,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: unity-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   preflight:
     runs-on: ubuntu-latest
@@ -524,6 +524,12 @@ func TestUnityEnrollmentRejectsCIEditorProvisioningMutations(t *testing.T) {
 			name: "unbound matrix provisioning profile",
 			from: " -ProvisioningProfile EditorOnly",
 			to:   " -ProvisioningProfile " + trustedEditorMatrixProfile,
+			code: "missing-unity-editor-check",
+		},
+		{
+			name: "standalone profile in the legacy script gate",
+			from: " -ProvisioningProfile EditorOnly",
+			to:   " -ProvisioningProfile " + trustedEditorStandalone,
 			code: "missing-unity-editor-check",
 		},
 		{
@@ -2586,6 +2592,17 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 				)
 			},
 		},
+		{
+			name: "job group with a cancellation expression",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"  aggregate:\n    if: always()\n",
+					"  aggregate:\n    concurrency:\n      group: aggregate\n      cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n    if: always()\n",
+					1,
+				)
+			},
+		},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -2753,6 +2770,150 @@ func TestUnityEnrollmentAcceptsCentralReturnFromStaticVersionMatrix(t *testing.T
 				"missing-unity-editor-check",
 			) {
 				t.Fatalf("unsafe profile matrix passed: %#v", result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentAcceptsLiteralStandaloneProfileOnVersionMatrix(t *testing.T) {
+	// The guard must pin the exact reviewed expression: a re-mapped or
+	// re-quoted constant must fail loudly here, before any consumer relies on
+	// it. The tampered-mapping mutation below hardcodes the same text as its
+	// replacement target, so a drift breaks two ways.
+	const reviewedProfileExpression = `${{ fromJSON('{"editmode":"EditorOnly","playmode":"EditorOnly","standalone":"StandaloneWindowsIl2Cpp"}')[matrix.test-mode] }}`
+	if trustedEditorMatrixProfile != reviewedProfileExpression {
+		t.Fatalf(
+			"the reviewed profile expression drifted: %q",
+			trustedEditorMatrixProfile,
+		)
+	}
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"        mode: [EditMode]\n",
+		"        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+		1,
+	)
+	workflow = strings.ReplaceAll(
+		workflow,
+		"          unity-version: 6000.5.2f1\n",
+		"          unity-version: ${{ matrix.unity-version }}\n",
+	)
+	workflow = strings.Replace(
+		workflow,
+		"          provisioning-profile: EditorOnly",
+		"          provisioning-profile: "+trustedEditorStandalone,
+		1,
+	)
+	workflow = strings.ReplaceAll(
+		workflow,
+		"          holder-id-suffix: qora\n",
+		"          holder-id-suffix: ${{ matrix.unity-version }}\n",
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("literal standalone profile on a static version matrix produced findings: %#v", result.Findings)
+	}
+	// The literal profile verifies the player module on every leg, so pairing
+	// it with a static test-mode axis over-provisions the editor-only legs and
+	// stays admitted.
+	workflowWithModeAxis := strings.Replace(
+		workflow,
+		"        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+		"        unity-version: [2022.3.45f1, 6000.5.2f1]\n        test-mode: [editmode, standalone]\n",
+		1,
+	)
+	workflowWithModeAxis = strings.ReplaceAll(
+		workflowWithModeAxis,
+		"          holder-id-suffix: ${{ matrix.unity-version }}\n",
+		"          holder-id-suffix: ${{ matrix.unity-version }}-${{ matrix.test-mode }}\n",
+	)
+	modeAxisResult, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflowWithModeAxis,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(modeAxisResult.Findings) != 0 {
+		t.Fatalf("literal standalone profile beside a static test-mode axis produced findings: %#v", modeAxisResult.Findings)
+	}
+	// The literal profile does not lift the matrix-shape rejections: an
+	// unenumerable leg set cannot prove the per-leg gate and return pins.
+	for _, mutation := range []struct {
+		name   string
+		from   string
+		to     string
+		suffix string
+	}{
+		{
+			name:   "include generated matrix cell",
+			from:   "        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+			to:     "        include:\n          - unity-version: 6000.5.2f1\n",
+			suffix: "          holder-id-suffix: ${{ matrix.unity-version }}\n",
+		},
+		{
+			name:   "dynamic whole matrix",
+			from:   "        unity-version: [2022.3.45f1, 6000.5.2f1]\n",
+			to:     "        ${{ fromJSON(needs.config.outputs.matrix-axes) }}\n",
+			suffix: "          holder-id-suffix: ${{ matrix.unity-version }}\n",
+		},
+	} {
+		t.Run("matrix shape "+mutation.name, func(t *testing.T) {
+			mutated := strings.Replace(workflow, mutation.from, mutation.to, 1)
+			if mutated == workflow {
+				t.Fatal("the mutation did not apply")
+			}
+			mutated = strings.ReplaceAll(
+				mutated,
+				"          holder-id-suffix: ${{ matrix.unity-version }}\n",
+				mutation.suffix,
+			)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": mutated,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"missing-unity-editor-check",
+			) {
+				t.Fatalf("unenumerable matrix shape passed with the literal profile: %#v", result.Findings)
+			}
+		})
+	}
+	for _, mutation := range []struct {
+		name    string
+		profile string
+	}{
+		{name: "unknown profile", profile: "StandaloneLinuxIl2cpp"},
+		{name: "dynamic profile", profile: "${{ env.PROVISIONING_PROFILE }}"},
+	} {
+		t.Run("profile "+mutation.name, func(t *testing.T) {
+			mutated := strings.Replace(
+				workflow,
+				"          provisioning-profile: "+trustedEditorStandalone,
+				"          provisioning-profile: "+mutation.profile,
+				1,
+			)
+			if mutated == workflow {
+				t.Fatal("the mutation did not apply")
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": mutated,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(
+				findingCodes(result.Findings),
+				"missing-unity-editor-check",
+			) {
+				t.Fatalf("unsafe literal profile passed: %#v", result.Findings)
 			}
 		})
 	}
@@ -3359,7 +3520,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: unity-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   static-validation:
     runs-on: ubuntu-latest
