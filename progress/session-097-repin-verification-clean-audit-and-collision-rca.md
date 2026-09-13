@@ -76,6 +76,15 @@ cancel) stays real only for cancels that no push, PR event, or watchdog
 state explains. Comment posted; no code change. Direction 2 (a consumer-side
 cancellation diagnostic) remains available if the gap recurs.
 
+## Durable learning
+
+The #278 misreading is a repeatable trap: release-leg log lines look like
+failure text. The operations runbook's session-phase casualty correlation
+section now says those lines are informational and points to the
+lock-state history, whose holder entries carry `queuedAt` and `acquiredAt`.
+No other resource change: the lesson is operator- and RCA-facing, so the
+runbook is the narrowest authoritative home.
+
 ## PLAN.md
 
 - Current state rewritten for session 097; the session 096 verification
