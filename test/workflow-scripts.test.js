@@ -1947,7 +1947,7 @@ test("consumer repin fails closed when the offer scan page hits its bound", (t) 
   const result = harness.run();
 
   assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /offer scan would be truncated/);
+  assert.match(result.stderr, /offer list may be truncated/);
   assert.match(result.stderr, /could not close the superseded repin offers/);
   assert.equal(repinEventLog(harness).filter((event) => event.startsWith("close")).length, 0);
 });

@@ -38,15 +38,27 @@ The first `jq` output line reports the page size; the remaining lines are the
 automation-branch offers. The mock `gh` in
 `test/workflow-scripts.test.js` now mirrors real `gh`: it rejects
 non-positive limits and always applies the page cap, so a regression to
-`--limit 0` turns three existing close-path tests red. A new data-driven test
-proves the full-page case fails closed and closes nothing.
+`--limit 0` turns three existing close-path tests red. A new test
+constructs a full 100-item page and proves the run fails closed and closes
+nothing.
 
 A second bug surfaced while implementing the parse: command substitution
 strips the trailing newline, so the marker line and the offer lines must be
-split through a normalized stream. Parameter expansion on the raw output
-turned the marker itself into an offer and the isolated function tried to
-close pull request #0. The existing "records an already pinned repository
-without offers" test caught it.
+split without assuming a final newline. Parameter expansion on the raw
+output turned the marker itself into an offer and the isolated function
+tried to close pull request #0. The existing "records an already pinned
+repository without offers" test caught it.
+
+An adversarial review pass hardened the same class further: the page-size
+marker is validated as a non-negative integer before the comparison, the
+close loop re-checks the automation branch grammar before each `gh pr
+close` so parse drift cannot close an unrelated pull request number, and
+the page split no longer runs `head` in a pipeline (the early-exit EPIPE
+interaction with `set -o pipefail` is avoided by construction). The
+marker-validation and grammar-row paths are unreachable through the mock
+because the mock runs the script's own jq filter, so they carry no
+dedicated tests; the truncation guard, the reject-limit mock, and the
+zero-offer parse are test-pinned.
 
 Sweep for the class: `gh pr list --limit 0` appears nowhere else; the other
 call sites are head-filtered existence checks that accept the default cap.

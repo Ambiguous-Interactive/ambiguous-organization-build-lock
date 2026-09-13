@@ -19,8 +19,11 @@ impact on licensed-resource safety and consumer CI churn.
   over all six snapshots: findings=0, complete=true, 119 active jobs. #113
   auto-closed 2026-09-12 21:36 UTC on the first clean audit, then reopened
   for these four findings.
-- The #274 flip cohort is fully merged: DoxReloaded #835, DxMessaging #584,
-  IshoBoy #906, unity-helpers #776. The contract enforces literal
+- The #274 flip cohort is complete. Four flip pull requests merged
+  (DoxReloaded #835, DxMessaging #584, IshoBoy #906, unity-helpers #776);
+  qora-redux `main` already canceled (#396 closed as compliant) and
+  unity-builder is the exempt fork with manual paid workflows, so neither
+  needed a flip. The contract enforces literal
   `cancel-in-progress: true` on workflow scopes that reach acquire, keeps
   aggregate reporters on literal false, and admits the literal standalone
   profile on a static matrix.
