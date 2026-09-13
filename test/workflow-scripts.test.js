@@ -1411,18 +1411,20 @@ function consumerRepinHarness(t, consumerStates) {
     "  done",
     '  name="${repository#*/}"',
     '  state_file="${TEST_PR_STATE}/${name}/${state}.json"',
-    '  # gh filters server-side by state and head, then caps the page at',
-    '  # 30 items unless --limit 0 fetches all. String results print raw.',
+    '  # gh filters server-side by state and head, caps the page at 30 items,',
+    '  # and rejects a non-positive --limit. String results print raw.',
+    '  case "${limit}" in',
+    '    "" | *[!0-9]* | 0)',
+    '      printf \'invalid value for --limit: %s\\n\' "${limit}" >&2',
+    "      exit 1",
+    "      ;;",
+    "  esac",
     '  if [ -n "${head}" ]; then',
     "    filtered='[.[] | select(.headRefName == $head)]'",
     '  else',
     "    filtered='.'",
     '  fi',
-    '  if [ "${limit}" = "0" ]; then',
-    '    jq -r --arg head "${head}" "${filtered} | ${jqexpr}" "${state_file}"',
-    "  else",
-    '    jq -r --arg head "${head}" --argjson limit "${limit}" "${filtered} | .[0:\\$limit] | ${jqexpr}" "${state_file}"',
-    "  fi",
+    '  jq -r --arg head "${head}" --argjson limit "${limit}" "${filtered} | .[0:$limit] | ${jqexpr}" "${state_file}"',
     "  exit 0",
     "fi",
     'if [ "$1" = "pr" ] && [ "$2" = "close" ]; then',
@@ -1927,6 +1929,27 @@ test("consumer repin closes a superseded offer buried under newer pull requests"
   ]);
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 1 superseded repin offer\(s\) \|/);
+});
+
+test("consumer repin fails closed when the offer scan page hits its bound", (t) => {
+  // The scan proves its list is complete only while the page holds every
+  // open pull request. A page at the bound could hide an offer behind the
+  // cut, so the run fails closed and closes nothing.
+  const openOffers = [];
+  for (let index = 0; index < 100; index += 1) {
+    openOffers.push({ number: 900 + index, head: `consumer/feature-${index}` });
+  }
+  openOffers.push({ number: 801, head: "automation/repin-lock-300501e" });
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { atTarget: true, openOffers }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /offer list may be truncated/);
+  assert.match(result.stderr, /could not close the superseded repin offers/);
+  assert.equal(repinEventLog(harness).filter((event) => event.startsWith("close")).length, 0);
 });
 
 test("consumer repin fails closed when a superseded offer cannot be closed", (t) => {
