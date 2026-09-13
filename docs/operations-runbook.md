@@ -337,6 +337,13 @@ suite, read the run's release `peer-timeline` evidence:
 The evidence carries holder IDs, runner IDs, reason codes, and timestamps only.
 It never contains logs. It is correlation evidence, not proof of cause.
 
+Do not read release-leg log lines as failure evidence. `Lock is held by ...;
+this run is ...` reports the remaining holder. `Removed lock ownership ...;
+resource capacity entered cooldown` reports a confirmed cleanup. For the
+authoritative timeline, read the lock-state history. Holder entries carry
+`queuedAt` and `acquiredAt`, so they show the exact acquire timing (session
+097 RCA for issue #278).
+
 ## Operator quick reference
 
 | State | Capacity effect | Required response |

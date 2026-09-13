@@ -4,29 +4,24 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-13, session 096)
+## Current state (2026-09-13, session 097)
 
-- Session 096 fixed the `Repin consumer lock references` failure (red since
-  2026-09-10): the superseded-offer scan passed `--limit 0` to `gh pr list`,
-  which current `gh` rejects. The scan now takes a bounded page of 100 and
-  fails closed on a full page; the test mock mirrors real `gh`. Live
-  verification lands with the first scheduled run after the fix merges.
-- Session 096 also RCA'd the four post-flip findings on unity-helpers
-  `unity-tests`: #776 added a dynamic `selected-version` matrix axis, which
-  defeats the audit's static cell enumeration, so the return-input and
-  editor-gate proofs fail together. Reviewed consumer fix: unity-helpers
-  #785 restores the #772 static axis. Verified with the unmodified analyzer
-  over all six snapshots: findings=0, complete=true, 119 active jobs. #113
-  auto-closed 2026-09-12 21:36 UTC on the first clean audit, then reopened
-  for these four findings.
-- The #274 flip cohort is complete. Four flip pull requests merged
-  (DoxReloaded #835, DxMessaging #584, IshoBoy #906, unity-helpers #776);
-  qora-redux `main` already canceled (#396 closed as compliant) and
-  unity-builder is the exempt fork with manual paid workflows, so neither
-  needed a flip. The contract enforces literal
-  `cancel-in-progress: true` on workflow scopes that reach acquire, keeps
-  aggregate reporters on literal false, and admits the literal standalone
-  profile on a static matrix.
+- M3 is complete (see Completed milestones). No enrollment drift remains; a
+  reopening follows the per-code contract in `docs/consumer-enrollment.md`.
+- Session 097 verified the #279 repin fix live: dispatched run 34768908054
+  completed green with the bounded superseded-offer scan in effect, and
+  #280 closed with that run as evidence. The day's scheduled run
+  (34743810332, created 06:52 UTC) started before #279 merged and still
+  shows the old failure.
+- Session 097 RCA'd #278 from lock-state history: the quoted "collision"
+  lines are the release leg's normal summary output, and attempts 1 and 2
+  of qora-redux run 34736599983 acquired, held, and released clean. The
+  consumer's own push plus the reviewed `cancel-in-progress: true` flip
+  cancelled attempt 3 before acquire. The same attribution data point went
+  to #277; the remaining ask there stays an accepted evidence gap.
+- The cancellation contract is standing: workflow scopes that reach acquire
+  carry literal `cancel-in-progress: true`, aggregate reporters keep
+  literal false, and licensed matrices use `fail-fast: false`.
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
   (superseded within minutes; discovery offers only the newest release).
@@ -48,8 +43,7 @@ impact on licensed-resource safety and consumer CI churn.
   preferred; a repository-level `Allow auto-merge` opt-out restores a
   manual gate). A closed repin pull request is the consumer's adoption
   answer: never re-offered, never force-updated.
-- The drift issue links the reviewed per-code fix contract. The 64-code
-  audit vocabulary is test-locked to `docs/consumer-enrollment.md`.
+- The 64-code audit vocabulary is test-locked to `docs/consumer-enrollment.md`.
 - The scheduled audit survives a consumer push that lands mid-run, and
   reports stale or expired `repinExceptions` entries.
 - The central merge-policy drift audit (#44 item 7, #252) compares the
@@ -87,34 +81,15 @@ impact on licensed-resource safety and consumer CI churn.
 - [ ] Decide holder capacity against real seat capacity: independent
       returnable Unity identities, slot-aware state, and two-order live proof.
 
-## M3: consumer enrollment drift (#113)
+## Completed milestones
 
-- [x] Zero-touch repin automation: the central `Repin consumer lock
-      references` workflow opens repin pull requests in enrolled
-      repositories for every newly authorized release. Session 089 added
-      auto-merge (operator decision on #266): offers merge on green without
-      a click; a per-repository `Allow auto-merge` opt-out restores a
-      manual gate.
-- [x] Confirm the automation App's registered permissions include
-      Pull requests write and Workflows write (org-wide installation is the
-      standing operator configuration). Operator-confirmed 2026-09-07; no
-      new App; the reader App stays read-only.
-- [ ] Drive the audit findings down repo by repo. The fixes are consumer-side
-      edits; this repository supplies the evidence and the contract. The
-      per-reason-code fix contract is published in
-      `docs/consumer-enrollment.md` and linked from the drift issue.
-      The #274 flip cohort merged across all six consumers (DoxReloaded
-      #835, DxMessaging #584, IshoBoy #906, unity-helpers #776); the first
-      clean audit closed #113, which then reopened for the four
-      static-matrix findings that #776 regressed. Session 096 opened
-      unity-helpers #785 for those. unity-helpers #749 merged 2026-09-11,
-      clearing its 27 structural findings. Merges are consumer decisions.
-      IshoBoy closed repin offer #855 unadopted (2026-09-07); a
-      consumer-closed offer is a decline, so the automation never re-offers
-      it. unity-helpers declined the earlier repin by closing #738.
-- [ ] After M3, the scheduled audit closes alert #113 automatically on the
-      first complete clean run. #113 stays open while any drift finding
-      stands, as it did through the DxMessaging prefix regression.
+- M3 (consumer enrollment drift, #113) closed 2026-09-13: zero-touch repin
+  automation with auto-merge, the per-code fix contract, the #274 flip
+  cohort (DoxReloaded #835, DxMessaging #584, IshoBoy #906, unity-helpers
+  #776; qora-redux `main` already canceled, unity-builder exempt), and the
+  unity-helpers static-matrix restore (#785) drove the audit to 0 findings
+  over 118 active inventory rows. The alert auto-closed as completed
+  (run 34770239068).
 
 ## Blocked on authority or evidence (do not start here)
 
