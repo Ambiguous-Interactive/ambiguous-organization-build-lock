@@ -573,9 +573,14 @@ close_superseded_offers() {
   # split through tail, which always reads its full input.
   marker_line="${listing%%$'\n'*}"
   page_size="${marker_line%%$'\t'*}"
-  open_offers="$(printf '%s\n' "${listing}" | tail -n +2)"
+  if ! open_offers="$(printf '%s\n' "${listing}" | tail -n +2)"; then
+    echo "::error::${repository}: could not split the offer list." >&2
+    return 1
+  fi
+  # A leading zero would make the arithmetic comparison read the value as
+  # octal, so the bound check could silently pass; reject it here.
   case "${page_size}" in
-    '' | *[!0-9]*)
+    '' | 0[0-9]* | *[!0-9]*)
       echo "::error::${repository}: unreadable offer-scan page marker." >&2
       return 1
       ;;
