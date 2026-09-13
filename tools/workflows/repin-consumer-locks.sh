@@ -550,19 +550,55 @@ close_superseded_offers() {
   # offer never re-opens, the branch stays untouched, and a future release
   # opens a new offer.
   local repository="$1" label="$2" target_sha="$3" authorization="$4"
-  local open_offers
-  if ! open_offers="$(GH_TOKEN="${authorization}" gh pr list \
+  local scan_bound=100 listing marker_line page_size open_offers
+  # gh pr list rejects --limit 0 and caps its default page at 30 items, so
+  # the scan asks for a bounded page of 100. A busy repository can hold a
+  # full page of unrelated open pull requests, and then no page of this
+  # size can prove the offer list is complete, so the scan fails closed
+  # there instead of closing offers from a possibly truncated list; raising
+  # the bound is the remedy, not a silent partial close. The first output
+  # line reports the page size, the rest are the automation-branch offers.
+  if ! listing="$(GH_TOKEN="${authorization}" gh pr list \
     --repo "${repository}" \
     --state open \
-    --limit 0 \
+    --limit "${scan_bound}" \
     --json number,headRefName \
-    --jq '.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv')"; then
+    --jq '([(length | tostring), "page-size"] | @tsv),
+      (.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv)')"; then
     echo "::error::${repository}: could not list open repin offers." >&2
+    return 1
+  fi
+  # Command substitution strips the trailing newline. Parameter expansion
+  # separates the marker from a lone-marker listing; the offer stream is
+  # split through tail, which always reads its full input.
+  marker_line="${listing%%$'\n'*}"
+  page_size="${marker_line%%$'\t'*}"
+  if ! open_offers="$(printf '%s\n' "${listing}" | tail -n +2)"; then
+    echo "::error::${repository}: could not split the offer list." >&2
+    return 1
+  fi
+  # A leading zero would make the arithmetic comparison read the value as
+  # octal, so the bound check could silently pass; reject it here.
+  case "${page_size}" in
+    '' | 0[0-9]* | *[!0-9]*)
+      echo "::error::${repository}: unreadable offer-scan page marker." >&2
+      return 1
+      ;;
+  esac
+  if [ "${page_size}" -ge "${scan_bound}" ]; then
+    echo "::error::${repository}: the open pull request page hit the ${scan_bound} item bound; the offer list may be truncated. Raise the scan bound or reduce the open pull request count." >&2
     return 1
   fi
   local closed=0 offer_number offer_branch
   while IFS=$'\t' read -r offer_number offer_branch; do
     [ -n "${offer_number}" ] || continue
+    # Defense in depth for the close mutation: the jq filter already
+    # applied the branch grammar, and a parse drift here would otherwise
+    # close an unrelated pull request number.
+    if ! [[ "${offer_branch}" =~ ^automation/repin-lock-[0-9a-f]{7}$ ]]; then
+      echo "::error::${repository}: offer list row (${offer_number}, ${offer_branch}) left the automation branch grammar; closing nothing." >&2
+      return 1
+    fi
     if ! GH_TOKEN="${authorization}" gh pr close "${offer_number}" \
       --repo "${repository}" \
       --comment "No permitted lock-pin change remains to reach the authorized
