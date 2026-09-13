@@ -4,60 +4,26 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-12, session 095)
+## Current state (2026-09-13, session 096)
 
-- Session 095 drove the #274 flip cohort toward merge. All three red
-  consumer PRs shared one root cause: a reviewed consumer artifact still
-  pinned the old contract shape. Fixes pushed: IshoBoy #902 (contract test
-  requires literal `cancel-in-progress: true`, 105 tests pass), DoxReloaded
-  #832 (policy validator pin flipped; folded into #835, which merged and
-  clears DoxReloaded on `main`), unity-helpers #772 reopened after the
-  static-matrix content was rebased onto the 3.6.0 release merge (#773),
-  plus its `unity-workflow-matrix-contract` suite fix (`f1bc22b0`,
-  verified with pwsh; #772 was then superseded by #776, which restates the
-  static axis and moves the release export off the licensed path).
-  DxMessaging #584 carries the flip and merged 2026-09-12 19:57 UTC;
-  #582 (the prefix fix) needed no commit and merged at 21:09 UTC. The
-  unmodified analyzer over all six consumers at the PR heads reports
-  `findings=0 complete=true` over 121 active jobs. IshoBoy #902 closed
-  the session CLEAN (all checks green, merge is the consumer's click);
-  unity-helpers #776 was BLOCKED in CI at session close, and the first
-  complete clean audit after it merges closes #113. One evidence gap
-  recorded as #277: the 18:34:19Z cancellation of #582's queued runs is
-  unattributable from retained evidence.
-- Session 093 closed the last #255 finding, and #255 closed live
-  (2026-09-12 06:12 UTC, dispatched run 34677521508: 6/6 repositories,
-  24 active contexts, 0 findings, complete). Root cause: unity-helpers
-  #749 added the universal `Unity CI Success` reporter, but required-
-  context enforcement lives in a ruleset, which no pull request can
-  create. The operator created ruleset 22983578 on unity-helpers `main`
-  (mirrors the reviewed DoxReloaded template: active, default branch,
-  requires `Unity CI Success`, no bypass actors). Two follow-ups were
-  needed before the audit went clean: the new carrying ruleset made the
-  audit fail closed with `merge-policy-attestation-missing` until
-  unity-helpers published its attestation (PR #768), and the
-  branch-rules endpoint lagged the new ruleset on the first re-audit.
-  The merge-policy audit also gained `workflow_dispatch`, so a live fix
-  is verifiable on demand; the reviewed contract test now requires that
-  trigger.
-- Session 094 worked fresh enrollment drift and the operator pivot. The
-  2026-09-12 08:33 UTC audit (run 34683538355) reported 8 findings over
-  121 active jobs: qora-redux #395 and unity-helpers #765 set
-  `cancel-in-progress: true` on licensed scopes, and unity-helpers #765
-  also used a literal `StandaloneWindowsIl2Cpp` profile outside the
-  reviewed vocabulary. Mid-session the operator opened #274: cancellation
-  replaces queueing, because queued superseded runs waste paid seats. The
-  contract now enforces literal `cancel-in-progress: true` on workflow
-  scopes that reach acquire (`unsafe-workflow-queue` /
-  `unsafe-job-queue`), keeps aggregate reporters on literal false, and
-  admits the literal standalone profile on a static matrix. The acquire
-  action's signal cleanup, the `always()` cleanup chain, and the reaper
-  are the resilience evidence. Reviewed consumer changes: qora-redux
-  #396 closed (its main already cancels), unity-helpers #772 retargeted
-  to the static matrix restore plus the `release.yml` flip, and new flip
-  pull requests for DoxReloaded, DxMessaging, and IshoBoy. Verified with
-  the unmodified analyzer over all six snapshots; remaining findings are
-  the flip surface plus the two known consumer regressions.
+- Session 096 fixed the `Repin consumer lock references` failure (red since
+  2026-09-10): the superseded-offer scan passed `--limit 0` to `gh pr list`,
+  which current `gh` rejects. The scan now takes a bounded page of 100 and
+  fails closed on a full page; the test mock mirrors real `gh`. Live
+  verification lands with the first scheduled run after the fix merges.
+- Session 096 also RCA'd the four post-flip findings on unity-helpers
+  `unity-tests`: #776 added a dynamic `selected-version` matrix axis, which
+  defeats the audit's static cell enumeration, so the return-input and
+  editor-gate proofs fail together. Reviewed consumer fix: unity-helpers
+  #785 restores the #772 static axis. Verified with the unmodified analyzer
+  over all six snapshots: findings=0, complete=true, 119 active jobs. #113
+  auto-closed 2026-09-12 21:36 UTC on the first clean audit, then reopened
+  for these four findings.
+- The #274 flip cohort is fully merged: DoxReloaded #835, DxMessaging #584,
+  IshoBoy #906, unity-helpers #776. The contract enforces literal
+  `cancel-in-progress: true` on workflow scopes that reach acquire, keeps
+  aggregate reporters on literal false, and admits the literal standalone
+  profile on a static matrix.
 - v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
   authorized for consumer pins. v1.14.1 stays unauthorized by design
   (superseded within minutes; discovery offers only the newest release).
@@ -66,170 +32,34 @@ impact on licensed-resource safety and consumer CI churn.
 - The cleanup classifier attributes generic return failures through
   `licensing-codes-checked` and `licensing-code-matched` outputs.
 - The enrollment audit rejects licensed Unity jobs on GitHub-hosted or
-  ambiguous runners (`unsafe-hosted-unity-runner`). The live audit
-  (2026-09-07) identifies the unity-helpers hosted `.unitypackage` export
-  jobs as the non-self-hosted Unity seat holder seen in the portal.
-- The enrollment audit admits the central return on Windows and, for pins
-  listed in the new reviewed `approvedDarwinReturnShas` allowlist, on macOS.
-  The allowlist is empty until a Darwin verifier release exists (#153, #228).
-- The in-repo #229 follow-ups are done: `gofmt` is a CI formatter gate, and
-  the three tests that settled only through unref'd event-loop timers now
-  use ref'd keep-alive floors.
+  ambiguous runners (`unsafe-hosted-unity-runner`), admits the central
+  return on Windows and, for pins listed in the reviewed
+  `approvedDarwinReturnShas` allowlist, on macOS. The allowlist is empty
+  until a Darwin verifier release exists (#153, #228).
 - The Darwin trusted return runtime landed (PR #240, squash-merged as
-  6a384393c): editor resolution inside the reviewed bundle, a `codesign`
-  designated-requirement identity check, process-group termination, and
-  runner-cancellation forwarding. Its `macos-latest` job runs the whole
-  return-action suite on macOS; the fixture fixes behind that are #241,
-  closed by session 077. The analyzer still refuses every Darwin return
-  until `approvedDarwinReturnShas` names a release (#231).
-- Repin automation honors reviewed, expiring `repinExceptions`: a pin-only
-  update can no longer move a caller to an action whose input contract the
-  caller cannot satisfy (#233 follow-up). Issue #233 is closed: unity-helpers
-  #739 removed the incompatible historical wrapper, the quarantined
-  reservation reconciled through the documented reaper path, and the audit
-  reports stale exceptions (#236).
-- The first scheduled repin run completed 2026-09-07 07:02 UTC (run
-  34093552546). It opened repin PRs in DoxReloaded (#801), IshoBoy (#855),
-  and unity-helpers (#738, the incompatible update closed in #233).
-  DxMessaging closed its repin #553 as a duplicate and adopts the pins in its
-  own PR #554.
-- The repin automation now treats a closed repin pull request as the
-  consumer's adoption answer: the same repin is never re-offered, the branch
-  is never force-updated, and the run stays green with a summary row. An
-  orphaned repin branch is reused only when its content matches the current
-  repin exactly. Verified against real Git push behavior with end-to-end
-  tests; without it, the next scheduled run would have failed the
-  non-fast-forward push against unity-helpers' stale branch.
-- The scheduled enrollment audit reports stale or expired `repinExceptions`
-  entries as `expired-repin-exception` and `stale-repin-exception` findings
-  in the drift issue (#234). The repin rewrite keeps its own fail-closed
-  gate.
-- The drift issue now links the reviewed per-code fix contract. The 64-code
-  audit vocabulary is test-locked to `docs/consumer-enrollment.md`, so a new
-  reason code cannot ship without its documented fix. The two head-revalidation
-  codes are covered too; the sync test extracts them from the audit script.
-- The scheduled audit survives a consumer push that lands mid-run: it
-  re-clones the advanced repository, re-analyzes, and fails closed only when
-  bounded refresh attempts cannot reconcile (2026-09-07 race on DoxReloaded,
-  run 34164453758).
-- The release train is repaired (issue #244): Auto release opens the
-  release-authorization pull request with a writer App token scoped to
-  this repository, discovery retries only the newest published release, a
-  declined offer stays closed, a failed creation removes the branch when
-  no pull request uses it, a run summary reports non-conventional commit
-  subjects, and semantic-release no longer comments on referenced issues
-  (foreign repository references cannot fail a release). Proven live:
-  v1.14.2 published and its authorization pull request #247 opened by the
-  App. Release-driving pull request titles must be conventional; the
-  squash merge copies the title into the commit subject semantic-release
-  reads.
-- The central merge-policy drift audit (#44 item 7, #252) is implemented:
-  a reviewed expectation list (`merge-policy-expectations.json`) is compared
-  daily with each consumer's live rulesets and branch protection, and drift
-  opens one deduplicated issue. Drift findings stay issue-visible with a green
-  run; an incomplete audit fails the run closed.
-- The first `Organization merge-policy audit` run (34285720502, pushed by
-  the #253 merge) failed closed as designed. The reader App holds
-  Administration read, but GitHub returns ruleset `bypass_actors` only to
-  ruleset-write callers. So the carrying rulesets on DxMessaging (17663217)
-  and IshoBoy (4545251) report `merge-policy-retrieval-incomplete`. True
-  consumer gaps stay visible: DoxReloaded and unity-helpers do not require
-  their aggregate, and qora-redux lets administrators bypass required
-  checks. #254 records the credential decision: read-only paths are
-  live-proven and documented insufficient, so only a ruleset-write
-  credential or #252 option 3 remains. The finding-code contract no longer
-  tells operators to "check Administration read" (session 082).
-- The operator chose #252 option 3 (2026-09-09): consumer-attested ruleset
-  bypass evidence. The audit now fills that one blind spot from
-  `.github/merge-policy-attestation.json`, proves the file is fresh
-  against the live ruleset, and fails closed while a carrying ruleset has
-  no attestation (session 083). True drift cleared live with operator
-  approval: DoxReloaded ruleset 22595536 now requires `CI Success`, and
-  qora-redux branch protection no longer lets administrators bypass.
-- Session 084 repaired the merge gate that ruleset 22595536 exposed
-  (#258): the DoxReloaded workflow withheld `CI Success` from every pull
-  request its `pull_request` paths filter excluded, so attestation PR
-  #815 was blocked permanently. #815 now also removes the filter; the
-  classifier still skips licensed work on inert pull requests. The
-  contract is documented as item 10 of the enrollment canary checklist.
-- Session 085 closed the #258 analyzer follow-up: the enrollment audit
-  reports `filtered-aggregate-gate` when no workflow provably reports a
-  reviewed required context on every pull request. Required contexts moved
-  into `unity-enrollment-policy.json`, locked to
-  `merge-policy-expectations.json` by a contract test. Coverage proofs are
-  literal and fail-closed; on 2026-09-09 the live audit over all six
-  consumers was byte-identical to the scheduled baseline (then 27
-  unity-helpers findings, behind consumer PR #749).
-- The three merge-policy attestation PRs merged (DoxReloaded #815,
-  DxMessaging #564, IshoBoy #873) and DxMessaging drift fixes merged
-  (#562). The remaining #255 findings are the DxMessaging Integration
-  3977200 bypass review and the unity-helpers merge gate; the next
-  scheduled merge-policy audit re-states the live set.
-- Session 086 repaired the v1.14.2 repin offers: every red offer had one
-  root cause, a reviewed consumer artifact that derives from the pin. The
-  policy now declares `repinCompanions`, and the repin rewrite carries each
-  declared file through one mechanical mode (`pin-lines`, `pin-literal`,
-  `policy-snapshot`). Outcomes: unity-helpers #751 green end to end after a
-  parity-test fix (assert reviewed verdict fields, tolerate reviewed
-  additive fields); IshoBoy #877 and qora-redux #382 green after their
-  companion commits; DxMessaging's maintainer closed offer #567 in favor of
-  their own #568, which absorbed the complete pin cohort. DoxReloaded's
-  stale v1.14.0 offer #801 closed as superseded. unity-helpers #749 is
-  green with reviewer feedback answered; merges stay consumer decisions.
-- Session 087 answered the #261 follow-ups: the repin run now closes its
-  own open offers as superseded when the default branch needs no lock-pin
-  change to reach the authorized release (branch-prefix filter, summary
-  row, failed close keeps the run red), and canary item 11 in
-  `docs/consumer-enrollment.md` publishes the verdict-compare contract:
-  consumer tests assert reviewed verdict fields and tolerate reviewed
-  additive fields.
-- Session 088 answered #263: the repin rewrite normalizes release version
-  comments, so every moved pin carries `# vX.Y.Z` and stays Dependabot-
-  visible (live proof: DoxReloaded Dependabot #775 tracked exactly the
-  commented pins). Dependabot cannot rewrite companions or see release
-  authorization, so the central repin offer stays the complete update and
-  an unauthorized Dependabot bump fails closed as `unapproved-lock-ref`.
-- The v1.14.2 adoption cohort completed (2026-09-09): the three repin
-  offers merged with their companions (unity-helpers #751, IshoBoy #877,
-  qora-redux #382), and DxMessaging adopted through #568.
-- Session 089 answered #266 (operator decision, option 2): the repin
-  automation enables auto-merge on every offer it opens, with the merge
-  method chosen from the repository's allowed methods (squash preferred).
-  The request happens once at creation; a consumer disable is respected;
-  a refused request keeps the run green with a summary row. The
-  repository-level opt-out is the `Allow auto-merge` setting.
-- Session 089 answered the last #255 review item (operator decision):
-  the DxMessaging ruleset 17663217 Integration actor 3977200 (attested,
-  mode `always`) is now recorded in `merge-policy-expectations.json`, and
-  expectation bypass actors carry a reviewed bypass mode. The live audit
-  re-run confirms only the unity-helpers merge gate remains.
-- Session 090 re-verified the green baseline after the #267 merge: main
-  CI green, the full local verification suite green, no open or draft
-  pull requests, and no failed runs. Every open issue waits on an
-  external decision or live evidence; the auto-merge path awaits its
-  first live offer at the next authorized release.
-- Session 091 answered the lock-side half of #269: the release action now
-  publishes a redacted `peer-timeline` output and job-summary table
-  replaying lock-state history for the holder's session window (peer
-  acquires and returns, reservations, incidents). It is bounded,
-  diagnostic-only evidence that never delays the release beyond its own
-  small budget, so a consumer can finally test the acquisition-side
-  hypothesis against real peer activity. The consumer half (classify the
-  engine-assertion zero-failed-leaves signature, retry once inside the
-  held lock) is published as canary item 12 of the enrollment contract.
-- Session 092 worked the live evidence queue. unity-helpers #749 merged
-  (2026-09-11) and cleared all 27 unity-helpers findings; the first clean
-  merge-policy audit closes #255. The same enrollment audit caught one
-  fresh finding: DxMessaging #580 inserted an input guard between the
-  current-PR-head guard and the editor gate, so the gate left the reviewed
-  prefix (`missing-unity-editor-check`). Session 092 recorded the root
-  cause and opened the reviewed consumer fix (DxMessaging #582). The doc
-  row now names the prefix rule. The unmodified local analyzer reports 0
-  findings over all six snapshots with the fix applied. For #269,
-  lock-state history proves no peer held the lock in either casualty
-  window. Both casualties started 40-62s after a peer returned on the
-  same physical runner. A full re-run reproduced the signature, so the
-  class is not always transient.
+  6a384393c). The analyzer still refuses every Darwin return until
+  `approvedDarwinReturnShas` names a release (#231).
+- Repin automation honors reviewed, expiring `repinExceptions`, closes its
+  own superseded offers, normalizes release version comments for
+  Dependabot visibility, and enables auto-merge on every offer (squash
+  preferred; a repository-level `Allow auto-merge` opt-out restores a
+  manual gate). A closed repin pull request is the consumer's adoption
+  answer: never re-offered, never force-updated.
+- The drift issue links the reviewed per-code fix contract. The 64-code
+  audit vocabulary is test-locked to `docs/consumer-enrollment.md`.
+- The scheduled audit survives a consumer push that lands mid-run, and
+  reports stale or expired `repinExceptions` entries.
+- The central merge-policy drift audit (#44 item 7, #252) compares the
+  reviewed expectation list with each consumer's live rulesets daily. The
+  #252 blind spot (ruleset `bypass_actors` need a ruleset-write caller) is
+  filled by consumer attestations in
+  `.github/merge-policy-attestation.json`, proven fresh against the live
+  ruleset (session 083). All attestation pull requests merged; ruleset
+  22983578 on unity-helpers requires `Unity CI Success`.
+- Session 091 answered the lock-side half of #269: the release action
+  publishes a redacted `peer-timeline` output and job-summary table. The
+  consumer half is canary item 12 of the enrollment contract. Lock-state
+  history proves no peer held the lock in either #269 casualty window.
 
 ## M1: attribute every Unity seat to a lock holder (#223, #83)
 
@@ -270,19 +100,12 @@ impact on licensed-resource safety and consumer CI churn.
       edits; this repository supplies the evidence and the contract. The
       per-reason-code fix contract is published in
       `docs/consumer-enrollment.md` and linked from the drift issue.
-      Session 079 opened reviewed fix pull requests for every one of the
-      64 findings, each verified against the unmodified local analyzer
-      over all six enrolled snapshots (0 findings, complete). unity-helpers
-      #749 merged 2026-09-11, clearing its 27 structural findings. Session
-      092 opened DxMessaging #582 for the `missing-unity-editor-check`
-      regression that #580 introduced. Session 094 pivoted the
-      cancellation contract per #274: the audit now enforces literal
-      `cancel-in-progress: true` on workflow scopes that reach acquire
-      (`unsafe-workflow-queue` / `unsafe-job-queue`), and flip pull
-      requests cover DoxReloaded (#832), DxMessaging (#584, merged),
-      IshoBoy (#902), and unity-helpers (`release.yml`, carried by
-      reopened #772 together with the static version matrix restore).
-      Merges are consumer decisions.
+      The #274 flip cohort merged across all six consumers (DoxReloaded
+      #835, DxMessaging #584, IshoBoy #906, unity-helpers #776); the first
+      clean audit closed #113, which then reopened for the four
+      static-matrix findings that #776 regressed. Session 096 opened
+      unity-helpers #785 for those. unity-helpers #749 merged 2026-09-11,
+      clearing its 27 structural findings. Merges are consumer decisions.
       IshoBoy closed repin offer #855 unadopted (2026-09-07); a
       consumer-closed offer is a decline, so the automation never re-offers
       it. unity-helpers declined the earlier repin by closing #738.

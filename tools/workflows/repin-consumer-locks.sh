@@ -550,14 +550,30 @@ close_superseded_offers() {
   # offer never re-opens, the branch stays untouched, and a future release
   # opens a new offer.
   local repository="$1" label="$2" target_sha="$3" authorization="$4"
-  local open_offers
-  if ! open_offers="$(GH_TOKEN="${authorization}" gh pr list \
+  local scan_bound=100 listing page open_offers
+  # gh pr list rejects --limit 0 and caps its default page at 30 items, so
+  # the scan asks for a bounded page of 100. The automation opens one offer
+  # per authorized release and closes superseded ones, so a full page means
+  # the repository state is already defective; the scan fails closed there
+  # instead of closing offers from a truncated list. The first output line
+  # reports the page size, the rest are the automation-branch offers.
+  if ! listing="$(GH_TOKEN="${authorization}" gh pr list \
     --repo "${repository}" \
     --state open \
-    --limit 0 \
+    --limit "${scan_bound}" \
     --json number,headRefName \
-    --jq '.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv')"; then
+    --jq '([(length | tostring), "page-size"] | @tsv),
+      (.[] | select(.headRefName | test("^automation/repin-lock-[0-9a-f]{7}$")) | [(.number | tostring), .headRefName] | @tsv)')"; then
     echo "::error::${repository}: could not list open repin offers." >&2
+    return 1
+  fi
+  # Command substitution strips the trailing newline, so the marker line and
+  # the offer lines are split through a normalized stream instead of
+  # parameter expansion, which cannot separate a lone marker line.
+  page="$(printf '%s\n' "${listing}" | head -n 1)"
+  open_offers="$(printf '%s\n' "${listing}" | tail -n +2)"
+  if [ "${page%%$'\t'*}" -ge "${scan_bound}" ]; then
+    echo "::error::${repository}: the open pull request page hit the ${scan_bound} item bound; the offer scan would be truncated." >&2
     return 1
   fi
   local closed=0 offer_number offer_branch
