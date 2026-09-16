@@ -1,26 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/DoxReloaded:35058077505:unity-tests:unity-tests",
+    "repository": "Ambiguous-Interactive/DoxReloaded",
+    "workflow": "Build and Deploy",
+    "job": "unity-tests",
+    "runId": "35058077505",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/35058077505",
+    "queuedAt": "2026-09-16T05:10:12.478Z",
+    "acquiredAt": "2026-09-16T05:10:14.285Z",
+    "expiresAt": "2026-09-16T09:10:14.285Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "104672661891"
+  },
+  "holders": [
     {
-      "reservationId": "22cf8ec9-1940-4c29-9d58-dc5ada86bc14",
-      "holderId": "Ambiguous-Interactive/unity-helpers:35057263970:unity-tests:6000.6.0f1",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
+      "holderId": "Ambiguous-Interactive/DoxReloaded:35058077505:unity-tests:unity-tests",
+      "repository": "Ambiguous-Interactive/DoxReloaded",
+      "workflow": "Build and Deploy",
       "job": "unity-tests",
-      "runId": "35057263970",
+      "runId": "35058077505",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35057263970",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/35058077505",
+      "queuedAt": "2026-09-16T05:10:12.478Z",
+      "acquiredAt": "2026-09-16T05:10:14.285Z",
+      "expiresAt": "2026-09-16T09:10:14.285Z",
       "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-16T05:09:45.812Z",
-      "availableAt": "2026-09-16T05:09:46.812Z"
+      "jobId": "104672661891"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-09-16T05:09:45.812Z"
+  "updatedAt": "2026-09-16T05:10:14.285Z"
 }
