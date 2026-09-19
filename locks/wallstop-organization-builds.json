@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:35463205114:unity-tests:2022.3.45f1",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "35463205114",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35463205114",
-    "queuedAt": "2026-09-19T19:10:55.985Z",
-    "acquiredAt": "2026-09-19T19:10:58.675Z",
-    "expiresAt": "2026-09-19T23:10:58.675Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "105950778008"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:35463205114:unity-tests:2022.3.45f1",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "35463205114",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35463205114",
-      "queuedAt": "2026-09-19T19:10:55.985Z",
-      "acquiredAt": "2026-09-19T19:10:58.675Z",
-      "expiresAt": "2026-09-19T23:10:58.675Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "105950778008"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "return-log-truncated",
       "createdAt": "2026-09-19T19:14:06.215Z"
+    },
+    {
+      "reservationId": "b63e2910-db98-49f0-a26e-3cf717d4ceeb",
+      "holderId": "Ambiguous-Interactive/unity-helpers:35463205114:unity-tests:2022.3.45f1",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "35463205114",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35463205114",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-19T19:14:08.114Z",
+      "availableAt": "2026-09-19T19:14:09.114Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-19T19:14:06.216Z"
+  "updatedAt": "2026-09-19T19:14:08.114Z"
 }
