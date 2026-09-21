@@ -1,26 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/doughby-td:35559078596:build:doughby-steam",
+    "repository": "Ambiguous-Interactive/doughby-td",
+    "workflow": "build-steam",
+    "job": "build",
+    "runId": "35559078596",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/35559078596",
+    "queuedAt": "2026-09-21T03:54:31.871Z",
+    "acquiredAt": "2026-09-21T03:54:33.620Z",
+    "expiresAt": "2026-09-21T07:54:33.620Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "67186e78-b4e0-4c4b-9168-76850ffe3eb0",
-      "holderId": "Ambiguous-Interactive/doughby-td:35558831955:unity:doughby-td",
+      "holderId": "Ambiguous-Interactive/doughby-td:35559078596:build:doughby-steam",
       "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "35558831955",
+      "workflow": "build-steam",
+      "job": "build",
+      "runId": "35559078596",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/35558831955",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-09-21T03:52:49.661Z",
-      "availableAt": "2026-09-21T03:52:50.661Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/35559078596",
+      "queuedAt": "2026-09-21T03:54:31.871Z",
+      "acquiredAt": "2026-09-21T03:54:33.620Z",
+      "expiresAt": "2026-09-21T07:54:33.620Z",
+      "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-09-21T03:52:49.661Z"
+  "updatedAt": "2026-09-21T03:54:33.620Z"
 }
