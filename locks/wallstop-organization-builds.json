@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:35671784415:unity-tests:6000.5.2f1",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "35671784415",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35671784415",
-    "queuedAt": "2026-09-22T00:44:20.874Z",
-    "acquiredAt": "2026-09-22T00:44:24.014Z",
-    "expiresAt": "2026-09-22T04:44:24.014Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "106569733486"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:35671784415:unity-tests:6000.5.2f1",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "35671784415",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35671784415",
-      "queuedAt": "2026-09-22T00:44:20.874Z",
-      "acquiredAt": "2026-09-22T00:44:24.014Z",
-      "expiresAt": "2026-09-22T04:44:24.014Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "106569733486"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,23 @@
       "state": "quarantine",
       "reason": "return-log-truncated",
       "createdAt": "2026-09-22T00:56:56.620Z"
+    },
+    {
+      "reservationId": "0be5ca80-62bd-44d0-a8f1-556e9bbc1b74",
+      "holderId": "Ambiguous-Interactive/unity-helpers:35671784415:unity-tests:6000.5.2f1",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "35671784415",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/35671784415",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-09-22T00:57:47.554Z",
+      "availableAt": "2026-09-22T00:57:48.554Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-09-22T00:56:56.621Z"
+  "updatedAt": "2026-09-22T00:57:47.555Z"
 }
