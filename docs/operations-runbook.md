@@ -162,6 +162,12 @@ run; the next run reuses it only when its content matches the current repin
 exactly, opens the pull request from it, and never force-updates a branch
 that holds other work.
 
+An existing open repin pull request for the same target is not updated
+automatically. If an older offer fails yamllint because its version comments
+have one space before `#`, the maintainer must push the two-space correction
+to that existing pull request branch. Automation does not rewrite an open
+pull request branch.
+
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
 (2026-09-09 issue 263). A non-empty target version must match

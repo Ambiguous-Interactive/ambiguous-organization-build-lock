@@ -94,8 +94,8 @@ The repository goal calls for an independent review loop. Delegation was not
 used in this session, so the main thread performed separate implementation,
 adversarial review, and remediation passes.
 
-The adversarial pass compared the change with the issue acceptance and the
-full writer, test, docs, and caller behavior:
+The main-thread adversarial pass compared the change with the issue
+acceptance and the full writer, test, docs, and caller behavior:
 
 - The writer accepts one or more spaces before comments and emits two for a
   new or updated version label.
@@ -107,11 +107,26 @@ full writer, test, docs, and caller behavior:
 - No lock lifecycle, licensed workflow, action runtime, secret, or merge
   policy path changed.
 
-Finding: no actionable issue. Remediation: none. The latest local validation
-was rerun after this documentation and review-record update and passed before
-PR creation.
+The independent reviewer then found one P2 documentation gap: an existing
+open same-target repin pull request is intentionally left unchanged, so its
+old formatting can remain red. The remediator updated the runbook with the
+manual correction for that existing branch. The review disposition is recorded
+below. Full validation will run on the remediated state before re-review.
 
 The external consumer PR that reported the lint failure must still be checked
 after this central fix is merged. A scheduled or dispatched repin run must
 show two spaces in its generated output. The PR must pass every GitHub check,
 receive review feedback, and merge before this session is complete.
+
+## PR #284 independent review finding and remediation
+
+- Independent reviewer finding (P2): an open same-target repin pull request is
+  not duplicated, but the runbook did not say that automation leaves its
+  existing branch unchanged. An older offer with one-space version comments
+  can therefore keep failing yamllint after the writer fix.
+- Remediator: Codex updated `docs/operations-runbook.md` to require the
+  maintainer to push the two-space correction to that existing pull request
+  branch. The text preserves the rule that automation does not rewrite an
+  open pull request branch.
+- Disposition: accepted. Documentation only; workflow code was not changed.
+  Tests were not run, as requested.
