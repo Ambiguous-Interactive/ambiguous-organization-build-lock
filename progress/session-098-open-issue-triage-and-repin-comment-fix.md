@@ -90,9 +90,9 @@ fixture were updated. No production behavior beyond comment spacing changed.
 
 ## Review and follow-up
 
-The repository goal calls for an independent review loop. Delegation was not
-used in this session, so the main thread performed separate implementation,
-adversarial review, and remediation passes.
+The review loop used separate roles: the main thread implemented the change,
+an independent agent reviewed it, and a different agent applied the justified
+documentation remediation.
 
 The main-thread adversarial pass compared the change with the issue
 acceptance and the full writer, test, docs, and caller behavior:
@@ -107,11 +107,18 @@ acceptance and the full writer, test, docs, and caller behavior:
 - No lock lifecycle, licensed workflow, action runtime, secret, or merge
   policy path changed.
 
-The independent reviewer then found one P2 documentation gap: an existing
-open same-target repin pull request is intentionally left unchanged, so its
-old formatting can remain red. The remediator updated the runbook with the
-manual correction for that existing branch. The review disposition is recorded
-below. Full validation will run on the remediated state before re-review.
+The independent reviewer found one P2 documentation gap: an existing open
+same-target repin pull request is intentionally left unchanged, so its old
+formatting can remain red. A separate remediator updated the runbook with the
+manual correction for that existing branch. The full verifier passed on the
+remediated state.
+
+In the next review pass, the independent reviewer confirmed the open-offer
+remediation and found no runtime or safety issues, but noted stale
+future-tense validation wording in this record. The remediator corrected the
+wording to report the completed verifier run and distinguish it from checks
+run during the documentation-only edit. The final review confirmed that
+chronology and found no remaining issue.
 
 The external consumer PR that reported the lint failure must still be checked
 after this central fix is merged. A scheduled or dispatched repin run must
@@ -124,9 +131,10 @@ receive review feedback, and merge before this session is complete.
   not duplicated, but the runbook did not say that automation leaves its
   existing branch unchanged. An older offer with one-space version comments
   can therefore keep failing yamllint after the writer fix.
-- Remediator: Codex updated `docs/operations-runbook.md` to require the
-  maintainer to push the two-space correction to that existing pull request
-  branch. The text preserves the rule that automation does not rewrite an
-  open pull request branch.
+- Remediator: a separate agent updated `docs/operations-runbook.md` to require
+  the maintainer to push the two-space correction to that existing pull
+  request branch. The text preserves the rule that automation does not
+  rewrite an open pull request branch.
 - Disposition: accepted. Documentation only; workflow code was not changed.
-  Tests were not run, as requested.
+  No separate checks were run for this documentation-only remediation.
+  `bash .devcontainer/scripts/verify.sh` was rerun afterward and passed.
