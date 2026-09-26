@@ -141,7 +141,8 @@ authorization merge.
 For each enrolled repository the workflow clones the default branch, rewrites
 only the `@<sha>` suffix of `uses:` references to this repository's actions
 (plus the `# vX.Y.Z` comment: a moved pin without a comment gains one, and a
-comment that is not a version stays), carries the reviewed companion files
+comment that is not a version stays; normalized comments have two spaces
+before `#`), carries the reviewed companion files
 named in the policy through their mechanical rewrites, and opens one pull
 request per repository on the stable branch prefix `automation/repin-lock-`.
 The per-repository result is recorded in the run summary; any repository
@@ -161,6 +162,12 @@ run; the next run reuses it only when its content matches the current repin
 exactly, opens the pull request from it, and never force-updates a branch
 that holds other work.
 
+An existing open repin pull request for the same target is not updated
+automatically. If an older offer fails yamllint because its version comments
+have one space before `#`, the maintainer must push the two-space correction
+to that existing pull request branch. Automation does not rewrite an open
+pull request branch.
+
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
 (2026-09-09 issue 263). A non-empty target version must match
@@ -172,9 +179,9 @@ Dependabot-only pin update leaves its offered commit incomplete. The central
 repin offer stays the complete update. When either merge answers the
 adoption first, the next run closes a superseded central offer; a
 Dependabot pull request is outside the automation branch filter, so the
-run never touches it. A repin branch pushed before the comment
-normalization reads as different content; delete such a branch once, and
-the next run pushes a fresh one.
+run never touches it. An orphan branch pushed before comment or spacing
+normalization may differ from current output. Delete that orphan once; the
+next run pushes a fresh branch.
 
 A reviewed, expiring `repinExceptions` entry in
 `unity-enrollment-policy.json` protects one workflow file in one repository

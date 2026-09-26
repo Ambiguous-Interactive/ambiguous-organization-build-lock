@@ -89,11 +89,12 @@ a repin exception whose protected file no longer exists. The finding codes
 are `expired-repin-exception` and `stale-repin-exception`, and the audit
 drift issue lists them with the repository and path.
 
-The rewrite normalizes pin comments. A moved pin carries a `# vX.Y.Z`
-comment for the new release: a pin without a comment gains one, and a pin
-with a version comment is updated. A pin already at the target keeps its
-current shape. A comment that is not a version, such as a reviewed witness
-note, survives untouched.
+The rewrite normalizes pin comments. A moved pin carries two spaces before
+its `# vX.Y.Z` comment for the new release. A pin without a comment gains
+one, and a pin with a version comment is updated. The rewrite accepts either
+one or more spaces before an existing comment. A pin already at the target
+keeps its current shape. A comment that is not a version, such as a reviewed
+witness note, survives untouched.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` version comment, so
 the normalized pins are Dependabot-visible. Two limits keep the central
