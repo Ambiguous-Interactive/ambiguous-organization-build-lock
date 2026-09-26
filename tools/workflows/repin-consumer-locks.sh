@@ -271,7 +271,9 @@ const rewritePinLine = (line) => {
   // comment: a stale version label is better evidence than a deleted one.
   const rawComment = (match[3] || "").trim();
   if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
-    return `${match[1]}${targetSha} # ${targetVersion}`;
+    // Keep YAML's default comments rule happy. The pin-line pattern accepts
+    // existing comments with one or more spaces, then writes the canonical two.
+    return `${match[1]}${targetSha}  # ${targetVersion}`;
   }
   return `${match[1]}${targetSha}${match[3] || ""}`;
 };

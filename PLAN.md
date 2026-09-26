@@ -4,10 +4,23 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-13, session 097)
+## Current state (2026-09-26, session 098)
 
-- M3 is complete (see Completed milestones). No enrollment drift remains; a
-  reopening follows the per-code contract in `docs/consumer-enrollment.md`.
+- Session 098 reviewed all 14 open issues and found no open pull requests in
+  this repository. It selected #283, the current repin YAML comment defect,
+  for its direct consumer CI impact and zero licensed Unity job changes.
+- #283 is being fixed in `tools/workflows/repin-consumer-locks.sh`: moved
+  pins write two spaces before version comments and accept existing spacing.
+  The local CI-equivalent passes; the PR and live repin evidence remain open.
+- Higher impact items remain gated by external evidence or authority: #51
+  needs owner-approved secret scope changes; #83 needs entitlement and portal
+  proof; #44 needs ruleset authority; #113 needs its reported findings
+  reconciled against the aggregate visible in its audited workflow.
+
+- M3 was completed (see Completed milestones). Issue #113 reopened with two
+  DoxReloaded aggregate findings at commit `1bc7790`. The audited workflow
+  contains a `ci-success` aggregate using the central validator; reproduce the
+  exact finding before changing the consumer or analyzer.
 - Session 097 verified the #279 repin fix live: dispatched run 34768908054
   completed green with the bounded superseded-offer scan in effect, and
   #280 closed with that run as evidence. The day's scheduled run

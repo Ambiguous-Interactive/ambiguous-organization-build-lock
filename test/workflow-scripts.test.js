@@ -603,11 +603,11 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   const lines = fs.readFileSync(path.join(workflows, "unity.yml"), "utf8").split("\n");
   assert.equal(
     lines[3],
-    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target}  # v1.14.0`
   );
   assert.equal(
     lines[4],
-    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target} # v1.14.0`,
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target}  # v1.14.0`,
     "a moved pin without a comment gains the release version comment"
   );
   assert.equal(
@@ -657,8 +657,9 @@ test("moved pin comments follow the disposition matrix for every comment and ver
   const target = "64bac446903115134dca8235410b332bc5a83547";
   const prefix = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@";
   const cases = [
-    { comment: "", version: "v1.14.0", expected: `${target} # v1.14.0` },
-    { comment: " # v1.13.0", version: "v1.14.0", expected: `${target} # v1.14.0` },
+    { comment: "", version: "v1.14.0", expected: `${target}  # v1.14.0` },
+    { comment: " # v1.13.0", version: "v1.14.0", expected: `${target}  # v1.14.0` },
+    { comment: "  # v1.13.0", version: "v1.14.0", expected: `${target}  # v1.14.0` },
     { comment: " # post-v1.10.0", version: "v1.14.0", expected: `${target} # post-v1.10.0` },
     { comment: "", version: "", expected: `${target}` },
     { comment: " # v1.13.0", version: "", expected: `${target} # v1.13.0` },
@@ -960,7 +961,7 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
     [
       "## Example",
       "",
-      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`,
+      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target}  # v1.14.0`,
       ""
     ].join("\n")
   );
@@ -1280,7 +1281,7 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
     // rewrite normalizes onto every moved pin.
     fs.writeFileSync(
       path.join(workflows, "unity.yml"),
-      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${releaseSha} # v1.14.0\n`
+      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${releaseSha}  # v1.14.0\n`
     );
     gitRun(seed, "add", "-A");
     gitRun(seed, "commit", "-m", "chore: repin organization lock actions to v1.14.0");
@@ -1770,8 +1771,8 @@ test("consumer repin commits companion artifacts and lists them in the pull requ
     harness.remotePath("dxmessaging"),
     "show", `${harness.branchName}:docs/ops/pin-doc.md`
   );
-  assert.match(pushedDoc, new RegExp(`acquire-build-lock@${harness.releaseSha} # v1.14.0`));
-  assert.match(pushedDoc, new RegExp(`return-unity-license@${harness.releaseSha} # v1.14.0`));
+  assert.match(pushedDoc, new RegExp(`acquire-build-lock@${harness.releaseSha}  # v1.14.0`));
+  assert.match(pushedDoc, new RegExp(`return-unity-license@${harness.releaseSha}  # v1.14.0`));
   const pushedWorkflow = gitRun(
     harness.remotePath("dxmessaging"),
     "show", `${harness.branchName}:.github/workflows/unity.yml`

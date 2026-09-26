@@ -141,7 +141,8 @@ authorization merge.
 For each enrolled repository the workflow clones the default branch, rewrites
 only the `@<sha>` suffix of `uses:` references to this repository's actions
 (plus the `# vX.Y.Z` comment: a moved pin without a comment gains one, and a
-comment that is not a version stays), carries the reviewed companion files
+comment that is not a version stays; normalized comments have two spaces
+before `#`), carries the reviewed companion files
 named in the policy through their mechanical rewrites, and opens one pull
 request per repository on the stable branch prefix `automation/repin-lock-`.
 The per-repository result is recorded in the run summary; any repository
@@ -172,9 +173,9 @@ Dependabot-only pin update leaves its offered commit incomplete. The central
 repin offer stays the complete update. When either merge answers the
 adoption first, the next run closes a superseded central offer; a
 Dependabot pull request is outside the automation branch filter, so the
-run never touches it. A repin branch pushed before the comment
-normalization reads as different content; delete such a branch once, and
-the next run pushes a fresh one.
+run never touches it. An orphan branch pushed before comment or spacing
+normalization may differ from current output. Delete that orphan once; the
+next run pushes a fresh branch.
 
 A reviewed, expiring `repinExceptions` entry in
 `unity-enrollment-policy.json` protects one workflow file in one repository
