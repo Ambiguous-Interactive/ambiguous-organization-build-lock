@@ -82,7 +82,7 @@ fixture were updated. No production behavior beyond comment spacing changed.
 `bash .devcontainer/scripts/verify.sh` passed after the fixture updates:
 
 - LLM harness checks passed.
-- All 906 Node tests passed, with 6 architecture-gated skips.
+- 900 Node tests passed; 6 architecture-gated tests were skipped.
 - Go tests, vet, and race tests passed.
 - actionlint, JavaScript CI, ShellCheck CI, both module verifies, both tidy
   checks, and the workflow credential audit passed.
@@ -120,10 +120,12 @@ wording to report the completed verifier run and distinguish it from checks
 run during the documentation-only edit. The final review confirmed that
 chronology and found no remaining issue.
 
-The external consumer PR that reported the lint failure must still be checked
-after this central fix is merged. A scheduled or dispatched repin run must
-show two spaces in its generated output. The PR must pass every GitHub check,
-receive review feedback, and merge before this session is complete.
+The reported consumer PR, IshoBoy #976, was closed unmerged before this
+central fix landed. The writer regression matrix verifies the generated
+two-space format and normalization from both existing spacing forms. No
+post-merge repin dispatch was run; the scheduled workflow writes branches
+across the reviewed consumer registry, so its next run is the live downstream
+confirmation.
 
 ## PR #284 independent review finding and remediation
 
