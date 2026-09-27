@@ -7,7 +7,16 @@ const path = require("node:path");
 
 const PROFILES = new Set([
   "EditorOnly",
+  "StandaloneWindowsMono",
   "StandaloneWindowsIl2Cpp",
+  "StandaloneLinuxMono",
+  "StandaloneLinuxIl2Cpp",
+  "StandaloneMacMono",
+  "StandaloneMacIl2Cpp",
+  "WebGL",
+  "iOS",
+  "AndroidMono",
+  "AndroidIl2Cpp",
   "Steam",
   "Android",
   "Full"

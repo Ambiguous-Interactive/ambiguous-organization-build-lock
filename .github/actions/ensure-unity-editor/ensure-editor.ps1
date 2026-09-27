@@ -11,7 +11,7 @@ param(
 
     [switch]$CiManagedOnly = $($env:GITHUB_ACTIONS -eq 'true'),
 
-    [ValidateSet('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Steam', 'Android', 'Full')]
+    [ValidateSet('EditorOnly', 'StandaloneWindowsMono', 'StandaloneWindowsIl2Cpp', 'StandaloneLinuxMono', 'StandaloneLinuxIl2Cpp', 'StandaloneMacMono', 'StandaloneMacIl2Cpp', 'WebGL', 'iOS', 'AndroidMono', 'AndroidIl2Cpp', 'Steam', 'Android', 'Full')]
     [string]$ProvisioningProfile = 'Full',
 
     [switch]$WithWindowsIl2Cpp,
@@ -2308,7 +2308,7 @@ function Get-UnityProvisioningProfile {
 function Assert-UnityProvisioningProfile {
     param([Parameter(Mandatory = $true)][string]$Profile)
 
-    if ($Profile -notin @('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Steam', 'Android', 'Full')) {
+    if ($Profile -notin @('EditorOnly', 'StandaloneWindowsMono', 'StandaloneWindowsIl2Cpp', 'StandaloneLinuxMono', 'StandaloneLinuxIl2Cpp', 'StandaloneMacMono', 'StandaloneMacIl2Cpp', 'WebGL', 'iOS', 'AndroidMono', 'AndroidIl2Cpp', 'Steam', 'Android', 'Full')) {
         throw "Unknown Unity provisioning profile '$Profile'."
     }
 }
@@ -2345,13 +2345,17 @@ function Get-UnityCiModuleSpec {
     # escalates to profile-scoped managed quarantine/reinstall unless repair is
     # disabled.
     return @(
-        [pscustomobject]@{ Id = 'windows-il2cpp';        Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsIl2Cpp', 'Full') },
-        [pscustomobject]@{ Id = 'webgl';                 Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Full') },
-        [pscustomobject]@{ Id = 'linux-mono';            Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Full') },
-        [pscustomobject]@{ Id = 'linux-il2cpp';          Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Steam', 'Full') },
-        [pscustomobject]@{ Id = 'android';               Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') },
-        [pscustomobject]@{ Id = 'android-sdk-ndk-tools'; Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') },
-        [pscustomobject]@{ Id = 'android-open-jdk';      Requested = $false; Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') }
+        [pscustomobject]@{ Id = 'windows-mono';           Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsMono') },
+        [pscustomobject]@{ Id = 'windows-il2cpp';         Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsIl2Cpp', 'Full') },
+        [pscustomobject]@{ Id = 'webgl';                  Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('WebGL', 'Full') },
+        [pscustomobject]@{ Id = 'linux-mono';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxMono', 'Full') },
+        [pscustomobject]@{ Id = 'linux-il2cpp';           Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxIl2Cpp', 'Steam', 'Full') },
+        [pscustomobject]@{ Id = 'mac-mono';               Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacMono') },
+        [pscustomobject]@{ Id = 'mac-il2cpp';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacIl2Cpp') },
+        [pscustomobject]@{ Id = 'ios';                    Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('iOS') },
+        [pscustomobject]@{ Id = 'android';                Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('AndroidMono', 'AndroidIl2Cpp', 'Android', 'Full') },
+        [pscustomobject]@{ Id = 'android-sdk-ndk-tools';  Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('AndroidMono', 'AndroidIl2Cpp', 'Android', 'Full') },
+        [pscustomobject]@{ Id = 'android-open-jdk';       Requested = $false; Verified = $true; Tier = 'android'; Profiles = @('AndroidMono', 'AndroidIl2Cpp', 'Android', 'Full') }
     )
 }
 
@@ -2538,6 +2542,13 @@ function Test-UnityCiModuleGroupPresent {
             'windows-il2cpp' {
                 return Test-Il2CppModulePresent -EditorPath $EditorPath
             }
+            'windows-mono' {
+                $windowsRoot = Join-Path $dataRoot 'PlaybackEngines\WindowsStandaloneSupport\Variations'
+                return Test-AnyUnityLeafPresent -Paths @(
+                    (Join-Path $windowsRoot 'win64_player_development_mono\WindowsPlayer.exe'),
+                    (Join-Path $windowsRoot 'win64_player_nondevelopment_mono\WindowsPlayer.exe')
+                )
+            }
             'webgl' {
                 $webGlRoot = Join-Path $dataRoot 'PlaybackEngines\WebGLSupport'
                 $hasEditorExtension = Test-Path -LiteralPath (Join-Path $webGlRoot 'UnityEditor.WebGL.Extensions.dll') -PathType Leaf
@@ -2584,6 +2595,24 @@ function Test-UnityCiModuleGroupPresent {
                     (Join-Path $androidRoot 'OpenJDK\bin\java')
                 )
             }
+            'ios' {
+                $iosRoot = Join-Path $dataRoot 'PlaybackEngines\iOSSupport'
+                $hasEditorExtension = Test-Path -LiteralPath (Join-Path $iosRoot 'UnityEditor.iOS.Extensions.dll') -PathType Leaf
+                $toolchainLeaves = @(
+                    Get-ChildItem -LiteralPath $iosRoot -Recurse -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -match '(?i)^MapFileParser(?:\.exe)?$' } |
+                        Select-Object -First 1
+                )
+                $hasToolchain = $toolchainLeaves.Count -gt 0
+                if (-not $hasToolchain) {
+                    $trampolineLeaves = @(
+                        Get-ChildItem -LiteralPath (Join-Path $iosRoot 'Trampoline') -Recurse -File -ErrorAction SilentlyContinue |
+                            Select-Object -First 1
+                    )
+                    $hasToolchain = $trampolineLeaves.Count -gt 0
+                }
+                return $hasEditorExtension -and $hasToolchain
+            }
             'linux-mono' {
                 $linuxRoot = Join-Path $dataRoot 'PlaybackEngines\LinuxStandaloneSupport'
                 $variationRoot = Join-Path $linuxRoot 'Variations'
@@ -2603,6 +2632,36 @@ function Test-UnityCiModuleGroupPresent {
                     (Join-Path $variationRoot 'linux64_player_nondevelopment_il2cpp\LinuxPlayer'),
                     (Join-Path $variationRoot 'linux64_player_nondevelopment_il2cpp\UnityPlayer.so')
                 )
+            }
+            'mac-mono' {
+                $macRoot = Join-Path $dataRoot 'PlaybackEngines\MacStandaloneSupport\Variations'
+                $macModuleRoot = Split-Path -Parent $macRoot
+                $hasEditorExtension = Test-Path -LiteralPath (Join-Path $macModuleRoot 'UnityEditor.OSXStandalone.Extensions.dll') -PathType Leaf
+                $monoPlayers = @(
+                    Get-ChildItem -LiteralPath $macRoot -Recurse -File -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            $segments = $_.FullName.Substring($macRoot.Length).TrimStart('\', '/').Split([char[]]@('\', '/'))
+                            $hasMonoSegment = @($segments | Where-Object { $_ -match '(?i)(?:^|[_-])mono(?:$|[_-])' }).Count -gt 0
+                            $_.Name -match '(?i)^(?:UnityPlayer(?:\.dylib)?|MacStandalonePlayer)$' -and $hasMonoSegment
+                        } |
+                        Select-Object -First 1
+                )
+                return $hasEditorExtension -and $monoPlayers.Count -gt 0
+            }
+            'mac-il2cpp' {
+                $macRoot = Join-Path $dataRoot 'PlaybackEngines\MacStandaloneSupport\Variations'
+                $macModuleRoot = Split-Path -Parent $macRoot
+                $hasEditorExtension = Test-Path -LiteralPath (Join-Path $macModuleRoot 'UnityEditor.OSXStandalone.Extensions.dll') -PathType Leaf
+                $il2cppPlayers = @(
+                    Get-ChildItem -LiteralPath $macRoot -Recurse -File -ErrorAction SilentlyContinue |
+                        Where-Object {
+                            $segments = $_.FullName.Substring($macRoot.Length).TrimStart('\', '/').Split([char[]]@('\', '/'))
+                            $hasIl2CppSegment = @($segments | Where-Object { $_ -match '(?i)(?:^|[_-])il2cpp(?:$|[_-])' }).Count -gt 0
+                            $_.Name -match '(?i)^(?:UnityPlayer(?:\.dylib)?|MacStandalonePlayer)$' -and $hasIl2CppSegment
+                        } |
+                        Select-Object -First 1
+                )
+                return $hasEditorExtension -and $il2cppPlayers.Count -gt 0
             }
             default {
                 throw "Unknown Unity CI module group '$Group'."

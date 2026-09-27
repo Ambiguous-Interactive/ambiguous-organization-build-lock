@@ -2668,16 +2668,35 @@ func TestUnityEnrollmentAcceptsReviewedAlternateEditorLayout(t *testing.T) {
 }
 
 func TestUnityEnrollmentAcceptsSteamProfileOnlyForSingleJob(t *testing.T) {
-	workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
-	workflow = strings.Replace(
-		workflow,
-		"    strategy:\n      fail-fast: false\n      matrix:\n        mode: [EditMode]\n",
-		"",
-		1,
-	)
-	if strings.Contains(workflow, "        mode: [EditMode]") {
-		t.Fatal("fixture matrix was not removed")
+	for _, profile := range []string{"Steam", "StandaloneWindowsMono", "StandaloneWindowsIl2Cpp", "StandaloneLinuxMono", "StandaloneLinuxIl2Cpp", "StandaloneMacMono", "StandaloneMacIl2Cpp", "WebGL", "iOS", "AndroidMono", "AndroidIl2Cpp", "Android"} {
+		workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
+		workflow = strings.Replace(
+			workflow,
+			"    strategy:\n      fail-fast: false\n      matrix:\n        mode: [EditMode]\n",
+			"",
+			1,
+		)
+		if strings.Contains(workflow, "        mode: [EditMode]") {
+			t.Fatal("fixture matrix was not removed")
+		}
+		workflow = strings.Replace(
+			workflow,
+			"          provisioning-profile: EditorOnly",
+			"          provisioning-profile: "+profile,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Findings) != 0 {
+			t.Fatalf("single-job %s profile produced findings: %#v", profile, result.Findings)
+		}
 	}
+
+	workflow := unityWorkflow(centralReturnSteps(), safeAggregate())
 	workflow = strings.Replace(
 		workflow,
 		"          provisioning-profile: EditorOnly",
@@ -2685,23 +2704,6 @@ func TestUnityEnrollmentAcceptsSteamProfileOnlyForSingleJob(t *testing.T) {
 		1,
 	)
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
-		".github/workflows/unity.yml": workflow,
-	}), unityAuditPolicy())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Findings) != 0 {
-		t.Fatalf("single-job Steam profile produced findings: %#v", result.Findings)
-	}
-
-	workflow = unityWorkflow(centralReturnSteps(), safeAggregate())
-	workflow = strings.Replace(
-		workflow,
-		"          provisioning-profile: EditorOnly",
-		"          provisioning-profile: Steam",
-		1,
-	)
-	result, err = AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/unity.yml": workflow,
 	}), unityAuditPolicy())
 	if err != nil {
