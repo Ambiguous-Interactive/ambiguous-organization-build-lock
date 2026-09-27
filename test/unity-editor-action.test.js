@@ -66,6 +66,16 @@ test("action input parsing preserves the upstream parameter surface", () => {
   });
 });
 
+test("Steam profile binds to Linux IL2CPP validation", () => {
+  const environment = validEnvironment({ "INPUT_PROVISIONING-PROFILE": "Steam" });
+  const inputs = parseInputs(environment);
+  assert.equal(inputs.provisioningProfile, "Steam");
+  assert.equal(
+    validateDiagnostics(validDiagnostics({ provisioningProfile: "Steam" }), inputs, environment),
+    validDiagnostics().editorPath
+  );
+});
+
 test("optional inputs remain omitted so the upstream defaults stay authoritative", () => {
   assert.deepEqual(parseInputs(validEnvironment({
     "INPUT_INSTALL-ROOT": "",
@@ -219,15 +229,24 @@ test("the action remains Windows-only", () => {
   );
 });
 
-test("vendored validator is the approved self-contained upstream payload", () => {
+test("vendored validator matches the reviewed self-contained payload digest", () => {
   const text = fs.readFileSync(payloadPath, "utf8");
   const normalizedPayload = Buffer.from(text.replace(/\r\n/g, "\n"), "utf8");
   assert.equal(
     crypto.createHash("sha256").update(normalizedPayload).digest("hex"),
-    "c9a5cea6ad890bc7b2ad189a05a0d1a0514f1b850e45002318b360851289e837"
+    "c76c9f5eafc04046ca4e8083d66c11f0c9ffc5a7985956c66647e30b72a1185d"
   );
   assert.doesNotMatch(text, /\$PSScriptRoot/i);
   assert.doesNotMatch(text, /^\s*\.\s+[^\r\n]+/m);
+});
+
+test("Steam profile is assigned only to the Linux IL2CPP module", () => {
+  const source = fs.readFileSync(payloadPath, "utf8");
+  const moduleRows = [...source.matchAll(/\[pscustomobject\]@\{ Id = '([^']+)';[^\r\n]*Profiles = @\(([^)]*)\) \}/g)];
+  const steamModuleIds = moduleRows
+    .filter((row) => row[2].split(",").some((profile) => profile.trim() === "'Steam'"))
+    .map((row) => row[1]);
+  assert.deepEqual(steamModuleIds, ["linux-il2cpp"]);
 });
 
 test("the PowerShell adapter splats typed JSON without dynamic evaluation", () => {
@@ -283,5 +302,39 @@ test("the PowerShell adapter maps every typed value", {
     requireHealthyExisting: true,
     withWindowsIl2Cpp: false,
     required: inputs.requiredEditorPayloadRelativePath
+  });
+});
+
+test("Steam profile requests and verifies only the Linux IL2CPP module", {
+  skip: process.platform !== "win32" && "requires hosted Windows PowerShell"
+}, () => {
+  const childProcess = require("node:child_process");
+  const command = String.raw`
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:ENSURE_EDITOR_SCRIPT_PATH, [ref]$tokens, [ref]$errors)
+if ($errors -and $errors.Count -gt 0) { throw 'ensure-editor.ps1 has parse errors.' }
+foreach ($name in @('Assert-UnityProvisioningProfile', 'Get-UnityCiModuleSpec', 'Get-UnityCiModuleSpecForProfile', 'Get-UnityCiModuleIds', 'Get-UnityCiVerifiedModuleGroups', 'Get-UnityCiModuleIdsForTier')) {
+  $functionAst = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true) | Select-Object -First 1
+  if (-not $functionAst) { throw "Function '$name' not found." }
+  Invoke-Expression "function script:$name $($functionAst.Body.Extent.Text)"
+}
+[ordered]@{
+  requested = @(Get-UnityCiModuleIds -Profile 'Steam')
+  verified = @(Get-UnityCiVerifiedModuleGroups -Profile 'Steam')
+  android = @(Get-UnityCiModuleIdsForTier -Tier 'android' -Profile 'Steam')
+} | ConvertTo-Json -Compress
+`;
+  const result = childProcess.spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    encoding: "utf8",
+    env: { ...process.env, ENSURE_EDITOR_SCRIPT_PATH: payloadPath },
+    shell: false
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    requested: ["linux-il2cpp"],
+    verified: ["linux-il2cpp"],
+    android: []
   });
 });

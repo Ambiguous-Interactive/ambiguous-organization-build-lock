@@ -142,6 +142,9 @@ touches a Dependabot pull request.
    `EditorOnly` profile beside a static `standalone` matrix value stays
    rejected, and the literal profile does not lift the include-based and
    dynamic matrix rejections.
+   `Steam` is allowed only for a single job without a matrix. It verifies the
+   Linux IL2CPP module and excludes Linux Mono, Android, and other player
+   modules. Use it only when the offline runner setup includes that module.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.
    The only permitted preceding step is the approved immutable, exact-input
