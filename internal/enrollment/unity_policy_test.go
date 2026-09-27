@@ -3541,6 +3541,10 @@ jobs:
           event-name: ${{ github.event_name }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
+      - name: Check added rule lines
+        run: |
+          python3 scripts/lint-line-length.py --self-test
+          python3 scripts/lint-line-length.py --require-change
   preflight:
     if: >-
       ${{
@@ -3841,6 +3845,55 @@ jobs:
 					value,
 					"      - id: classify\n        uses: "+changeAction,
 					"      - id: classify\n        continue-on-error: true\n        uses: "+changeAction,
+					1,
+				)
+			},
+		},
+		{
+			name: "classifier runs consumer code before its action",
+			mutate: func(value string) string {
+				value = strings.Replace(value, `      - name: Check added rule lines
+        run: |
+          python3 scripts/lint-line-length.py --self-test
+          python3 scripts/lint-line-length.py --require-change
+`, "", 1)
+				return strings.Replace(
+					value,
+					"          persist-credentials: false\n",
+					"          persist-credentials: false\n      - run: echo untrusted\n",
+					1,
+				)
+			},
+		},
+		{
+			name: "post-classifier command can alter output",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"python3 scripts/lint-line-length.py --require-change",
+					`echo "unity-required=false" >> "$GITHUB_OUTPUT"`,
+					1,
+				)
+			},
+		},
+		{
+			name: "post-classifier check suppresses failure",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - name: Check added rule lines\n        run:",
+					"      - name: Check added rule lines\n        continue-on-error: true\n        run:",
+					1,
+				)
+			},
+		},
+		{
+			name: "post-classifier check inherits an environment",
+			mutate: func(value string) string {
+				return strings.Replace(
+					value,
+					"      - name: Check added rule lines\n        run:",
+					"      - name: Check added rule lines\n        env:\n          GITHUB_OUTPUT: spoof\n        run:",
 					1,
 				)
 			},
