@@ -61,7 +61,7 @@ Read only the files relevant to the current task.
 | [.llm/tasks/issue-163-managed-editor-layout.md](./tasks/issue-163-managed-editor-layout.md) | Represent the reviewed CI-managed alternate Unity editor layout without trusting a caller path. |
 | [.llm/tasks/issue-169-exact-holder-job.md](./tasks/issue-169-exact-holder-job.md) | Bind stale-state decisions to a recorded numeric Actions job ID instead of runner-clock inference. |
 | [.llm/tasks/issue-206-ensure-unity-editor-action.md](./tasks/issue-206-ensure-unity-editor-action.md) | Replace the trusted Unity editor checkout prefix with one pinned organization action. |
-| [.llm/tasks/issue-291-steam-linux-profile.md](./tasks/issue-291-steam-linux-profile.md) | Add least-scope Unity target/backend profiles; store routing and native signing stay separate. |
+| [.llm/tasks/issue-291-steam-linux-profile.md](./tasks/issue-291-steam-linux-profile.md) | Steam checks Linux and Mac Mono modules; signing runs separately. |
 | [.llm/tasks/issue-42-unity-enrollment-audit.md](./tasks/issue-42-unity-enrollment-audit.md) | Build and validate the fail-closed extensible Unity enrollment audit. |
 | [.llm/tasks/issue-77-reaper-delivery-monitoring.md](./tasks/issue-77-reaper-delivery-monitoring.md) | Task record for independent scheduled-reaper delivery monitoring and uncancellable proof-bearing recovery. |
 | [.llm/tasks/issue-85-central-unity-cleanup-policy.md](./tasks/issue-85-central-unity-cleanup-policy.md) | Task record for central bounded Unity cleanup classification and post-release safety gating. |

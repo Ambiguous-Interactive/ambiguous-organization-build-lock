@@ -301,11 +301,12 @@ reader access. Treat either condition as scope drift.
    `StandaloneLinuxIl2Cpp`, `StandaloneMacMono`, or
    `StandaloneMacIl2Cpp` for standalone targets. `WebGL` and `iOS` use IL2CPP
    only. `AndroidMono` and `AndroidIl2Cpp` use the same Android module set.
-   `Steam` includes Linux Mono and IL2CPP without Android. Steam and itch.io are store
+   `Steam` checks Linux Mono, Linux IL2CPP, and Mac Mono. It excludes Android.
+   Steam and itch.io are store
    channels; choose profiles for their target depots. The `iOS` profile proves
    the Unity module only. Xcode must run on macOS to build and sign an iOS app.
-   Native Mac signing, notarization, and licensed runner return remain separate
-   gates. The existing `Full` profile keeps its previous module set.
+   A Mac job signs and notarizes without Unity. License return stays with the
+   Windows build. The existing `Full` profile keeps its previous module set.
 
    The enrollment audit temporarily accepts the exact previously approved
    bootstrap/checkout/script prefix for unchanged consumers during rollout.

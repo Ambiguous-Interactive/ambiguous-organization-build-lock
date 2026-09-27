@@ -2350,7 +2350,7 @@ function Get-UnityCiModuleSpec {
         [pscustomobject]@{ Id = 'webgl';                  Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('WebGL', 'Full') },
         [pscustomobject]@{ Id = 'linux-mono';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxMono', 'Steam', 'Full') },
         [pscustomobject]@{ Id = 'linux-il2cpp';           Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxIl2Cpp', 'Steam', 'Full') },
-        [pscustomobject]@{ Id = 'mac-mono';               Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacMono') },
+        [pscustomobject]@{ Id = 'mac-mono';               Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacMono', 'Steam') },
         [pscustomobject]@{ Id = 'mac-il2cpp';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacIl2Cpp') },
         [pscustomobject]@{ Id = 'ios';                    Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('iOS') },
         [pscustomobject]@{ Id = 'android';                Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('AndroidMono', 'AndroidIl2Cpp', 'Android', 'Full') },
