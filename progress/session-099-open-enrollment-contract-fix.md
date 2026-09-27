@@ -67,4 +67,12 @@ Learning decision: revise `docs/consumer-enrollment.md`, the authoritative contr
 
 ## Remaining work
 
-The central and DoxReloaded branches still need GitHub pull requests, CI, review, and merge. The post-merge central audit and green `main` status remain required before closing this objective.
+The central contract change was merged by squash as `73338af16b3492dfc2c23e2defa936c36e462bdd` in [PR #286](https://github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/pull/286). Central PR CI (`36281404128`) and push-to-main Build lock CI (`36281575998`) both completed successfully. No reviews or inline threads were submitted.
+
+DoxReloaded companion change was merged as `d187783f1f6995c3fce4f299d593ee5f491dda13` in [DoxReloaded PR #946](https://github.com/Ambiguous-Interactive/DoxReloaded/pull/946). PR checks passed: workflow lint, static validation, solver impact, both devcontainer smoke tests, and Unity validation. The licensed job passed EditMode, PlayMode, and Windows build; WebGL was skipped by the classifier. License return and lock cleanup succeeded. Push-to-main Build and Deploy (`36281928963`), Solver Impact (`36281928958`), Workflow Lint (`36281928979`), and Devcontainer Health (`36281928972`) all completed successfully. No reviews or inline threads were submitted.
+
+After both merges, the trusted central audit ran on `main` at `73338af16b3492dfc2c23e2defa936c36e462bdd` (`36281994640`): complete, six of six repositories, 113 active inventory rows, zero findings. It audited DoxReloaded at merge commit `d187783f1f6995c3fce4f299d593ee5f491dda13`. The audit automatically closed issue #113 as completed.
+
+## Completion
+
+The selected highest-priority actionable issue is fixed, both PRs are merged, all relevant PR and post-merge main workflows are green, and the complete main-branch enrollment audit is clean. No organization policy, lock configuration, action runtime, or licensed job scope changed.
