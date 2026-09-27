@@ -6,10 +6,14 @@
 `Ambiguous-Interactive/unity-helpers` commit
 `76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d`, path
 `scripts/unity/ensure-editor.ps1`, with CRLF normalized to LF for this
-repository. This copy adds the reviewed `Steam` profile for Linux IL2CPP builds.
-The profile requests and verifies only the `linux-il2cpp` module. The resulting
-payload SHA-256 digest is
-`c76c9f5eafc04046ca4e8083d66c11f0c9ffc5a7985956c66647e30b72a1185d`.
+repository. This copy adds reviewed target/backend profiles for Windows,
+Linux, Mac, WebGL, iOS, and Android. The `Steam` profile remains a Linux IL2CPP
+alias. The iOS and Mac Mono disk probes follow layouts reviewed in
+`Ambiguous-Interactive/unity-helpers` commit
+`8c627ab32255a7f931f05bdd33203190e582b267`; the Mac IL2CPP probe applies the
+same backend-specific check. Each profile requests and verifies its selected
+module groups. The resulting payload SHA-256 digest is
+`dcc432d839470f27801ae6736a54a672ffdc46561d48ebd271c9ee4ed5c43ede`.
 
 MIT License
 

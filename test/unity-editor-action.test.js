@@ -76,6 +76,24 @@ test("Steam profile binds to Linux IL2CPP validation", () => {
   );
 });
 
+test("supported target profiles parse as exact inputs", () => {
+  for (const profile of [
+    "StandaloneWindowsMono",
+    "StandaloneWindowsIl2Cpp",
+    "StandaloneLinuxMono",
+    "StandaloneLinuxIl2Cpp",
+    "StandaloneMacMono",
+    "StandaloneMacIl2Cpp",
+    "WebGL",
+    "iOS",
+    "AndroidMono",
+    "AndroidIl2Cpp"
+  ]) {
+    const inputs = parseInputs(validEnvironment({ "INPUT_PROVISIONING-PROFILE": profile }));
+    assert.equal(inputs.provisioningProfile, profile);
+  }
+});
+
 test("optional inputs remain omitted so the upstream defaults stay authoritative", () => {
   assert.deepEqual(parseInputs(validEnvironment({
     "INPUT_INSTALL-ROOT": "",
@@ -234,7 +252,7 @@ test("vendored validator matches the reviewed self-contained payload digest", ()
   const normalizedPayload = Buffer.from(text.replace(/\r\n/g, "\n"), "utf8");
   assert.equal(
     crypto.createHash("sha256").update(normalizedPayload).digest("hex"),
-    "c76c9f5eafc04046ca4e8083d66c11f0c9ffc5a7985956c66647e30b72a1185d"
+    "dcc432d839470f27801ae6736a54a672ffdc46561d48ebd271c9ee4ed5c43ede"
   );
   assert.doesNotMatch(text, /\$PSScriptRoot/i);
   assert.doesNotMatch(text, /^\s*\.\s+[^\r\n]+/m);
@@ -247,6 +265,104 @@ test("Steam profile is assigned only to the Linux IL2CPP module", () => {
     .filter((row) => row[2].split(",").some((profile) => profile.trim() === "'Steam'"))
     .map((row) => row[1]);
   assert.deepEqual(steamModuleIds, ["linux-il2cpp"]);
+});
+
+test("target profiles cover supported channel targets and backends", () => {
+  const source = fs.readFileSync(payloadPath, "utf8");
+  const expectedProfiles = [
+    "StandaloneWindowsMono",
+    "StandaloneWindowsIl2Cpp",
+    "StandaloneLinuxMono",
+    "StandaloneLinuxIl2Cpp",
+    "StandaloneMacMono",
+    "StandaloneMacIl2Cpp",
+    "WebGL",
+    "iOS",
+    "AndroidMono",
+    "AndroidIl2Cpp",
+    "Steam"
+  ];
+  const validateSet = source.match(/\[ValidateSet\(([^\]]+)\)\]/)?.[1] || "";
+  for (const profile of expectedProfiles) {
+    assert.ok(validateSet.includes(`'${profile}'`), `${profile} must be accepted by PowerShell`);
+  }
+  const rows = [...source.matchAll(/\[pscustomobject\]@\{ Id = '([^']+)';[^\r\n]*Profiles = @\(([^)]*)\) \}/g)];
+  const assignments = Object.fromEntries(rows.map((row) => [row[1], row[2].split(",").map((item) => item.trim().replaceAll("'", ""))]));
+  for (const [module, profiles] of Object.entries({
+    "windows-mono": ["StandaloneWindowsMono"],
+    "windows-il2cpp": ["StandaloneWindowsIl2Cpp", "Full"],
+    "linux-mono": ["StandaloneLinuxMono", "Full"],
+    "linux-il2cpp": ["StandaloneLinuxIl2Cpp", "Steam", "Full"],
+    "mac-mono": ["StandaloneMacMono"],
+    "mac-il2cpp": ["StandaloneMacIl2Cpp"],
+    webgl: ["WebGL", "Full"],
+    ios: ["iOS"],
+    android: ["AndroidMono", "AndroidIl2Cpp", "Android", "Full"]
+  })) {
+    assert.deepEqual(assignments[module], profiles, `${module} profile assignment`);
+  }
+});
+
+test("target module probes require backend-specific payload evidence", () => {
+  const childProcess = require("node:child_process");
+  const command = String.raw`
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:ENSURE_EDITOR_SCRIPT_PATH, [ref]$tokens, [ref]$errors)
+if ($errors -and $errors.Count -gt 0) { throw 'ensure-editor.ps1 has parse errors.' }
+foreach ($name in @('Test-AnyUnityLeafPresent', 'Test-UnityCiModuleGroupPresent')) {
+  $functionAst = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true) | Select-Object -First 1
+  if (-not $functionAst) { throw "Function '$name' not found." }
+  Invoke-Expression "function script:$name $($functionAst.Body.Extent.Text)"
+}
+$root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+$editor = Join-Path $root 'Editor/Unity.exe'
+New-Item -ItemType File -Path $editor -Force | Out-Null
+$editorPath = $editor
+function Add-FixtureFile([string]$RelativePath) {
+  $path = Join-Path $root $RelativePath
+  New-Item -ItemType File -Path $path -Force | Out-Null
+}
+try {
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/WindowsStandaloneSupport/Variations/win64_player_development_mono/WindowsPlayer.exe'
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/iOSSupport/UnityEditor.iOS.Extensions.dll'
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/iOSSupport/Tools/MapFileParser.exe'
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/MacStandaloneSupport/UnityEditor.OSXStandalone.Extensions.dll'
+  $beforeMono = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'mac-mono'
+  $beforeIl2Cpp = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'mac-il2cpp'
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_player_development_mono/UnityPlayer.dylib'
+  $macMono = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'mac-mono'
+  $afterMonoIl2Cpp = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'mac-il2cpp'
+  Add-FixtureFile 'Editor/Data/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_player_development_il2cpp/UnityPlayer.dylib'
+  [ordered]@{
+    windowsMono = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'windows-mono'
+    ios = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'ios'
+    macMonoAbsentBeforePlayer = $beforeMono
+    macIl2CppAbsentBeforePlayer = $beforeIl2Cpp
+    macMono = $macMono
+    macIl2CppNotMono = $afterMonoIl2Cpp
+    macIl2Cpp = Test-UnityCiModuleGroupPresent -EditorPath $editorPath -Group 'mac-il2cpp'
+  } | ConvertTo-Json -Compress
+} finally {
+  Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+}
+`;
+  const result = childProcess.spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    encoding: "utf8",
+    env: { ...process.env, ENSURE_EDITOR_SCRIPT_PATH: payloadPath },
+    shell: false
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    windowsMono: true,
+    ios: true,
+    macMonoAbsentBeforePlayer: false,
+    macIl2CppAbsentBeforePlayer: false,
+    macMono: true,
+    macIl2CppNotMono: false,
+    macIl2Cpp: true
+  });
 });
 
 test("the PowerShell adapter splats typed JSON without dynamic evaluation", () => {
@@ -305,9 +421,7 @@ test("the PowerShell adapter maps every typed value", {
   });
 });
 
-test("Steam profile requests and verifies only the Linux IL2CPP module", {
-  skip: process.platform !== "win32" && "requires hosted Windows PowerShell"
-}, () => {
+test("target profiles request and verify only their module groups", () => {
   const childProcess = require("node:child_process");
   const command = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -315,16 +429,25 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:ENSURE_EDITOR_SCRIPT_PATH, [ref]$tokens, [ref]$errors)
 if ($errors -and $errors.Count -gt 0) { throw 'ensure-editor.ps1 has parse errors.' }
-foreach ($name in @('Assert-UnityProvisioningProfile', 'Get-UnityCiModuleSpec', 'Get-UnityCiModuleSpecForProfile', 'Get-UnityCiModuleIds', 'Get-UnityCiVerifiedModuleGroups', 'Get-UnityCiModuleIdsForTier')) {
+foreach ($name in @('Assert-UnityProvisioningProfile', 'Get-UnityCiModuleSpec', 'Get-UnityCiModuleSpecForProfile', 'Get-UnityCiModuleIds', 'Get-UnityCiVerifiedModuleGroups', 'Test-UnityProvisioningProfileIncludesAndroid', 'Get-UnityCiModuleIdsForTier')) {
   $functionAst = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true) | Select-Object -First 1
   if (-not $functionAst) { throw "Function '$name' not found." }
   Invoke-Expression "function script:$name $($functionAst.Body.Extent.Text)"
 }
-[ordered]@{
-  requested = @(Get-UnityCiModuleIds -Profile 'Steam')
-  verified = @(Get-UnityCiVerifiedModuleGroups -Profile 'Steam')
-  android = @(Get-UnityCiModuleIdsForTier -Tier 'android' -Profile 'Steam')
-} | ConvertTo-Json -Compress
+$profiles = @('StandaloneWindowsMono', 'StandaloneWindowsIl2Cpp', 'StandaloneLinuxMono', 'StandaloneLinuxIl2Cpp', 'StandaloneMacMono', 'StandaloneMacIl2Cpp', 'WebGL', 'iOS', 'AndroidMono', 'AndroidIl2Cpp', 'Steam', 'Android', 'Full')
+$result = [ordered]@{}
+foreach ($profile in $profiles) {
+  $android = @()
+  if (Test-UnityProvisioningProfileIncludesAndroid -Profile $profile) {
+    $android = @(Get-UnityCiModuleIdsForTier -Tier 'android' -Profile $profile)
+  }
+  $result[$profile] = [ordered]@{
+    requested = @(Get-UnityCiModuleIds -Profile $profile)
+    verified = @(Get-UnityCiVerifiedModuleGroups -Profile $profile)
+    android = $android
+  }
+}
+$result | ConvertTo-Json -Compress -Depth 5
 `;
   const result = childProcess.spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
     encoding: "utf8",
@@ -333,8 +456,34 @@ foreach ($name in @('Assert-UnityProvisioningProfile', 'Get-UnityCiModuleSpec', 
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout.trim()), {
-    requested: ["linux-il2cpp"],
-    verified: ["linux-il2cpp"],
-    android: []
+    StandaloneWindowsMono: { requested: ["windows-mono"], verified: ["windows-mono"], android: [] },
+    StandaloneWindowsIl2Cpp: { requested: ["windows-il2cpp"], verified: ["windows-il2cpp"], android: [] },
+    StandaloneLinuxMono: { requested: ["linux-mono"], verified: ["linux-mono"], android: [] },
+    StandaloneLinuxIl2Cpp: { requested: ["linux-il2cpp"], verified: ["linux-il2cpp"], android: [] },
+    StandaloneMacMono: { requested: ["mac-mono"], verified: ["mac-mono"], android: [] },
+    StandaloneMacIl2Cpp: { requested: ["mac-il2cpp"], verified: ["mac-il2cpp"], android: [] },
+    WebGL: { requested: ["webgl"], verified: ["webgl"], android: [] },
+    iOS: { requested: ["ios"], verified: ["ios"], android: [] },
+    AndroidMono: {
+      requested: ["android", "android-sdk-ndk-tools"],
+      verified: ["android", "android-sdk-ndk-tools", "android-open-jdk"],
+      android: ["android", "android-sdk-ndk-tools"]
+    },
+    AndroidIl2Cpp: {
+      requested: ["android", "android-sdk-ndk-tools"],
+      verified: ["android", "android-sdk-ndk-tools", "android-open-jdk"],
+      android: ["android", "android-sdk-ndk-tools"]
+    },
+    Steam: { requested: ["linux-il2cpp"], verified: ["linux-il2cpp"], android: [] },
+    Android: {
+      requested: ["android", "android-sdk-ndk-tools"],
+      verified: ["android", "android-sdk-ndk-tools", "android-open-jdk"],
+      android: ["android", "android-sdk-ndk-tools"]
+    },
+    Full: {
+      requested: ["windows-il2cpp", "webgl", "linux-mono", "linux-il2cpp", "android", "android-sdk-ndk-tools"],
+      verified: ["windows-il2cpp", "webgl", "linux-mono", "linux-il2cpp", "android", "android-sdk-ndk-tools", "android-open-jdk"],
+      android: ["android", "android-sdk-ndk-tools"]
+    }
   });
 });

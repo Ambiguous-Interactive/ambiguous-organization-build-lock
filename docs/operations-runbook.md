@@ -294,9 +294,18 @@ reader access. Treat either condition as scope drift.
    and acquire omit `if` so each inherits the preceding step's successful
    status. Never use `always()` on this prefix: editor rejection must stop lock
    acquisition.
-   `Steam` is limited to a single job without a matrix. It proves that the
-   offline-managed editor has Linux IL2CPP support. It does not install the
-   module in CI, and it does not include Linux Mono or Android support.
+   Target profiles are limited to a single job without a matrix. They prove
+   that the offline-managed editor has the selected target modules. They do
+   not install modules in CI. Use `StandaloneWindowsMono`,
+   `StandaloneWindowsIl2Cpp`, `StandaloneLinuxMono`,
+   `StandaloneLinuxIl2Cpp`, `StandaloneMacMono`, or
+   `StandaloneMacIl2Cpp` for standalone targets. `WebGL` and `iOS` use IL2CPP
+   only. `AndroidMono` and `AndroidIl2Cpp` use the same Android module set.
+   `Steam` remains an alias for Linux IL2CPP. Steam and itch.io are store
+   channels; choose profiles for their target depots. The `iOS` profile proves
+   the Unity module only. Xcode must run on macOS to build and sign an iOS app.
+   Native Mac signing, notarization, and licensed runner return remain separate
+   gates. The existing `Full` profile keeps its previous module set.
 
    The enrollment audit temporarily accepts the exact previously approved
    bootstrap/checkout/script prefix for unchanged consumers during rollout.

@@ -1,17 +1,17 @@
-<!-- summary: Add a least-scope Linux IL2CPP profile to the central Unity editor action. -->
-# Task: Add the Steam Linux IL2CPP profile
+<!-- summary: Add least-scope Unity target/backend profiles; store routing and native signing stay separate. -->
+# Task: Add Unity target and backend profiles
 
 ## Objective
 
-Add an opt-in `Steam` profile to the central Windows Unity editor action. The
-profile must request and verify only Unity's `linux-il2cpp` module. Keep CI
-health checks read-only and fail closed when the runner lacks the module.
+Add opt-in target/backend profiles to the central Windows Unity editor action.
+Each profile must request and verify only its Unity target modules. Keep CI
+health checks read-only and fail closed when the runner lacks a module.
 
 ## Safety and scope
 
 - Do not install, repair, move, or quarantine Unity editors in CI.
-- Admit `Steam` only on a single job without a matrix.
-- Keep Android and Linux Mono modules out of the profile.
+- Admit target profiles only on a single job without a matrix.
+- Keep unselected target modules out of each profile.
 - Do not change organization settings, secrets, runner access, or live lock state.
 - This task does not complete central issue #291. The downstream player currently
   builds Windows only, and its macOS path still needs a safe license-return gate.
@@ -19,7 +19,7 @@ health checks read-only and fail closed when the runner lacks the module.
 ## Baseline
 
 - The action runtime rejects `Steam` as an invalid profile.
-- The PowerShell module table assigns `linux-il2cpp` to `Full` only.
+- Target/backend profiles were missing for Mono, iOS, WebGL, and Android.
 - The enrollment analyzer accepts `EditorOnly` for non-matrix jobs and rejects
   every other profile shape.
 - The payload is copied from `unity-helpers` commit
@@ -28,11 +28,13 @@ health checks read-only and fail closed when the runner lacks the module.
 
 ## Acceptance
 
-- Node input parsing and diagnostics accept and bind the literal `Steam` profile.
-- The payload exposes exactly `linux-il2cpp` for requested and verified modules,
-  with no Android modules, and it remains self-contained.
-- The enrollment analyzer accepts `Steam` only without a job matrix.
+- Standalone profiles cover Windows, Linux, and Mac Mono and IL2CPP modules.
+- WebGL and iOS profiles cover their IL2CPP-only targets.
+- Android Mono and IL2CPP profiles use the same Android module set.
+- `Steam` remains a Linux IL2CPP alias. Store names select target depots,
+  not Unity modules.
+- The enrollment analyzer accepts target profiles only without a job matrix.
 - The action manifest, enrollment guidance, runbook, provenance notice, tests,
   task index, and progress evidence agree.
-- Central CI passes. Consumer enrollment, Linux and macOS depot delivery, and
-  native macOS licensing remain separate evidence gates.
+- Central CI passes. Xcode signing, native Mac signing and notarization, and
+  licensed runner return remain separate evidence gates.

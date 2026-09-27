@@ -8,7 +8,7 @@ inputs:
     description: Editor installation root; defaults to UNITY_EDITOR_INSTALL_ROOT or C:\Unity\Editors.
     required: false
   provisioning-profile:
-    description: Required payload profile; EditorOnly, StandaloneWindowsIl2Cpp, Steam, Android, or Full.
+    description: Required target profile; see consumer enrollment docs for supported targets and backends.
     required: false
   diagnostics-path:
     description: JSON diagnostics file or destination directory.

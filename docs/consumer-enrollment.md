@@ -142,9 +142,20 @@ touches a Dependabot pull request.
    `EditorOnly` profile beside a static `standalone` matrix value stays
    rejected, and the literal profile does not lift the include-based and
    dynamic matrix rejections.
-   `Steam` is allowed only for a single job without a matrix. It verifies the
-   Linux IL2CPP module and excludes Linux Mono, Android, and other player
-   modules. Use it only when the offline runner setup includes that module.
+   Target profiles are allowed only for a single job without a matrix. They
+   verify only the selected target modules. Use `StandaloneWindowsMono`,
+   `StandaloneWindowsIl2Cpp`, `StandaloneLinuxMono`,
+   `StandaloneLinuxIl2Cpp`, `StandaloneMacMono`, or
+   `StandaloneMacIl2Cpp` for standalone targets. `WebGL` and `iOS` use IL2CPP
+   only. `AndroidMono` and `AndroidIl2Cpp` use the same Android module set.
+   The legacy `Steam` profile aliases `StandaloneLinuxIl2Cpp`; `Android` keeps
+   its former alias behavior. Steam and itch.io are distribution channels, so
+   select profiles for each target depot instead of the store name.
+   `iOS` proves the Unity module only. Unity can export an Xcode project from
+   Windows, but Xcode must run on macOS to build and sign the app. The Mac
+   profiles prove cross-build modules; native Mac signing, notarization, and
+   licensed runner return remain separate gates. The existing `Full` profile
+   retains its previous module set to avoid adding installation churn.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.
    The only permitted preceding step is the approved immutable, exact-input
