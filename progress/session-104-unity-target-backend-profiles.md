@@ -43,8 +43,11 @@ remain host-specific evidence gates.
 - Green: synthetic filesystem tests require target-specific Mono or IL2CPP
   player evidence for Windows Mono, Mac Mono, and Mac IL2CPP.
 - Green: `node tools/llm-harness.mjs check`.
-- Green: `.devcontainer/scripts/verify.sh` before the final filesystem test.
-- Pending: rerun the full verifier after that final test addition and review CI.
+- Green: `.devcontainer/scripts/verify.sh` after the final filesystem test.
+- Green: PR #293 Build lock CI, including Windows action tests.
+- Green: push Build lock CI and the organization enrollment audit on main at
+  `dcafdce0f395d1f8dfc01e9d4005edfff0bbb8e5`.
+- Green: local `main` matched `origin/main` after the merge.
 
 ## Review
 
