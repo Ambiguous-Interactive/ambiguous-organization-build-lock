@@ -2348,7 +2348,7 @@ function Get-UnityCiModuleSpec {
         [pscustomobject]@{ Id = 'windows-mono';           Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsMono') },
         [pscustomobject]@{ Id = 'windows-il2cpp';         Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsIl2Cpp', 'Full') },
         [pscustomobject]@{ Id = 'webgl';                  Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('WebGL', 'Full') },
-        [pscustomobject]@{ Id = 'linux-mono';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxMono', 'Full') },
+        [pscustomobject]@{ Id = 'linux-mono';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxMono', 'Steam', 'Full') },
         [pscustomobject]@{ Id = 'linux-il2cpp';           Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneLinuxIl2Cpp', 'Steam', 'Full') },
         [pscustomobject]@{ Id = 'mac-mono';               Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacMono') },
         [pscustomobject]@{ Id = 'mac-il2cpp';             Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneMacIl2Cpp') },

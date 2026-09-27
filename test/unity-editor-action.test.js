@@ -66,7 +66,7 @@ test("action input parsing preserves the upstream parameter surface", () => {
   });
 });
 
-test("Steam profile binds to Linux IL2CPP validation", () => {
+test("Steam profile binds to Linux Mono and IL2CPP validation", () => {
   const environment = validEnvironment({ "INPUT_PROVISIONING-PROFILE": "Steam" });
   const inputs = parseInputs(environment);
   assert.equal(inputs.provisioningProfile, "Steam");
@@ -252,19 +252,19 @@ test("vendored validator matches the reviewed self-contained payload digest", ()
   const normalizedPayload = Buffer.from(text.replace(/\r\n/g, "\n"), "utf8");
   assert.equal(
     crypto.createHash("sha256").update(normalizedPayload).digest("hex"),
-    "dcc432d839470f27801ae6736a54a672ffdc46561d48ebd271c9ee4ed5c43ede"
+    "cf26dfec9b5a88ff425411a89b1002227d0b3f7bd7781ff8ce4d8cb30be4a36f"
   );
   assert.doesNotMatch(text, /\$PSScriptRoot/i);
   assert.doesNotMatch(text, /^\s*\.\s+[^\r\n]+/m);
 });
 
-test("Steam profile is assigned only to the Linux IL2CPP module", () => {
+test("Steam profile includes Linux Mono and IL2CPP without Android modules", () => {
   const source = fs.readFileSync(payloadPath, "utf8");
   const moduleRows = [...source.matchAll(/\[pscustomobject\]@\{ Id = '([^']+)';[^\r\n]*Profiles = @\(([^)]*)\) \}/g)];
   const steamModuleIds = moduleRows
     .filter((row) => row[2].split(",").some((profile) => profile.trim() === "'Steam'"))
     .map((row) => row[1]);
-  assert.deepEqual(steamModuleIds, ["linux-il2cpp"]);
+  assert.deepEqual(steamModuleIds, ["linux-mono", "linux-il2cpp"]);
 });
 
 test("target profiles cover supported channel targets and backends", () => {
@@ -291,7 +291,7 @@ test("target profiles cover supported channel targets and backends", () => {
   for (const [module, profiles] of Object.entries({
     "windows-mono": ["StandaloneWindowsMono"],
     "windows-il2cpp": ["StandaloneWindowsIl2Cpp", "Full"],
-    "linux-mono": ["StandaloneLinuxMono", "Full"],
+    "linux-mono": ["StandaloneLinuxMono", "Steam", "Full"],
     "linux-il2cpp": ["StandaloneLinuxIl2Cpp", "Steam", "Full"],
     "mac-mono": ["StandaloneMacMono"],
     "mac-il2cpp": ["StandaloneMacIl2Cpp"],
@@ -474,7 +474,7 @@ $result | ConvertTo-Json -Compress -Depth 5
       verified: ["android", "android-sdk-ndk-tools", "android-open-jdk"],
       android: ["android", "android-sdk-ndk-tools"]
     },
-    Steam: { requested: ["linux-il2cpp"], verified: ["linux-il2cpp"], android: [] },
+    Steam: { requested: ["linux-mono", "linux-il2cpp"], verified: ["linux-mono", "linux-il2cpp"], android: [] },
     Android: {
       requested: ["android", "android-sdk-ndk-tools"],
       verified: ["android", "android-sdk-ndk-tools", "android-open-jdk"],

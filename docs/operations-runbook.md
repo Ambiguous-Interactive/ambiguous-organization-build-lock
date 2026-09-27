@@ -301,7 +301,7 @@ reader access. Treat either condition as scope drift.
    `StandaloneLinuxIl2Cpp`, `StandaloneMacMono`, or
    `StandaloneMacIl2Cpp` for standalone targets. `WebGL` and `iOS` use IL2CPP
    only. `AndroidMono` and `AndroidIl2Cpp` use the same Android module set.
-   `Steam` remains an alias for Linux IL2CPP. Steam and itch.io are store
+   `Steam` includes Linux Mono and IL2CPP without Android. Steam and itch.io are store
    channels; choose profiles for their target depots. The `iOS` profile proves
    the Unity module only. Xcode must run on macOS to build and sign an iOS app.
    Native Mac signing, notarization, and licensed runner return remain separate

@@ -26,7 +26,8 @@ remain host-specific evidence gates.
 ## Change
 
 - Added least-scope Windows, Linux, Mac, WebGL, iOS, and Android profiles.
-- Kept `Steam` as the Linux IL2CPP alias and `Android` as its former alias.
+- At this session's head, `Steam` selected only Linux IL2CPP; `Android` kept
+  its former alias behavior.
 - Kept the existing `Full` module set and order unchanged.
 - Kept action validation read-only. Missing modules still fail closed.
 - Updated enrollment policy, action runtime, docs, provenance, and task index.
