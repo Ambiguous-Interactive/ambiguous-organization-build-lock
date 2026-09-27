@@ -211,6 +211,7 @@ test("engineering workflows encode investigation, planning, review, and test ris
 
 test("vendor files remain thin canonical pointers", async () => {
   const { POINTERS, pointerContent } = await loadHarness();
+  assert.equal(POINTERS.some((pointer) => pointer.path === "GEMINI.md"), false);
   for (const pointer of POINTERS) {
     const content = fs.readFileSync(path.join(repoRoot, pointer.path), "utf8");
     assert.equal(content, pointerContent(pointer), `${pointer.path} must remain canonical`);
