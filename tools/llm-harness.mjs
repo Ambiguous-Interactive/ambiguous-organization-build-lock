@@ -7,7 +7,6 @@ export const MAX_LINES = 300;
 export const POINTERS = [
   { path: "AGENTS.md", title: "Codex and OpenAI Agents", target: ".llm/context.md" },
   { path: "CLAUDE.md", title: "Claude Code", target: ".llm/context.md" },
-  { path: "GEMINI.md", title: "Gemini", target: ".llm/context.md" },
   { path: ".cursorrules", title: "Cursor (legacy compatibility)", target: ".llm/context.md" },
   { path: ".windsurfrules", title: "Windsurf", target: ".llm/context.md" },
   { path: ".github/copilot-instructions.md", title: "GitHub Copilot", target: "../.llm/context.md" },
