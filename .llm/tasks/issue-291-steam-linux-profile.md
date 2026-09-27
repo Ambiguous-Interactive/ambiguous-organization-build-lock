@@ -31,8 +31,8 @@ health checks read-only and fail closed when the runner lacks a module.
 - Standalone profiles cover Windows, Linux, and Mac Mono and IL2CPP modules.
 - WebGL and iOS profiles cover their IL2CPP-only targets.
 - Android Mono and IL2CPP profiles use the same Android module set.
-- `Steam` remains a Linux IL2CPP alias. Store names select target depots,
-  not Unity modules.
+- `Steam` includes Linux Mono and IL2CPP modules without Android. Store names
+  select target depots, not Unity modules.
 - The enrollment analyzer accepts target profiles only without a job matrix.
 - The action manifest, enrollment guidance, runbook, provenance notice, tests,
   task index, and progress evidence agree.
