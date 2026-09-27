@@ -294,6 +294,9 @@ reader access. Treat either condition as scope drift.
    and acquire omit `if` so each inherits the preceding step's successful
    status. Never use `always()` on this prefix: editor rejection must stop lock
    acquisition.
+   `Steam` is limited to a single job without a matrix. It proves that the
+   offline-managed editor has Linux IL2CPP support. It does not install the
+   module in CI, and it does not include Linux Mono or Android support.
 
    The enrollment audit temporarily accepts the exact previously approved
    bootstrap/checkout/script prefix for unchanged consumers during rollout.

@@ -70,6 +70,7 @@ const (
 	trustedEditorInstallRoot    = `${{ runner.tool_cache }}\u6-v3`
 	trustedEditorDiagnostics    = "unity-editor-check.json"
 	trustedEditorStandalone     = "StandaloneWindowsIl2Cpp"
+	trustedEditorSteam          = "Steam"
 	trustedEditorMatrixProfile  = `${{ fromJSON('{"editmode":"EditorOnly","playmode":"EditorOnly","standalone":"StandaloneWindowsIl2Cpp"}')[matrix.test-mode] }}`
 	trustedEditorShell          = `pwsh -NoProfile -NonInteractive -Command ". '{0}'"`
 )
@@ -1228,12 +1229,13 @@ func trustedEditorGateCommandWithProfile(version, profile string) string {
 // bound to a static matrix: include-based and dynamic matrices keep the
 // general rejection, because the audit cannot enumerate their legs. The
 // unsafe direction, an EditorOnly profile beside standalone work, stays
-// rejected by the shape rules below.
+// rejected by the shape rules below. Steam verifies Linux IL2CPP for a single
+// cross-compiling job; matrix jobs cannot use that profile.
 func trustedEditorGateProfile(profile string, job *yaml.Node) bool {
 	strategy := mappingValue(job, "strategy")
 	matrix := mappingValue(strategy, "matrix")
 	if matrix == nil {
-		return profile == "EditorOnly"
+		return profile == "EditorOnly" || profile == trustedEditorSteam
 	}
 	if matrix.Kind != yaml.MappingNode ||
 		mappingValue(matrix, "include") != nil {

@@ -11,7 +11,7 @@ param(
 
     [switch]$CiManagedOnly = $($env:GITHUB_ACTIONS -eq 'true'),
 
-    [ValidateSet('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Android', 'Full')]
+    [ValidateSet('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Steam', 'Android', 'Full')]
     [string]$ProvisioningProfile = 'Full',
 
     [switch]$WithWindowsIl2Cpp,
@@ -2308,7 +2308,7 @@ function Get-UnityProvisioningProfile {
 function Assert-UnityProvisioningProfile {
     param([Parameter(Mandatory = $true)][string]$Profile)
 
-    if ($Profile -notin @('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Android', 'Full')) {
+    if ($Profile -notin @('EditorOnly', 'StandaloneWindowsIl2Cpp', 'Steam', 'Android', 'Full')) {
         throw "Unknown Unity provisioning profile '$Profile'."
     }
 }
@@ -2348,7 +2348,7 @@ function Get-UnityCiModuleSpec {
         [pscustomobject]@{ Id = 'windows-il2cpp';        Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('StandaloneWindowsIl2Cpp', 'Full') },
         [pscustomobject]@{ Id = 'webgl';                 Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Full') },
         [pscustomobject]@{ Id = 'linux-mono';            Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Full') },
-        [pscustomobject]@{ Id = 'linux-il2cpp';          Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Full') },
+        [pscustomobject]@{ Id = 'linux-il2cpp';          Requested = $true;  Verified = $true; Tier = 'core';    Profiles = @('Steam', 'Full') },
         [pscustomobject]@{ Id = 'android';               Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') },
         [pscustomobject]@{ Id = 'android-sdk-ndk-tools'; Requested = $true;  Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') },
         [pscustomobject]@{ Id = 'android-open-jdk';      Requested = $false; Verified = $true; Tier = 'android'; Profiles = @('Android', 'Full') }

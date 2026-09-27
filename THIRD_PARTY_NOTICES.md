@@ -6,8 +6,10 @@
 `Ambiguous-Interactive/unity-helpers` commit
 `76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d`, path
 `scripts/unity/ensure-editor.ps1`, with CRLF normalized to LF for this
-repository. Its SHA-256 digest is
-`c9a5cea6ad890bc7b2ad189a05a0d1a0514f1b850e45002318b360851289e837`.
+repository. This copy adds the reviewed `Steam` profile for Linux IL2CPP builds.
+The profile requests and verifies only the `linux-il2cpp` module. The resulting
+payload SHA-256 digest is
+`c76c9f5eafc04046ca4e8083d66c11f0c9ffc5a7985956c66647e30b72a1185d`.
 
 MIT License
 

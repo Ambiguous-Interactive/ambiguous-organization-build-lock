@@ -8,6 +8,7 @@ const path = require("node:path");
 const PROFILES = new Set([
   "EditorOnly",
   "StandaloneWindowsIl2Cpp",
+  "Steam",
   "Android",
   "Full"
 ]);
