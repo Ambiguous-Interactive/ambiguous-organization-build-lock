@@ -1,4 +1,4 @@
-<!-- summary: Add least-scope Unity target/backend profiles; store routing and native signing stay separate. -->
+<!-- summary: Steam checks Linux and Mac Mono modules; signing runs separately. -->
 # Task: Add Unity target and backend profiles
 
 ## Objective
@@ -31,10 +31,10 @@ health checks read-only and fail closed when the runner lacks a module.
 - Standalone profiles cover Windows, Linux, and Mac Mono and IL2CPP modules.
 - WebGL and iOS profiles cover their IL2CPP-only targets.
 - Android Mono and IL2CPP profiles use the same Android module set.
-- `Steam` includes Linux Mono and IL2CPP modules without Android. Store names
-  select target depots, not Unity modules.
+- `Steam` checks Linux Mono, Linux IL2CPP, and Mac Mono. It excludes Android.
+  Store names select target depots, not Unity modules.
 - The enrollment analyzer accepts target profiles only without a job matrix.
 - The action manifest, enrollment guidance, runbook, provenance notice, tests,
   task index, and progress evidence agree.
-- Central CI passes. Xcode signing, native Mac signing and notarization, and
-  licensed runner return remain separate evidence gates.
+- Central CI passes. Mac signing and notarization run without Unity activation.
+  Licensed runner return stays with the Windows build lifecycle.

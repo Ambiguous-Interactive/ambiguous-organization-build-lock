@@ -148,13 +148,13 @@ touches a Dependabot pull request.
    `StandaloneLinuxIl2Cpp`, `StandaloneMacMono`, or
    `StandaloneMacIl2Cpp` for standalone targets. `WebGL` and `iOS` use IL2CPP
    only. `AndroidMono` and `AndroidIl2Cpp` use the same Android module set.
-   The `Steam` profile includes Linux Mono and IL2CPP modules without Android.
+   `Steam` checks Linux Mono, Linux IL2CPP, and Mac Mono. It excludes Android.
    `Android` keeps its former alias behavior. Steam and itch.io are distribution
    channels, so select profiles for each target depot instead of the store name.
    `iOS` proves the Unity module only. Unity can export an Xcode project from
    Windows, but Xcode must run on macOS to build and sign the app. The Mac
-   profiles prove cross-build modules; native Mac signing, notarization, and
-   licensed runner return remain separate gates. The existing `Full` profile
+   profiles prove cross-build modules. A Mac job signs and notarizes without Unity.
+   License return stays with the Windows build. The `Full` profile
    retains its previous module set to avoid adding installation churn.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.

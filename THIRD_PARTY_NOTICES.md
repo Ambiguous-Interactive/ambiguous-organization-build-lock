@@ -7,13 +7,13 @@
 `76712db791093a9c6b2eccdd9c7bd1b4f1cdb24d`, path
 `scripts/unity/ensure-editor.ps1`, with CRLF normalized to LF for this
 repository. This copy adds reviewed target/backend profiles for Windows,
-Linux, Mac, WebGL, iOS, and Android. The `Steam` profile includes Linux Mono and
-IL2CPP modules without Android. The iOS and Mac Mono disk probes follow
+Linux, Mac, WebGL, iOS, and Android. The `Steam` profile checks Linux Mono,
+Linux IL2CPP, and Mac Mono, without Android. The iOS and Mac Mono disk probes follow
 layouts reviewed in `Ambiguous-Interactive/unity-helpers` commit
 `8c627ab32255a7f931f05bdd33203190e582b267`; the Mac IL2CPP probe applies the
 same backend-specific check. Each profile requests and verifies its selected
 module groups. The resulting payload SHA-256 digest is
-`cf26dfec9b5a88ff425411a89b1002227d0b3f7bd7781ff8ce4d8cb30be4a36f`.
+`69fca6d452fdba98a4f8b522887fd2567659306279947e83576a968c97ae5725`.
 
 MIT License
 
