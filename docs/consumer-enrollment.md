@@ -261,13 +261,16 @@ touches a Dependabot pull request.
 
 The conditional classifier and aggregate have an exact static shape. All five
 referenced jobs must be distinct and must not define workflow/job `env`,
-`defaults`, containers, services, or a matrix. The classifier has exactly the
-two steps below; preflight has exactly one approved preflight action; fallback
-has exactly one approved release action; and the aggregate has exactly one
-validation action. Replace `APPROVED_LOCK_SHA` only with a reviewed SHA listed
-in `approvedLockShas`. A pin used for the central return action must also be
-listed in `approvedReturnShas`, and for a Darwin runner also in
-`approvedDarwinReturnShas`.
+`defaults`, containers, services, or a matrix. The classifier has the two
+steps below. It may add one `Check added rule lines` step after the classifier
+action, with only `name` and `run` keys and the exact commands shown. This
+check cannot change the already-reported classifier output, and its failure
+still fails the job. Preflight has exactly one approved preflight
+action; fallback has exactly one approved release action; and the aggregate
+has exactly one validation action. Replace `APPROVED_LOCK_SHA` only with a
+reviewed SHA listed in `approvedLockShas`. A pin used for the central return
+action must also be listed in `approvedReturnShas`, and for a Darwin runner
+also in `approvedDarwinReturnShas`.
 
 ```yaml
 jobs:
@@ -286,6 +289,10 @@ jobs:
           event-name: ${{ github.event_name }}
           base-sha: ${{ github.event.pull_request.base.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
+      - name: Check added rule lines
+        run: |
+          python3 scripts/lint-line-length.py --self-test
+          python3 scripts/lint-line-length.py --require-change
 
   unity-ci:
     if: always()

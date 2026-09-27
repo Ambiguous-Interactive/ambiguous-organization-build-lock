@@ -906,6 +906,11 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 
 const maxUnityEditorCheckTimeoutMinutes = 10
 
+const postClassifierValidationCommand = "python3 scripts/lint-line-length.py --self-test\n" +
+	"python3 scripts/lint-line-length.py --require-change"
+
+const postClassifierValidationName = "Check added rule lines"
+
 var unityEditorProvisioningControls = []string{
 	"uh_ensure_editor_provisioning_budget_seconds",
 	"uh_ensure_editor_install_timeout_seconds",
@@ -5303,7 +5308,8 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		return false
 	}
 	steps := sequenceValues(mappingValue(job, "steps"))
-	if len(steps) != 2 {
+	if len(steps) < 2 || len(steps) > 3 ||
+		(len(steps) == 3 && !postClassifierValidationStepSafe(steps[2])) {
 		return false
 	}
 	checkout, classify := steps[0], steps[1]
@@ -5358,6 +5364,17 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 			classifyID,
 			"unity-required",
 		)
+}
+
+func postClassifierValidationStepSafe(step *yaml.Node) bool {
+	if !mappingHasOnlyKeys(step, map[string]bool{"name": true, "run": true}) {
+		return false
+	}
+	name := mappingValue(step, "name")
+	run := mappingValue(step, "run")
+	return scalarValue(name) == postClassifierValidationName &&
+		run != nil && run.Kind == yaml.ScalarNode &&
+		strings.TrimSpace(run.Value) == postClassifierValidationCommand
 }
 
 func (a *unityPolicyAnalyzer) validationPreflightMatches(
