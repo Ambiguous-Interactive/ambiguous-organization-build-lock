@@ -91,8 +91,14 @@ confirmed the central profile and enrollment gaps.
 
 ## Disposition
 
-This central profile slice is ready for PR review. The task and issue remain
-open pending hosted review/checks and downstream proof that a Linux player is
-built and uploaded to Steam's Linux depot. macOS depot and safe native license
-return evidence also remain open. Continue the broader issue triage after this
-slice is reviewed and merged.
+PR #292 is open from `codex/issue-291-steam-profile`. Hosted Build lock CI run
+`36349982200` completed successfully: the central checks, Windows action tests,
+and Darwin return action tests all passed. At the latest review inspection,
+there were no submitted review objects, inline review threads, or discussion
+comments. The PR's automated summary labels it medium risk and reports no
+blocking finding.
+
+The profile slice is ready to merge under repository gates. The task and issue
+remain open pending downstream proof that a Linux player is built and uploaded
+to Steam's Linux depot. macOS depot and safe native license-return evidence
+also remain open. Continue the broader issue triage after this slice is merged.
