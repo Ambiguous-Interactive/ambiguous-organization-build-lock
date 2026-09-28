@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
 const { setTimeout: delay } = require("node:timers/promises");
 
 const {
@@ -25,6 +26,7 @@ const {
   verifyUnityEditor,
   workflowCommandData
 } = require("../.github/dist/return-unity-license.js");
+const { classifyEvidence } = require("../.github/dist/classify-unity-cleanup-evidence.js");
 
 // `editorPath` defaults to the Windows layout while `executeReturn` defaults to
 // `process.platform`, so every case below names the platform it means: the
@@ -148,20 +150,85 @@ test("central return invokes only the CI-managed editor and emits bounded eviden
   );
 });
 
-test("nonzero Unity exit preserves typed evidence and fails the action", async (t) => {
-  const item = fixture(t, "#!/bin/sh\nprintf 'return failed\\n'\nexit 7\n");
-  const result = await executeReturn({
-    env: item.env,
-    platform: "linux",
-    verifyEditor: async () => {}
-  });
-  assert.equal(result.exitCode, 7);
-  assert.equal(result.commandCompleted, true);
-  assert.equal(result.captureComplete, true);
+test("nonzero Unity exit leaves cleanup success to the separate classifier", async (t) => {
+  const cases = [
+    {
+      name: "complete return proof",
+      log: [
+        "[Licensing::Module] Successfully returned the entitlement license",
+        "[Licensing::Client] Successfully returned ULF license with serial number : " +
+          "SC-ABCD-EFGH-IJKL-MNOP-QRST"
+      ].join("\n") + "\n",
+      wantSafe: true
+    },
+    {
+      name: "missing return proof",
+      log: "return failed\n",
+      wantSafe: false
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async (subtest) => {
+      const fixtureResult = fixture(
+        subtest,
+        `#!/bin/sh\nprintf '%s' '${item.log}'\nexit 7\n`,
+        "linux"
+      );
+      const result = await run({
+        env: fixtureResult.env,
+        platform: "linux",
+        verifyEditor: async () => {},
+        log() {},
+        warn() {}
+      });
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.commandCompleted, true);
+      assert.equal(result.captureComplete, true);
+
+      const verdict = classifyEvidence({
+        exitCode: result.exitCode,
+        returnLog: fs.readFileSync(result.returnLogPath),
+        supplemental: [],
+        commandCompleted: result.commandCompleted,
+        captureComplete: result.captureComplete
+      });
+      assert.equal(verdict.resourceSafe, item.wantSafe);
+      assert.equal(verdict.cleanupStatus, item.wantSafe ? "confirmed" : "unknown");
+    });
+  }
+});
+
+test("a signaled Unity return stays failed even when its capture has positive proof", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nexit 0\n", "linux");
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.pid = 12345;
+    child.kill = () => true;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    process.nextTick(() => {
+      child.stdout.end(
+        [
+          "[Licensing::Module] Successfully returned the entitlement license",
+          "[Licensing::Client] Successfully returned ULF license with serial number : " +
+            "SC-ABCD-EFGH-IJKL-MNOP-QRST"
+        ].join("\n") + "\n"
+      );
+      child.emit("close", null, "SIGTERM");
+    });
+    return child;
+  };
+
   await assert.rejects(run({
     env: item.env,
     platform: "linux",
-    verifyEditor: async () => {}
+    spawnImpl,
+    verifyEditor: async () => {},
+    killImpl() {},
+    log() {},
+    warn() {}
   }), /did not complete/);
 });
 

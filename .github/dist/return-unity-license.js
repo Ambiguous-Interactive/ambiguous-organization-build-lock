@@ -725,16 +725,28 @@ async function executeReturn(options) {
     exitCode: exitCode ?? 1,
     returnLogPath,
     returnLogDigest,
+    terminatedBySignal: typeof result.signal === "string" && result.signal !== "",
     timedOut
   };
 }
 
 async function run(options = {}) {
   const result = await executeReturn(options);
-  if (!result.commandCompleted || !result.captureComplete || result.exitCode !== 0) {
+  if (
+    !result.commandCompleted ||
+    !result.captureComplete ||
+    result.terminatedBySignal ||
+    result.timedOut
+  ) {
     throw new Error("Unity return did not complete with bounded successful evidence.");
   }
-  console.log("::notice::Unity return command completed; redacted evidence remains local to the runner.");
+  if (result.exitCode === 0) {
+    (options.log || console.log)("::notice::Unity return command completed; redacted evidence remains local to the runner.");
+  } else {
+    (options.warn || console.warn)(
+      `::warning::Unity return command exited with code ${result.exitCode}; cleanup classification will decide its meaning.`
+    );
+  }
   return result;
 }
 
