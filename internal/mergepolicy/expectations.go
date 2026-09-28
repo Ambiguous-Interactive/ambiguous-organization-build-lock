@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	expectationsSchemaVersion = 2
 	// MaxExpectationsBytes bounds the reviewed expectation file.
 	MaxExpectationsBytes = 64 * 1024
 	// Organization is the only authorized owner for audited repositories.
@@ -92,6 +93,7 @@ type RepositoryExpectation struct {
 	Repository              string        `json:"repository"`
 	DefaultBranch           string        `json:"defaultBranch"`
 	RequiredContexts        []string      `json:"requiredContexts"`
+	RequiredContextAppID    int64         `json:"requiredContextAppId,omitempty"`
 	RequireAdminEnforcement bool          `json:"requireAdminEnforcement"`
 	AllowedBypassActors     []BypassActor `json:"allowedBypassActors"`
 }
@@ -136,8 +138,8 @@ func ParseExpectations(content []byte) (Expectations, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Expectations{}, fmt.Errorf("merge policy expectations must contain one JSON value")
 	}
-	if expectations.SchemaVersion != 1 {
-		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 1")
+	if expectations.SchemaVersion != expectationsSchemaVersion {
+		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 2")
 	}
 	if expectations.Organization != Organization {
 		return Expectations{}, fmt.Errorf("merge policy expectations organization is not authorized")
@@ -160,6 +162,12 @@ func ParseExpectations(content []byte) (Expectations, error) {
 		}
 		if len(expectation.RequiredContexts) > MaxContextsPerRepository {
 			return Expectations{}, fmt.Errorf("merge policy expectations exceed the required context bound")
+		}
+		if len(expectation.RequiredContexts) > 0 && expectation.RequiredContextAppID <= 0 {
+			return Expectations{}, fmt.Errorf("merge policy expectations require a positive required-context App ID")
+		}
+		if len(expectation.RequiredContexts) == 0 && expectation.RequiredContextAppID != 0 {
+			return Expectations{}, fmt.Errorf("exempt merge policy expectations cannot name a required-context App ID")
 		}
 		for _, context := range expectation.RequiredContexts {
 			if !validContext(context) {

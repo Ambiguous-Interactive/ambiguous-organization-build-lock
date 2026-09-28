@@ -50,6 +50,8 @@ func TestRenderIssueBodyContainsOnlySanitizedFields(t *testing.T) {
 		alertMarker,
 		"Ambiguous-Interactive/DoxReloaded",
 		"missing-required-context",
+		"Source App ID",
+		"any source",
 		"ruleset Main Protection (id 1483933)",
 		"finding-code contract",
 		"(docs/consumer-enrollment.md)",
@@ -165,6 +167,13 @@ func TestReadAuditRejectsUnknownFieldsAndHostileValues(t *testing.T) {
 	write(audit, nil)
 	if _, err := readAudit(path); err == nil {
 		t.Fatal("invalid branch passed")
+	}
+
+	audit = sampleAudit()
+	audit.Inventory[0].IntegrationID = -1
+	write(audit, nil)
+	if _, err := readAudit(path); err == nil {
+		t.Fatal("negative source App ID passed")
 	}
 }
 

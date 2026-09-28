@@ -33,16 +33,19 @@ func defaultExpectationBodies() []string {
 
 func expectationBody(repository, branch, context string) string {
 	contexts := ""
+	appID := ""
 	if context != "" {
 		contexts = `"` + context + `"`
+		appID = `"requiredContextAppId": 15368,`
 	}
 	return fmt.Sprintf(`{
     "repository": "Ambiguous-Interactive/%s",
     "defaultBranch": "%s",
     "requiredContexts": [%s],
+	    %s
     "requireAdminEnforcement": %t,
     "allowedBypassActors": []
-  }`, repository, branch, contexts, context != "")
+	}`, repository, branch, contexts, appID, context != "")
 }
 
 func writeRepositoryPolicy(t *testing.T, directory string) string {
@@ -78,7 +81,7 @@ func writeExpectations(t *testing.T, directory string, bodies ...string) string 
 	}
 	path := filepath.Join(directory, "merge-policy-expectations.json")
 	content := `{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "organization": "Ambiguous-Interactive",
   "repositories": [` + strings.Join(bodies, ",\n") + `]
 }`
@@ -345,11 +348,12 @@ func decodeArtifact(t *testing.T, content string) struct {
 		Repository string `json:"repository"`
 	} `json:"repositories"`
 	Inventory []struct {
-		Repository  string `json:"repository"`
-		Kind        string `json:"kind"`
-		Carrier     string `json:"carrier"`
-		Context     string `json:"context"`
-		Enforcement string `json:"enforcement"`
+		Repository    string `json:"repository"`
+		Kind          string `json:"kind"`
+		Carrier       string `json:"carrier"`
+		Context       string `json:"context"`
+		Enforcement   string `json:"enforcement"`
+		IntegrationID int64  `json:"integrationId"`
 	} `json:"inventory"`
 	Findings []struct {
 		Repository string `json:"repository"`
@@ -365,11 +369,12 @@ func decodeArtifact(t *testing.T, content string) struct {
 			Repository string `json:"repository"`
 		} `json:"repositories"`
 		Inventory []struct {
-			Repository  string `json:"repository"`
-			Kind        string `json:"kind"`
-			Carrier     string `json:"carrier"`
-			Context     string `json:"context"`
-			Enforcement string `json:"enforcement"`
+			Repository    string `json:"repository"`
+			Kind          string `json:"kind"`
+			Carrier       string `json:"carrier"`
+			Context       string `json:"context"`
+			Enforcement   string `json:"enforcement"`
+			IntegrationID int64  `json:"integrationId"`
 		} `json:"inventory"`
 		Findings []struct {
 			Repository string `json:"repository"`
@@ -470,6 +475,89 @@ func TestRunReportsCleanMergePolicy(t *testing.T) {
 	if len(audit.Inventory) != 2 {
 		t.Fatalf("inventory must record both observed carriers: %s", content)
 	}
+	for _, entry := range audit.Inventory {
+		if entry.Context == "CI Success" && entry.IntegrationID != 15368 {
+			t.Fatalf("ruleset source ID = %d, want 15368", entry.IntegrationID)
+		}
+		if entry.Context == "Unity CI" && entry.IntegrationID != 15368 {
+			t.Fatalf("branch protection source ID = %d, want 15368", entry.IntegrationID)
+		}
+	}
+}
+
+func TestRunReportsUnboundRulesetCheckSource(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	server.rulesetDetailPayloads[managedRulesetID] = strings.Replace(
+		detailPayload("Main Protection", "CI Success", ""),
+		`"integration_id": 15368`, `"integration_id": null`, 1,
+	)
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] = activeRulesJSON("CI Success")
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("unbound source exit = %d, want 1; artifact: %s", exit, content)
+	}
+	audit := decodeArtifact(t, content)
+	if !audit.Complete || len(audit.Findings) != 1 || audit.Findings[0].Code != mergepolicy.CodeUnexpectedCheckSource {
+		t.Fatalf("unexpected unbound-source evidence: %s", content)
+	}
+	if audit.Inventory[0].IntegrationID != 0 || !strings.Contains(audit.Findings[0].Detail, "App ID 0") {
+		t.Fatalf("artifact must preserve the unbound source: %s", content)
+	}
+}
+
+func TestRunReportsUnboundClassicProtectionSource(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", ""),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", "Unity CI"),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.protectionPayloads["Ambiguous-Interactive/qora-redux/branches/main"] = strings.Replace(
+		protectionJSON("Unity CI", true), `"app_id": 15368`, `"app_id": null`, 1,
+	)
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("unbound classic source exit = %d, want 1; artifact: %s", exit, content)
+	}
+	audit := decodeArtifact(t, content)
+	if !audit.Complete || len(audit.Findings) != 1 || audit.Findings[0].Code != mergepolicy.CodeUnexpectedCheckSource {
+		t.Fatalf("unexpected unbound-source evidence: %s", content)
+	}
+	if audit.Inventory[0].IntegrationID != 0 || !strings.Contains(audit.Findings[0].Detail, "App ID 0") {
+		t.Fatalf("artifact must preserve the unbound source: %s", content)
+	}
+}
+
+func TestIntegrationIDTreatsNonpositiveSourceAsUnbound(t *testing.T) {
+	for _, value := range []*int64{nil, int64Pointer(0), int64Pointer(-1)} {
+		if got := integrationID(value); got != 0 {
+			t.Fatalf("integrationID(%v) = %d, want unbound 0", value, got)
+		}
+	}
+	if got := integrationID(int64Pointer(15368)); got != 15368 {
+		t.Fatalf("integrationID(15368) = %d", got)
+	}
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
 }
 
 func TestRunReportsMissingContextAndAbsentProtection(t *testing.T) {

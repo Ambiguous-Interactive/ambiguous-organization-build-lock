@@ -7,7 +7,7 @@ import (
 
 func expectationsContent(body string) string {
 	return `{
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "organization": "Ambiguous-Interactive",
   "repositories": [` + body + `]
 }`
@@ -18,6 +18,7 @@ func validExpectationBody() string {
     "repository": "Ambiguous-Interactive/example",
     "defaultBranch": "main",
     "requiredContexts": ["Unity CI Success"],
+    "requiredContextAppId": 15368,
     "requireAdminEnforcement": true,
     "allowedBypassActors": [
       {"actorType": "OrganizationAdmin", "actorId": 5, "mode": "always"}
@@ -38,6 +39,7 @@ func TestParseExpectationsAcceptsReviewedFile(t *testing.T) {
 		expectation.DefaultBranch != "main" ||
 		len(expectation.RequiredContexts) != 1 ||
 		expectation.RequiredContexts[0] != "Unity CI Success" ||
+		expectation.RequiredContextAppID != 15368 ||
 		!expectation.RequireAdminEnforcement ||
 		len(expectation.AllowedBypassActors) != 1 ||
 		expectation.AllowedBypassActors[0].ActorType != "OrganizationAdmin" ||
@@ -63,15 +65,17 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 	cases := map[string]string{
 		"empty":                      "",
 		"too large":                  strings.Repeat(" ", MaxExpectationsBytes+1),
-		"unknown field":              `{"schemaVersion": 1, "organization": "Ambiguous-Interactive", "repositories": [{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "surprise": true}]}`,
+		"unknown field":              `{"schemaVersion": 2, "organization": "Ambiguous-Interactive", "repositories": [{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [], "surprise": true}]}`,
 		"trailing value":             expectationsContent(validExpectationBody()) + " {}",
-		"wrong schema version":       strings.Replace(expectationsContent(validExpectationBody()), `"schemaVersion": 1`, `"schemaVersion": 2`, 1),
+		"wrong schema version":       strings.Replace(expectationsContent(validExpectationBody()), `"schemaVersion": 2`, `"schemaVersion": 1`, 1),
 		"wrong organization":         strings.Replace(expectationsContent(validExpectationBody()), "Ambiguous-Interactive", "Other-Org", 1),
-		"no repositories":            `{"schemaVersion": 1, "organization": "Ambiguous-Interactive", "repositories": []}`,
+		"no repositories":            `{"schemaVersion": 2, "organization": "Ambiguous-Interactive", "repositories": []}`,
 		"repository outside org":     `{"repository": "Other-Org/example", "defaultBranch": "main", "requiredContexts": []}`,
 		"bad repository spelling":    `{"repository": "Ambiguous-Interactive/ex ample", "defaultBranch": "main", "requiredContexts": []}`,
 		"duplicate repository":       `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": []}, {"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": []}`,
 		"invalid default branch":     `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "bad branch", "requiredContexts": []}`,
+		"missing context App ID":     expectationsContent(strings.Replace(validExpectationBody(), "    \"requiredContextAppId\": 15368,\n", "", 1)),
+		"nonpositive context App ID": expectationsContent(strings.Replace(validExpectationBody(), `"requiredContextAppId": 15368`, `"requiredContextAppId": 0`, 1)),
 		"empty context":              `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": [""]}`,
 		"unbounded context":          `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": ["` + strings.Repeat("a", MaxContextBytes+1) + `"]}`,
 		"context with control chars": `{"repository": "Ambiguous-Interactive/example", "defaultBranch": "main", "requiredContexts": ["a\tb"]}`,

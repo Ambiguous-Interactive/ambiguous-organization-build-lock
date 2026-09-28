@@ -275,7 +275,8 @@ type rulesetDetailPayload struct {
 		Type       string `json:"type"`
 		Parameters struct {
 			RequiredStatusChecks []struct {
-				Context string `json:"context"`
+				Context       string `json:"context"`
+				IntegrationID *int64 `json:"integration_id"`
 			} `json:"required_status_checks"`
 		} `json:"parameters"`
 	} `json:"rules"`
@@ -298,6 +299,7 @@ type protectionPayload struct {
 	RequiredStatusChecks struct {
 		Checks []struct {
 			Context string `json:"context"`
+			AppID   *int64 `json:"app_id"`
 		} `json:"checks"`
 		Contexts []string `json:"contexts"`
 	} `json:"required_status_checks"`
@@ -518,7 +520,8 @@ func rulesetFromDetail(detail rulesetDetailPayload) mergepolicy.Ruleset {
 		}
 		for _, check := range rule.Parameters.RequiredStatusChecks {
 			ruleset.RequiredChecks = append(ruleset.RequiredChecks, mergepolicy.RequiredCheck{
-				Context: check.Context,
+				Context:       check.Context,
+				IntegrationID: integrationID(check.IntegrationID),
 			})
 		}
 	}
@@ -538,7 +541,10 @@ func rulesetFromDetail(detail rulesetDetailPayload) mergepolicy.Ruleset {
 func protectionChecks(payload protectionPayload) []mergepolicy.RequiredCheck {
 	checks := make([]mergepolicy.RequiredCheck, 0, len(payload.RequiredStatusChecks.Checks)+len(payload.RequiredStatusChecks.Contexts))
 	for _, check := range payload.RequiredStatusChecks.Checks {
-		checks = append(checks, mergepolicy.RequiredCheck{Context: mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes)})
+		checks = append(checks, mergepolicy.RequiredCheck{
+			Context:       mergepolicy.SanitizeText(check.Context, mergepolicy.MaxContextBytes),
+			IntegrationID: integrationID(check.AppID),
+		})
 	}
 	for _, context := range payload.RequiredStatusChecks.Contexts {
 		sanitized := mergepolicy.SanitizeText(context, mergepolicy.MaxContextBytes)
@@ -554,6 +560,13 @@ func protectionChecks(payload protectionPayload) []mergepolicy.RequiredCheck {
 		}
 	}
 	return checks
+}
+
+func integrationID(value *int64) int64 {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return *value
 }
 
 func hasPagination(headers http.Header) bool {

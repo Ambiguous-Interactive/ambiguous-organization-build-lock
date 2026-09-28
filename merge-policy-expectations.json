@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "organization": "Ambiguous-Interactive",
   "repositories": [
     {
       "repository": "Ambiguous-Interactive/DoxReloaded",
       "defaultBranch": "main",
       "requiredContexts": ["CI Success"],
+      "requiredContextAppId": 15368,
       "requireAdminEnforcement": true,
       "allowedBypassActors": []
     },
@@ -13,6 +14,7 @@
       "repository": "Ambiguous-Interactive/DxMessaging",
       "defaultBranch": "master",
       "requiredContexts": ["Unity CI Success"],
+      "requiredContextAppId": 15368,
       "requireAdminEnforcement": true,
       "allowedBypassActors": [
         { "actorType": "Integration", "actorId": 3977200, "mode": "always" }
@@ -22,6 +24,7 @@
       "repository": "Ambiguous-Interactive/IshoBoy",
       "defaultBranch": "main",
       "requiredContexts": ["Unity CI Success"],
+      "requiredContextAppId": 15368,
       "requireAdminEnforcement": true,
       "allowedBypassActors": []
     },
@@ -29,6 +32,7 @@
       "repository": "Ambiguous-Interactive/qora-redux",
       "defaultBranch": "main",
       "requiredContexts": ["Unity CI"],
+      "requiredContextAppId": 15368,
       "requireAdminEnforcement": true,
       "allowedBypassActors": []
     },
@@ -43,6 +47,7 @@
       "repository": "Ambiguous-Interactive/unity-helpers",
       "defaultBranch": "main",
       "requiredContexts": ["Unity CI Success"],
+      "requiredContextAppId": 15368,
       "requireAdminEnforcement": true,
       "allowedBypassActors": []
     }

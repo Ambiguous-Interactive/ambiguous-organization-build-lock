@@ -10,6 +10,7 @@ func expectation() RepositoryExpectation {
 		Repository:              "Ambiguous-Interactive/example",
 		DefaultBranch:           "main",
 		RequiredContexts:        []string{"Unity CI Success"},
+		RequiredContextAppID:    15368,
 		RequireAdminEnforcement: true,
 	}
 }
@@ -17,9 +18,37 @@ func expectation() RepositoryExpectation {
 func ruleset(id int64, name, enforcement string, checks ...string) Ruleset {
 	ruleset := Ruleset{ID: id, Name: name, Enforcement: enforcement}
 	for _, check := range checks {
-		ruleset.RequiredChecks = append(ruleset.RequiredChecks, RequiredCheck{Context: check})
+		ruleset.RequiredChecks = append(ruleset.RequiredChecks, RequiredCheck{Context: check, IntegrationID: 15368})
 	}
 	return ruleset
+}
+
+func TestAnalyzeReportsUnboundRequiredCheckSource(t *testing.T) {
+	observed := Observed{
+		ActiveChecks: []ActiveCheck{activeCheck("Unity CI Success", 4)},
+		Rulesets: []Ruleset{{
+			ID: 4, Name: "Required CI", Enforcement: "active",
+			RequiredChecks: []RequiredCheck{{Context: "Unity CI Success"}},
+		}},
+	}
+	findings, _ := Analyze(expectation(), observed)
+	if want := []string{CodeUnexpectedCheckSource}; !equalCodes(codes(findings), want) {
+		t.Fatalf("codes = %v, want %v", codes(findings), want)
+	}
+	if !strings.Contains(findings[0].Detail, "App ID 0") || !strings.Contains(findings[0].Detail, "15368") {
+		t.Fatalf("source finding must record observed and expected App IDs: %q", findings[0].Detail)
+	}
+}
+
+func TestAnalyzeReportsMissingRulesetSourceEvidence(t *testing.T) {
+	observed := Observed{
+		ActiveChecks: []ActiveCheck{activeCheck("Unity CI Success", 4)},
+		Rulesets:     []Ruleset{{ID: 4, Name: "Required CI", Enforcement: "active"}},
+	}
+	findings, _ := Analyze(expectation(), observed)
+	if len(findings) != 1 || findings[0].Code != CodeCheckSourceEvidenceMissing {
+		t.Fatalf("missing source details must fail closed: %+v", findings)
+	}
 }
 
 func activeCheck(context string, rulesetID int64) ActiveCheck {
@@ -53,6 +82,42 @@ func TestAnalyzeAcceptsActiveRulesetAndClassicProtectionCarriers(t *testing.T) {
 	if !hasInventory(inventory, kindRuleset, "Unity CI Success") ||
 		!hasInventory(inventory, kindBranchProtection, "Engine-free (Qora.Core + Qora.Gen)") {
 		t.Fatalf("inventory does not record the observed carriers: %+v", inventory)
+	}
+	for _, entry := range inventory {
+		if entry.Kind == kindRuleset && entry.Context == "Unity CI Success" && entry.IntegrationID != 15368 {
+			t.Fatalf("ruleset inventory source = %d, want 15368", entry.IntegrationID)
+		}
+	}
+}
+
+func TestAnalyzeChecksEveryCarrierForTheReviewedApp(t *testing.T) {
+	first := ruleset(4, "First", "active", "Unity CI Success")
+	second := ruleset(5, "Second", "active", "Unity CI Success")
+	second.RequiredChecks[0].IntegrationID = 42
+	observed := Observed{
+		ActiveChecks: []ActiveCheck{
+			activeCheck("Unity CI Success", 4),
+			activeCheck("Unity CI Success", 5),
+		},
+		Rulesets: []Ruleset{first, second},
+	}
+	findings, _ := Analyze(expectation(), observed)
+	if len(findings) != 1 || findings[0].Code != CodeUnexpectedCheckSource ||
+		!strings.Contains(findings[0].Detail, "Second") || !strings.Contains(findings[0].Detail, "App ID 42") {
+		t.Fatalf("wrong issuer on one carrier must fail: %+v", findings)
+	}
+}
+
+func TestAnalyzeChecksClassicBranchProtectionSource(t *testing.T) {
+	observed := Observed{Protection: Protection{
+		Present:        true,
+		AdminEnforced:  true,
+		RequiredChecks: []RequiredCheck{{Context: "Unity CI Success"}},
+	}}
+	findings, _ := Analyze(expectation(), observed)
+	if len(findings) != 1 || findings[0].Code != CodeUnexpectedCheckSource ||
+		!strings.Contains(findings[0].Detail, "default branch protection") {
+		t.Fatalf("unbound classic source must fail: %+v", findings)
 	}
 }
 
@@ -207,7 +272,7 @@ func TestAnalyzeReportsClassicAdminBypass(t *testing.T) {
 	protection := Protection{
 		Present:        true,
 		AdminEnforced:  false,
-		RequiredChecks: []RequiredCheck{{Context: "Unity CI Success"}},
+		RequiredChecks: []RequiredCheck{{Context: "Unity CI Success", IntegrationID: 15368}},
 	}
 	findings, _ := Analyze(expectation(), Observed{Protection: protection})
 	if want := []string{CodeUnexpectedBypassActor}; !equalCodes(codes(findings), want) {
