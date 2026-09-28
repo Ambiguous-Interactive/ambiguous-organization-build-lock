@@ -301,8 +301,11 @@ perform PR API calls.
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The return wrapper
 owns command invocation and bounded raw-log capture; it must not classify its own
-evidence. The central classifier accepts cleanup proof only from the dedicated
-current return log. Exact entitlement-return and client-ULF-return lines are both
+evidence. A completed command with a complete capture does not fail its step
+only because its exit code is nonzero; the classifier decides what that result
+proves. A timeout, signal, or incomplete capture still fails the step. The
+central classifier accepts cleanup proof only from the dedicated current return
+log. Exact entitlement-return and client-ULF-return lines are both
 required. Exit zero, supplemental proof, or `Serial number unavailable` is
 insufficient. The one exception is the measured shared-seat handoff
 (issue #83): a `400006` response with the client-ULF-return line and a

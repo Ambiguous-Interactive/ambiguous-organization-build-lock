@@ -196,8 +196,11 @@ touches a Dependabot pull request.
    not cleanup authority. It reports a dedicated run-scoped log path,
    command-completed state, signed exit code,
    capture-complete attestation, and SHA-256 of the exact redacted log bytes.
-   Bind that digest directly into the classifier so later workflow steps
-   cannot replace evidence. The classifier accepts only the exact current-run
+   A completed command with a complete capture does not fail this step only
+   because its exit code is nonzero. The classifier decides what that code and
+   log prove. Timeouts, signals, and incomplete capture still fail the step.
+   Bind the digest directly into the classifier so later workflow steps cannot
+   replace evidence. The classifier accepts only the exact current-run
    `RUNNER_TEMP/unity-return-<run>-<attempt>-<suffix>/return-license.log`
    contract, rejects link/reparse ancestry, hard links, and identity changes,
    then atomically claims the action-owned directory under a private random
