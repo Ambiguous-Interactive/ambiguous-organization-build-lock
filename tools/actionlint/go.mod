@@ -1,6 +1,6 @@
 module github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/tools/actionlint
 
-go 1.26.0
+go 1.27.1
 
 require github.com/rhysd/actionlint v1.7.12
 

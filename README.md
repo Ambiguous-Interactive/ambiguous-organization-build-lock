@@ -8,7 +8,7 @@ Unity.
 ## Development Environment
 
 The repository has a pinned, multi-architecture [development container](.devcontainer/README.md)
-for VS Code and VSCodium on Linux, macOS, and Windows. It includes Go 1.26,
+for VS Code and VSCodium on Linux, macOS, and Windows. It includes Go 1.27,
 Node.js 24, GitHub Actions tooling, persistent build caches, zsh, and matching
 editor extensions. After reopening the repository in the container, run
 `.devcontainer/scripts/verify.sh` for the complete CI-equivalent local check.

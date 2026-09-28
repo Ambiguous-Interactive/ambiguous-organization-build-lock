@@ -1,7 +1,7 @@
 # Development container
 
 This repository includes the same development environment for VS Code and
-VSCodium on Linux, macOS, and Windows. It provides Go 1.26, Node.js 24,
+VSCodium on Linux, macOS, and Windows. It provides Go 1.27, Node.js 24,
 GitHub CLI, zsh, Go editor/debug tools, `actionlint` through the repository's
 tool module, the latest stable OpenAI Codex and OpenCode CLIs from npm, and a
 focused set of shell, JSON, search, and benchmarking tools.
@@ -34,7 +34,7 @@ There are two different VSCodium container workflows:
   named caches, environment, and editor customizations in this repository.
 - `DDorch.codium-devcontainer` is a deliberately smaller SSH-based launcher.
   It ignores `build`, Features, mounts, environment, and editor customizations.
-  For that launcher, this configuration exposes a pinned Go 1.26 fallback
+  For that launcher, this configuration exposes a pinned Go 1.27 fallback
   `image`; its build-time lifecycle command installs checksum-verified Node.js
   24 and GitHub CLI releases. The remaining convenience utilities intentionally
   track the current packages in the image's Debian repositories and are not
