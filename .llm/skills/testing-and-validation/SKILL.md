@@ -4,7 +4,7 @@ description: Select and run repository validation with honest evidence. Use when
 ---
 # Testing and Validation
 
-The repository uses dependency-free Node 24 tests and Go 1.26 tests. Public
+The repository uses dependency-free Node 24 tests and Go 1.27 tests. Public
 JavaScript actions execute committed files under `.github/dist/`; do not assume
 a package build step exists.
 

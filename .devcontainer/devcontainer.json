@@ -1,25 +1,28 @@
 {
   "name": "Ambiguous Organization Build Lock",
-  "image": "mcr.microsoft.com/devcontainers/go@sha256:090a56c6c9c4e80a1573c18c1225eb851b8c86c199fc929b07ea2a67f7b4850f",
+  "image": "mcr.microsoft.com/devcontainers/go@sha256:adc326255c019241228f9da4a1cb5d6a89abaaa0eb8d926a355b00af7daafd00",
   "features": {
-    "ghcr.io/devcontainers/features/common-utils:2.5.9": {
+    "ghcr.io/devcontainers/features/common-utils:2.7.0": {
       "configureZshAsDefaultShell": true,
       "installOhMyZsh": true,
       "upgradePackages": false,
       "username": "vscode"
     },
-    "ghcr.io/devcontainers/features/github-cli:1.1.0": {
-      "version": "2.96.0"
+    "ghcr.io/devcontainers/features/github-cli:1.1.3": {
+      "version": "2.101.0"
     },
-    "ghcr.io/devcontainers/features/go:1.3.4": {
-      "golangciLintVersion": "2.12.2",
-      "version": "1.26.5"
+    "ghcr.io/devcontainers/features/go:1.4.0": {
+      "golangciLintVersion": "2.14.0",
+      "version": "1.27.1"
     },
     "ghcr.io/devcontainers/features/node:2.1.0": {
       "nodeGypDependencies": false,
       "npmVersion": "none",
       "pnpmVersion": "none",
-      "version": "24.18.0"
+      "version": "24.21.0"
+    },
+    "ghcr.io/devcontainers/features/powershell:2.0.3": {
+      "version": "7.6.6"
     }
   },
   "containerEnv": {
@@ -47,7 +50,7 @@
     "source=ambiguous-build-lock-${devcontainerId}-node-cache,target=/home/vscode/.npm,type=volume",
     "source=ambiguous-build-lock-${devcontainerId}-shell-history,target=/commandhistory,type=volume"
   ],
-  "postCreateCommand": "if [ -f .devcontainer/scripts/post-create.sh ]; then bash .devcontainer/scripts/post-create.sh; else set -eu; export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get install -y --no-install-recommends bat direnv fd-find hyperfine jq make man-db procps ripgrep shellcheck tree xz-utils; machine=\"$(dpkg --print-architecture)\"; case \"${machine}\" in amd64) go_arch=amd64; go_sha=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053; node_arch=x64; node_sha=55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450fa76742; gh_arch=amd64; gh_sha=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60 ;; arm64) go_arch=arm64; go_sha=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49; node_arch=arm64; node_sha=58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6; gh_arch=arm64; gh_sha=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909 ;; *) echo \"Unsupported architecture: ${machine}\" >&2; exit 1 ;; esac; curl -fsSL \"https://go.dev/dl/go1.26.5.linux-${go_arch}.tar.gz\" -o /tmp/go.tar.gz; echo \"${go_sha}  /tmp/go.tar.gz\" | sha256sum -c -; rm -rf /usr/local/go; tar -xzf /tmp/go.tar.gz -C /usr/local; rm -f /tmp/go.tar.gz; curl -fsSL \"https://nodejs.org/dist/v24.18.0/node-v24.18.0-linux-${node_arch}.tar.xz\" -o /tmp/node.tar.xz; echo \"${node_sha}  /tmp/node.tar.xz\" | sha256sum -c -; tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; rm -f /tmp/node.tar.xz; curl -fsSL \"https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_${gh_arch}.tar.gz\" -o /tmp/gh.tar.gz; echo \"${gh_sha}  /tmp/gh.tar.gz\" | sha256sum -c -; tar -xzf /tmp/gh.tar.gz -C /tmp; install -m 0755 \"/tmp/gh_2.96.0_linux_${gh_arch}/bin/gh\" /usr/local/bin/gh; rm -rf /tmp/gh.tar.gz \"/tmp/gh_2.96.0_linux_${gh_arch}\"; ln -sf /usr/bin/batcat /usr/local/bin/bat; ln -sf /usr/bin/fdfind /usr/local/bin/fd; for tool in /usr/local/go/bin/go /go/bin/*; do if [ -x \"${tool}\" ]; then ln -sf \"${tool}\" \"/usr/local/bin/$(basename \"${tool}\")\"; fi; done; rm -rf /var/lib/apt/lists/*; fi",
+  "postCreateCommand": "if [ -f .devcontainer/scripts/post-create.sh ]; then bash .devcontainer/scripts/post-create.sh; else set -eu; export DEBIAN_FRONTEND=noninteractive; apt-get update; apt-get install -y --no-install-recommends bat direnv fd-find hyperfine jq make man-db procps ripgrep shellcheck tree xz-utils; machine=\"$(dpkg --print-architecture)\"; case \"${machine}\" in amd64) go_arch=amd64; go_sha=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445; node_arch=x64; node_sha=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6; gh_arch=amd64; gh_sha=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8 ;; arm64) go_arch=arm64; go_sha=3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec; node_arch=arm64; node_sha=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2; gh_arch=arm64; gh_sha=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f ;; *) echo \"Unsupported architecture: ${machine}\" >&2; exit 1 ;; esac; curl -fsSL \"https://go.dev/dl/go1.27.1.linux-${go_arch}.tar.gz\" -o /tmp/go.tar.gz; echo \"${go_sha}  /tmp/go.tar.gz\" | sha256sum -c -; rm -rf /usr/local/go; tar -xzf /tmp/go.tar.gz -C /usr/local; rm -f /tmp/go.tar.gz; curl -fsSL \"https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-${node_arch}.tar.xz\" -o /tmp/node.tar.xz; echo \"${node_sha}  /tmp/node.tar.xz\" | sha256sum -c -; tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; rm -f /tmp/node.tar.xz; curl -fsSL \"https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_${gh_arch}.tar.gz\" -o /tmp/gh.tar.gz; echo \"${gh_sha}  /tmp/gh.tar.gz\" | sha256sum -c -; tar -xzf /tmp/gh.tar.gz -C /tmp; install -m 0755 \"/tmp/gh_2.101.0_linux_${gh_arch}/bin/gh\" /usr/local/bin/gh; rm -rf /tmp/gh.tar.gz \"/tmp/gh_2.101.0_linux_${gh_arch}\"; ln -sf /usr/bin/batcat /usr/local/bin/bat; ln -sf /usr/bin/fdfind /usr/local/bin/fd; for tool in /usr/local/go/bin/go /go/bin/*; do if [ -x \"${tool}\" ]; then ln -sf \"${tool}\" \"/usr/local/bin/$(basename \"${tool}\")\"; fi; done; rm -rf /var/lib/apt/lists/*; fi",
   "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
   "waitFor": "postCreateCommand",
   "customizations": {

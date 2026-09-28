@@ -35,28 +35,35 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   assert.equal(
     config.image,
     "mcr.microsoft.com/devcontainers/go@sha256:" +
-      "090a56c6c9c4e80a1573c18c1225eb851b8c86c199fc929b07ea2a67f7b4850f"
+      "adc326255c019241228f9da4a1cb5d6a89abaaa0eb8d926a355b00af7daafd00"
   );
   assert.equal(
-    config.features["ghcr.io/devcontainers/features/github-cli:1.1.0"].version,
-    "2.96.0"
+    config.features["ghcr.io/devcontainers/features/github-cli:1.1.3"].version,
+    "2.101.0"
   );
-  assert.equal(config.features["ghcr.io/devcontainers/features/go:1.3.4"].version, "1.26.5");
-  assert.equal(config.features["ghcr.io/devcontainers/features/node:2.1.0"].version, "24.18.0");
+  assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].version, "1.27.1");
+  assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].golangciLintVersion, "2.14.0");
+  assert.equal(config.features["ghcr.io/devcontainers/features/node:2.1.0"].version, "24.21.0");
+  assert.equal(
+    config.features["ghcr.io/devcontainers/features/powershell:2.0.3"].version,
+    "7.6.6"
+  );
 
   for (const feature of Object.keys(config.features)) {
     assert.match(feature, /:\d+\.\d+\.\d+$/, `${feature} must use an exact Feature version`);
   }
   assert.deepEqual(Object.keys(lock.features).sort(), Object.keys(config.features).sort());
   const expectedFeatureDigests = {
-    "ghcr.io/devcontainers/features/common-utils:2.5.9":
-      "cb0c4d3c276f157eed17935747e364178d75fee17f55c4e129966f64633deb3a",
-    "ghcr.io/devcontainers/features/github-cli:1.1.0":
-      "d22f50b70ed75339b4eed1ba9ecde3a1791f90e88d37936517e3bace0bbad671",
-    "ghcr.io/devcontainers/features/go:1.3.4":
-      "d85e921f91b41340055bb12b325d9d551170ed04b3b832e33530bf42f167c032",
+    "ghcr.io/devcontainers/features/common-utils:2.7.0":
+      "3f63bbee7418dc940d9e5e7ab93ef3049acfe4dba3085b17ee45fe307fdba4e5",
+    "ghcr.io/devcontainers/features/github-cli:1.1.3":
+      "bd7ab48a832228f633239277552c30b353867fef2e5b037e064b4e64f0b843f2",
+    "ghcr.io/devcontainers/features/go:1.4.0":
+      "3b2c7acfdb24de88292283d10eb7517ccc45f60ae22a97030f1cf4fbd03634f3",
     "ghcr.io/devcontainers/features/node:2.1.0":
-      "586c9a6f7dd40bd3ba2cd41e7f2f88dcc31fbe5d1442afcbf07ffbc66b686857"
+      "586c9a6f7dd40bd3ba2cd41e7f2f88dcc31fbe5d1442afcbf07ffbc66b686857",
+    "ghcr.io/devcontainers/features/powershell:2.0.3":
+      "460fb241f4f9e098a30f9e1ea4a6ac8cac8cdf5df89ba2edfcf177f66e17d8b7"
   };
   for (const [feature, digest] of Object.entries(expectedFeatureDigests)) {
     const featureVersion = feature.slice(feature.lastIndexOf(":") + 1);
@@ -80,32 +87,44 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   assert.doesNotMatch(config.postCreateCommand, /apt-get install[^;]*\bgh\b/);
   assert.match(
     config.postCreateCommand,
-    /go\.dev\/dl\/go1\.26\.5\.linux-\$\{go_arch\}\.tar\.gz/
+    /go\.dev\/dl\/go1\.27\.1\.linux-\$\{go_arch\}\.tar\.gz/
   );
   assert.match(
     config.postCreateCommand,
-    /amd64[\s\S]*go_sha=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053/
+    /amd64[\s\S]*go_sha=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445/
   );
   assert.match(
     config.postCreateCommand,
-    /arm64[\s\S]*go_sha=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49/
+    /arm64[\s\S]*go_sha=3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec/
   );
   assert.match(
     config.postCreateCommand,
-    /github\.com\/cli\/cli\/releases\/download\/v2\.96\.0\/gh_2\.96\.0_linux_\$\{gh_arch\}\.tar\.gz/
+    /nodejs\.org\/dist\/v24\.21\.0\/node-v24\.21\.0-linux-\$\{node_arch\}\.tar\.xz/
   );
   assert.match(
     config.postCreateCommand,
-    /amd64[\s\S]*gh_sha=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60/
+    /amd64[\s\S]*node_sha=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6/
   );
   assert.match(
     config.postCreateCommand,
-    /arm64[\s\S]*gh_sha=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909/
+    /arm64[\s\S]*node_sha=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2/
+  );
+  assert.match(
+    config.postCreateCommand,
+    /github\.com\/cli\/cli\/releases\/download\/v2\.101\.0\/gh_2\.101\.0_linux_\$\{gh_arch\}\.tar\.gz/
+  );
+  assert.match(
+    config.postCreateCommand,
+    /amd64[\s\S]*gh_sha=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8/
+  );
+  assert.match(
+    config.postCreateCommand,
+    /arm64[\s\S]*gh_sha=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f/
   );
   assert.match(config.postCreateCommand, /echo "\$\{gh_sha\}  \/tmp\/gh\.tar\.gz" \| sha256sum -c -/);
   assert.match(
     config.postCreateCommand,
-    /install -m 0755 "\/tmp\/gh_2\.96\.0_linux_\$\{gh_arch\}\/bin\/gh" \/usr\/local\/bin\/gh/
+    /install -m 0755 "\/tmp\/gh_2\.101\.0_linux_\$\{gh_arch\}\/bin\/gh" \/usr\/local\/bin\/gh/
   );
   assert.equal(config.postStartCommand, "bash .devcontainer/scripts/post-start.sh");
 
