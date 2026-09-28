@@ -21,8 +21,9 @@ The committed sources of truth are
 - Runner serialization: `enabled`
 - Resource lifecycle: `enabled`
 - Confirmed-cleanup cooldown: `1` second
-- Published compatibility release: `v1.14.0` at
-  `64bac446903115134dca8235410b332bc5a83547`
+- Latest authorized release for lock and standard return actions: `v1.15.0`
+  at `03518ac5ac2a4a223243c593cc9b453688c92b99`. Darwin return approval is
+  listed separately in `unity-enrollment-policy.json`.
 
 The one-second cooldown remains the live value. Issue #60 tracks literal zero,
 but the concurrent shared-entitlement return collision in issue #83 must be
