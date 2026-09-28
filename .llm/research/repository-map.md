@@ -5,6 +5,8 @@ Observed on 2026-09-28:
 
 - Go 1.27 implements enrollment and workflow policy analysis.
 - Node.js 24 implements public GitHub Actions and dependency-free contract tests.
+- PowerShell 7.6 supports editor provisioning contract tests and is declared as
+  a Dev Container feature, not inherited from the base image.
 - Actionlint is isolated in `tools/actionlint`.
 - CI runs JavaScript syntax checks, actionlint, Node tests, Go tests, module
   verification/tidy checks, and the workflow credential audit.

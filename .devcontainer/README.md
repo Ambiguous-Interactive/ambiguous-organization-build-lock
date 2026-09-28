@@ -2,9 +2,9 @@
 
 This repository includes the same development environment for VS Code and
 VSCodium on Linux, macOS, and Windows. It provides Go 1.27, Node.js 24,
-GitHub CLI, zsh, Go editor/debug tools, `actionlint` through the repository's
-tool module, the latest stable OpenAI Codex and OpenCode CLIs from npm, and a
-focused set of shell, JSON, search, and benchmarking tools.
+PowerShell 7.6, GitHub CLI, zsh, Go editor/debug tools, and `actionlint` through
+the repository's tool module. It also installs the latest stable OpenAI Codex
+and OpenCode CLIs from npm, plus shell, JSON, search, and benchmarking tools.
 
 ## Start
 

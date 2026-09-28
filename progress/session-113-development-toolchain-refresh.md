@@ -21,8 +21,9 @@ will keep development and CI aligned without changing licensed workflows.
 - Upgrade Node.js 24.18.0 to 24.21.0, GitHub CLI 2.96.0 to 2.101.0, and
   golangci-lint 2.12.2 to 2.14.0.
 - Upgrade Dev Container features to common-utils 2.7.0, GitHub CLI 1.1.3,
-  and Go 1.4.0. Feature lock digests were regenerated with Dev Container CLI
-  0.89.0. Node feature 2.1.0 was already current.
+  Go 1.4.0, and PowerShell 2.0.3. PowerShell 7.6.6 is now explicit because
+  contract tests require `pwsh`. Feature lock digests were regenerated with
+  Dev Container CLI 0.89.0. Node feature 2.1.0 was already current.
 - Pin the Go 1.27 Bookworm base image by its OCI index digest.
 - Update both architecture checksums for Go, Node.js, and GitHub CLI. Tests
   assert the versioned URLs, checksums, feature digests, and image digest.
@@ -39,6 +40,10 @@ will keep development and CI aligned without changing licensed workflows.
   `go mod tidy -diff`; they are not imported by the wrapper.
 - `devcontainer outdated` reports every configured feature at its latest
   version.
+- The first hosted arm64 image build exposed an implicit test dependency:
+  two existing tests could not start `pwsh` after the base image changed.
+  The base image did not provide PowerShell. The PowerShell feature is now
+  explicit and locked. Hosted arm64 and amd64 builds must verify the fix.
 - Official release metadata supplied Go 1.27.1, Node.js 24.21.0, GitHub CLI
   2.101.0, and golangci-lint 2.14.0. The Go, Node, and GitHub CLI checksums
   came from their official release metadata. Downloaded arm64 Go, Node, and
@@ -67,8 +72,10 @@ The active instructions prohibit sub-agents, so implementation, review, and
 remediation used separate main-thread passes. Review checked all version
 references, both architecture mappings, published checksums, image digest,
 feature lock data, module tidy output, generated LLM files, and the full
-verification result. It found no actionable issue. The local Docker build
-limit remains for hosted CI to verify.
+verification result. The first hosted build found the missing PowerShell
+feature; this fix adds it explicitly. The updated hosted builds remain the
+final check. Local Docker builds are unavailable.
 
 Continuous-improvement decision: revise the repository map and testing skill
-to record the Go 1.27 baseline. No new reusable safety rule was established.
+to record the Go 1.27 baseline and explicit PowerShell test dependency. The
+new evidence also shows why tests must not inherit tools from a base image.

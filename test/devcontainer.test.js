@@ -44,6 +44,10 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].version, "1.27.1");
   assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].golangciLintVersion, "2.14.0");
   assert.equal(config.features["ghcr.io/devcontainers/features/node:2.1.0"].version, "24.21.0");
+  assert.equal(
+    config.features["ghcr.io/devcontainers/features/powershell:2.0.3"].version,
+    "7.6.6"
+  );
 
   for (const feature of Object.keys(config.features)) {
     assert.match(feature, /:\d+\.\d+\.\d+$/, `${feature} must use an exact Feature version`);
@@ -57,7 +61,9 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
     "ghcr.io/devcontainers/features/go:1.4.0":
       "3b2c7acfdb24de88292283d10eb7517ccc45f60ae22a97030f1cf4fbd03634f3",
     "ghcr.io/devcontainers/features/node:2.1.0":
-      "586c9a6f7dd40bd3ba2cd41e7f2f88dcc31fbe5d1442afcbf07ffbc66b686857"
+      "586c9a6f7dd40bd3ba2cd41e7f2f88dcc31fbe5d1442afcbf07ffbc66b686857",
+    "ghcr.io/devcontainers/features/powershell:2.0.3":
+      "460fb241f4f9e098a30f9e1ea4a6ac8cac8cdf5df89ba2edfcf177f66e17d8b7"
   };
   for (const [feature, digest] of Object.entries(expectedFeatureDigests)) {
     const featureVersion = feature.slice(feature.lastIndexOf(":") + 1);
