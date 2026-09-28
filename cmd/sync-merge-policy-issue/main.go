@@ -153,7 +153,7 @@ func validateAudit(audit mergepolicy.Audit) error {
 			!kindPattern.MatchString(entry.Kind) ||
 			!carrierPattern.MatchString(entry.Carrier) ||
 			!contextPattern.MatchString(entry.Context) ||
-			!enforcementPattern.MatchString(entry.Enforcement) {
+			!enforcementPattern.MatchString(entry.Enforcement) || entry.IntegrationID < 0 {
 			return fmt.Errorf("invalid inventory entry")
 		}
 	}
@@ -313,8 +313,8 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 	if len(audit.Inventory) == 0 {
 		body.WriteString("- No required status checks were observed on the audited default branches.\n")
 	} else {
-		body.WriteString("| Repository | Carrier | Context | Enforcement |\n")
-		body.WriteString("| --- | --- | --- | --- |\n")
+		body.WriteString("| Repository | Carrier | Context | Source App ID | Enforcement |\n")
+		body.WriteString("| --- | --- | --- | --- | --- |\n")
 		inventory := append([]mergepolicy.InventoryEntry(nil), audit.Inventory...)
 		sort.Slice(inventory, func(i, j int) bool {
 			left, right := inventory[i], inventory[j]
@@ -333,10 +333,11 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 		for _, entry := range inventory[:rendered] {
 			fmt.Fprintf(
 				&body,
-				"| `%s` | %s | %s | `%s` |\n",
+				"| `%s` | %s | %s | %s | `%s` |\n",
 				entry.Repository,
 				valueOrDash(entry.Carrier),
 				valueOrDash(entry.Context),
+				appIDOrAny(entry.IntegrationID),
 				entry.Enforcement,
 			)
 		}
@@ -361,4 +362,11 @@ func valueOrDash(value string) string {
 		return "-"
 	}
 	return "`" + value + "`"
+}
+
+func appIDOrAny(appID int64) string {
+	if appID == 0 {
+		return "any source"
+	}
+	return fmt.Sprintf("`%d`", appID)
 }

@@ -9,10 +9,12 @@ import (
 // Reason codes reported by the merge-policy audit. Each code maps to its
 // reviewed fix in docs/consumer-enrollment.md.
 const (
-	CodeMissingRequiredContext = "missing-required-context"
-	CodeRenamedRequiredContext = "renamed-required-context"
-	CodeDisabledRuleset        = "disabled-ruleset"
-	CodeUnexpectedBypassActor  = "unexpected-bypass-actor"
+	CodeMissingRequiredContext     = "missing-required-context"
+	CodeRenamedRequiredContext     = "renamed-required-context"
+	CodeDisabledRuleset            = "disabled-ruleset"
+	CodeUnexpectedBypassActor      = "unexpected-bypass-actor"
+	CodeUnexpectedCheckSource      = "unexpected-required-check-source"
+	CodeCheckSourceEvidenceMissing = "required-check-source-evidence-missing"
 )
 
 // Observed reason codes are emitted by the command that reads live evidence.
@@ -61,7 +63,8 @@ type Ruleset struct {
 
 // RequiredCheck is one declared check requirement inside a ruleset.
 type RequiredCheck struct {
-	Context string
+	Context       string
+	IntegrationID int64
 }
 
 // Protection is the observed classic branch protection of a default branch.
@@ -91,11 +94,12 @@ type Finding struct {
 // InventoryEntry is one observed required check on a default branch. It is
 // operator-visible evidence; it never contains secret values.
 type InventoryEntry struct {
-	Repository  string `json:"repository"`
-	Kind        string `json:"kind"`
-	Carrier     string `json:"carrier"`
-	Context     string `json:"context"`
-	Enforcement string `json:"enforcement"`
+	Repository    string `json:"repository"`
+	Kind          string `json:"kind"`
+	Carrier       string `json:"carrier"`
+	Context       string `json:"context"`
+	Enforcement   string `json:"enforcement"`
+	IntegrationID int64  `json:"integrationId"`
 }
 
 const (
@@ -129,26 +133,68 @@ func Analyze(expectation RepositoryExpectation, observed Observed) ([]Finding, [
 	if observed.Protection.Present {
 		for _, check := range observed.Protection.RequiredChecks {
 			inventory = append(inventory, InventoryEntry{
-				Repository:  expectation.Repository,
-				Kind:        kindBranchProtection,
-				Carrier:     "default branch protection",
-				Context:     check.Context,
-				Enforcement: protectionEnforcement(observed.Protection),
+				Repository:    expectation.Repository,
+				Kind:          kindBranchProtection,
+				Carrier:       "default branch protection",
+				Context:       check.Context,
+				Enforcement:   protectionEnforcement(observed.Protection),
+				IntegrationID: check.IntegrationID,
 			})
 		}
 	}
 	for _, check := range observed.ActiveChecks {
-		inventory = append(inventory, InventoryEntry{
-			Repository:  expectation.Repository,
-			Kind:        kindRuleset,
-			Carrier:     rulesetCarrier(rulesetNames[check.RulesetID], check.RulesetID),
-			Context:     check.Context,
-			Enforcement: enforcementActive,
-		})
+		integrationIDs := []int64{0}
+		if ruleset, found := findRuleset(observed.Rulesets, check.RulesetID); found {
+			if required := requiredChecksForContext(ruleset.RequiredChecks, check.Context); len(required) > 0 {
+				integrationIDs = make([]int64, 0, len(required))
+				for _, item := range required {
+					integrationIDs = append(integrationIDs, item.IntegrationID)
+				}
+			}
+		}
+		for _, integrationID := range integrationIDs {
+			inventory = append(inventory, InventoryEntry{
+				Repository:    expectation.Repository,
+				Kind:          kindRuleset,
+				Carrier:       rulesetCarrier(rulesetNames[check.RulesetID], check.RulesetID),
+				Context:       check.Context,
+				Enforcement:   enforcementActive,
+				IntegrationID: integrationID,
+			})
+		}
 	}
 
 	for _, context := range expectation.RequiredContexts {
-		if protectionRequires(context) || requiresActive(context) {
+		active := requiresActive(context)
+		protected := protectionRequires(context)
+		if active || protected {
+			for _, check := range observed.ActiveChecks {
+				if check.Context != context {
+					continue
+				}
+				ruleset, found := findRuleset(observed.Rulesets, check.RulesetID)
+				if !found {
+					findings = append(findings, sourceEvidenceMissing(expectation, context, rulesetCarrier("", check.RulesetID)))
+					continue
+				}
+				required := requiredChecksForContext(ruleset.RequiredChecks, context)
+				if len(required) == 0 {
+					findings = append(findings, sourceEvidenceMissing(expectation, context, rulesetCarrier(ruleset.Name, ruleset.ID)))
+					continue
+				}
+				for _, item := range required {
+					if item.IntegrationID != expectation.RequiredContextAppID {
+						findings = append(findings, unexpectedCheckSource(expectation, context, rulesetCarrier(ruleset.Name, ruleset.ID), item.IntegrationID))
+					}
+				}
+			}
+			if observed.Protection.Present {
+				for _, check := range observed.Protection.RequiredChecks {
+					if check.Context == context && check.IntegrationID != expectation.RequiredContextAppID {
+						findings = append(findings, unexpectedCheckSource(expectation, context, "default branch protection", check.IntegrationID))
+					}
+				}
+			}
 			continue
 		}
 		if renamed, carrier := caseRenamed(context, observed); renamed != "" {
@@ -210,6 +256,49 @@ func containsContext(checks []RequiredCheck, context string) bool {
 		}
 	}
 	return false
+}
+
+func findRuleset(rulesets []Ruleset, id int64) (Ruleset, bool) {
+	for _, ruleset := range rulesets {
+		if ruleset.ID == id {
+			return ruleset, true
+		}
+	}
+	return Ruleset{}, false
+}
+
+func requiredChecksForContext(checks []RequiredCheck, context string) []RequiredCheck {
+	matching := make([]RequiredCheck, 0, 1)
+	for _, check := range checks {
+		if check.Context == context {
+			matching = append(matching, check)
+		}
+	}
+	return matching
+}
+
+func unexpectedCheckSource(expectation RepositoryExpectation, context, carrier string, observedID int64) Finding {
+	return Finding{
+		Repository: expectation.Repository,
+		Code:       CodeUnexpectedCheckSource,
+		Context:    context,
+		Detail: BoundDetail(fmt.Sprintf(
+			"required context source in %s is App ID %d; expected App ID %d",
+			SanitizeText(carrier, 160), observedID, expectation.RequiredContextAppID,
+		)),
+	}
+}
+
+func sourceEvidenceMissing(expectation RepositoryExpectation, context, carrier string) Finding {
+	return Finding{
+		Repository: expectation.Repository,
+		Code:       CodeCheckSourceEvidenceMissing,
+		Context:    context,
+		Detail: BoundDetail(fmt.Sprintf(
+			"required context source evidence is missing from %s",
+			SanitizeText(carrier, 160),
+		)),
+	}
 }
 
 // CarryingRulesetIDs returns the active rulesets that require a reviewed
@@ -374,6 +463,9 @@ func sortInventory(inventory []InventoryEntry) {
 		if left.Carrier != right.Carrier {
 			return left.Carrier < right.Carrier
 		}
-		return left.Context < right.Context
+		if left.Context != right.Context {
+			return left.Context < right.Context
+		}
+		return left.IntegrationID < right.IntegrationID
 	})
 }

@@ -407,6 +407,8 @@ edits.
 | `missing-required-context` | Require the aggregate context on the default branch. See Merge policy audit. |
 | `renamed-required-context` | Restore the exact reviewed context spelling. See Merge policy audit. |
 | `disabled-ruleset` | Set the ruleset enforcement to active. See Merge policy audit. |
+| `unexpected-required-check-source` | Bind the aggregate to its reviewed App ID. See Merge policy audit. |
+| `required-check-source-evidence-missing` | Review the inconsistent live rule evidence. See Merge policy audit. |
 | `unexpected-bypass-actor` | Remove the bypass actor, or record it in `merge-policy-expectations.json` after review. See Merge policy audit. |
 | `merge-policy-attestation-missing` | Publish `.github/merge-policy-attestation.json`, or add the carrying ruleset to its `rulesets` list. See Merge policy audit. |
 | `merge-policy-attestation-stale` | Update `.github/merge-policy-attestation.json` to the live ruleset state, or remove entries for rulesets that carry no reviewed context. See Merge policy audit. |
@@ -417,9 +419,10 @@ edits.
 A scheduled central audit compares each enrolled default branch with the
 reviewed expectations in `merge-policy-expectations.json`. The expectations
 name the always-reporting Unity aggregate contexts that the branch must
-require before merge, plus every bypass actor that review accepted. The
-repository set and default branches must match `unity-enrollment-policy.json`;
-the audit refuses to run when they drift.
+require before merge, the expected source App ID for each context, and every
+bypass actor that review accepted. The repository set and default branches
+must match `unity-enrollment-policy.json`; the audit refuses to run when they
+drift.
 
 The audit reads live rulesets and classic branch protection with a
 per-repository reader token scoped to Administration read and Contents read.
@@ -427,9 +430,11 @@ A failed read is a finding, never a pass. GitHub returns ruleset
 `bypass_actors` only to callers with write access to the ruleset. The reader
 App stays read-only by reviewed policy (issue #254), so the audit fills that
 one blind spot from the consumer-published attestation file and fails closed
-when the file is missing or stale. Classic branch protection bypass evidence
-stays readable with Administration read. Findings are consumer decisions; the
-audit reports and opens one deduplicated issue.
+when the file is missing or stale. The audit also records each required
+check's source App ID and reports an unbound or unexpected source. Classic
+branch protection bypass evidence stays readable with Administration read.
+Findings are consumer decisions; the audit reports and opens one deduplicated
+issue.
 
 - `missing-required-context`: no active ruleset or branch protection on the
   default branch requires the reviewed aggregate. Add the requirement.
@@ -437,6 +442,11 @@ audit reports and opens one deduplicated issue.
   different letter case. Restore the reviewed spelling.
 - `disabled-ruleset`: a ruleset that still declares the aggregate is not
   active on the default branch. Set its enforcement to active.
+- `unexpected-required-check-source`: a required aggregate accepts any App or
+  a different App. Bind it to the reviewed App ID in the live rule.
+- `required-check-source-evidence-missing`: live rule reads do not agree about
+  the required check's source. Central operators review the audit before any
+  policy change.
 - `unexpected-bypass-actor`: a ruleset grants a bypass actor that review did
   not accept, or classic protection lets administrators bypass the aggregate.
   Remove the bypass or record the actor in `merge-policy-expectations.json`

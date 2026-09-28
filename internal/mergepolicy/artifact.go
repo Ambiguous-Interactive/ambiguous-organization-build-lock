@@ -10,9 +10,9 @@ type AuditedRepository struct {
 }
 
 // Audit is the bounded, source-free artifact consumed by issue sync. It
-// contains repository names, default branches, check contexts, ruleset
-// metadata, and reason codes only. It never contains credentials or matched
-// source lines.
+// contains repository names, default branches, check contexts, source App
+// IDs, ruleset metadata, and reason codes only. It never contains credentials
+// or matched source lines.
 type Audit struct {
 	Complete     bool                `json:"complete"`
 	Repositories []AuditedRepository `json:"repositories"`
