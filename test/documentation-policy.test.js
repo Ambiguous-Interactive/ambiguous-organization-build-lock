@@ -119,7 +119,7 @@ test("steady-state runbook reports the registered release and consumer inventory
   assert.match(
     operations,
     new RegExp(
-      `- Published compatibility release: \`${facts.publishedRelease.tag}\` at\\s+\`${facts.publishedRelease.commit}\``
+      `- Latest authorized release for lock and standard return actions: \`${facts.publishedRelease.tag}\`\\s+at \`${facts.publishedRelease.commit}\`. Darwin return approval is\\s+listed separately in \`unity-enrollment-policy.json\`.`
     )
   );
   assert.deepEqual(listedBaseline.sort(), requiredBaseline.sort());
