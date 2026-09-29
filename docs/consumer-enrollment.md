@@ -327,6 +327,12 @@ jobs:
           fallback-cleanup-result: ${{ needs.unity-cleanup.outputs.cleanup-result }}
 ```
 
+The classifier reads commits and trees, and no file contents. So its checkout
+may add `filter: blob:none` and `sparse-checkout: .github`, each with exactly
+that value. Without blobs, a large history clones much faster: one consumer
+measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
+step that reads other files, such as the rule-line check above.
+
 ## Finding codes
 
 The scheduled audit reports every finding with one of these reason codes.
