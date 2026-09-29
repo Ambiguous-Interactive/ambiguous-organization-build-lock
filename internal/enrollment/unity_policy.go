@@ -5362,6 +5362,12 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		scalarValue(mappingValue(checkoutWith, "persist-credentials")) != "false" {
 		return false
 	}
+	// The optional rule-lines step runs a consumer script outside the
+	// workflow directory, which a sparse working tree cannot materialize.
+	// Reject the combination instead of red-ing every consumer pull request.
+	if len(steps) == 3 && mappingValue(checkoutWith, "sparse-checkout") != nil {
+		return false
+	}
 	classifyUses := stepUses(classify)
 	classifyWith := mappingValue(classify, "with")
 	classifyID := stepID(classify)
