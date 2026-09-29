@@ -5308,6 +5308,14 @@ func (a *unityPolicyAnalyzer) typedValidationGateEnforces(
 	)
 }
 
+// optionalScalarIs reports whether key is absent from mapping or holds exactly want. The
+// change classifier reads only commits and trees, so a blobless clone with a sparse working
+// tree serves it, and it has no credential to fetch a blob it would miss later.
+func optionalScalarIs(mapping *yaml.Node, key, want string) bool {
+	value := mappingValue(mapping, key)
+	return value == nil || (value.Kind == yaml.ScalarNode && value.Value == want)
+}
+
 func (a *unityPolicyAnalyzer) validationClassifierMatches(
 	workflow *yaml.Node,
 	jobs *yaml.Node,
@@ -5344,9 +5352,13 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		checkoutWith == nil ||
 		!mappingHasOnlyKeys(checkoutWith, map[string]bool{
 			"fetch-depth":         true,
+			"filter":              true,
+			"sparse-checkout":     true,
 			"persist-credentials": true,
 		}) ||
 		scalarValue(mappingValue(checkoutWith, "fetch-depth")) != "0" ||
+		!optionalScalarIs(checkoutWith, "filter", "blob:none") ||
+		!optionalScalarIs(checkoutWith, "sparse-checkout", ".github") ||
 		scalarValue(mappingValue(checkoutWith, "persist-credentials")) != "false" {
 		return false
 	}

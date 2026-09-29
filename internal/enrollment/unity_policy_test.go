@@ -3662,6 +3662,33 @@ jobs:
 		t.Fatalf("typed conditional validation gate produced findings: %#v", result.Findings)
 	}
 
+	const canonicalClassifierCheckout = "          fetch-depth: 0\n          persist-credentials: false\n"
+	for _, checkout := range []struct {
+		with     string
+		accepted bool
+	}{
+		{"          fetch-depth: 0\n          filter: blob:none\n          sparse-checkout: .github\n          persist-credentials: false\n", true},
+		{"          fetch-depth: 0\n          filter: blob:none\n          persist-credentials: false\n", true},
+		{"          fetch-depth: 0\n          filter: tree:0\n          persist-credentials: false\n", false},
+		{"          fetch-depth: 0\n          sparse-checkout: Assets\n          persist-credentials: false\n", false},
+		{"          fetch-depth: 0\n          sparse-checkout: |\n            .github\n            scripts\n          persist-credentials: false\n", false},
+	} {
+		checkoutWorkflow := strings.Replace(workflow, canonicalClassifierCheckout, checkout.with, 1)
+		if checkoutWorkflow == workflow {
+			t.Fatal("the classifier checkout fixture moved")
+		}
+		checkoutResult, err := AnalyzeUnityEnrollment(
+			unityFixture(map[string]string{".github/workflows/unity.yml": checkoutWorkflow}),
+			unityAuditPolicy(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accepted := len(checkoutResult.Findings) == 0; accepted != checkout.accepted {
+			t.Fatalf("classifier checkout %q accepted=%v, want %v: %#v", checkout.with, accepted, checkout.accepted, checkoutResult.Findings)
+		}
+	}
+
 	declaredPathsWorkflow := strings.Replace(
 		workflow,
 		"          head-sha: ${{ github.event.pull_request.head.sha }}\n",
