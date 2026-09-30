@@ -258,10 +258,11 @@ direct child key of that block, and the value is 40 lowercase hexadecimal
 characters. Only the SHA changes, and no version comment is added, because
 Dependabot does not read a `ref:`. A comment already on the `ref:` line
 survives as it is. A moved `ref:` joins the set of pins a `pin-literal`
-companion may follow, so a policy snapshot or constant that names the same
-commit heals with the workflow that named it.
+companion may follow, so a constant that names the same commit heals with
+the workflow that named it. A `policy-snapshot` companion is built from the
+policy allowlists instead and does not follow the moved-pin set.
 
-The rewrite reads a `with:` block, not YAML. Six shapes therefore stay as
+The rewrite reads a `with:` block, not YAML. Eight shapes therefore stay as
 the consumer wrote them, with no warning and no red run:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
@@ -270,16 +271,22 @@ the consumer wrote them, with no warning and no red run:
 - a quoted `repository:` value, in single or double quotes.
 - a `with:` with a tag or an anchor on it.
 - a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
+- a `repository:` value this repository names with a trailing slash, or as
+  a folded scalar such as `repository: >-`.
+- a `repository:` value in any other spelling, such as a URL.
 
-A comment after `repository:` or after the `ref:` value is not one of
-these: both are read, and a comment on the `with:` line itself is.
+A key this repository names in any case is read, and a comment after
+`repository:`, after the `ref:` value, or on the `with:` line itself is
+read too.
 
 The first two are the consumer's own choice and usually self-healing. The
 rest are a real gap: such a `ref:` does not move, so the offer still
-splits. No enrolled consumer writes one of those shapes today. If one
-adopts one, the offer goes red in the consumer's own contract check, and
-the remedy is to write the block form with a plain lowercase SHA. A workflow written inside a
-`run: |` body is text, not structure, so a `uses:` line or a
+splits. No enrolled consumer writes one of those shapes today. For three
+of them the consumer's own contract check stays green, because a YAML
+parser reads a quoted value, a tag, an anchor, and a flow mapping as the
+same mapping, so the remedy is to write the block form with a plain
+lowercase SHA and to read the `ref:` in the offer. A workflow written
+inside a `run: |` body is text, not structure, so a `uses:` line or a
 `repository:`/`ref:` pair there is a sample and is left exactly as written.
 
 The workflow mints one installation token per run through the automation App

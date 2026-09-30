@@ -2131,6 +2131,57 @@ test("consumer repin shields samples in a block scalar without shielding real pi
       sample: false
     },
     {
+      name: "a sequence marker in front of a comment",
+      why: "a step whose whole entry is a comment is a legal step, and the optional sequence marker backtracks so the key then accepts the comment character",
+      lines: [
+        "      - # policy checkout: |",
+        uses("        ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 2,
+      refs: 0,
+      sample: false
+    },
+    {
+      name: "a comment above a deeper block",
+      why: "a comment is not a key, so it opens nothing; a shield that starts there swallows the rest of the file and the rewrite crashes",
+      lines: [
+        "jobs:",
+        "  # The lock policy lives in the checkout below |",
+        "  build:",
+        "    steps:",
+        uses("      ", "acquire-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 1,
+      refs: 0,
+      sample: false,
+      header: false
+    },
+    {
+      name: "a quoted key holding a colon",
+      why: "a quoted key may contain a colon, so a key pattern that stops at one misses the scalar",
+      lines: [
+        "      - \"a: b\": |",
+        uses("          ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 1,
+      refs: 0,
+      sample: true
+    },
+    {
+      name: "a sequence item that is a bare scalar",
+      why: "the scalar can be the sequence item itself, with no key in front of it",
+      lines: [
+        "      - |",
+        uses("          ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 1,
+      refs: 0,
+      sample: true
+    },
+    {
       name: "a tagged scalar",
       why: "a tag before the indicator is still a block scalar",
       lines: [
@@ -2176,24 +2227,121 @@ test("consumer repin shields samples in a block scalar without shielding real pi
   }));
   const file = path.join(workflows, "unity.yml");
   for (const testCase of cases) {
-    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:"].concat(testCase.lines, [""]).join("\n"));
+    // A case that supplies its own document needs no header, and one that
+    // starts at `jobs:` is testing the shield against the whole file.
+    const prefix = testCase.header === false ? [] : ["jobs:", "  unity:", "    steps:"];
+    fs.writeFileSync(file, prefix.concat(testCase.lines, [""]).join("\n"));
     const result = runRewrite();
     assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
     const report = JSON.parse(result.stdout);
     assert.equal(report.changed, testCase.moves, testCase.name + ": " + testCase.why);
     assert.equal(report.refs, testCase.refs, testCase.name + ": moved ref: count");
     const rewritten = fs.readFileSync(file, "utf8");
-    // The sibling step's pin is outside every scalar in the table, so it is
-    // the common witness that no real pin was shielded.
-    assert.ok(
-      rewritten.includes(uses("      ", "release-build-lock", target, "1.14.0")),
-      testCase.name + ": the sibling step's pin did not move. " + testCase.why
+    // Every case carries a real pin outside its scalar, so the count above is
+    // the witness: a shield that swallowed a real pin would report fewer.
+    assert.equal(
+      (rewritten.match(new RegExp(target, "g")) || []).length,
+      testCase.moves,
+      testCase.name + ": the real pins did not all reach the target. " + testCase.why
     );
     // A `uses:` line inside the scalar is a sample: it stays at the old SHA,
     // and every other occurrence of that SHA is gone.
     const survivors = (rewritten.match(new RegExp(oldSha, "g")) || []).length;
     assert.equal(survivors, testCase.sample ? 1 : 0, testCase.name + ": old SHA count");
   }
+});
+
+test("consumer repin reads a checkout ref: through every spelling a real step uses", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-spellings-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const uses = (indent, action) =>
+    indent + "- uses: " + lockRepository + "/.github/actions/" + action + "@" + oldSha + " # v1.13.0";
+  // Each case is a spelling a real workflow may use, and each one used to
+  // freeze a real pin: the rewrite reported nothing to change, the
+  // automation called the repository already pinned, and the stale pin had
+  // no evidence against it. `moves` is the change count the rewrite has to
+  // report, which is what proves nothing was left behind.
+  const cases = [
+    {
+      name: "a comment on the with: line",
+      why: "a step whose with: line carries a comment is ordinary YAML",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with: # inputs",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
+      name: "a capital Repository and Ref key",
+      why: "GitHub reads an action's with: keys without regard to case",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          Repository: " + lockRepository,
+        "          Ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    }
+  ];
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: []
+  }));
+  const file = path.join(workflows, "unity.yml");
+  for (const testCase of cases) {
+    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:"].concat(testCase.lines, [""]).join("\n"));
+    const result = runRewrite();
+    assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.refs, testCase.refs, testCase.name + ": " + testCase.why);
+    assert.equal(report.changed, testCase.refs + 1, testCase.name + ": " + testCase.why);
+    assert.equal(
+      fs.readFileSync(file, "utf8").includes(oldSha),
+      false,
+      testCase.name + ": a stale pin survived. " + testCase.why
+    );
+  }
+  // The value keeps its own case rule: an uppercase SHA is not an immutable
+  // commit this rewrite will move, so the ref: stays and the other pin moves.
+  fs.writeFileSync(
+    file,
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "        with:",
+      "          repository: " + lockRepository,
+      "          ref: " + oldSha.toUpperCase(),
+      uses("      ", "release-build-lock"),
+      ""
+    ].join("\n")
+  );
+  const upper = runRewrite();
+  assert.equal(upper.status, 0, upper.stderr);
+  assert.equal(JSON.parse(upper.stdout).refs, 0, "an uppercase SHA is not moved");
 });
 
 test("consumer repin does not read a comment gap out of a block scalar", (t) => {
@@ -2682,7 +2830,7 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
     // content has to match what this run would produce exactly.
     writePin(releaseSha, "v1.14.0");
     gitRun(seed, "add", "-A");
-    gitRun(seed, "commit", "-m", "chore: repin organization lock actions to v1.14.0");
+    gitRun(seed, "commit", "-m", "chore: repin organization lock references to v1.14.0");
     gitRun(seed, "push", "-q", "origin", branchName);
     gitRun(seed, "checkout", "-q", "master");
     if (state.advanced) {
@@ -2724,6 +2872,9 @@ function consumerRepinHarness(t, consumerStates) {
   const branches = new Map();
   const consumers = [];
   for (const [name, state] of Object.entries(consumerStates)) {
+    if (name === "reportOverride") {
+      continue;
+    }
     branches.set(name, createConsumerRemote(root, name, state, releaseSha, branchName));
     consumers.push({ repository: `${repinOrganization}/${name}`, defaultBranch: "master" });
   }
@@ -2736,7 +2887,10 @@ function consumerRepinHarness(t, consumerStates) {
     repositories: consumers,
     exceptions: []
   };
-  for (const state of Object.values(consumerStates)) {
+  for (const [name, state] of Object.entries(consumerStates)) {
+    if (name === "reportOverride") {
+      continue;
+    }
     if (state.companions) {
       policy.repinCompanions = [...(policy.repinCompanions || []), ...state.companions];
     }
@@ -2746,11 +2900,29 @@ function consumerRepinHarness(t, consumerStates) {
 
   const shims = path.join(root, "shims");
   fs.mkdirSync(shims);
+  if (consumerStates.reportOverride) {
+    // The rewrite is a `node` call on PATH, so a shim can hand the caller a
+    // report the script could not have produced. The mutation it stands in
+    // for is the count reader treating an absent field as a count of zero,
+    // which would let the pull request body describe a mutation the report
+    // never claimed.
+    writeExecutable(path.join(shims, "node"), [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "cat <<'REPORT'",
+      consumerStates.reportOverride,
+      "REPORT",
+      ""
+    ].join("\n"));
+  }
   const events = path.join(root, "events.log");
   const prState = path.join(root, "pr-state");
   fs.writeFileSync(events, "");
   fs.mkdirSync(prState, { recursive: true });
   for (const [name, state] of Object.entries(consumerStates)) {
+    if (name === "reportOverride") {
+      continue;
+    }
     fs.mkdirSync(path.join(prState, name), { recursive: true });
     // The fixtures are the raw pull-request lists the GitHub API would
     // return; the shim applies the state and head filters and the script's
@@ -3012,7 +3184,7 @@ test("consumer repin reuses an orphaned repin branch with identical content", (t
   assert.equal(result.status, 0, result.stderr);
   const events = repinEventLog(harness);
   assert.deepEqual(events.filter((event) => event.startsWith("create")), [
-    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+    `create ${harness.branchName} Repin organization lock references to v1.14.0`
   ]);
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| opened repin pull request to `v1.14.0` from the existing branch \|/);
@@ -3130,7 +3302,7 @@ test("consumer repin pushes and opens a pull request when no branch exists", (t)
   assert.equal(result.status, 0, result.stderr);
   const events = repinEventLog(harness);
   assert.deepEqual(events.filter((event) => event.startsWith("create")), [
-    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+    `create ${harness.branchName} Repin organization lock references to v1.14.0`
   ]);
   const pushed = gitRun(
     harness.remotePath("dxmessaging"),
@@ -3139,6 +3311,31 @@ test("consumer repin pushes and opens a pull request when no branch exists", (t)
   assert.match(pushed, new RegExp(`return-unity-license@${harness.releaseSha}`));
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+});
+
+test("consumer repin fails closed on a report it cannot read the counts from", (t) => {
+  // The pull request body decides which mutations to name from two counts in
+  // the rewrite report. A reader that treated an absent count as zero would
+  // describe a mutation the report never claimed, and the offer would go out
+  // with a body a reviewer cannot check against the diff. Each report here is
+  // one the script could not have produced, so the reader has to refuse it.
+  for (const [name, report] of [
+    ["an absent count", '{"changed":1,"files":[{"path":".github/workflows/unity.yml","lines":1}],"skipped":[],"unmatched":[],"companions":[],"unmatchedCompanions":[]}'],
+    ["a null count", '{"changed":1,"uses":null,"refs":null,"files":[],"skipped":[],"unmatched":[],"companions":[],"unmatchedCompanions":[]}'],
+    ["a string count", '{"changed":1,"uses":"2","refs":"1","files":[],"skipped":[],"unmatched":[],"companions":[],"unmatchedCompanions":[]}']
+  ]) {
+    const harness = consumerRepinHarness(t, { "dxmessaging": {}, reportOverride: report });
+
+    const result = harness.run();
+
+    assert.notEqual(result.status, 0, name + ": the run accepted a report it cannot read");
+    assert.match(result.stderr, /could not read the rewrite counts from the report/, name);
+    assert.equal(
+      repinEventLog(harness).filter((event) => event.startsWith("create")).length,
+      0,
+      name + ": no offer may be opened from a report the run could not read"
+    );
+  }
 });
 
 test("consumer repin names only the mutation it made in the pull request body", (t) => {
@@ -3296,7 +3493,7 @@ test("consumer repin closes superseded offers when the default branch already pi
     "close unity-helpers 751"
   ]);
   assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("create")), [
-    `create ${harness.branchName} Repin organization lock actions to v1.14.0`
+    `create ${harness.branchName} Repin organization lock references to v1.14.0`
   ]);
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 2 superseded repin offer\(s\) \|/);

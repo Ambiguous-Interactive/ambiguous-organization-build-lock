@@ -271,16 +271,25 @@ const stripTerminator = (line) => (line.endsWith("\r") ? line.slice(0, -1) : lin
 //
 // The opener therefore names the key explicitly, so a comment cannot match
 // it, and an optional sequence marker is captured so the mapping indent can
-// be derived. Tag and anchor properties are allowed before the indicator
-// because `run: !!str |` and `run: &doc |` are block scalars too. Detecting a
-// scalar remains a heuristic on the opening line; over-detecting skips lines
-// that both rewrites would have matched only by an exact key prefix, so the
-// cost of a false positive is a pin an operator carries by hand, never a
-// wrong write. A false NEGATIVE is the expensive direction, so the pattern
-// is written to match every legal block scalar header rather than a tidy
-// subset of them.
+// be derived. A comment is also refused on its own, before the pattern runs,
+// because a pattern cannot exclude one: the sequence marker is optional, so
+// on `- # note: |` it backtracks to nothing and the key then accepts the
+// `#`. A quoted key may contain a colon, and a sequence item may be a bare
+// scalar, so both are in the key alternation. Tag and anchor properties are
+// allowed before the indicator because `run: !!str |` and `run: &doc |` are
+// block scalars too. Detecting a scalar remains a heuristic on the opening
+// line; over-detecting skips lines that both rewrites would have matched
+// only by an exact key prefix, so the cost of a false positive is a pin an
+// operator carries by hand, never a wrong write. A false NEGATIVE is the
+// expensive direction, so the pattern is written to match every legal block
+// scalar header rather than a tidy subset of them.
 const blockScalarOpener =
-  /^(\s*)(?:-([ \t]+))?[^\s#][^:]*:[ \t]*(?:[!&][^\s]*[ \t]*)*[|>][-+0-9]*[ \t]*(?:#.*)?$/;
+  /^[ \t]*(?:-[ \t]+)?(?:(?:"[^"]*"|'[^']*'|[^:'"#][^:]*):[ \t]*)?(?:[!&][^\s]*[ \t]*)*[|>][-+0-9]*[ \t]*(?:#.*)?$/;
+// A comment may follow a sequence marker, which is ordinary YAML: a step
+// whose whole entry is a comment is a legal step. It cannot be a key, so it
+// cannot open a block scalar. See the opener above for why the pattern
+// cannot be left to make this decision alone.
+const blockScalarComment = /^[ \t]*(?:-[ \t]+)?#/;
 const blockScalarLines = (lines) => {
   const literal = new Set();
   // The indent the block's content must exceed: the column of the mapping
@@ -299,12 +308,16 @@ const blockScalarLines = (lines) => {
       }
       openIndent = -1;
     }
+    if (blockScalarComment.test(body)) {
+      continue;
+    }
     const opener = blockScalarOpener.exec(body);
     if (opener) {
       // A sequence item's content starts after `- `, so a scalar opened by
       // the item's first key ends at the next sibling of that key rather
       // than at the next line of the item.
-      openIndent = opener[1].length + (opener[2] === undefined ? 0 : 1 + opener[2].length);
+      const marker = /^[ \t]*-[ \t]+/.exec(body);
+      openIndent = marker ? marker[0].length : body.length - body.trimStart().length;
     }
   }
   return literal;
@@ -491,9 +504,19 @@ const rewritePinLine = (line, location, ownGaps) => {
 // rewrite is anchored on the sibling `repository:` key, read from the same
 // `with:` block. Only direct children count, so a `ref:` nested under another
 // key is not a sibling of `repository:` and never moves.
-const withPattern = /^(\s*)with:[ \t]*$/;
+// `with:` opens the block mapping a checkout reads its inputs from. A
+// comment may follow it: a step whose `with:` line carries a comment is
+// ordinary YAML, and refusing it would freeze a real pin while the run
+// reports the repository already pinned. A tag, an anchor, or a flow
+// mapping on the same line is a different value and stays a documented
+// limit, so the pattern ends at the comment.
+const withPattern = /^(\s*)with:[ \t]*(?:#.*)?$/;
 const mappingKeyPattern = /^(\s*)([A-Za-z_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$/;
-const refValuePattern = /^(\s*ref:[ \t]+)([0-9a-f]{40})([ \t]*(?:#.*)?)$/;
+// The key is matched without regard to case because GitHub reads an action's
+// `with:` that way. The value keeps its own case requirement: only a
+// lowercase 40-character hex string is an immutable commit, and an uppercase
+// one is a value this rewrite declines to move.
+const refValuePattern = /^([ \t]*[Rr][Ee][Ff]:[ \t]+)([0-9a-f]{40})([ \t]*(?:#.*)?)$/;
 const lockRepository = lockPrefix.replace(/\/$/, "");
 const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim();
 // Collect the line indices a checkout `ref:` may move on. A `with:` block is
@@ -536,11 +559,11 @@ const refLineIndices = (lines, literal) => {
         children.push({ index, key: key[2], value: (key[3] || "").replace(/\s+$/, "") });
       }
     }
-    if (!children.some((child) => child.key === "repository" && bareRepository(child.value) === lockRepository)) {
+    if (!children.some((child) => child.key.toLowerCase() === "repository" && bareRepository(child.value) === lockRepository)) {
       continue;
     }
     for (const child of children) {
-      if (child.key === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
+      if (child.key.toLowerCase() === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
         eligible.add(child.index);
       }
     }
@@ -772,15 +795,12 @@ ${file_list}
 \`\`\`"
   fi
   cat > "${body_file}" <<EOF
-Repin the organization lock actions to the authorized release ${label}
+Repin the organization lock references to the authorized release ${label}
 (\`${target_sha}\`).
 
 ## Review before merge (leaving auto-merge on is the adoption decision)
 
 - ${mutation_bullet}
-- Reviewed companion artifacts named in the enrollment policy carry the
-  consumer files that derive from the pin. Each one moves through one
-  mechanical, mode-bound rewrite.
 - Release authorization evidence: the central authorization pull request for
   this release, merged by a maintainer.
 - The automation enables auto-merge on this pull request. The merge then
@@ -794,7 +814,7 @@ EOF
   if ! pr_url="$(GH_TOKEN="${authorization}" gh pr create \
     --repo "${repository}" \
     --head "${branch_name}" \
-    --title "Repin organization lock actions to ${label}" \
+    --title "Repin organization lock references to ${label}" \
     --body-file "${body_file}")"; then
     echo "::error::${repository}: could not open the repin pull request." >&2
     exit 1
@@ -1127,7 +1147,7 @@ ${unmatched_companions}
       echo "::error::${repository}: staged repin is empty but ${changed} lines were rewritten." >&2
       exit 1
     fi
-    if ! git -C "${directory}" commit -m "chore: repin organization lock actions to ${label}"; then
+    if ! git -C "${directory}" commit -m "chore: repin organization lock references to ${label}"; then
       echo "::error::${repository}: could not commit the repin." >&2
       exit 1
     fi

@@ -79,10 +79,11 @@ automation never force-updates it. A workflow file listed in a reviewed
 current pin; the pull request body names each preserved file and its review
 expiry. Some consumer files derive their content from the pin: copyable
 examples in operational docs, reviewed pin constants in contract tests,
-local allowlist snapshots, and a policy checkout `ref:`. A reviewed
-`repinCompanions` policy entry names
-each such file and one mechanical rewrite mode (`pin-lines`, `pin-literal`,
-or `policy-snapshot`). The repin pull request moves those files with the
+and local allowlist snapshots. A reviewed `repinCompanions` policy entry
+names each such file and one mechanical rewrite mode (`pin-lines`,
+`pin-literal`, or `policy-snapshot`). A policy checkout `ref:` is not one
+of these files: the workflow rewrite moves it where it stands, and its own
+paragraph below states the rule. The repin pull request moves those files with the
 pins, so the offered commit is complete. A companion path may be under
 `.github/`. It must not name a `.yml` or `.yaml` file there, whatever
 its case, because the `uses:` pin rewrite walks every lowercase-named
@@ -143,7 +144,7 @@ changes, and no `# vX.Y.Z` comment is added: a `ref:` is not a `uses:` pin,
 so Dependabot never reads it. A comment already on the `ref:` line survives
 as it is.
 
-Six shapes stay as the consumer wrote them, because the rewrite cannot
+Eight shapes stay as the consumer wrote them, because the rewrite cannot
 read them as a key and a value it cannot read is not evidence:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
@@ -153,17 +154,23 @@ read them as a key and a value it cannot read is not evidence:
 - a `with:` with a tag or an anchor on it, such as `with: !!map`.
 - a `with:` written as a flow mapping on one line, such as
   `with: {repository: ..., ref: ...}`.
+- a `repository:` value this repository names with a trailing slash, or as
+  a folded scalar such as `repository: >-`.
+- a `repository:` value in any other spelling, such as a URL.
 
-A comment after `repository:` or after the `ref:` value is not one of
-these: both are read, and a comment on the `with:` line itself is.
+A key this repository names in any case is read, and a comment after
+`repository:`, after the `ref:` value, or on the `with:` line itself is
+read too.
 
 The first two are self-healing or deliberate. A repository that resolves
 its `ref:` from a step that reads the `uses:` pin needs no change, because
 the pin it resolves from already moved. The rest are not, so a consumer
 that wants its policy `ref:` carried has to write the block form with a
-plain lowercase SHA. Check the `ref:` after the offer merges; a `ref:`
-the rewrite did not carry is a split commit the same way a `uses:` pin the
-rewrite did not carry is.
+plain lowercase SHA. For three of them the consumer's own contract check
+stays green, because a YAML parser reads a quoted value, a tag, an anchor,
+and a flow mapping as the same mapping. Check the `ref:` after the offer
+merges; a `ref:` the rewrite did not carry is a split commit the same way a
+`uses:` pin the rewrite did not carry is.
 
 A workflow written inside a `run: |` body is text, not structure. A
 `uses:` line or a `repository:`/`ref:` pair there is a sample, and the
