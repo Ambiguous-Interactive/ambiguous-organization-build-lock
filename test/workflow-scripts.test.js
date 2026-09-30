@@ -1539,9 +1539,14 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
       stderr: /reviewed mechanical mode/
     },
     {
-      name: "path inside .github",
-      companions: [{ repository: "Ambiguous-Interactive/unity-helpers", path: ".github/pin-doc.md", mode: "pin-lines" }],
-      stderr: /outside \.github/
+      name: "YAML path inside .github",
+      companions: [{ repository: "Ambiguous-Interactive/unity-helpers", path: ".github/pin-doc.yml", mode: "pin-lines" }],
+      stderr: /that is not a \.github YAML file/
+    },
+    {
+      name: "the .github directory itself",
+      companions: [{ repository: "Ambiguous-Interactive/unity-helpers", path: ".github", mode: "pin-lines" }],
+      stderr: /that is not a \.github YAML file/
     },
     {
       name: "escaping path",
@@ -1797,6 +1802,221 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
     onlyStale,
     "a fail-closed run leaves the companion untouched"
   );
+});
+
+test("consumer repin moves a checkout ref: only when its repository is the lock repository", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  // Every case below is a shape observed in an enrolled consumer. Only the
+  // first names the lock repository, so only its ref: may move. The
+  // unity-helpers case is the one that decides the rule: a 40-hex ref: in an
+  // identical with: block can check out a different repository entirely, so
+  // the anchor is the sibling repository: key and never the SHA.
+  const checkoutStep = (name, repository, ref, extra = []) => [
+    `      - name: ${name}`,
+    "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "        with:",
+    `          repository: ${repository}`,
+    // A comment sits between the keys in DoxReloaded's real checkout, so the
+    // scan has to skip a line that is not a key at all.
+    "          # The comment is not a key.",
+    `          ref: ${ref}`,
+    ...extra,
+    ""
+  ];
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: ${lockRepository}/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
+      // Moves: the policy checkout of DoxReloaded's build-deploy.yml.
+      ...checkoutStep("Checkout central Unity cleanup policy", lockRepository, oldSha, [
+        "          path: .central-build-lock-policy",
+        "          persist-credentials: false"
+      ]),
+      // Survives: qora-redux's unity-helpers checkout pins a literal commit in
+      // a block that differs only in the repository: value.
+      ...checkoutStep("Checkout trusted Unity editor validator", "Ambiguous-Interactive/unity-helpers", oldSha),
+      // Survives: unity-helpers resolves its ref: from a step output, so the
+      // value is not a 40-character SHA and the rewrite leaves it alone.
+      ...checkoutStep("Checkout immutable central cleanup policy", lockRepository, "${{ steps.policy_pin.outputs.sha }}"),
+      // Survives: a branch name, not a pin.
+      ...checkoutStep("Checkout upstream", "Ambiguous-Interactive/unity-helpers", "main"),
+      ""
+    ].join("\n")
+  );
+  // A ref: that is not a sibling of repository:. `nested:` is a direct child
+  // of the with: block, so its own mapping is deeper; the ref: below it names
+  // a different checkout and must not borrow this block's repository.
+  fs.writeFileSync(
+    path.join(workflows, "nested.yml"),
+    [
+      "jobs:",
+      "  nested:",
+      "    steps:",
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "        with:",
+      `          repository: ${lockRepository}`,
+      "          nested:",
+      `            repository: Ambiguous-Interactive/unity-helpers`,
+      `            ref: ${oldSha}`,
+      ""
+    ].join("\n")
+  );
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: []
+  }));
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+
+  const result = runRewrite();
+  assert.equal(result.status, 0, result.stderr);
+  const rewritten = fs.readFileSync(path.join(workflows, "unity.yml"), "utf8");
+  // The `uses:` pin and the anchored `ref:` both moved, and the comment and
+  // `path:` lines around the moved ref: are byte-identical.
+  assert.match(rewritten, new RegExp(`acquire-build-lock@${target} # v1\\.14\\.0`));
+  assert.ok(
+    rewritten.includes(
+      `          repository: ${lockRepository}\n` +
+      "          # The comment is not a key.\n" +
+      `          ref: ${target}\n` +
+      "          path: .central-build-lock-policy\n" +
+      "          persist-credentials: false\n"
+    ),
+    `expected the anchored ref: to move in place:\n${rewritten}`
+  );
+  // Every unanchored ref: is byte-identical to what the consumer wrote.
+  for (const survivor of [
+    "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n" +
+      "          repository: Ambiguous-Interactive/unity-helpers\n" +
+      "          # The comment is not a key.\n" + `          ref: ${oldSha}\n`,
+    `          repository: ${lockRepository}\n` +
+      "          # The comment is not a key.\n" +
+      "          ref: ${{ steps.policy_pin.outputs.sha }}\n",
+    "          repository: Ambiguous-Interactive/unity-helpers\n" +
+      "          # The comment is not a key.\n" +
+      "          ref: main\n"
+  ]) {
+    assert.ok(rewritten.includes(survivor), `expected the rewrite to preserve:\n${survivor}`);
+  }
+  // The ref: reports as a changed line of its own file, so the pull request
+  // body names the file a reviewer has to read.
+  assert.deepEqual(JSON.parse(result.stdout).files.sort((a, b) => a.path.localeCompare(b.path)), [
+    { path: ".github/workflows/unity.yml", lines: 2 }
+  ]);
+  assert.equal(
+    fs.readFileSync(path.join(workflows, "nested.yml"), "utf8"),
+    [
+      "jobs:",
+      "  nested:",
+      "    steps:",
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "        with:",
+      `          repository: ${lockRepository}`,
+      "          nested:",
+      "            repository: Ambiguous-Interactive/unity-helpers",
+      `            ref: ${oldSha}`,
+      ""
+    ].join("\n"),
+    "a ref: nested under another key is not a sibling of the repository: key"
+  );
+
+  // A ref: already at the target is a no-op, so the rerun is idempotent and
+  // reports nothing to change.
+  const rerun = runRewrite();
+  assert.equal(rerun.status, 0, rerun.stderr);
+  assert.equal(JSON.parse(rerun.stdout).changed, 0);
+});
+
+test("consumer repin carries a .github companion the workflow rewrite does not own", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-github-companion-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0\n`
+  );
+  // The two shapes a consumer keeps under .github/: a JSON pin table and a
+  // script constant. The workflow walk selects YAML by name, so neither is
+  // one of the files it rewrites.
+  fs.writeFileSync(
+    path.join(root, ".github", "lock-action-pins.json"),
+    `{\n  "acquire-build-lock": "${oldSha}"\n}\n`
+  );
+  fs.mkdirSync(path.join(root, ".github", "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "scripts", "test-central-unity-cleanup-policy.cjs"),
+    `const policyCommit = "${oldSha}";\n`
+  );
+  const writePolicy = (companions) =>
+    fs.writeFileSync(
+      path.join(root, "policy.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        organization: "Ambiguous-Interactive",
+        approvedLockShas: [oldSha, target],
+        approvedReturnShas: [target],
+        approvedDarwinReturnShas: [],
+        repositories: [{ repository: "Ambiguous-Interactive/DoxReloaded" }],
+        exceptions: [],
+        repinExceptions: [],
+        repinCompanions: companions
+      })
+    );
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/DoxReloaded"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+
+  writePolicy([
+    { repository: "Ambiguous-Interactive/DoxReloaded", path: ".github/lock-action-pins.json", mode: "pin-literal" },
+    { repository: "Ambiguous-Interactive/DoxReloaded", path: ".github/scripts/test-central-unity-cleanup-policy.cjs", mode: "pin-literal" }
+  ]);
+  const result = runRewrite();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.readFileSync(path.join(root, ".github", "lock-action-pins.json"), "utf8"),
+    `{\n  "acquire-build-lock": "${target}"\n}\n`
+  );
+  assert.equal(
+    fs.readFileSync(path.join(root, ".github", "scripts", "test-central-unity-cleanup-policy.cjs"), "utf8"),
+    `const policyCommit = "${target}";\n`
+  );
+
+  // A .github YAML file stays refused: the workflow walk rewrites it, so a
+  // second writer on the same file is a second interpretation of one pin.
+  for (const yamlPath of [".github/unity-cleanup-policy.yml", ".github/workflows/unity.yml", ".github"]) {
+    writePolicy([
+      { repository: "Ambiguous-Interactive/DoxReloaded", path: yamlPath, mode: "pin-literal" }
+    ]);
+    const refused = runRewrite();
+    assert.equal(refused.status, 1, `${yamlPath}: expected failure, got ${refused.status}`);
+    assert.match(refused.stderr, /that is not a \.github YAML file/);
+  }
 });
 
 test("consumer repin refuses a companion that is not a regular file", (t) => {

@@ -138,10 +138,14 @@ const companionModes = new Set(["pin-lines", "pin-literal", "policy-snapshot"]);
 const reviewedSnapshotKeys = new Set(["approvedLockShas", "approvedReturnShas", "approvedDarwinReturnShas"]);
 const reviewedEntryKeys = new Set(["repository", "path", "reason", "owner", "expiresAt"]);
 const reviewedCompanionKeys = new Set(["repository", "path", "mode"]);
+// The workflow walk selects `.yml`/`.yaml` files by name, so a companion on any
+// other extension is named by nothing else and this rewrite is its only
+// writer. Mirrors `validRepinCompanionPath` in internal/enrollment.
 const validCompanionPath = (value) =>
   typeof value === "string" && value.length > 0 &&
   !value.includes("\\") && !value.startsWith("/") && !value.startsWith("-") &&
-  !value.startsWith(".github/") && value !== ".github" && singleLine(value) &&
+  !(value === ".github" || (value.startsWith(".github/") && /\.ya?ml$/i.test(value))) &&
+  singleLine(value) &&
   !/[\x00-\x1f\x7f]/.test(value) &&
   !value.split("/").includes("..") && path.posix.normalize(value) === value;
 if (policy.repinExceptions !== undefined && !Array.isArray(policy.repinExceptions)) {
@@ -198,7 +202,7 @@ for (const entry of companionEntries) {
   }
   const entryPath = String(entry.path || "");
   if (!validCompanionPath(entryPath)) {
-    throw new Error(`Repins require a normalized repository-relative path outside .github in repinCompanions; got ${entryPath}`);
+    throw new Error(`Repins require a normalized repository-relative path that is not a .github YAML file in repinCompanions; got ${entryPath}`);
   }
   if (!companionModes.has(String(entry.mode || ""))) {
     throw new Error(`Repins require a reviewed mechanical mode in repinCompanions; got ${entry.mode}`);
@@ -240,6 +244,7 @@ const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
 // consumer keeps a stale pin with no evidence that anything was missed.
 const matchPinLine = (line) => linePattern.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
 const lineTerminator = (line) => (line.endsWith("\r") ? "\r" : "");
+const stripTerminator = (line) => (line.endsWith("\r") ? line.slice(0, -1) : line);
 const versionGrammar = /^v\d+\.\d+\.\d+$/;
 // The version comment is a machine-readable contract, so the target version
 // must be a release tag. The scheduled resolver emits only `vX.Y.Z` tags;
@@ -407,6 +412,76 @@ const rewritePinLine = (line, location, ownGaps) => {
   }
   return `${match[1]}${targetSha}${comment}${terminator}`;
 };
+// A checkout `ref:` is a second spelling of the same pin, and it moves with
+// it. The SHA alone proves nothing: qora-redux checks out `unity-helpers` at
+// a literal commit in a `with:` block that looks identical, and rewriting that
+// would point a different repository at this repository's release. So the
+// rewrite is anchored on the sibling `repository:` key, read from the same
+// `with:` block. Only direct children count, so a `ref:` nested under another
+// key is not a sibling of `repository:` and never moves.
+const withPattern = /^(\s*)with:[ \t]*$/;
+const mappingKeyPattern = /^(\s*)([A-Za-z_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$/;
+const refValuePattern = /^(\s*ref:[ \t]+)([0-9a-f]{40})([ \t]*(?:#.*)?)$/;
+const lockRepository = lockPrefix.replace(/\/$/, "");
+const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim();
+// Collect the line indices a checkout `ref:` may move on. A `with:` block is
+// a block mapping, so every direct child shares one indent: the first deeper
+// line fixes it and the block ends at the first line at or above the `with:`
+// indent. Blank and comment lines belong to no key and are skipped.
+const refLineIndices = (lines) => {
+  const eligible = new Set();
+  for (let start = 0; start < lines.length; start += 1) {
+    const withMatch = withPattern.exec(stripTerminator(lines[start]));
+    if (!withMatch) {
+      continue;
+    }
+    const blockIndent = withMatch[1].length;
+    let childIndent = -1;
+    const children = [];
+    for (let index = start + 1; index < lines.length; index += 1) {
+      const line = stripTerminator(lines[index]);
+      if (line.trim() === "" || line.trimStart().startsWith("#")) {
+        continue;
+      }
+      const indent = line.length - line.trimStart().length;
+      if (indent <= blockIndent) {
+        break;
+      }
+      if (childIndent === -1) {
+        childIndent = indent;
+      }
+      if (indent !== childIndent) {
+        continue;
+      }
+      const key = mappingKeyPattern.exec(line);
+      if (key) {
+        children.push({ index, key: key[2], value: (key[3] || "").replace(/\s+$/, "") });
+      }
+    }
+    if (!children.some((child) => child.key === "repository" && bareRepository(child.value) === lockRepository)) {
+      continue;
+    }
+    for (const child of children) {
+      if (child.key === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
+        eligible.add(child.index);
+      }
+    }
+  }
+  return eligible;
+};
+// Move a `ref:` by rewriting only its 40-character value. Nothing else on the
+// line changes: a `ref:` is not a `uses:` pin, so Dependabot never reads it
+// and no version comment is added. The SHA joins `replacedPins` for the same
+// reason a `uses:` pin does, so a `pin-literal` companion quoting the policy
+// commit can heal alongside the workflow that named it.
+const rewriteRefLine = (line) => {
+  const match = refValuePattern.exec(stripTerminator(line));
+  if (!match || match[2] === targetSha) {
+    return line;
+  }
+  replacedPins.add(match[2]);
+  return `${match[1]}${targetSha}${match[3]}${lineTerminator(line)}`;
+};
 // Every write is buffered and flushed once, at the end, so every check fails
 // closed before anything is written. A throw can come from a later workflow
 // file, from a companion that is not a regular file, or from a companion that
@@ -417,8 +492,13 @@ const rewritePinLine = (line, location, ownGaps) => {
 const pendingWrites = [];
 for (const source of sources) {
   let fileChanges = 0;
+  // The `ref:` scan runs on the original lines, before any `uses:` pin moves,
+  // so the sibling `repository:` it anchors on is the one the consumer wrote.
+  const refLines = refLineIndices(source.lines);
   const lines = source.lines.map((line, index) => {
-    const rewrittenLine = rewritePinLine(line, `${source.relativePath}:${index + 1}`);
+    const rewrittenLine = refLines.has(index)
+      ? rewriteRefLine(line)
+      : rewritePinLine(line, `${source.relativePath}:${index + 1}`);
     if (rewrittenLine !== line) {
       fileChanges += 1;
     }
@@ -577,7 +657,8 @@ open_repin_pull_request() {
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
   local mutation_bullet="Only the \`@<sha>\` suffix of \`uses:\` references to
   \`${lock_repository_prefix%/*}\` changed, plus \`# vX.Y.Z\` version comments
-  (updated or added)."
+  (updated or added). A checkout \`ref:\` naming that repository moved with
+  them."
   local references_section=""
   if [ -z "${file_list}" ]; then
     mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."

@@ -121,17 +121,23 @@ func validRepinExceptionPath(value string) bool {
 }
 
 // validRepinCompanionPath requires one normalized repository-relative file
-// outside `.github/`, because the workflow pin rewrite already owns every
-// `.github` YAML file. Companion paths are reproduced in run logs, repin pull
-// request bodies, and `git add` arguments, so control characters, backticks,
+// that the workflow pin rewrite does not already own. That rewrite walks every
+// YAML file under `.github/`, so a companion there must not be YAML; a JSON or
+// script under `.github/` is named by nothing else and this rewrite is its
+// only writer. Companion paths are reproduced in run logs, repin pull request
+// bodies, and `git add` arguments, so control characters, backticks,
 // and option-like leading dashes are refused.
 func validRepinCompanionPath(value string) bool {
-	if strings.HasPrefix(value, ".github/") || value == ".github" {
-		return false
-	}
 	clean, err := cleanRepositoryPath(value)
 	if err != nil || clean != value ||
 		strings.HasPrefix(clean, "-") || strings.ContainsAny(clean, "\r\n`") {
+		return false
+	}
+	// The walk that rewrites `uses:` pins selects `.yml` and `.yaml` files by
+	// name, so a companion on any other extension cannot be one of them. The
+	// check is case-insensitive, which is the safe direction: a `.YAML` file
+	// the walk ignores is still refused here.
+	if clean == ".github" || (strings.HasPrefix(clean, ".github/") && isYAML(clean)) {
 		return false
 	}
 	if clean == "." {
@@ -261,7 +267,7 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion repository spelling is not canonical")
 		}
 		if !validRepinCompanionPath(companion.Path) {
-			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion path must be a normalized repository-relative path outside .github")
+			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion path must be a normalized repository-relative path that is not a .github YAML file")
 		}
 		if !repinCompanionModes[companion.Mode] {
 			return UnityEnrollmentRegistry{}, fmt.Errorf("repin companion mode is not a reviewed mechanical rewrite")

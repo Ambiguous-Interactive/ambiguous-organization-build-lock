@@ -341,12 +341,25 @@ func TestUnityEnrollmentRegistryRetainsValidRepinCompanions(t *testing.T) {
 			Path:       "tests/ci/unity-workflow-contract.test.mjs",
 			Mode:       "pin-literal",
 		},
+		{
+			// The shapes a consumer that keeps its pins under `.github/` uses.
+			// The workflow pin rewrite selects YAML by name, so nothing else
+			// writes these and this rewrite is their only writer.
+			Repository: "Ambiguous-Interactive/DoxReloaded",
+			Path:       ".github/lock-action-pins.json",
+			Mode:       "pin-literal",
+		},
+		{
+			Repository: "Ambiguous-Interactive/DoxReloaded",
+			Path:       ".github/scripts/test-central-unity-cleanup-policy.cjs",
+			Mode:       "pin-literal",
+		},
 	}
 	parsed, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.RepinCompanions) != 3 {
+	if len(parsed.RepinCompanions) != 5 {
 		t.Fatalf("repin companions were not retained: %#v", parsed.RepinCompanions)
 	}
 }
@@ -362,8 +375,14 @@ func TestUnityEnrollmentRegistryRejectsInvalidRepinCompanion(t *testing.T) {
 		{"non-canonical repository", func(value *UnityRepinCompanion) {
 			value.Repository = "Ambiguous-Interactive/DXMESSAGING"
 		}},
-		{"path inside .github", func(value *UnityRepinCompanion) {
-			value.Path = ".github/pin-reference.md"
+		{"a .github YAML companion", func(value *UnityRepinCompanion) {
+			value.Path = ".github/pin-reference.yml"
+		}},
+		{"a .github YAML companion with an uppercase extension", func(value *UnityRepinCompanion) {
+			value.Path = ".github/pin-reference.YAML"
+		}},
+		{"a .github workflow", func(value *UnityRepinCompanion) {
+			value.Path = ".github/workflows/unity.yml"
 		}},
 		{"the .github directory itself", func(value *UnityRepinCompanion) {
 			value.Path = ".github"
@@ -373,9 +392,6 @@ func TestUnityEnrollmentRegistryRejectsInvalidRepinCompanion(t *testing.T) {
 		}},
 		{"tab in path", func(value *UnityRepinCompanion) {
 			value.Path = "docs/pin\treference.md"
-		}},
-		{"workflow path", func(value *UnityRepinCompanion) {
-			value.Path = ".github/workflows/unity.yml"
 		}},
 		{"escaping path", func(value *UnityRepinCompanion) {
 			value.Path = "docs/../secrets.txt"

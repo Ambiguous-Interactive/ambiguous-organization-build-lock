@@ -78,11 +78,15 @@ automation never force-updates it. A workflow file listed in a reviewed
 `repinExceptions` policy entry keeps its
 current pin; the pull request body names each preserved file and its review
 expiry. Some consumer files derive their content from the pin: copyable
-examples in operational docs, reviewed pin constants in contract tests, and
-local allowlist snapshots. A reviewed `repinCompanions` policy entry names
+examples in operational docs, reviewed pin constants in contract tests,
+local allowlist snapshots, and a policy checkout `ref:`. A reviewed
+`repinCompanions` policy entry names
 each such file and one mechanical rewrite mode (`pin-lines`, `pin-literal`,
 or `policy-snapshot`). The repin pull request moves those files with the
-pins, so the offered commit is complete. The pull request body names each
+pins, so the offered commit is complete. A companion path may be under
+`.github/`. It must not be a `.yml` or `.yaml` file there, because the
+`uses:` pin rewrite already walks every YAML file under `.github/`. A JSON
+or script file there has no second writer. The pull request body names each
 changed companion file and its mode. The scheduled enrollment audit reports
 an expired repin exception and
 a repin exception whose protected file no longer exists. The finding codes
@@ -120,6 +124,20 @@ CRLF line endings. A write that fails while the buffered changes are being
 committed is the one case that cannot be undone; it leaves the run red and
 emits no report, so no caller acts on it. Consumer lints own the spacing:
 they must accept the comment form the repository already uses.
+
+A checkout of this repository is pinned twice: in the `uses:` line of the
+action, and in the `ref:` of the `actions/checkout` step that fetches the
+central policy. A `ref:` moves with the pin, or the offered commit runs one
+release's actions against another release's policy. The anchor is the
+sibling `repository:` key in the same `with:` block, never the value of the
+`ref:`. An enrolled consumer checks out a different repository at a literal
+40-character commit, and a value-only rule would point that checkout at
+this repository's release. So the rule is: the `with:` block must name this
+repository, the `ref:` must be a direct child key of that same block, and
+its value must be a 40-character SHA. An expression, a branch, and a tag
+all stay as the consumer wrote them, and a `ref:` nested under another key
+never moves. Only the SHA changes, and no `# vX.Y.Z` comment is added: a
+`ref:` is not a `uses:` pin, so Dependabot never reads it.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` version comment, so
 the repinned pins are Dependabot-visible. Two limits keep the central
