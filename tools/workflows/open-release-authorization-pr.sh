@@ -110,11 +110,29 @@ git checkout -B "${branch}" origin/main
 
 node - "${release_sha}" "${policy_path}" <<'EOF'
 const fs = require("node:fs");
+const { TextDecoder } = require("node:util");
 const [releaseSha, policyPath] = process.argv.slice(2);
 if (!/^[a-f0-9]{40}$/.test(releaseSha)) {
   throw new Error("Release SHA is not a full lowercase commit SHA.");
 }
-const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+// The reviewed policy is read here and written back to the same path, and Node
+// replaces every byte it cannot decode with U+FFFD, which is three bytes long.
+// A rewrite that reported success would therefore commit a destroyed byte
+// inside the authorization pull request. Refuse a policy the rewrite cannot
+// read instead. `ignoreBOM` keeps a byte order mark, which the default
+// decoder strips and which belongs to the file rather than to the document.
+const bytes = fs.readFileSync(policyPath);
+let text;
+try {
+  text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+} catch {
+  throw new Error(
+    `${policyPath} is not valid UTF-8, so this rewrite cannot read it and refuses to write it ` +
+      "back. Re-save the reviewed policy as UTF-8 and authorize the release again."
+  );
+}
+const byteOrderMark = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+const policy = JSON.parse(byteOrderMark === "" ? text : text.slice(1));
 for (const key of ["approvedLockShas", "approvedReturnShas"]) {
   if (!Array.isArray(policy[key])) {
     throw new Error(`${key} must be an array.`);
@@ -124,7 +142,7 @@ for (const key of ["approvedLockShas", "approvedReturnShas"]) {
   }
   policy[key].push(releaseSha);
 }
-fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
+fs.writeFileSync(policyPath, byteOrderMark + `${JSON.stringify(policy, null, 2)}\n`);
 EOF
 
 git add "${policy_path}"

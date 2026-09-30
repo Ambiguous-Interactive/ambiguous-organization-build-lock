@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
 )
@@ -39,6 +40,14 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	content, err := os.ReadFile(*policyPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "cannot read Unity enrollment policy")
+		return 2
+	}
+	// The registry is decoded from this file and encoded back into it, and
+	// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+	// failing. The atomic replace would then hide that destroyed byte inside a
+	// clean-looking commit, so refuse a policy this run cannot read exactly.
+	if !utf8.Valid(content) {
+		_, _ = fmt.Fprintln(stderr, "cannot read Unity enrollment policy: the file is not valid UTF-8")
 		return 2
 	}
 	registry, err := enrollment.ParseUnityEnrollmentRegistry(content)
