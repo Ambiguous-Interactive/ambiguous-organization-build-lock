@@ -96,7 +96,8 @@ the gap the repository's other workflow lock pins already use, so every moved
 pin stays human-readable and Dependabot-visible. A `pin-lines` companion is
 its own file with its own formatter, so its own comments are its evidence; the
 workflow pins are the fallback for a companion that carries no version
-comment. The consumer's own formatter owns that gap and the organization is
+comment. `.github` itself has to be a real directory in the reviewed checkout;
+a symlink there is refused like any other. The consumer's own formatter owns that gap and the organization is
 not uniform: IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects
 one space, while unity-helpers runs Prettier over `.github/` and rewrites two
 spaces back to one. A gap is one or more spaces. The rewrite fails closed, and

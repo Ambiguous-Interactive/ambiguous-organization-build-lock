@@ -166,17 +166,18 @@ that holds other work.
 
 An existing open repin pull request for the same target is not updated
 automatically. The offer keeps each repository's own comment spacing, so a
-repository whose formatter rejects that spacing fails its own lint on the
-offer: fix the workflow comments by hand in the format the repository's
+formatter no longer rejects it for the gap. If an offer still fails a consumer
+lint, fix the workflow comments by hand in the format the repository's
 formatter accepts, then close the offer. That target's offer is final, so the
 next release opens a new one. Automation does not rewrite an open pull request
 branch.
 
-The rewrite checks everything before it writes anything, and the error names
-the repository, the file, and the line to fix. It reports that a line needs a
+The rewrite checks everything before it writes anything. A comment-spacing
+refusal names the repository, the file, and the line to fix: a line needs a
 version comment but the lock pins carry none, or carry more than one comment
-gap, or that an existing version comment separates the pin with something other
-than spaces. Every one of those refusals leaves the checkout byte-identical,
+gap, or an existing version comment separates the pin with something other than
+spaces. A symlink or companion refusal names the path it refuses. Every one of
+those refusals leaves the checkout byte-identical,
 so the fix is to change those comments in the format the repository's own
 formatter accepts, then let the next run open a new offer. The same applies to
 a symlink under `.github`, which the rewrite refuses rather than following; to

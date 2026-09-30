@@ -832,41 +832,64 @@ test("consumer repin refuses a symlink under .github instead of following it", (
   const cases = [
     { name: "a symlinked workflow file", link: "linked.yml", kind: "file" },
     { name: "a symlinked workflow directory", link: "linked.yml", kind: "directory" },
-    { name: "a symlinked directory under .github", link: "shared", kind: "directory" }
+    { name: "a symlinked directory under .github", link: "shared", kind: "directory" },
+    { name: "a .github that is a file", link: null, kind: "github-file" },
+    { name: "a .github that is a symlink", link: null, kind: "github-symlink" }
   ];
   for (const testCase of cases) {
     const container = fs.mkdtempSync(path.join(os.tmpdir(), "repin-symlink-"));
     t.after(() => fs.rmSync(container, { recursive: true, force: true }));
     const root = path.join(container, "consumer");
-    const workflows = path.join(root, ".github", "workflows");
-    fs.mkdirSync(workflows, { recursive: true });
-    fs.writeFileSync(path.join(workflows, "unity.yml"), `jobs: {}\n`);
     const outside = path.join(container, "outside");
-    if (testCase.kind === "file") {
-      fs.mkdirSync(outside, { recursive: true });
-      fs.writeFileSync(path.join(outside, testCase.link), original);
+    if (testCase.kind === "github-file") {
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(path.join(root, ".github"), original);
+    } else if (testCase.kind === "github-symlink") {
+      fs.mkdirSync(root, { recursive: true });
+      fs.mkdirSync(path.join(outside, "workflows"), { recursive: true });
+      fs.writeFileSync(path.join(outside, "workflows", "unity.yml"), original);
+      fs.symlinkSync(outside, path.join(root, ".github"));
     } else {
-      fs.mkdirSync(path.join(outside, testCase.link), { recursive: true });
-      fs.writeFileSync(path.join(outside, testCase.link, "unity.yml"), original);
+      const workflows = path.join(root, ".github", "workflows");
+      fs.mkdirSync(workflows, { recursive: true });
+      fs.writeFileSync(path.join(workflows, "unity.yml"), `jobs: {}\n`);
+      if (testCase.kind === "file") {
+        fs.mkdirSync(outside, { recursive: true });
+        fs.writeFileSync(path.join(outside, testCase.link), original);
+      } else {
+        fs.mkdirSync(path.join(outside, testCase.link), { recursive: true });
+        fs.writeFileSync(path.join(outside, testCase.link, "unity.yml"), original);
+      }
+      fs.symlinkSync(
+        path.relative(path.dirname(path.join(root, ".github", testCase.link)), path.join(outside, testCase.link)),
+        path.join(root, ".github", testCase.link)
+      );
     }
-    fs.symlinkSync(
-      path.relative(path.dirname(path.join(root, ".github", testCase.link)), path.join(outside, testCase.link)),
-      path.join(root, ".github", testCase.link)
-    );
     const result = childProcess.spawnSync(
       "bash",
       [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
       { cwd: repoRoot, encoding: "utf8" }
     );
     assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
-    assert.match(
-      result.stderr,
-      new RegExp(`refuse the symlink \\.github/${testCase.link} under \\.github`, "u"),
-      testCase.name
-    );
+    if (testCase.link === null) {
+      assert.match(result.stderr, /refuse a \.github that is not a directory/u, testCase.name);
+    } else {
+      assert.match(
+        result.stderr,
+        new RegExp(`refuse the symlink \\.github/${testCase.link} under \\.github`, "u"),
+        testCase.name
+      );
+    }
     if (testCase.kind === "file") {
       assert.equal(
         fs.readFileSync(path.join(outside, testCase.link), "utf8"),
+        original,
+        `${testCase.name}: the write never escapes the checkout`
+      );
+    }
+    if (testCase.kind === "github-symlink") {
+      assert.equal(
+        fs.readFileSync(path.join(outside, "workflows", "unity.yml"), "utf8"),
         original,
         `${testCase.name}: the write never escapes the checkout`
       );
@@ -1004,61 +1027,83 @@ test("a protected workflow is neither read nor used as comment spacing evidence"
   }
 });
 
-test("a companion that fails closed leaves every rewritten file byte-identical", (t) => {
+test("a companion that fails closed leaves every rewritten file byte-identical", async (t) => {
   // A fail-closed run must leave the whole checkout untouched, not only the
   // workflow files. A companion can still fail after an earlier companion has
   // already decided what to change, so a write flushed per companion would
-  // leave a half-updated tree. The refusal therefore has to come from a
-  // companion that is processed after the one that moves a pin.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-atomic-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // leave a half-updated tree. Every companion mode is covered, because each
+  // one can be the file that changes first.
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
   const target = "64bac446903115134dca8235410b332bc5a83547";
   const pin = (action, ref) =>
     `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
   const workflow = `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", oldSha)}\n`;
   // A companion whose own comment gap is a tab fails closed when the rewrite
-  // reaches it, which is after `a.md` has already been rewritten in memory.
-  const moved = pin("acquire-build-lock", `${oldSha}  # v1.13.0`) + "\n";
+  // reaches it, which is after every companion before it.
   const refused = pin("release-build-lock", `${oldSha}\t# v1.13.0`) + "\n";
-  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
-  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".github", "workflows", "unity.yml"), workflow);
-  fs.writeFileSync(path.join(root, "docs", "a.md"), moved);
-  fs.writeFileSync(path.join(root, "docs", "b.md"), refused);
-  const policyPath = path.join(root, "policy.json");
-  fs.writeFileSync(policyPath, JSON.stringify({
-    schemaVersion: 1,
-    organization: "Ambiguous-Interactive",
-    approvedLockShas: [oldSha, target],
-    approvedReturnShas: [target],
-    approvedDarwinReturnShas: [],
-    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
-    exceptions: [],
-    repinExceptions: [],
-    repinCompanions: [
-      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/a.md", mode: "pin-lines" },
-      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/b.md", mode: "pin-lines" }
-    ]
-  }));
-  const result = childProcess.spawnSync(
-    "bash",
-    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
-    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
-  );
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /docs\/b\.md:1 separates its pin/u);
-  assert.equal(
-    fs.readFileSync(path.join(root, ".github", "workflows", "unity.yml"), "utf8"),
-    workflow,
-    "the workflow pass decided to rewrite this file, and the run still left it alone"
-  );
-  assert.equal(
-    fs.readFileSync(path.join(root, "docs", "a.md"), "utf8"),
-    moved,
-    "the companion pass decided to rewrite this file, and the run still left it alone"
-  );
-  assert.equal(fs.readFileSync(path.join(root, "docs", "b.md"), "utf8"), refused);
+  const snapshot = { schemaVersion: 1, organization: "Ambiguous-Interactive", approvedLockShas: [target], approvedReturnShas: [target], approvedDarwinReturnShas: [] };
+  const modes = [
+    {
+      name: "pin-lines",
+      path: "docs/a.md",
+      content: pin("acquire-build-lock", `${oldSha}  # v1.13.0`) + "\n"
+    },
+    {
+      name: "pin-literal",
+      path: "docs/a.json",
+      content: `{"policyCommit": "${oldSha}"}\n`
+    },
+    {
+      name: "policy-snapshot",
+      path: "docs/a.json",
+      content: `${JSON.stringify({ ...snapshot, approvedLockShas: [oldSha] }, null, 2)}\n`
+    }
+  ];
+  for (const mode of modes) {
+    await t.test(`${mode.name} changes first, then a companion refuses`, () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-atomic-"));
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+      fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(root, ".github", "workflows", "unity.yml"), workflow);
+      fs.writeFileSync(path.join(root, mode.path), mode.content);
+      fs.writeFileSync(path.join(root, "docs", "z.md"), refused);
+      const policyPath = path.join(root, "policy.json");
+      const policy = {
+        schemaVersion: 1,
+        organization: "Ambiguous-Interactive",
+        approvedLockShas: [oldSha, target],
+        approvedReturnShas: [target],
+        approvedDarwinReturnShas: [],
+        repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+        exceptions: [],
+        repinExceptions: [],
+        repinCompanions: [
+          { repository: "Ambiguous-Interactive/unity-helpers", path: mode.path, mode: mode.name },
+          { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/z.md", mode: "pin-lines" }
+        ]
+      };
+      fs.writeFileSync(policyPath, JSON.stringify(policy));
+      const result = childProcess.spawnSync(
+        "bash",
+        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+        { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+      );
+      assert.equal(result.status, 1, `${mode.name}: ${result.stdout}`);
+      assert.match(result.stderr, /docs\/z\.md:1 separates its pin/u, mode.name);
+      assert.equal(
+        fs.readFileSync(path.join(root, ".github", "workflows", "unity.yml"), "utf8"),
+        workflow,
+        `${mode.name}: the workflow pass decided to rewrite this file, and the run still left it alone`
+      );
+      assert.equal(
+        fs.readFileSync(path.join(root, mode.path), "utf8"),
+        mode.content,
+        `${mode.name}: the companion pass decided to rewrite this file, and the run still left it alone`
+      );
+      assert.equal(fs.readFileSync(path.join(root, "docs", "z.md"), "utf8"), refused, mode.name);
+    });
+  }
 });
 
 test("consumer repin fails closed when a companion path cannot be read", (t) => {

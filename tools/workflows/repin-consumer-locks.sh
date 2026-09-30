@@ -274,7 +274,19 @@ const visit = (entry) => {
     }
   }
 };
-visit(path.join(directory, ".github"));
+// `.github` is the one entry the walk below never sees inside itself, so it
+// needs its own check. A committed symlink there would send the rewrite into
+// a directory outside the reviewed checkout, and the report would name paths
+// that do not exist in it.
+const githubRoot = path.join(directory, ".github");
+const githubStat = fs.lstatSync(githubRoot);
+if (githubStat.isSymbolicLink() || !githubStat.isDirectory()) {
+  throw new Error(
+    "Repins refuse a .github that is not a directory in the reviewed checkout; a rewrite would " +
+      "edit whatever it points at instead."
+  );
+}
+visit(githubRoot);
 const report = { changed: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
 // The pins this rewrite removes, collected from the workflow lines it
