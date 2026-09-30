@@ -224,10 +224,20 @@ one consumer file that derives its content from the pin, with one mechanical
 rewrite mode. `pin-lines` applies the same `uses:` pin rewrite to every line
 of the file. `pin-literal` replaces the pinned SHAs that this rewrite
 removes, as standalone tokens only, so a SHA embedded in a longer hex
-constant survives. When a rewrite removes no pin, a `pin-literal` companion
-that names no target pin anywhere still carries a stale pin, and the rewrite
-fails closed: it cannot tell a stale pin constant from a reviewed historical
-witness, so an operator updates that file by hand. `policy-snapshot` mirrors
+constant survives. The path may be under `.github/`. It must not name a
+`.yml` or `.yaml` file there, whatever its case, because the `uses:` pin
+rewrite walks every lowercase-named one and two writers on one file would
+be two interpretations of one pin. The refusal is case-insensitive, so a
+`.YAML` file is refused even though the walk ignores it. A `pin-literal` companion that names an
+authorized pin no moved pin accounts for, and no target of its own, still
+carries a stale pin, and the rewrite fails closed: it cannot tell a stale
+pin constant from a reviewed historical witness, so an operator updates
+that file by hand. The check reads the rewritten text, because that is the
+state the offer carries: a pin the replacement healed now reads as the
+target, and a companion that names the target holds a healed constant
+beside whatever witness it also carries. A companion that names both a
+healed constant and an unrelated approved pin passes; treat the extra pin
+as a witness unless you know otherwise. `policy-snapshot` mirrors
 the reviewed `approved*Shas` lists exactly, the same content a consumer
 snapshot refresh derives from the policy. The registry parser rejects a
 malformed entry, and the rewrite accepts only the reviewed policy fields.
@@ -236,6 +246,87 @@ request body. A companion whose file no longer exists is reported in both
 places. That visibility comes from repin runs only; the enrollment audit
 has no companion finding, so a stale entry in a repository that no longer
 receives repin offers stays invisible until the next repin.
+
+The rewrite also moves a checkout `ref:` that pins this repository, because a
+consumer that fetches the central policy at one release while its actions run
+another release has a split offer. The anchor is the sibling `repository:` key
+of the same `with:` block, never the value of the `ref:`: an enrolled consumer
+checks out a different repository at a literal 40-character commit, and a
+value-only rule would redirect that checkout. A `ref:` moves when the `with:`
+block is a key of a step, the step runs `actions/checkout` at 40 lowercase
+hexadecimal characters, the block names this repository, the `ref:` is a direct
+child key of that block, and the value is 40 lowercase hexadecimal characters.
+The `with:` block may be written before or after the `uses:` it belongs to.
+Only the SHA is replaced. The key spelling, the gap on either side of its
+colon, the indentation, any `- ` in front of the key, a comment already on the
+line, the whitespace behind that comment and the line terminator are all
+written back as they were read, and no version comment is added because
+Dependabot does not read a `ref:`. A moved `ref:` joins the set of pins a
+`pin-literal` companion may follow, so a constant that names the same commit
+heals with the workflow that named it. A `policy-snapshot` companion is built
+from the policy allowlists instead and does not follow the moved-pin set.
+
+The rewrite reads a `with:` block, not YAML. A value it cannot read as a
+commit and a key it cannot read as a key are not evidence, so these stay
+as the consumer wrote them, with no warning and no red run:
+
+- an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
+- a branch or a tag.
+- an uppercase SHA.
+- a quoted `ref:` value, in single or double quotes.
+- a `ref:` value carrying a tag or an anchor, such as `ref: !!str <sha>`.
+- a `ref:` with a comment and no space in front of it, which YAML reads as
+  part of the plain scalar.
+- a quoted `repository:` value, in single or double quotes.
+- a `with:` with a tag or an anchor on it.
+- a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
+- a `with:` that is not inside a step, so the pair under it is not a
+  checkout's inputs. A `with:` on a step that is not `actions/checkout` is the
+  same case, and a `with:` written beside a sequence item belongs to no step.
+- a `uses:` on the step carrying a tag or an anchor in front of the key. A
+  quoted key and a `uses:` on the line below the step's marker are read.
+- a step whose `uses:` is not `actions/checkout` at 40 lowercase hexadecimal
+  characters: a tag such as `actions/checkout@v4`, an uppercase commit, a name
+  in another case, 39 or 41 characters, or a quoted value.
+- a step written as a bare `-` with its keys on the lines after it, and a step
+  that is an alias or a merge of another one.
+- a block that names this repository twice, or that writes `ref:` twice.
+- a `ref:` whose value is a folded block scalar, such as `ref: >-`.
+- a `ref:` indented with a tab in a block whose other keys are indented with
+  spaces.
+- a `repository:` value this repository names with a trailing slash, or as
+  a folded scalar such as `repository: >-`.
+- a `repository:` value in any other spelling, such as a URL.
+
+A `uses:` pin line is read with the same key machinery. A bare or quoted key, a
+space before its colon, and a repository name in any case all name the pin a
+reader accepts, so all of them move, and the line is rebuilt from the key, its
+marker and its gap so the spelling comes back out as it was written. A key in
+another case is read too: it is not a `uses:` key to GitHub's own schema, so a
+workflow carrying one fails validation there anyway, and reading it keeps a
+spelling from freezing a pin behind a green run.
+
+These stay put on a `uses:` line: a tag or an anchor on the key or the value, a
+flow mapping, a quoted value, a tag instead of a commit, a commit that is not
+40 lowercase hexadecimal characters, a `#` with no separation space, and a
+repository with no action path under it, which names this repository rather
+than an action of it. Whitespace after the value is not part of the pin and
+does not stop it moving.
+
+A comment after `repository:`, after the `ref:` value, on the `with:` line
+itself or on the step's `uses:` line is read, so none of those keeps the pin
+behind.
+
+The first two are the consumer's own choice and usually self-healing. The
+rest are a real gap: such a `ref:` does not move, so the offer still
+splits. No enrolled consumer writes one of those shapes today. For four
+of them the consumer's own contract check stays green, because a YAML
+parser reads a quoted value, a tag, an anchor, and a flow mapping as the
+same mapping, so the remedy is to write the block form on an
+`actions/checkout` step with a plain lowercase SHA, and to read the `ref:`
+in the offer. A workflow written
+inside a `run: |` body is text, not structure, so a `uses:` line or a
+`repository:`/`ref:` pair there is a sample and is left exactly as written.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by
