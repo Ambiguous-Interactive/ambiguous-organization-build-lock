@@ -504,21 +504,97 @@ const rewritePinLine = (line, location, ownGaps) => {
 // rewrite is anchored on the sibling `repository:` key, read from the same
 // `with:` block. Only direct children count, so a `ref:` nested under another
 // key is not a sibling of `repository:` and never moves.
+// A key may be quoted, may carry a space before its colon, and is matched
+// without regard to case: GitHub reads an action's `with:` that way, so
+// `"with":`, `'with':`, and `with :` are the same key to it and to a YAML
+// reader. A key pattern that accepted only `word:` froze a real pin on
+// every other spelling, and a stale pin with a green run is the outcome
+// this rewrite must never produce.
+const yamlKey = "\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*[ \t]*";
+// A key may sit behind a sequence marker, because a step's first key is
+// written as `- uses:`. The key's column is the indent plus that marker, and
+// it is the column that decides what is a sibling of what, so both are
+// captured rather than measured from the physical line.
+const keyPattern = new RegExp(
+  "^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):(?:[ \\t]+(.*))?$"
+);
+// The column the key sits at, which is what a sibling shares: the line's own
+// indent plus any sequence marker in front of it.
+const keyIndentOf = (match) => match[1].length + match[2].length;
 // `with:` opens the block mapping a checkout reads its inputs from. A
 // comment may follow it: a step whose `with:` line carries a comment is
 // ordinary YAML, and refusing it would freeze a real pin while the run
 // reports the repository already pinned. A tag, an anchor, or a flow
 // mapping on the same line is a different value and stays a documented
 // limit, so the pattern ends at the comment.
-const withPattern = /^(\s*)with:[ \t]*(?:#.*)?$/;
-const mappingKeyPattern = /^(\s*)([A-Za-z_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$/;
-// The key is matched without regard to case because GitHub reads an action's
-// `with:` that way. The value keeps its own case requirement: only a
-// lowercase 40-character hex string is an immutable commit, and an uppercase
-// one is a value this rewrite declines to move.
-const refValuePattern = /^([ \t]*[Rr][Ee][Ff]:[ \t]+)([0-9a-f]{40})([ \t]*(?:#.*)?)$/;
+const withPattern = new RegExp("^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):[ \\t]*(?:#.*)?$", "i");
+// A comment needs a space in front of it. Without one, YAML reads the `#`
+// and everything after it as part of the plain scalar, so the value is not
+// a commit and moving it would edit a line that is not a pin. The `uses:`
+// path refuses that shape; the `ref:` path refuses it for the same reason.
+const refValuePattern = /^([ \t]*[Rr][Ee][Ff][ \t]*:[ \t]+)([0-9a-f]{40})(?=[ \t]|$)([ \t]+#.*)?$/;
 const lockRepository = lockPrefix.replace(/\/$/, "");
-const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim();
+// The value is compared folded: a GitHub repository name is an identifier
+// GitHub reads without regard to case, so a spelling that differs only in
+// case names this repository and a pin left behind would be a real one.
+const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim().toLowerCase();
+const foldedLockRepository = lockRepository.toLowerCase();
+// A quoted key is the same key to a YAML reader as its bare spelling, and
+// YAML allows a space before the colon, which belongs to the key's text and
+// not to its name. Both are folded here so a key is compared by its name.
+const unquoteKey = (key) =>
+  key.trim().replace(/^(?:"([^"]*)"|'([^']*)')$/, "$1$2").toLowerCase();
+// The step has to be a checkout for `repository:` and `ref:` to be checkout
+// inputs. Without this anchor the rule would move a `with:` pair that is
+// something else entirely: a reusable-workflow call passes `repository` and
+// `ref` to the called workflow as its own inputs, and any other action that
+// takes both is free to mean something the rewrite cannot know. Every
+// enrolled consumer that carries the shape uses `actions/checkout`, so
+// anchoring on it narrows the rule to the one step the shape is written for.
+const checkoutStepUses = /^actions\/checkout@[0-9a-f]{40}$/;
+// The `uses:` that owns a `with:` block is a sibling of it, so the step is
+// read from the block's own line upwards, stopping at the first line that
+// leaves the step's mapping.
+const opensACheckout = (lines, literal, start, blockIndent) => {
+  for (let index = start - 1; index >= 0; index -= 1) {
+    if (literal.has(index)) {
+      continue;
+    }
+    const line = stripTerminator(lines[index]);
+    if (line.trim() === "" || line.trimStart().startsWith("#")) {
+      continue;
+    }
+    // The step ends at the first line whose own indent leaves the step's
+    // column. The LINE's indent is the test rather than the key's, because
+    // the first key of a step carries the sequence marker and its key column
+    // sits two further right than the keys that follow it. A `uses:` written
+    // on the marker line is therefore shallower than its own `with:`, and
+    // the first key is read as a member of the step rather than as the end
+    // of one.
+    const key = keyPattern.exec(line);
+    if (!key) {
+      continue;
+    }
+    // A line that carries a sequence marker is a step of its own, and the
+    // key in it sits past that marker. A line that does not is a key of the
+    // step it is already inside. So the two are compared against the
+    // `with:` column the way they are written, and a `uses:` on either
+    // counts as the checkout that owns this block.
+    if (key[2].length > 0) {
+      if (key[1].length > blockIndent) {
+        return false;
+      }
+    } else if (key[1].length < blockIndent) {
+      return false;
+    } else if (key[1].length > blockIndent) {
+      continue;
+    }
+    if (unquoteKey(key[3]) === "uses" && checkoutStepUses.test((key[4] || "").trim())) {
+      return true;
+    }
+  }
+  return false;
+};
 // Collect the line indices a checkout `ref:` may move on. A `with:` block is
 // a block mapping, so every direct child shares one indent: the first deeper
 // line fixes it and the block ends at the first line at or above the `with:`
@@ -531,10 +607,13 @@ const refLineIndices = (lines, literal) => {
       continue;
     }
     const withMatch = withPattern.exec(stripTerminator(lines[start]));
-    if (!withMatch) {
+    if (!withMatch || unquoteKey(withMatch[3]) !== "with") {
       continue;
     }
-    const blockIndent = withMatch[1].length;
+    const blockIndent = keyIndentOf(withMatch);
+    if (!opensACheckout(lines, literal, start, blockIndent)) {
+      continue;
+    }
     let childIndent = -1;
     const children = [];
     for (let index = start + 1; index < lines.length; index += 1) {
@@ -544,7 +623,11 @@ const refLineIndices = (lines, literal) => {
       if (line.trim() === "" || line.trimStart().startsWith("#")) {
         continue;
       }
-      const indent = line.length - line.trimStart().length;
+      const key = keyPattern.exec(line);
+      if (!key) {
+        continue;
+      }
+      const indent = keyIndentOf(key);
       if (indent <= blockIndent) {
         break;
       }
@@ -554,16 +637,13 @@ const refLineIndices = (lines, literal) => {
       if (indent !== childIndent) {
         continue;
       }
-      const key = mappingKeyPattern.exec(line);
-      if (key) {
-        children.push({ index, key: key[2], value: (key[3] || "").replace(/\s+$/, "") });
-      }
+      children.push({ index, key: key[3], value: (key[4] || "").replace(/\s+$/, "") });
     }
-    if (!children.some((child) => child.key.toLowerCase() === "repository" && bareRepository(child.value) === lockRepository)) {
+    if (!children.some((child) => unquoteKey(child.key) === "repository" && bareRepository(child.value) === foldedLockRepository)) {
       continue;
     }
     for (const child of children) {
-      if (child.key.toLowerCase() === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
+      if (unquoteKey(child.key) === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
         eligible.add(child.index);
       }
     }
@@ -581,7 +661,10 @@ const rewriteRefLine = (line) => {
     return line;
   }
   replacedPins.add(match[2]);
-  return `${match[1]}${targetSha}${match[3]}${lineTerminator(line)}`;
+  // The trailing comment is optional, so the group is absent when there is
+  // none. Spelled out rather than templated, because an absent group in a
+  // template literal is the text "undefined".
+  return `${match[1]}${targetSha}${match[3] || ""}${lineTerminator(line)}`;
 };
 // Every write is buffered and flushed once, at the end, so every check fails
 // closed before anything is written. A throw can come from a later workflow

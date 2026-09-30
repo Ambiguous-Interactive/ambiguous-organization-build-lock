@@ -2109,6 +2109,7 @@ test("consumer repin shields samples in a block scalar without shielding real pi
         "          Acquire the organization Unity build lock and wait for the queue.",
         "          Then run the licensed build to completion.",
         uses("        ", "acquire-build-lock", oldSha, "1.13.0"),
+        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "        with:",
         "          repository: " + lockRepository,
         "          ref: " + oldSha,
@@ -2280,6 +2281,68 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       refs: 1
     },
     {
+      name: "a quoted with: key",
+      why: "a quoted key is the same key to a YAML reader and to GitHub, so a pattern that accepted only a bare word froze a real pin",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        \"with\":",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
+      name: "a space before each colon",
+      why: "YAML allows it and GitHub reads the key, so a pattern that required key: exactly froze a real pin",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with :",
+        "          repository : " + lockRepository,
+        "          ref : " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
+      name: "a repository name in another case",
+      why: "GitHub reads a repository name without regard to case, so a spelling that differs only in case names the same repository",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: Ambiguous-Interactive/Ambiguous-Organization-Build-Lock",
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
+      name: "a ref: whose sibling keys are not a with: block",
+      why: "the pattern that finds a with: block accepts any key, so the name is checked separately; a repository and ref pair under another key is not a checkout",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        env:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a ref: with a comment and no space before it",
+      why: "YAML reads that hash as part of the plain scalar, so the value is not a commit and moving it would edit a line that is not a pin",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha + "# audited",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
       name: "a capital Repository and Ref key",
       why: "GitHub reads an action's with: keys without regard to case",
       lines: [
@@ -2317,11 +2380,15 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
     const report = JSON.parse(result.stdout);
     assert.equal(report.refs, testCase.refs, testCase.name + ": " + testCase.why);
     assert.equal(report.changed, testCase.refs + 1, testCase.name + ": " + testCase.why);
-    assert.equal(
-      fs.readFileSync(file, "utf8").includes(oldSha),
-      false,
-      testCase.name + ": a stale pin survived. " + testCase.why
-    );
+    // A case that keeps a value on purpose says so; every other one must
+    // leave no occurrence of the old SHA behind.
+    if (!testCase.staleSurvives) {
+      assert.equal(
+        fs.readFileSync(file, "utf8").includes(oldSha),
+        false,
+        testCase.name + ": a stale pin survived. " + testCase.why
+      );
+    }
   }
   // The value keeps its own case rule: an uppercase SHA is not an immutable
   // commit this rewrite will move, so the ref: stays and the other pin moves.
@@ -2342,6 +2409,104 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
   const upper = runRewrite();
   assert.equal(upper.status, 0, upper.stderr);
   assert.equal(JSON.parse(upper.stdout).refs, 0, "an uppercase SHA is not moved");
+});
+
+test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-anchor-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const withBlock = (repository, ref) => [
+    "        with:",
+    "          repository: " + repository,
+    "          ref: " + ref
+  ];
+  // `repository:` and `ref:` are only checkout inputs on an `actions/checkout`
+  // step. A reusable-workflow call passes both to the called workflow as its
+  // own inputs, and any other action is free to mean something else by them,
+  // so the step is an anchor and not an assumption. Each of these is a real
+  // wrong write the anchor refuses: the offered commit would change a value
+  // whose meaning the rewrite does not know.
+  const cases = [
+    {
+      name: "a reusable-workflow call",
+      lines: [
+        "  call:",
+        "    uses: Ambiguous-Interactive/shared/.github/workflows/policy.yml@abc",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0
+    },
+    {
+      name: "a deploy action",
+      lines: [
+        "      - uses: azure/webapps-deploy@v3",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0
+    },
+    {
+      name: "a job with no uses: at all",
+      lines: [
+        "  job:",
+        "    runs-on: ubuntu-latest",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0
+    }
+  ];
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: []
+  }));
+  const file = path.join(workflows, "unity.yml");
+  const realPin = "      - uses: " + lockRepository + "/.github/actions/release-build-lock@" + oldSha + " # v1.13.0";
+  for (const testCase of cases) {
+    fs.writeFileSync(file, ["jobs:", "  a:", "    steps:", ...testCase.lines, realPin, ""].join("\n"));
+    const result = runRewrite();
+    assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.refs, testCase.refs, testCase.name + ": the ref: must not move");
+    assert.equal(report.uses, 1, testCase.name + ": the sibling pin still moves");
+    assert.equal(
+      fs.readFileSync(file, "utf8").includes(oldSha),
+      true,
+      testCase.name + ": the unanchored ref: is left as the consumer wrote it"
+    );
+  }
+  // The same block on a checkout step does move, so the anchor is the
+  // difference and not the block shape.
+  fs.writeFileSync(
+    file,
+    [
+      "jobs:",
+      "  a:",
+      "    steps:",
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      ...withBlock(lockRepository, oldSha),
+      realPin,
+      ""
+    ].join("\n")
+  );
+  const anchored = runRewrite();
+  assert.equal(anchored.status, 0, anchored.stderr);
+  assert.equal(JSON.parse(anchored.stdout).refs, 1, "an actions/checkout step moves the ref:");
 });
 
 test("consumer repin does not read a comment gap out of a block scalar", (t) => {
@@ -2426,7 +2591,11 @@ test("consumer repin treats a workflow sample inside a block scalar as text", (t
       "  unity:",
       "    steps:",
       // The real pins, after the scalar, at a shallower indent than its body.
+      // The `with:` hangs off an `actions/checkout` step because that is the
+      // step the `ref:` rule is anchored on: a `repository:` and a `ref:` on
+      // any other step are that step's own inputs, not a checkout of here.
       `      - uses: ${lockRepository}/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "        with:",
       `          repository: ${lockRepository}`,
       `          ref: ${oldSha}`,
@@ -2461,6 +2630,7 @@ test("consumer repin treats a workflow sample inside a block scalar as text", (t
   assert.ok(
     rewritten.includes(
       `      - uses: ${lockRepository}/.github/actions/acquire-build-lock@${target} # v1.14.0\n` +
+      "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n" +
       "        with:\n" +
       `          repository: ${lockRepository}\n` +
       `          ref: ${target}\n`
@@ -2497,6 +2667,7 @@ test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (
       "    unity:",
       "        steps:",
       `            - uses: ${lockRepository}/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
+      "            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "            with:",
       `                repository: ${lockRepository}`,
       `                ref: ${oldSha}`,
@@ -2529,6 +2700,7 @@ test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (
       "    unity:",
       "        steps:",
       `            - uses: ${lockRepository}/.github/actions/acquire-build-lock@${target} # v1.14.0`,
+      "            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "            with:",
       `                repository: ${lockRepository}`,
       `                ref: ${target}`,

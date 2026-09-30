@@ -137,40 +137,55 @@ release's actions against another release's policy. The anchor is the
 sibling `repository:` key in the same `with:` block, never the value of the
 `ref:`. An enrolled consumer checks out a different repository at a literal
 40-character commit, and a value-only rule would point that checkout at
-this repository's release. So the rule is: the `with:` block must name this
-repository, the `ref:` must be a direct child key of that same block, and
-its value must be 40 lowercase hexadecimal characters. Only the SHA
+this repository's release. So the rule has three anchors. The step must
+run `actions/checkout` at a reviewed commit, so a `repository:` and a
+`ref:` on any other step stay put: a reusable-workflow call passes both to
+the called workflow as its own inputs, and no other action's meaning for
+them is knowable here. The `with:` block must name this repository. The
+`ref:` must be a direct child key of that same block, and its value must
+be 40 lowercase hexadecimal characters. A key is read in any case and with
+or without quotes, because GitHub reads an action's `with:` that way; the
+repository value is compared the same way, because a name that differs
+only in case is the same repository. Only the SHA
 changes, and no `# vX.Y.Z` comment is added: a `ref:` is not a `uses:` pin,
 so Dependabot never reads it. A comment already on the `ref:` line survives
 as it is.
 
-Eight shapes stay as the consumer wrote them, because the rewrite cannot
-read them as a key and a value it cannot read is not evidence:
+A `ref:` stays as the consumer wrote it whenever the rewrite cannot read it
+as a commit, and a `with:` stays whenever it cannot read it as a key. A
+value it cannot read is not evidence, so the list is this:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
 - a branch or a tag, such as `ref: main`.
 - an uppercase SHA.
+- a quoted `ref:` value, in single or double quotes.
+- a `ref:` value carrying a tag or an anchor, such as `ref: !!str <sha>`.
 - a quoted `repository:` value, in single or double quotes.
 - a `with:` with a tag or an anchor on it, such as `with: !!map`.
 - a `with:` written as a flow mapping on one line, such as
   `with: {repository: ..., ref: ...}`.
+- a `with:` that is not on an `actions/checkout` step, which is the
+  anchor above rather than a spelling of the key.
 - a `repository:` value this repository names with a trailing slash, or as
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
+- a `ref:` with a comment and no space in front of it. YAML reads that `#`
+  as part of the plain scalar, so the value is not a commit. The `uses:`
+  path refuses that shape for the same reason.
 
-A key this repository names in any case is read, and a comment after
-`repository:`, after the `ref:` value, or on the `with:` line itself is
-read too.
+A comment after `repository:`, after the `ref:` value, or on the `with:`
+line itself is read, so none of those keeps the pin behind.
 
 The first two are self-healing or deliberate. A repository that resolves
 its `ref:` from a step that reads the `uses:` pin needs no change, because
 the pin it resolves from already moved. The rest are not, so a consumer
-that wants its policy `ref:` carried has to write the block form with a
-plain lowercase SHA. For three of them the consumer's own contract check
-stays green, because a YAML parser reads a quoted value, a tag, an anchor,
-and a flow mapping as the same mapping. Check the `ref:` after the offer
-merges; a `ref:` the rewrite did not carry is a split commit the same way a
-`uses:` pin the rewrite did not carry is.
+that wants its policy `ref:` carried has to write the block form on an
+`actions/checkout` step, with a plain lowercase SHA. For four of them the
+consumer's own contract check stays green, because a YAML parser reads a
+quoted value, a tag, an anchor, and a flow mapping as the same mapping.
+Check the `ref:` after the offer merges; a `ref:` the rewrite did not
+carry is a split commit the same way a `uses:` pin the rewrite did not
+carry is.
 
 A workflow written inside a `run: |` body is text, not structure. A
 `uses:` line or a `repository:`/`ref:` pair there is a sample, and the

@@ -262,30 +262,36 @@ companion may follow, so a constant that names the same commit heals with
 the workflow that named it. A `policy-snapshot` companion is built from the
 policy allowlists instead and does not follow the moved-pin set.
 
-The rewrite reads a `with:` block, not YAML. Eight shapes therefore stay as
-the consumer wrote them, with no warning and no red run:
+The rewrite reads a `with:` block, not YAML. A value it cannot read as a
+commit and a key it cannot read as a key are not evidence, so these stay
+as the consumer wrote them, with no warning and no red run:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
 - a branch or a tag.
 - an uppercase SHA.
+- a quoted `ref:` value, in single or double quotes.
+- a `ref:` value carrying a tag or an anchor, such as `ref: !!str <sha>`.
+- a `ref:` with a comment and no space in front of it, which YAML reads as
+  part of the plain scalar.
 - a quoted `repository:` value, in single or double quotes.
 - a `with:` with a tag or an anchor on it.
 - a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
+- a `with:` on a step that is not `actions/checkout`.
 - a `repository:` value this repository names with a trailing slash, or as
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
 
-A key this repository names in any case is read, and a comment after
-`repository:`, after the `ref:` value, or on the `with:` line itself is
-read too.
+A comment after `repository:`, after the `ref:` value, or on the `with:`
+line itself is read, so none of those keeps the pin behind.
 
 The first two are the consumer's own choice and usually self-healing. The
 rest are a real gap: such a `ref:` does not move, so the offer still
-splits. No enrolled consumer writes one of those shapes today. For three
+splits. No enrolled consumer writes one of those shapes today. For four
 of them the consumer's own contract check stays green, because a YAML
 parser reads a quoted value, a tag, an anchor, and a flow mapping as the
-same mapping, so the remedy is to write the block form with a plain
-lowercase SHA and to read the `ref:` in the offer. A workflow written
+same mapping, so the remedy is to write the block form on an
+`actions/checkout` step with a plain lowercase SHA, and to read the `ref:`
+in the offer. A workflow written
 inside a `run: |` body is text, not structure, so a `uses:` line or a
 `repository:`/`ref:` pair there is a sample and is left exactly as written.
 
