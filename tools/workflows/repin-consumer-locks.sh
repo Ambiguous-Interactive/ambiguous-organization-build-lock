@@ -255,19 +255,20 @@ const relativeToConsumer = (filePath) =>
 const visit = (entry) => {
   for (const item of fs.readdirSync(entry, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const itemPath = path.join(entry, item.name);
+    // A symlink is followed on read and written through, so a workflow reached
+    // through one would be edited outside the checkout the offer shows while
+    // `git status` stays clean, and a symlinked directory would hide every pin
+    // inside it so the run would report no change and close its own offer as
+    // superseded. Neither is a reviewed surface, so refuse them by name.
+    if (item.isSymbolicLink()) {
+      throw new Error(
+        `Repins refuse the symlink ${relativeToConsumer(itemPath)} under .github; a rewrite would ` +
+          "either edit the file it points at outside the reviewed checkout or miss the pins inside it."
+      );
+    }
     if (item.isDirectory()) {
       visit(itemPath);
     } else if (/\.(yml|yaml)$/.test(item.name)) {
-      // A symlink is written through, so the rewrite would edit the file it
-      // points at, outside the checkout the offer shows, and `git status`
-      // would stay clean. The companion path below refuses the same shape,
-      // so refuse it by name instead of following it.
-      if (item.isSymbolicLink()) {
-        throw new Error(
-          `Repins refuse the symlinked workflow ${relativeToConsumer(itemPath)}; a rewrite would ` +
-            "edit the file it points at instead of the reviewed checkout."
-        );
-      }
       files.push(itemPath);
     }
   }
@@ -289,22 +290,27 @@ const replacedPins = new Set();
 const versionCommentGaps = new Set();
 // `linePattern` accepts any `\s` run before `#`, and `trim()` strips the
 // Unicode spaces too, so a comment can pass the version test while carrying a
-// gap that is not spaces or tabs. Copying that gap is impossible and dropping
-// it is worse: YAML reads a `#` with no separation space as part of the plain
+// gap that is not a space. Copying that gap is impossible and dropping it is
+// worse: YAML reads a `#` with no separation space as part of the plain
 // scalar, so the rewrite would fold `# vX.Y.Z` into the `uses:` value and the
-// pin would then match nothing on any later run. A gap the rewrite cannot
-// reproduce is evidence it must not touch, so it fails closed and names the
-// file and line. Only a version comment needs this: a witness comment is
-// written back verbatim and never re-formed.
-const gapPattern = /^[ \t]+$/;
+// pin would then match nothing on any later run. A tab fails the same way from
+// the other side: libyaml rejects a tab before a comment as a syntax error, so
+// a tab is a space the consumer never wrote. A gap the rewrite cannot reproduce
+// is evidence it must not touch, so it fails closed and names the file and
+// line. Only a version comment needs this: a witness comment is written back
+// verbatim and never re-formed.
+const gapPattern = /^ +$/;
 const commentGap = (comment, location) => {
-  const gap = /^[ \t]*/.exec(comment)[0];
+  // Match the whole gap, not a prefix of it, so a gap that mixes a space with
+  // another whitespace character is refused and reported as it really is.
+  const gap = /^\s+/.exec(comment)[0];
   if (!gapPattern.test(gap)) {
     throw new Error(
       `${repository} ${location} separates its pin from \`${comment.trim()}\` with ` +
-        `${JSON.stringify(comment.slice(0, gap.length))} instead of spaces or tabs. The rewrite ` +
-        "refuses to change that shape, because dropping the gap would fold the comment into the " +
-        "`uses:` value and hide the pin from every later run. Fix the comment by hand and repin again."
+        `${JSON.stringify(gap)} instead of one or more spaces. Only a space separates a pin from a ` +
+        "comment in YAML: libyaml rejects a tab as a syntax error, and a gap the rewrite cannot " +
+        "reproduce risks folding the comment into the `uses:` value and hiding the pin from every " +
+        "later run. Fix the comment by hand and repin again."
     );
   }
   return gap;
@@ -338,19 +344,23 @@ for (const filePath of files) {
 }
 // A moved pin without a version comment gains one, so Dependabot can read
 // the release. That new comment needs a gap, and the only evidence is what
-// the repository already writes. No precedent, or two different gaps in one
-// repository, is ambiguous evidence: a mechanical rewrite cannot tell which
-// width the consumer's formatter accepts, so it fails closed and names the
-// repository and the file instead of guessing. A repository that has no lock
-// pin at all never reaches this path because it has no pin to move.
-const versionCommentGap = (location) => {
-  if (versionCommentGaps.size === 1) {
-    return [...versionCommentGaps][0];
+// the repository already writes. No precedent, or more than one gap in one
+// file, is ambiguous evidence: a mechanical rewrite cannot tell which width the
+// consumer's formatter accepts, so it fails closed and names the repository
+// and the file instead of guessing. A repository that has no lock pin at all
+// never reaches this path because it has no pin to move. `ownGaps` is the
+// evidence from the file being rewritten: a `pin-lines` companion keeps its
+// own spacing even when the workflow pins use a different one, so the offered
+// commit never leaves a file internally inconsistent.
+const resolveVersionCommentGap = (location, ownGaps) => {
+  const gaps = ownGaps || versionCommentGaps;
+  if (gaps.size === 1) {
+    return [...gaps][0];
   }
-  const gaps = [...versionCommentGaps];
-  const evidence = gaps.length === 0
-    ? "None of its workflow lock pins carries a `# vX.Y.Z` comment."
-    : `Its workflow lock pins use ${gaps.length} different comment gaps: ${gaps
+  const observed = [...gaps];
+  const evidence = observed.length === 0
+    ? "None of its lock pins carries a `# vX.Y.Z` comment."
+    : `Its lock pins use ${observed.length} different comment gaps: ${observed
       .map((gap) => JSON.stringify(gap))
       .join(", ")}.`;
   throw new Error(
@@ -359,7 +369,7 @@ const versionCommentGap = (location) => {
       "comments uniform in the repository's own format, then repin again."
   );
 };
-const rewritePinLine = (line, location) => {
+const rewritePinLine = (line, location, ownGaps) => {
   const match = matchPinLine(line);
   if (!match || match[2] === targetSha) {
     return line;
@@ -374,14 +384,19 @@ const rewritePinLine = (line, location) => {
   const rawComment = comment.trim();
   const terminator = lineTerminator(line);
   if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
-    const gap = comment === "" ? versionCommentGap(location) : commentGap(comment, location);
+    const gap = comment === ""
+      ? resolveVersionCommentGap(location, ownGaps)
+      : commentGap(comment, location);
     return `${match[1]}${targetSha}${gap}# ${targetVersion}${terminator}`;
   }
   return `${match[1]}${targetSha}${comment}${terminator}`;
 };
-// Rewrite every file in memory and write only once all of them succeed, so a
-// fail-closed run leaves the checkout byte-identical instead of half-updated.
-const rewritten = [];
+// Every write is buffered and flushed once, at the end, so a fail-closed run
+// leaves the checkout byte-identical instead of half-updated. A throw can come
+// from a later workflow file, from a companion that is not a regular file, or
+// from a companion that still names a stale pin, so the workflow flush alone
+// would not be enough.
+const pendingWrites = [];
 for (const source of sources) {
   let fileChanges = 0;
   const lines = source.lines.map((line, index) => {
@@ -394,12 +409,9 @@ for (const source of sources) {
   if (fileChanges === 0) {
     continue;
   }
-  rewritten.push({ filePath: source.filePath, content: lines.join("\n"), lines: fileChanges });
-}
-for (const file of rewritten) {
-  fs.writeFileSync(file.filePath, file.content, "utf8");
-  report.changed += file.lines;
-  report.files.push({ path: relativeToConsumer(file.filePath), lines: file.lines });
+  pendingWrites.push({ filePath: source.filePath, content: lines.join("\n") });
+  report.changed += fileChanges;
+  report.files.push({ path: source.relativePath, lines: fileChanges });
 }
 for (const [entryPath, entry] of exceptions) {
   if (!matchedExceptions.has(entryPath)) {
@@ -417,7 +429,14 @@ const reviewedCompanions = companions.map((companion) => {
   let companionStat;
   try {
     companionStat = fs.lstatSync(companionPath);
-  } catch {
+  } catch (error) {
+    // Only a missing entry means the companion is absent. A path whose parent
+    // is a file, or one the checkout cannot read, is not the same fact, and
+    // reporting it as absent would offer a commit that silently omits a
+    // policy-required artifact.
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
     report.unmatchedCompanions.push({ path: companion.path, mode: companion.mode });
     return null;
   }
@@ -436,15 +455,26 @@ for (const companion of reviewedCompanions) {
   let companionChanges = 0;
   if (companion.mode === "pin-lines") {
     const lines = fs.readFileSync(companionPath, "utf8").split("\n");
-    const rewritten = lines.map((line, index) => {
-      const rewrittenLine = rewritePinLine(line, `${companion.path}:${index + 1}`);
+    // A companion is its own file with its own formatter, so its own comments
+    // are the first evidence for a comment it has to gain. The workflow set is
+    // the fallback for a companion that carries no version comment at all.
+    const ownGaps = new Set();
+    for (const [index, line] of lines.entries()) {
+      const match = matchPinLine(line);
+      const comment = match ? match[3] || "" : "";
+      if (comment !== "" && versionCommentPattern.test(comment.trim())) {
+        ownGaps.add(commentGap(comment, `${companion.path}:${index + 1}`));
+      }
+    }
+    const rewrittenLines = lines.map((line, index) => {
+      const rewrittenLine = rewritePinLine(line, `${companion.path}:${index + 1}`, ownGaps);
       if (rewrittenLine !== line) {
         companionChanges += 1;
       }
       return rewrittenLine;
     });
     if (companionChanges > 0) {
-      fs.writeFileSync(companionPath, `${rewritten.join("\n")}`, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: rewrittenLines.join("\n") });
     }
   } else if (companion.mode === "pin-literal") {
     const original = fs.readFileSync(companionPath, "utf8");
@@ -481,7 +511,7 @@ for (const companion of reviewedCompanions) {
     }
     if (updated !== original) {
       companionChanges = 1;
-      fs.writeFileSync(companionPath, updated, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: updated });
     }
   } else if (companion.mode === "policy-snapshot") {
     // Mirror the reviewed allowlists exactly: the same content a consumer
@@ -500,11 +530,14 @@ for (const companion of reviewedCompanions) {
     const updated = `${JSON.stringify(snapshot, null, 2)}\n`;
     if (updated !== original) {
       companionChanges = 1;
-      fs.writeFileSync(companionPath, updated, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: updated });
     }
   }
   report.changed += companionChanges;
   report.companions.push({ path: companion.path, mode: companion.mode, lines: companionChanges });
+}
+for (const write of pendingWrites) {
+  fs.writeFileSync(write.filePath, write.content, "utf8");
 }
 process.stdout.write(`${JSON.stringify(report)}\n`);
 EOF

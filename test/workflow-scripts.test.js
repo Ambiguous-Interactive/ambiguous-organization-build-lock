@@ -670,9 +670,7 @@ test("moved pin comments keep the consumer's own comment spacing", async (t) => 
   // The repository's other pin already sits at the target, so it supplies the
   // spacing evidence without moving itself.
   const precedent = (gap) => `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target}${gap}# v1.14.0`)}\n`;
-  // A tab is a YAML separation space, so the rewrite preserves it like a
-  // space. Pinning the case keeps that decision from drifting.
-  for (const gap of [" ", "  ", "\t"]) {
+  for (const gap of [" ", "  "]) {
     const other = gap === " " ? "  " : " ";
     const cases = [
       { comment: "", version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
@@ -742,7 +740,7 @@ test("consumer repin fails closed when the repository's comment spacing has no s
     {
       name: "no version comment to copy",
       files: { "unity.yml": `${pin("return-unity-license", oldSha)}\n` },
-      expected: /None of its workflow lock pins carries a `# vX\.Y\.Z` comment\./u
+      expected: /None of its lock pins carries a `# vX\.Y\.Z` comment\./u
     },
     {
       name: "two comment gaps in one repository",
@@ -750,15 +748,29 @@ test("consumer repin fails closed when the repository's comment spacing has no s
         "a.yml": `${pin("acquire-build-lock", `${oldSha} # v1.13.0`)}\n`,
         "b.yml": `${pin("release-build-lock", `${oldSha}  # v1.13.0`)}\n${pin("return-unity-license", oldSha)}\n`
       },
-      expected: /Its workflow lock pins use 2 different comment gaps: " ", "  "\./u
+      expected: /Its lock pins use 2 different comment gaps: " ", "  "\./u
     },
     {
       // `trim()` strips a non-breaking space, so this comment passes the
       // version test. Copying the gap is impossible and dropping it folds the
       // `#` into the `uses:` value, which hides the pin from every later run.
-      name: "a gap that is not a space or tab",
+      name: "a gap that is not a space",
       files: { "unity.yml": `${pin("acquire-build-lock", `${oldSha}\u00a0# v1.13.0`)}\n` },
-      expected: /instead of spaces or tabs\.[\s\S]*`uses:` value/u
+      expected: /with "\u00a0" instead of one or more spaces\.[\s\S]*`uses:` value/u
+    },
+    {
+      // A gap that starts with a space and then a non-breaking space is still
+      // not reproducible, and the message has to name the gap as it really is.
+      name: "a gap that mixes a space with another whitespace character",
+      files: { "unity.yml": `${pin("acquire-build-lock", `${oldSha} \u00a0# v1.13.0`)}\n` },
+      expected: /with " \u00a0" instead of one or more spaces\./u
+    },
+    {
+      // libyaml rejects a tab before a comment as a syntax error, so a tab is a
+      // space the consumer never wrote and the rewrite must not emit one.
+      name: "a tab gap",
+      files: { "unity.yml": `${pin("acquire-build-lock", `${oldSha}\t# v1.13.0`)}\n` },
+      expected: /with "\\t" instead of one or more spaces\./u
     }
   ];
   for (const testCase of cases) {
@@ -805,28 +817,246 @@ test("consumer repin fails closed when the repository's comment spacing has no s
   assert.deepEqual(JSON.parse(skipped.stdout).changed, 0);
 });
 
-test("consumer repin refuses a symlinked workflow instead of writing through it", (t) => {
-  // A symlink is written through, so the rewrite would edit a file outside the
-  // checkout the offer shows and `git status` would stay clean. The companion
-  // path already refuses this shape; a workflow must refuse it the same way.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-symlink-"));
+test("consumer repin refuses a symlink under .github instead of following it", (t) => {
+  // A symlink is followed on read and written through, so a workflow reached
+  // through one would be edited outside the checkout the offer shows while
+  // `git status` stays clean, and a symlinked directory would hide every pin
+  // inside it so the run would report no change and close its own offer as
+  // superseded. The companion path already refuses the file shape; a workflow
+  // must refuse both, and the target has to sit outside the consumer root for
+  // the claim to mean anything.
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const original =
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0\n`;
+  const cases = [
+    { name: "a symlinked workflow file", link: "linked.yml", kind: "file" },
+    { name: "a symlinked workflow directory", link: "linked.yml", kind: "directory" },
+    { name: "a symlinked directory under .github", link: "shared", kind: "directory" }
+  ];
+  for (const testCase of cases) {
+    const container = fs.mkdtempSync(path.join(os.tmpdir(), "repin-symlink-"));
+    t.after(() => fs.rmSync(container, { recursive: true, force: true }));
+    const root = path.join(container, "consumer");
+    const workflows = path.join(root, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.writeFileSync(path.join(workflows, "unity.yml"), `jobs: {}\n`);
+    const outside = path.join(container, "outside");
+    if (testCase.kind === "file") {
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, testCase.link), original);
+    } else {
+      fs.mkdirSync(path.join(outside, testCase.link), { recursive: true });
+      fs.writeFileSync(path.join(outside, testCase.link, "unity.yml"), original);
+    }
+    fs.symlinkSync(
+      path.relative(path.dirname(path.join(root, ".github", testCase.link)), path.join(outside, testCase.link)),
+      path.join(root, ".github", testCase.link)
+    );
+    const result = childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
+    assert.match(
+      result.stderr,
+      new RegExp(`refuse the symlink \\.github/${testCase.link} under \\.github`, "u"),
+      testCase.name
+    );
+    if (testCase.kind === "file") {
+      assert.equal(
+        fs.readFileSync(path.join(outside, testCase.link), "utf8"),
+        original,
+        `${testCase.name}: the write never escapes the checkout`
+      );
+    }
+  }
+});
+
+test("a protected workflow is neither read nor used as comment spacing evidence", (t) => {
+  // A `repinExceptions` file is never rewritten, so it is not a reviewed
+  // surface for this run. If it were still read, it could veto the whole
+  // consumer repin with a gap the run would never touch, and an unreadable
+  // protected file would turn a tolerated state into a red run. The gap below
+  // is deliberately the one width the rewritten file does not use.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-protected-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
   const target = "64bac446903115134dca8235410b332bc5a83547";
-  const outside = path.join(root, "outside.yml");
-  const original = `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0\n`;
-  fs.writeFileSync(outside, original);
-  const workflows = path.join(root, ".github", "workflows");
-  fs.mkdirSync(workflows, { recursive: true });
-  fs.symlinkSync(path.relative(workflows, outside), path.join(workflows, "linked.yml"));
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  const protectedContent = `${pin("release-build-lock", `${oldSha}   # v1.13.0`)}\n`;
+  const openContent = `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", oldSha)}\n`;
+  // The protected gap is deliberately the one width the rewritten file does not
+  // use, and one run protects a file that cannot be opened at all. Neither may
+  // reach the rewrite: the first would veto the consumer, the second would
+  // turn a tolerated state into a red run.
+  const policyPath = path.join(root, "policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [{
+      repository: "Ambiguous-Interactive/unity-helpers",
+      path: ".github/workflows/legacy.yml",
+      reason: "The wrapper cannot supply the return-log-digest input.",
+      owner: "unity-helpers-maintainers",
+      expiresAt: "2099-01-01T00:00:00Z"
+    }],
+    repinCompanions: []
+  }));
+  const cases = [
+    { name: "a protected workflow with a different gap", mode: 0o644, expectRewrite: true },
+    { name: "a protected workflow that cannot be read", mode: 0o000, expectRewrite: true }
+  ];
+  for (const testCase of cases) {
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "repin-protected-"));
+    t.after(() => {
+      fs.chmodSync(path.join(checkout, ".github", "workflows", "legacy.yml"), 0o600);
+      fs.rmSync(checkout, { recursive: true, force: true });
+    });
+    const workflows = path.join(checkout, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.writeFileSync(path.join(workflows, "legacy.yml"), protectedContent);
+    fs.writeFileSync(path.join(workflows, "unity.yml"), openContent);
+    fs.chmodSync(path.join(workflows, "legacy.yml"), testCase.mode);
+    const result = childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", checkout, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+    );
+    assert.equal(result.status, 0, `${testCase.name}: ${result.stderr}`);
+    assert.deepEqual(
+      JSON.parse(result.stdout).files,
+      [{ path: path.join(".github", "workflows", "unity.yml"), lines: 1 }],
+      testCase.name
+    );
+    assert.equal(
+      fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+      `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", `${target} # v1.14.0`)}\n`,
+      testCase.name
+    );
+    fs.chmodSync(path.join(workflows, "legacy.yml"), 0o600);
+    assert.equal(
+      fs.readFileSync(path.join(workflows, "legacy.yml"), "utf8"),
+      protectedContent,
+      testCase.name
+    );
+  }
+});
+
+test("a companion that fails closed leaves every rewritten file byte-identical", (t) => {
+  // A fail-closed run must leave the whole checkout untouched, not only the
+  // workflow files. The companion block runs after the workflow pass and can
+  // still throw, so a write flushed there would leave a half-updated tree.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-atomic-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  const workflow = `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", oldSha)}\n`;
+  const companion = `${pin("release-build-lock", `${oldSha} # v1.13.0`)}\n`;
+  const stale = `const policyCommit = "${oldSha}";\n`;
+  const outside = path.join(root, "secret.txt");
+  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".github", "workflows", "unity.yml"), workflow);
+  fs.writeFileSync(path.join(root, "scripts", "pin.md"), companion);
+  fs.writeFileSync(path.join(root, "scripts", "pin.js"), stale);
+  fs.writeFileSync(outside, "untouched\n");
+  // A symlinked companion is refused after the workflow pass has already
+  // decided what to write, so this is where a flush would leak.
+  fs.symlinkSync(path.relative(path.join(root, "scripts"), outside), path.join(root, "scripts", "linked.md"));
+  const policyPath = path.join(root, "policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: [
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "scripts/pin.md", mode: "pin-lines" },
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "scripts/linked.md", mode: "pin-lines" }
+    ]
+  }));
   const result = childProcess.spawnSync(
     "bash",
     [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
-    { cwd: repoRoot, encoding: "utf8" }
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
   );
   assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /refuse the symlinked workflow \.github\/workflows\/linked\.yml/u);
-  assert.equal(fs.readFileSync(outside, "utf8"), original, "the write never escapes the checkout");
+  assert.match(result.stderr, /scripts\/linked\.md is not a regular file/u);
+  assert.equal(
+    fs.readFileSync(path.join(root, ".github", "workflows", "unity.yml"), "utf8"),
+    workflow,
+    "the workflow pass decided to rewrite this file, and the run still left it alone"
+  );
+  assert.equal(fs.readFileSync(path.join(root, "scripts", "pin.md"), "utf8"), companion);
+  assert.equal(fs.readFileSync(outside, "utf8"), "untouched\n");
+});
+
+test("a pin-lines companion keeps its own comment spacing", (t) => {
+  // A companion is a file the consumer formats on its own terms. A
+  // documentation file that carries two spaces must not have a one-space
+  // comment written into it just because the workflow files use one, or the
+  // offered commit leaves that file internally inconsistent.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companion-gap-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const pin = (action, ref) =>
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "workflows", "unity.yml"),
+    `jobs:\n  unity:\n    steps:\n      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0\n`
+  );
+  const companion = [
+    pin("acquire-build-lock", `${oldSha}  # v1.13.0`),
+    pin("return-unity-license", oldSha),
+    pin("release-build-lock", `${oldSha}  # v1.13.0`),
+    ""
+  ].join("\n");
+  fs.writeFileSync(path.join(root, "docs", "pins.md"), companion);
+  const policyPath = path.join(root, "policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: [
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/pins.md", mode: "pin-lines" }
+    ]
+  }));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.readFileSync(path.join(root, "docs", "pins.md"), "utf8"),
+    [
+      pin("acquire-build-lock", `${target}  # v1.14.0`),
+      pin("return-unity-license", `${target}  # v1.14.0`),
+      pin("release-build-lock", `${target}  # v1.14.0`),
+      ""
+    ].join("\n")
+  );
 });
 
 test("consumer repin moves pins in a CRLF workflow and keeps the line endings", (t) => {
