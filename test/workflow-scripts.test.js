@@ -593,6 +593,7 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     changed: 3,
+    uses: 3,
     refs: 0,
     files: [{ path: path.join(".github", "workflows", "unity.yml"), lines: 3 }],
     skipped: [],
@@ -633,6 +634,7 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.equal(rerun.status, 0, rerun.stderr);
   assert.deepEqual(JSON.parse(rerun.stdout), {
     changed: 0,
+    uses: 0,
     refs: 0,
     files: [],
     skipped: [],
@@ -1303,6 +1305,7 @@ test("consumer repin preserves reviewed compatibility exceptions and fails close
   assert.equal(preserved.status, 0, preserved.stderr);
   assert.deepEqual(JSON.parse(preserved.stdout), {
     changed: 1,
+    uses: 1,
     refs: 0,
     files: [{ path: path.join(".github", "workflows", "native.yml"), lines: 1 }],
     skipped: [
@@ -1330,6 +1333,7 @@ test("consumer repin preserves reviewed compatibility exceptions and fails close
   assert.equal(otherRepository.status, 0, otherRepository.stderr);
   assert.deepEqual(JSON.parse(otherRepository.stdout), {
     changed: 1,
+    uses: 1,
     refs: 0,
     files: [{ path: path.join(".github", "workflows", "legacy-return.yml"), lines: 1 }],
     skipped: [],
@@ -1485,6 +1489,7 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
   const report = JSON.parse(result.stdout);
   assert.deepEqual(report, {
     changed: 4,
+    uses: 1,
     refs: 0,
     files: [{ path: ".github/workflows/unity.yml", lines: 1 }],
     skipped: [],
@@ -2077,6 +2082,172 @@ test("consumer repin carries a .github companion the workflow rewrite does not o
   }
 });
 
+test("consumer repin shields samples in a block scalar without shielding real pins", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-shield-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const uses = (indent, action, sha, version) =>
+    indent + "- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/" +
+    action + "@" + sha + " # v" + version;
+  // Each case is one way a block-scalar detector can be wrong in the
+  // expensive direction: marking a real pin as literal text. That reports no
+  // change, the automation calls the repository already pinned, and the
+  // consumer keeps a stale pin with nothing to show for it. Every header
+  // spelling below is legal YAML, and the real pins must move under all of
+  // them. `sample` marks the case as carrying a `uses:` line inside the
+  // scalar, and `moves` is the change count the rewrite has to report.
+  const cases = [
+    {
+      name: "a sequence item opens the scalar",
+      why: "the block belongs to the MAPPING, not to the physical line, so a scalar opened by a step's first key must not shield that step's other keys",
+      lines: [
+        "      - name: |",
+        "          Acquire the organization Unity build lock and wait for the queue.",
+        "          Then run the licensed build to completion.",
+        uses("        ", "acquire-build-lock", oldSha, "1.13.0"),
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 3,
+      refs: 1,
+      sample: false
+    },
+    {
+      name: "an indented comment ends in a bar",
+      why: "a comment is not a key, and a greedy leading indent backtracks, so the earlier pattern opened a block on one",
+      lines: [
+        "      # Reads the pin | and nothing else.",
+        uses("      ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 2,
+      refs: 0,
+      sample: false
+    },
+    {
+      name: "a tagged scalar",
+      why: "a tag before the indicator is still a block scalar",
+      lines: [
+        "      - name: Emit",
+        "        run: !!str |",
+        uses("          ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 1,
+      refs: 0,
+      sample: true
+    },
+    {
+      name: "an anchored scalar",
+      why: "an anchor before the indicator is still a block scalar",
+      lines: [
+        "      - name: Emit",
+        "        run: &doc |",
+        uses("          ", "acquire-build-lock", oldSha, "1.13.0"),
+        uses("      ", "release-build-lock", oldSha, "1.13.0")
+      ],
+      moves: 1,
+      refs: 0,
+      sample: true
+    }
+  ];
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+    );
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: []
+  }));
+  const file = path.join(workflows, "unity.yml");
+  for (const testCase of cases) {
+    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:"].concat(testCase.lines, [""]).join("\n"));
+    const result = runRewrite();
+    assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.changed, testCase.moves, testCase.name + ": " + testCase.why);
+    assert.equal(report.refs, testCase.refs, testCase.name + ": moved ref: count");
+    const rewritten = fs.readFileSync(file, "utf8");
+    // The sibling step's pin is outside every scalar in the table, so it is
+    // the common witness that no real pin was shielded.
+    assert.ok(
+      rewritten.includes(uses("      ", "release-build-lock", target, "1.14.0")),
+      testCase.name + ": the sibling step's pin did not move. " + testCase.why
+    );
+    // A `uses:` line inside the scalar is a sample: it stays at the old SHA,
+    // and every other occurrence of that SHA is gone.
+    const survivors = (rewritten.match(new RegExp(oldSha, "g")) || []).length;
+    assert.equal(survivors, testCase.sample ? 1 : 0, testCase.name + ": old SHA count");
+  }
+});
+
+test("consumer repin does not read a comment gap out of a block scalar", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-gap-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  // A moved pin without a version comment needs a gap to add one, and the
+  // only evidence is what the repository already writes. A comment gap inside
+  // a block scalar is a sample's formatting, so reading it would put a gap on
+  // a real pin that the consumer never wrote. With the guard the run fails
+  // closed for want of evidence; without it, the run silently writes the
+  // sample's gap onto both real pins.
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: ${lockRepository}/.github/actions/acquire-build-lock@${oldSha}`,
+      "      - name: Emit",
+      "        run: |",
+      `          - uses: ${lockRepository}/.github/actions/return-unity-license@${oldSha}   # v1.13.0`,
+      `      - uses: ${lockRepository}/.github/actions/release-build-lock@${oldSha}`
+    ].join("\n")
+  );
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: []
+  }));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+  );
+  assert.equal(result.status, 1, `expected failure, got ${result.status}: ${result.stdout}`);
+  assert.match(result.stderr, /needs a version comment[\s\S]*None of its lock pins carries/);
+  assert.equal(
+    fs.readFileSync(path.join(workflows, "unity.yml"), "utf8").includes(target),
+    false,
+    "a fail-closed run leaves every real pin untouched"
+  );
+});
+
 test("consumer repin treats a workflow sample inside a block scalar as text", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2148,7 +2319,11 @@ test("consumer repin treats a workflow sample inside a block scalar as text", (t
     ),
     `expected the real pins to move:\n${rewritten}`
   );
+  // The report counts the two mutations apart, so a caller can describe
+  // exactly what changed: one `uses:` pin and one checkout `ref:`.
   assert.deepEqual(JSON.parse(result.stdout).files, [{ path: ".github/workflows/unity.yml", lines: 2 }]);
+  assert.equal(JSON.parse(result.stdout).uses, 1);
+  assert.equal(JSON.parse(result.stdout).refs, 1);
 });
 
 test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (t) => {
@@ -2476,6 +2651,23 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
     `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${sha} # ${version}\n`
   );
   writePin(state.atTarget ? releaseSha : repinOldSha, state.atTarget ? "v1.14.0" : "v1.13.0");
+  if (state.staleRefOnly) {
+    // A checkout `ref:` this repository names is the same pin spelled a
+    // second way. A consumer can reach this state on its own: Dependabot
+    // moves a `uses:` line and never a `ref:`, so the `uses:` pin reaches the
+    // target first and the policy checkout is left behind.
+    fs.writeFileSync(
+      path.join(workflows, "unity.yml"),
+      [
+        `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${releaseSha} # v1.14.0`,
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: Ambiguous-Interactive/ambiguous-organization-build-lock",
+        `          ref: ${repinOldSha}`,
+        ""
+      ].join("\n")
+    );
+  }
   for (const [relativePath, content] of Object.entries(state.companionFiles || {})) {
     const filePath = path.join(seed, relativePath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -2947,6 +3139,40 @@ test("consumer repin pushes and opens a pull request when no branch exists", (t)
   assert.match(pushed, new RegExp(`return-unity-license@${harness.releaseSha}`));
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+});
+
+test("consumer repin names only the mutation it made in the pull request body", (t) => {
+  // One consumer per mutation shape. The checkout `ref:` moved in one and no
+  // `uses:` reference did, and the reverse holds for the other. A body that
+  // claimed both mutations on either offer would send a reviewer looking for
+  // a line the diff does not contain.
+  const harness = consumerRepinHarness(t, {
+    "dxmessaging": { staleRefOnly: true },
+    "unity-helpers": {}
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  const bodyFor = (name) => fs.readFileSync(
+    path.join(harness.root, "pr-state", name, "last-body.md"),
+    "utf8"
+  );
+  // The ref:-only offer names the ref: and nothing else.
+  const refOnly = bodyFor("dxmessaging");
+  assert.match(refOnly, /A checkout `ref:` naming/);
+  assert.doesNotMatch(refOnly, /suffix of a `uses:` reference/);
+  // The uses:-only offer names the `uses:` reference and nothing else.
+  const usesOnly = bodyFor("unity-helpers");
+  assert.match(usesOnly, /suffix of a `uses:` reference/);
+  assert.doesNotMatch(usesOnly, /A checkout `ref:` naming/);
+  // The moved ref: is the only change in its offer.
+  const pushed = gitRun(
+    harness.remotePath("dxmessaging"),
+    "show", `${harness.branchName}:.github/workflows/unity.yml`
+  );
+  assert.match(pushed, new RegExp(`ref: ${harness.releaseSha}`));
+  assert.doesNotMatch(pushed, new RegExp(`return-unity-license@${repinOldSha}`));
 });
 
 test("consumer repin commits companion artifacts and lists them in the pull request body", (t) => {

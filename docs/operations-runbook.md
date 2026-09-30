@@ -226,11 +226,18 @@ of the file. `pin-literal` replaces the pinned SHAs that this rewrite
 removes, as standalone tokens only, so a SHA embedded in a longer hex
 constant survives. The path may be under `.github/`. It must not name a
 `.yml` or `.yaml` file there, whatever its case, because the `uses:` pin
-rewrite already walks every such file and two writers on one file would be
-two interpretations of one pin. When a rewrite removes no pin, a `pin-literal`
-companion that names no target pin anywhere still carries a stale pin, and
-the rewrite fails closed: it cannot tell a stale pin constant from a reviewed
-historical witness, so an operator updates that file by hand. `policy-snapshot` mirrors
+rewrite walks every lowercase-named one and two writers on one file would
+be two interpretations of one pin. The refusal is case-insensitive, so a
+`.YAML` file is refused even though the walk ignores it. A `pin-literal` companion that names an
+authorized pin no moved pin accounts for, and no target of its own, still
+carries a stale pin, and the rewrite fails closed: it cannot tell a stale
+pin constant from a reviewed historical witness, so an operator updates
+that file by hand. The check reads the rewritten text, because that is the
+state the offer carries: a pin the replacement healed now reads as the
+target, and a companion that names the target holds a healed constant
+beside whatever witness it also carries. A companion that names both a
+healed constant and an unrelated approved pin passes; treat the extra pin
+as a witness unless you know otherwise. `policy-snapshot` mirrors
 the reviewed `approved*Shas` lists exactly, the same content a consumer
 snapshot refresh derives from the policy. The registry parser rejects a
 malformed entry, and the rewrite accepts only the reviewed policy fields.
@@ -247,26 +254,33 @@ run another release has a split offer. The anchor is the sibling
 an enrolled consumer checks out a different repository at a literal
 40-character commit, and a value-only rule would redirect that checkout. A
 `ref:` moves when the `with:` block names this repository, the `ref:` is a
-direct child key of that block, and the value is a 40-character SHA. Only
-the SHA changes, and no version comment is added, because Dependabot does
-not read a `ref:`. A moved `ref:` joins the set of pins a `pin-literal`
+direct child key of that block, and the value is 40 lowercase hexadecimal
+characters. Only the SHA changes, and no version comment is added, because
+Dependabot does not read a `ref:`. A comment already on the `ref:` line
+survives as it is. A moved `ref:` joins the set of pins a `pin-literal`
 companion may follow, so a policy snapshot or constant that names the same
 commit heals with the workflow that named it.
 
-The rewrite reads a `with:` block, not YAML. Three shapes therefore stay as
+The rewrite reads a `with:` block, not YAML. Six shapes therefore stay as
 the consumer wrote them, with no warning and no red run:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
 - a branch or a tag.
+- an uppercase SHA.
+- a quoted `repository:` value, in single or double quotes.
+- a `with:` with a tag or an anchor on it.
 - a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
 
+A comment after `repository:` or after the `ref:` value is not one of
+these: both are read, and a comment on the `with:` line itself is.
+
 The first two are the consumer's own choice and usually self-healing. The
-third is a real gap: such a `ref:` does not move, so the offer still splits.
-No enrolled consumer writes that shape today. If one adopts it, the offer
-goes red in the consumer's own contract check, and the remedy is to write
-the block form. A workflow written inside a `run: |` body is text, not
-structure, so a `uses:` line or a `repository:`/`ref:` pair there is a
-sample and is left exactly as written.
+rest are a real gap: such a `ref:` does not move, so the offer still
+splits. No enrolled consumer writes one of those shapes today. If one
+adopts one, the offer goes red in the consumer's own contract check, and
+the remedy is to write the block form with a plain lowercase SHA. A workflow written inside a
+`run: |` body is text, not structure, so a `uses:` line or a
+`repository:`/`ref:` pair there is a sample and is left exactly as written.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by

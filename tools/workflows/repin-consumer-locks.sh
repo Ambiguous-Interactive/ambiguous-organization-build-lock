@@ -83,8 +83,8 @@ rewrite_pins() {
   # artifacts that derive from the pin (copyable docs, pin constants, policy
   # snapshots) through the same mechanical, mode-bound rewrite, so a declared
   # companion never leaves the offered commit incomplete. A pin-literal
-  # companion that still names a stale authorized pin when no workflow pin was
-  # removed fails the run instead of guessing.
+  # companion that still names an authorized pin no moved pin accounts for
+  # fails the run instead of guessing.
   local directory="$1" target_sha="$2" target_version="$3" repository="$4"
   node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" "${repository}" <<'EOF'
 const fs = require("node:fs");
@@ -253,18 +253,38 @@ const stripTerminator = (line) => (line.endsWith("\r") ? line.slice(0, -1) : lin
 // literal text, and a `run: |` body is where a workflow is written, quoted,
 // and asserted on. A `uses:` or a `repository:`/`ref:` pair inside one is a
 // sample of the shape, not the shape itself, and rewriting it edits a script
-// or a fixture instead of a pin. Both rewrites below consult this, so the
-// sample and the real key are treated the same way. The block ends at the
-// first non-blank line that is not more indented than the key that opened it,
-// which is what libyaml does with a block scalar's indentation indicator
-// absent. Detecting a scalar is a heuristic on the opening line: a line whose
-// value starts with `|` or `>` after optional chomping and indentation
-// indicators. Over-detecting only skips lines the rewrites would have matched
-// by an exact key prefix, so the cost of a false positive is a pin the
-// operator carries by hand, never a wrong write.
-const blockScalarOpener = /^(\s*)[^#].*?:\s*[|>][-+0-9]*\s*(?:#.*)?$/;
+// or a fixture instead of a pin. Both rewrites below consult this, so a
+// sample and a real key are treated the same way.
+//
+// Two properties decide whether this is safe, and both are load-bearing.
+// The recorded indent is the indent of the MAPPING the scalar belongs to, not
+// the indent of the physical line: a scalar opened by the first key of a
+// sequence item (`- name: |`) still belongs to the item's mapping, and every
+// sibling key of that step shares the item's content indent. Recording the
+// line indent instead shields those siblings, so a real `uses:` or `ref:`
+// stops moving while the rewrite reports nothing to change. The opener must
+// also not match a comment, and `^(\s*)[^#]` does: `\s*` is greedy and
+// backtracks, so `[^#]` lands on a space and any indented comment ending in a
+// colon and a bar opens a block that shields real pins. Both of those
+// produce a silent "already pinned", which is the one outcome worse than a
+// wrong edit.
+//
+// The opener therefore names the key explicitly, so a comment cannot match
+// it, and an optional sequence marker is captured so the mapping indent can
+// be derived. Tag and anchor properties are allowed before the indicator
+// because `run: !!str |` and `run: &doc |` are block scalars too. Detecting a
+// scalar remains a heuristic on the opening line; over-detecting skips lines
+// that both rewrites would have matched only by an exact key prefix, so the
+// cost of a false positive is a pin an operator carries by hand, never a
+// wrong write. A false NEGATIVE is the expensive direction, so the pattern
+// is written to match every legal block scalar header rather than a tidy
+// subset of them.
+const blockScalarOpener =
+  /^(\s*)(?:-([ \t]+))?[^\s#][^:]*:[ \t]*(?:[!&][^\s]*[ \t]*)*[|>][-+0-9]*[ \t]*(?:#.*)?$/;
 const blockScalarLines = (lines) => {
   const literal = new Set();
+  // The indent the block's content must exceed: the column of the mapping
+  // that owns the scalar, which is past a sequence item's `- `.
   let openIndent = -1;
   for (const [index, line] of lines.entries()) {
     const body = stripTerminator(line);
@@ -281,7 +301,10 @@ const blockScalarLines = (lines) => {
     }
     const opener = blockScalarOpener.exec(body);
     if (opener) {
-      openIndent = opener[1].length;
+      // A sequence item's content starts after `- `, so a scalar opened by
+      // the item's first key ends at the next sibling of that key rather
+      // than at the next line of the item.
+      openIndent = opener[1].length + (opener[2] === undefined ? 0 : 1 + opener[2].length);
     }
   }
   return literal;
@@ -333,7 +356,7 @@ if (githubStat.isSymbolicLink() || !githubStat.isDirectory()) {
   );
 }
 visit(githubRoot);
-const report = { changed: 0, refs: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
+const report = { changed: 0, uses: 0, refs: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
 // The pins this rewrite removes, from the workflow lines it rewrites. A
 // checkout `ref:` naming this repository is such a pin, and it moves the same
@@ -575,6 +598,7 @@ for (const source of sources) {
   // which one happened, and a run that moves only a checkout `ref:` moved no
   // `uses:` reference.
   report.refs += [...source.refChanges].length;
+  report.uses += fileChanges - source.refChanges.size;
   report.files.push({ path: source.relativePath, lines: fileChanges });
 }
 // Only a pin this rewrite removes from a workflow may move inside a
@@ -718,17 +742,26 @@ open_repin_pull_request() {
   # paths cannot drift.
   local repository="$1" branch_name="$2" label="$3" target_sha="$4"
   local authorization="$5" file_list="$6" preserved_section="$7" companion_section="$8"
-  local ref_count="$9"
+  local uses_count="$9"
+  local ref_count="${10}"
   local body_file
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
-  local mutation_bullet="Only the \`@<sha>\` suffix of \`uses:\` references to
-  \`${lock_repository_prefix%/*}\` changed, plus \`# vX.Y.Z\` version comments
+  # Each mutation gets its own bullet, and a mutation that did not happen
+  # gets no bullet. A run that moves only a checkout `ref:` moved no `uses:`
+  # reference, and a body that claims otherwise sends a reviewer looking for a
+  # change the diff does not contain.
+  local mutation_bullet=""
+  if [ "${uses_count}" != "0" ]; then
+    mutation_bullet="${mutation_bullet}- Only the \`@<sha>\` suffix of a \`uses:\` reference to
+  \`${lock_repository_prefix%/*}\` changed, plus its \`# vX.Y.Z\` version comment
   (updated or added)."
-  local references_section=""
+  fi
   if [ "${ref_count}" != "0" ]; then
     mutation_bullet="${mutation_bullet}
-- A checkout \`ref:\` naming that repository moved with them."
+- A checkout \`ref:\` naming \`${lock_repository_prefix%/*}\` moved to the same
+  release."
   fi
+  local references_section=""
   if [ -z "${file_list}" ]; then
     mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."
   else
@@ -948,10 +981,15 @@ repin_consumer() {
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
-    local ref_count
-    if ! ref_count="$(printf '%s' "${report}" | jq -er '.refs | if type == "number" then . else 0 end')" ||
-      [[ ! "${ref_count}" =~ ^[0-9]+$ ]]; then
-      echo "::error::${repository}: could not read the checkout ref count." >&2
+    # Both counters come from the same report, so one reader keeps them
+    # honest. A missing or non-numeric count is a malformed report, not a
+    # count of zero: reading it as zero would let the pull request body
+    # describe a mutation the diff contains.
+    local uses_count ref_count
+    if ! uses_count="$(printf '%s' "${report}" | jq -er '.uses | numbers')" ||
+      ! ref_count="$(printf '%s' "${report}" | jq -er '.refs | numbers')" ||
+      [[ ! "${uses_count}" =~ ^[0-9]+$ ]] || [[ ! "${ref_count}" =~ ^[0-9]+$ ]]; then
+      echo "::error::${repository}: could not read the rewrite counts from the report." >&2
       exit 1
     fi
     local preserved preserved_count
@@ -1141,7 +1179,7 @@ ${preserved}
       open_repin_pull_request \
         "${repository}" "${branch_name}" "${label}" "${target_sha}" \
         "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}" \
-        "${ref_count}"
+        "${uses_count}" "${ref_count}"
       printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` from the existing branch |" >> "${GITHUB_STEP_SUMMARY}"
       exit 0
     fi
@@ -1155,7 +1193,7 @@ ${preserved}
     open_repin_pull_request \
       "${repository}" "${branch_name}" "${label}" "${target_sha}" \
       "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}" \
-      "${ref_count}"
+      "${uses_count}" "${ref_count}"
     local lines_word="lines"
     if [ "${changed}" = "1" ]; then
       lines_word="line"

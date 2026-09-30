@@ -85,10 +85,12 @@ each such file and one mechanical rewrite mode (`pin-lines`, `pin-literal`,
 or `policy-snapshot`). The repin pull request moves those files with the
 pins, so the offered commit is complete. A companion path may be under
 `.github/`. It must not name a `.yml` or `.yaml` file there, whatever
-its case, because the `uses:` pin rewrite already walks every such
-file and a second writer on one file is a second reading of one pin.
-A JSON or script file there has no second writer. The pull request
-body names each changed companion file and its mode. The scheduled
+its case, because the `uses:` pin rewrite walks every lowercase-named
+one and a second writer on one file is a second reading of one pin. The
+refusal is case-insensitive, so a `.YAML` file is refused even though
+the walk ignores it. A JSON or script file there has no second writer.
+The pull request body
+names each changed companion file and its mode. The scheduled
 enrollment audit reports
 an expired repin exception and
 a repin exception whose protected file no longer exists. The finding codes
@@ -136,24 +138,32 @@ sibling `repository:` key in the same `with:` block, never the value of the
 40-character commit, and a value-only rule would point that checkout at
 this repository's release. So the rule is: the `with:` block must name this
 repository, the `ref:` must be a direct child key of that same block, and
-its value must be a 40-character SHA. Only the SHA changes, and no
-`# vX.Y.Z` comment is added: a `ref:` is not a `uses:` pin, so Dependabot
-never reads it.
+its value must be 40 lowercase hexadecimal characters. Only the SHA
+changes, and no `# vX.Y.Z` comment is added: a `ref:` is not a `uses:` pin,
+so Dependabot never reads it. A comment already on the `ref:` line survives
+as it is.
 
-Three shapes stay as the consumer wrote them, because the rewrite cannot
+Six shapes stay as the consumer wrote them, because the rewrite cannot
 read them as a key and a value it cannot read is not evidence:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
 - a branch or a tag, such as `ref: main`.
+- an uppercase SHA.
+- a quoted `repository:` value, in single or double quotes.
+- a `with:` with a tag or an anchor on it, such as `with: !!map`.
 - a `with:` written as a flow mapping on one line, such as
   `with: {repository: ..., ref: ...}`.
 
-The first is self-healing: a repository that resolves its `ref:` from a
-step that reads the `uses:` pin needs no change, because the pin it
-resolves from already moved. A flow mapping is not, so a consumer that
-wants its policy `ref:` carried has to write the block form. Check the
-`ref:` after the offer merges; a `ref:` the rewrite did not carry is a
-split commit the same way a `uses:` pin the rewrite did not carry is.
+A comment after `repository:` or after the `ref:` value is not one of
+these: both are read, and a comment on the `with:` line itself is.
+
+The first two are self-healing or deliberate. A repository that resolves
+its `ref:` from a step that reads the `uses:` pin needs no change, because
+the pin it resolves from already moved. The rest are not, so a consumer
+that wants its policy `ref:` carried has to write the block form with a
+plain lowercase SHA. Check the `ref:` after the offer merges; a `ref:`
+the rewrite did not carry is a split commit the same way a `uses:` pin the
+rewrite did not carry is.
 
 A workflow written inside a `run: |` body is text, not structure. A
 `uses:` line or a `repository:`/`ref:` pair there is a sample, and the
