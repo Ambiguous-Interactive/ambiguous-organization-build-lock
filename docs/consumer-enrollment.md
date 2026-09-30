@@ -133,23 +133,28 @@ they must accept the comment form the repository already uses.
 A checkout of this repository is pinned twice: in the `uses:` line of the
 action, and in the `ref:` of the `actions/checkout` step that fetches the
 central policy. A `ref:` moves with the pin, or the offered commit runs one
-release's actions against another release's policy. The anchor is the
-sibling `repository:` key in the same `with:` block, never the value of the
-`ref:`. An enrolled consumer checks out a different repository at a literal
-40-character commit, and a value-only rule would point that checkout at
-this repository's release. So the rule has three anchors. The step must
-run `actions/checkout` at a reviewed commit, so a `repository:` and a
-`ref:` on any other step stay put: a reusable-workflow call passes both to
-the called workflow as its own inputs, and no other action's meaning for
-them is knowable here. The `with:` block must name this repository. The
-`ref:` must be a direct child key of that same block, and its value must
-be 40 lowercase hexadecimal characters. A key is read in any case and with
-or without quotes, because GitHub reads an action's `with:` that way; the
-repository value is compared the same way, because a name that differs
-only in case is the same repository. Only the SHA
-changes, and no `# vX.Y.Z` comment is added: a `ref:` is not a `uses:` pin,
-so Dependabot never reads it. A comment already on the `ref:` line survives
-as it is.
+release's actions against another release's policy. The anchor is the sibling
+`repository:` key in the same `with:` block, never the value of the `ref:`. An
+enrolled consumer checks out a different repository at a literal 40-character
+commit, and a value-only rule would point that checkout at this repository's
+release. So the rule has three anchors. The step must run `actions/checkout` at
+a reviewed commit, so a `repository:` and a `ref:` on any other step stay put:
+a reusable-workflow call passes both to the called workflow as its own inputs,
+and no other action's meaning for them is knowable here. The `with:` block must
+name this repository. The `ref:` must be a direct child key of that same block,
+and its value must be 40 lowercase hexadecimal characters. A key is read in any
+case and with or without quotes, because GitHub reads an action's `with:` that
+way; the repository value is compared the same way, because a name that differs
+only in case is the same repository. The `with:` block may be written before or
+after the `uses:` it belongs to, and a comment on the step's own `uses:` line
+is read, because a YAML mapping is unordered and GitHub reads either order.
+Only the SHA is replaced: the key spelling, the gap before its colon, the
+indentation, a comment already on the line and the line terminator are all
+written back as they were read. No `# vX.Y.Z` comment is added, because a
+`ref:` is not a `uses:` pin and Dependabot never reads it. The two things that
+do not survive are trailing whitespace after the value and a tab-indented line,
+which comes back space-indented; neither is valid YAML indentation, so no
+workflow this rewrite is offered carries one.
 
 A `ref:` stays as the consumer wrote it whenever the rewrite cannot read it
 as a commit, and a `with:` stays whenever it cannot read it as a key. A
@@ -173,8 +178,9 @@ value it cannot read is not evidence, so the list is this:
   as part of the plain scalar, so the value is not a commit. The `uses:`
   path refuses that shape for the same reason.
 
-A comment after `repository:`, after the `ref:` value, or on the `with:`
-line itself is read, so none of those keeps the pin behind.
+A comment after `repository:`, after the `ref:` value, on the `with:` line
+itself or on the step's `uses:` line is read, so none of those keeps the pin
+behind.
 
 The first two are self-healing or deliberate. A repository that resolves
 its `ref:` from a step that reads the `uses:` pin needs no change, because

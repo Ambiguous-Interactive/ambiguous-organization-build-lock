@@ -247,20 +247,24 @@ places. That visibility comes from repin runs only; the enrollment audit
 has no companion finding, so a stale entry in a repository that no longer
 receives repin offers stays invisible until the next repin.
 
-The rewrite also moves a checkout `ref:` that pins this repository, because
-a consumer that fetches the central policy at one release while its actions
-run another release has a split offer. The anchor is the sibling
-`repository:` key of the same `with:` block, never the value of the `ref:`:
-an enrolled consumer checks out a different repository at a literal
-40-character commit, and a value-only rule would redirect that checkout. A
-`ref:` moves when the `with:` block names this repository, the `ref:` is a
-direct child key of that block, and the value is 40 lowercase hexadecimal
-characters. Only the SHA changes, and no version comment is added, because
-Dependabot does not read a `ref:`. A comment already on the `ref:` line
-survives as it is. A moved `ref:` joins the set of pins a `pin-literal`
-companion may follow, so a constant that names the same commit heals with
-the workflow that named it. A `policy-snapshot` companion is built from the
-policy allowlists instead and does not follow the moved-pin set.
+The rewrite also moves a checkout `ref:` that pins this repository, because a
+consumer that fetches the central policy at one release while its actions run
+another release has a split offer. The anchor is the sibling `repository:` key
+of the same `with:` block, never the value of the `ref:`: an enrolled consumer
+checks out a different repository at a literal 40-character commit, and a
+value-only rule would redirect that checkout. A `ref:` moves when the step runs
+`actions/checkout` at a reviewed commit, the `with:` block names this
+repository, the `ref:` is a direct child key of that block, and the value is 40
+lowercase hexadecimal characters. The `with:` block may be written before or
+after the `uses:` it belongs to. Only the SHA is replaced: the key spelling,
+the gap before its colon, the indentation, a comment already on the line and
+the line terminator are all written back as they were read, and no version
+comment is added because Dependabot does not read a `ref:`. Trailing whitespace
+after the value and tab indentation do not survive, and neither is valid YAML
+indentation. A moved `ref:` joins the set of pins a `pin-literal` companion may
+follow, so a constant that names the same commit heals with the workflow that
+named it. A `policy-snapshot` companion is built from the policy allowlists
+instead and does not follow the moved-pin set.
 
 The rewrite reads a `with:` block, not YAML. A value it cannot read as a
 commit and a key it cannot read as a key are not evidence, so these stay
@@ -281,8 +285,9 @@ as the consumer wrote them, with no warning and no red run:
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
 
-A comment after `repository:`, after the `ref:` value, or on the `with:`
-line itself is read, so none of those keeps the pin behind.
+A comment after `repository:`, after the `ref:` value, on the `with:` line
+itself or on the step's `uses:` line is read, so none of those keeps the pin
+behind.
 
 The first two are the consumer's own choice and usually self-healing. The
 rest are a real gap: such a `ref:` does not move, so the offer still

@@ -557,40 +557,73 @@ const unquoteKey = (key) =>
 // enrolled consumer that carries the shape uses `actions/checkout`, so
 // anchoring on it narrows the rule to the one step the shape is written for.
 const checkoutStepUses = /^actions\/checkout@[0-9a-f]{40}$/;
-// The `uses:` that owns a `with:` block is a sibling of it, so the step is
-// read from the block's own line upwards, stopping at the first line that
-// leaves the step's mapping.
-// The `uses:` that owns a `with:` block is a key of the same step, so the
-// step is read from the block's own line upwards. A step is a sequence item,
-// and a sequence item is the one line in it that carries a marker. So the
-// walk reads keys until the first marker, and that marker is where the step
-// ends: a checkout above the marker belongs to the step above, and lending
-// its anchor to this one would rewrite a `ref:` on any action as if it
-// checked out here. A key nested deeper than the `with:` is not a key of the
-// step and is skipped.
+// A step may carry a comment on its `uses:` line, so the value is read
+// without it. Refusing one would freeze a real pin while the run reports the
+// repository already pinned, which is the outcome this rewrite must never
+// produce.
+const bareValue = (value) => value.replace(/[ \t]+#.*$/, "").trim();
+// A step is a sequence item, and a sequence item is the one line in it that
+// carries a marker. So a step is read by finding its own marker and then every
+// line between that marker and the next, and a `with:` block is only a checkout
+// input when such a step has a checkout `uses:` in it. Reading the whole step
+// rather than the lines above the block is what makes the `uses:` findable on
+// either side of the `with:`; a YAML mapping is unordered and GitHub reads
+// either order. Two bounds keep the read inside the step: a line shallower than
+// the `with:` column is not in the step, and a key deeper than the `with:`
+// column is nested inside the step rather than being a key of it, and every
+// key of a block mapping shares one column with the `with:`. A `with:` outside
+// any step at all -- a
+// reusable-workflow call, where `repository` and `ref` are inputs of the
+// workflow being called -- has no step, so it finds no `uses:` and is refused.
 const opensACheckout = (lines, literal, start, blockIndent) => {
-  for (let index = start - 1; index >= 0; index -= 1) {
+  const isStepMarker = (index) => {
     if (literal.has(index)) {
-      continue;
+      return false;
     }
-    const line = stripTerminator(lines[index]);
-    if (line.trim() === "" || line.trimStart().startsWith("#")) {
-      continue;
+    const key = keyPattern.exec(stripTerminator(lines[index]));
+    return key !== null && key[2].length > 0;
+  };
+  // The `with:` may itself be the step's first key, written on the marker line.
+  let markerLine = isStepMarker(start) ? start : -1;
+  for (let index = start - 1; markerLine === -1 && index >= 0; index -= 1) {
+    if (isStepMarker(index)) {
+      markerLine = index;
+      break;
     }
-    const key = keyPattern.exec(line);
-    if (!key) {
-      continue;
+    const key = keyPattern.exec(stripTerminator(lines[index]));
+    if (key !== null && keyIndentOf(key) < blockIndent) {
+      // Shallower than the `with:` and not a marker, so the `with:` is not
+      // inside a step: there is no checkout to anchor on.
+      return false;
     }
-    if (key[2].length > 0) {
-      // The step's own first key is written on its marker line, so it is the
-      // one marker the walk reads; any other marker is a step of its own. A
-      // key nested deeper than the `with:` is not a key of the step at all.
-      return unquoteKey(key[3]) === "uses" && checkoutStepUses.test((key[4] || "").trim());
-    }
-    if (keyIndentOf(key) > blockIndent) {
-      continue;
-    }
-    if (unquoteKey(key[3]) === "uses" && checkoutStepUses.test((key[4] || "").trim())) {
+  }
+  if (markerLine === -1) {
+    return false;
+  }
+  for (let index = markerLine; index < lines.length; index += 1) {
+    if (index > markerLine) {
+      if (literal.has(index)) {
+        continue;
+      }
+      const line = stripTerminator(lines[index]);
+      if (line.trim() === "" || line.trimStart().startsWith("#")) {
+        continue;
+      }
+      const key = keyPattern.exec(line);
+      if (key === null) {
+        continue;
+      }
+      if (key[2].length > 0 || keyIndentOf(key) < blockIndent) {
+        // The next step, or the end of this one.
+        break;
+      }
+      // A block mapping gives every key of the step one column, so a key
+      // deeper than the `with:` belongs to a mapping nested inside the step
+      // and is not a key of the step at all.
+      if (keyIndentOf(key) === blockIndent && unquoteKey(key[3]) === "uses" && checkoutStepUses.test(bareValue(key[4] || ""))) {
+        return true;
+      }
+    } else if (checkoutStepUses.test(bareValue((keyPattern.exec(stripTerminator(lines[index]))[4] || "")))) {
       return true;
     }
   }
@@ -864,19 +897,22 @@ open_repin_pull_request() {
   if [ "${uses_count}" != "0" ]; then
     mutation_bullet="${mutation_bullet}- Only the \`@<sha>\` suffix of a \`uses:\` reference to
   \`${lock_repository_prefix%/*}\` changed, plus its \`# vX.Y.Z\` version comment
-  (updated or added)."
+  (updated or added).
+"
   fi
   if [ "${ref_count}" != "0" ]; then
-    mutation_bullet="${mutation_bullet}
-- A checkout \`ref:\` naming \`${lock_repository_prefix%/*}\` moved to the same
-  release."
+    mutation_bullet="${mutation_bullet}- A checkout \`ref:\` naming \`${lock_repository_prefix%/*}\` moved to the
+  same release.
+"
+  fi
+  if [ -z "${mutation_bullet}" ]; then
+    mutation_bullet="- No \`uses:\` pin and no checkout \`ref:\` needed a change; this pull request carries reviewed
+  companion artifacts only.
+"
   fi
   local references_section=""
-  if [ -z "${file_list}" ]; then
-    mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."
-  else
-    references_section="
-- Changed references:
+  if [ -n "${file_list}" ]; then
+    references_section="- Changed references:
 \`\`\`
 ${file_list}
 \`\`\`"
@@ -887,8 +923,7 @@ Repin the organization lock references to the authorized release ${label}
 
 ## Review before merge (leaving auto-merge on is the adoption decision)
 
-- ${mutation_bullet}
-- Release authorization evidence: the central authorization pull request for
+${mutation_bullet}- Release authorization evidence: the central authorization pull request for
   this release, merged by a maintainer.
 - The automation enables auto-merge on this pull request. The merge then
   fires only when every required check and merge rule passes. Disable

@@ -2252,6 +2252,76 @@ test("consumer repin shields samples in a block scalar without shielding real pi
   }
 });
 
+test("the repin pull request body lists only the mutations that happened", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-body-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The body is what a reviewer reads before approving a merge, so a bullet
+  // for a change the diff does not contain sends them looking for something
+  // that is not there, and a doubled bullet marker renders as literal text.
+  // `gh` is stubbed: this reads the body the script built and creates nothing.
+  const bodyFor = (uses, refs) => {
+    const captured = path.join(root, "body-" + uses + "-" + refs + ".md");
+    const bin = path.join(root, "bin-" + uses + "-" + refs);
+    fs.mkdirSync(bin, { recursive: true });
+    const gh = path.join(bin, "gh");
+    fs.writeFileSync(
+      gh,
+      ["#!/usr/bin/env bash",
+       'for a in "$@"; do',
+       '  if [ "$prev" = "--body-file" ]; then cp "$a" "' + captured + '"; fi',
+       '  prev="$a"',
+       "done",
+       'echo "https://github.com/Ambiguous-Interactive/unity-helpers/pull/1"',
+       ""].join("\n"),
+      { mode: 0o755 }
+    );
+    // The dispatch at the end of the script would run a command, so the
+    // functions are sourced from a copy that has it removed.
+    const library = path.join(root, "lib-" + uses + "-" + refs + ".sh");
+    fs.writeFileSync(library, fs.readFileSync(path.join(scriptsRoot, "repin-consumer-locks.sh"), "utf8").replace(/\ncase "\$\{1:-\}" in[\s\S]*$/, "\n"));
+    // The arguments go through "$@" so a backtick in a file list stays text.
+    const driver = path.join(bin, "driver.sh");
+    fs.writeFileSync(
+      driver,
+      ['lock_repository_prefix="Ambiguous-Interactive/ambiguous-organization-build-lock"',
+       "RUNNER_TEMP=" + JSON.stringify(root),
+       "GITHUB_STEP_SUMMARY=" + JSON.stringify(path.join(root, "summary.md")),
+       ". " + JSON.stringify(library),
+       'open_repin_pull_request "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"',
+       ""].join("\n")
+    );
+    const result = childProcess.spawnSync(
+      "bash",
+      [driver, "Ambiguous-Interactive/unity-helpers", "repin/x", "v1.14.0",
+       "abc1234567890abcdef1234567890abcdef12345678", "token",
+       "- `unity.yml` (1 line)", "preserved", "companion", String(uses), String(refs)],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH } }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return fs.readFileSync(captured, "utf8");
+  };
+  for (const [uses, refs, expected, absent] of [
+    [1, 0, ["- Only the `@<sha>` suffix"], []],
+    [0, 1, ["- A checkout `ref:` naming"], []],
+    [1, 1, ["- Only the `@<sha>` suffix", "- A checkout `ref:` naming"], []],
+    [0, 0, ["- No `uses:` pin and no checkout `ref:` needed a change"], ["- Only the `@<sha>` suffix", "- A checkout `ref:` naming"]]
+  ]) {
+    const body = bodyFor(uses, refs);
+    for (const line of expected) {
+      assert.ok(body.includes(line), "uses=" + uses + " refs=" + refs + ": missing " + JSON.stringify(line) + "\n" + body);
+    }
+    for (const line of absent) {
+      assert.ok(!body.includes(line), "uses=" + uses + " refs=" + refs + ": claims " + JSON.stringify(line) + "\n" + body);
+    }
+    // A bullet marker is a bullet marker, never two of them and never one
+    // with nothing after it.
+    assert.ok(!/^- - /m.test(body), "uses=" + uses + " refs=" + refs + ": doubled bullet\n" + body);
+    assert.ok(!/^-[ \t]*\n/m.test(body), "uses=" + uses + " refs=" + refs + ": empty bullet\n" + body);
+    const bullets = body.split("\n").filter((line) => line.startsWith("- ") || line.startsWith("  "));
+    assert.ok(bullets.every((line) => line.trim().length > 0), "uses=" + uses + " refs=" + refs + ": blank bullet text");
+  }
+});
+
 test("consumer repin reads a checkout ref: through every spelling a real step uses", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-spellings-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2278,7 +2348,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          ref: " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          ref: " + target
     },
     {
       name: "a quoted with: key",
@@ -2290,7 +2361,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          ref: " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          ref: " + target
     },
     {
       name: "a quoted ref: key",
@@ -2302,7 +2374,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          'ref': " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          'ref': " + target
     },
     {
       name: "a quoted key and a space before its colon",
@@ -2314,7 +2387,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          \"ref\" : " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          \"ref\" : " + target
     },
     {
       name: "a space before each colon",
@@ -2326,7 +2400,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          ref : " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          ref : " + target
     },
     {
       name: "a repository name in another case",
@@ -2338,7 +2413,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          ref: " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          ref: " + target
     },
     {
       name: "a ref: whose sibling keys are not a with: block",
@@ -2367,6 +2443,108 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       staleSurvives: true
     },
     {
+      name: "a comment on the step's own uses: line",
+      why: "the sibling with: line is read with its comment, so refusing one here would freeze a real pin while the run reports the repository already pinned",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pin",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target
+    },
+    {
+      name: "a with: block written before the uses: it belongs to",
+      why: "a YAML mapping is unordered and GitHub reads either order, so a walk that only reads upwards freezes a real pin",
+      lines: [
+        "      - with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target
+    },
+    {
+      name: "a with: block on a reusable-workflow call",
+      why: "repository and ref there are inputs of the workflow being called, and a checkout in an earlier job is not this step's anchor",
+      header: false,
+      lines: [
+        "name: call",
+        "on: push",
+        "jobs:",
+        "  a:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "  b:",
+        "    uses: ./.github/workflows/policy.yml",
+        "    with:",
+        "      repository: " + lockRepository,
+        "      ref: " + oldSha,
+        uses("  ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a uses: nested inside a step that is not a checkout",
+      why: "every key of a block mapping shares one column, so a uses: deeper than the with: belongs to a mapping nested in the step and is not the step's own",
+      lines: [
+        "      - uses: azure/webapps-deploy@v3",
+        "        with:",
+        "          args:",
+        "            uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a comment on the ref: line, with the consumer's own gap",
+      why: "a comment is a reviewer's note about the pin, and a rewrite that dropped it would delete evidence while the pin still moved",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha + "   # audited 2026-01-02",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target + "   # audited 2026-01-02"
+    },
+    {
+      name: "a single-space comment gap on the ref: line",
+      why: "the gap is the consumer's own spacing, and the repin must not re-space it",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha + " # v1.13.0",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target + " # v1.13.0"
+    },
+    {
+      name: "a comment on the ref: line of a quoted key",
+      why: "the comment and the key spelling are both rebuilt from the parsed line",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          'ref': " + oldSha + "  # note",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          'ref': " + target + "  # note"
+    },
+    {
       name: "a capital Repository and Ref key",
       why: "GitHub reads an action's with: keys without regard to case",
       lines: [
@@ -2376,7 +2554,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         "          Ref: " + oldSha,
         uses("      ", "release-build-lock")
       ],
-      refs: 1
+      refs: 1,
+      refLine: "          Ref: " + target
     }
   ];
   const runRewrite = () =>
@@ -2398,12 +2577,23 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
   }));
   const file = path.join(workflows, "unity.yml");
   for (const testCase of cases) {
-    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:"].concat(testCase.lines, [""]).join("\n"));
+    const prefix = testCase.header === false ? [] : ["jobs:", "  unity:", "    steps:"];
+    fs.writeFileSync(file, prefix.concat(testCase.lines, [""]).join("\n"));
     const result = runRewrite();
     assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
     const report = JSON.parse(result.stdout);
     assert.equal(report.refs, testCase.refs, testCase.name + ": " + testCase.why);
     assert.equal(report.changed, testCase.refs + 1, testCase.name + ": " + testCase.why);
+    // A count proves a pin moved; the line proves how it was rebuilt. Only the
+    // SHA may change, so the key spelling, the gap before the colon, the
+    // indentation and any comment have to come back out as they went in.
+    const rewritten = fs.readFileSync(file, "utf8");
+    if (testCase.refLine !== undefined) {
+      assert.ok(
+        rewritten.split("\n").includes(testCase.refLine),
+        testCase.name + ": the rewritten line is not exactly " + JSON.stringify(testCase.refLine) + "\n" + rewritten
+      );
+    }
     // A case that keeps a value on purpose says so; every other one must
     // leave no occurrence of the old SHA behind.
     if (!testCase.staleSurvives) {
