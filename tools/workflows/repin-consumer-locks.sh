@@ -250,12 +250,24 @@ if (targetVersion && !versionGrammar.test(targetVersion)) {
   );
 }
 const files = [];
+const relativeToConsumer = (filePath) =>
+  path.relative(directory, filePath).split(path.sep).join("/");
 const visit = (entry) => {
   for (const item of fs.readdirSync(entry, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const itemPath = path.join(entry, item.name);
     if (item.isDirectory()) {
       visit(itemPath);
     } else if (/\.(yml|yaml)$/.test(item.name)) {
+      // A symlink is written through, so the rewrite would edit the file it
+      // points at, outside the checkout the offer shows, and `git status`
+      // would stay clean. The companion path below refuses the same shape,
+      // so refuse it by name instead of following it.
+      if (item.isSymbolicLink()) {
+        throw new Error(
+          `Repins refuse the symlinked workflow ${relativeToConsumer(itemPath)}; a rewrite would ` +
+            "edit the file it points at instead of the reviewed checkout."
+        );
+      }
       files.push(itemPath);
     }
   }
@@ -275,12 +287,52 @@ const replacedPins = new Set();
 // them on every release, so the rewrite never normalizes the gap. It reads
 // the gap this repository already uses and reuses it.
 const versionCommentGaps = new Set();
+// `linePattern` accepts any `\s` run before `#`, and `trim()` strips the
+// Unicode spaces too, so a comment can pass the version test while carrying a
+// gap that is not spaces or tabs. Copying that gap is impossible and dropping
+// it is worse: YAML reads a `#` with no separation space as part of the plain
+// scalar, so the rewrite would fold `# vX.Y.Z` into the `uses:` value and the
+// pin would then match nothing on any later run. A gap the rewrite cannot
+// reproduce is evidence it must not touch, so it fails closed and names the
+// file and line. Only a version comment needs this: a witness comment is
+// written back verbatim and never re-formed.
+const gapPattern = /^[ \t]+$/;
+const commentGap = (comment, location) => {
+  const gap = /^[ \t]*/.exec(comment)[0];
+  if (!gapPattern.test(gap)) {
+    throw new Error(
+      `${repository} ${location} separates its pin from \`${comment.trim()}\` with ` +
+        `${JSON.stringify(comment.slice(0, gap.length))} instead of spaces or tabs. The rewrite ` +
+        "refuses to change that shape, because dropping the gap would fold the comment into the " +
+        "`uses:` value and hide the pin from every later run. Fix the comment by hand and repin again."
+    );
+  }
+  return gap;
+};
+// Read every workflow file once and record the comment gaps the repository
+// already uses. A file a reviewed `repinExceptions` entry protects is never
+// rewritten, so it is neither evidence nor read: it cannot veto the run and
+// it cannot fail the read.
+const sources = [];
 for (const filePath of files) {
-  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+  const relativePath = relativeToConsumer(filePath);
+  const exception = exceptions.get(relativePath);
+  if (exception) {
+    matchedExceptions.add(relativePath);
+    report.skipped.push({
+      path: relativePath,
+      owner: String(exception.owner || ""),
+      expiresAt: String(exception.expiresAt || "")
+    });
+    continue;
+  }
+  const lines = fs.readFileSync(filePath, "utf8").split("\n");
+  sources.push({ filePath, relativePath, lines });
+  for (const [index, line] of lines.entries()) {
     const match = matchPinLine(line);
     const comment = match ? match[3] || "" : "";
     if (comment !== "" && versionCommentPattern.test(comment.trim())) {
-      versionCommentGaps.add(/^[ \t]*/.exec(comment)[0]);
+      versionCommentGaps.add(commentGap(comment, `${relativePath}:${index + 1}`));
     }
   }
 }
@@ -289,25 +341,25 @@ for (const filePath of files) {
 // the repository already writes. No precedent, or two different gaps in one
 // repository, is ambiguous evidence: a mechanical rewrite cannot tell which
 // width the consumer's formatter accepts, so it fails closed and names the
-// repository instead of guessing. A repository that has no lock pin at all
-// never reaches this path because it has no pin to move.
-const versionCommentGap = () => {
+// repository and the file instead of guessing. A repository that has no lock
+// pin at all never reaches this path because it has no pin to move.
+const versionCommentGap = (location) => {
   if (versionCommentGaps.size === 1) {
     return [...versionCommentGaps][0];
   }
   const gaps = [...versionCommentGaps];
   const evidence = gaps.length === 0
-    ? "None of its lock pins carries a `# vX.Y.Z` comment."
-    : `Its lock pins use ${gaps.length} different comment gaps: ${gaps
+    ? "None of its workflow lock pins carries a `# vX.Y.Z` comment."
+    : `Its workflow lock pins use ${gaps.length} different comment gaps: ${gaps
       .map((gap) => JSON.stringify(gap))
       .join(", ")}.`;
   throw new Error(
-    `${repository} ${evidence} The rewrite cannot match the repository's comment spacing, ` +
-      "so it fails closed instead of guessing. Make the version comments uniform in the " +
-      "repository's own format, then repin again."
+    `${repository} ${location} needs a version comment. ${evidence} The rewrite cannot match the ` +
+      "repository's comment spacing, so it fails closed instead of guessing. Make the version " +
+      "comments uniform in the repository's own format, then repin again."
   );
 };
-const rewritePinLine = (line) => {
+const rewritePinLine = (line, location) => {
   const match = matchPinLine(line);
   if (!match || match[2] === targetSha) {
     return line;
@@ -322,28 +374,18 @@ const rewritePinLine = (line) => {
   const rawComment = comment.trim();
   const terminator = lineTerminator(line);
   if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
-    const gap = comment === "" ? versionCommentGap() : /^[ \t]*/.exec(comment)[0];
+    const gap = comment === "" ? versionCommentGap(location) : commentGap(comment, location);
     return `${match[1]}${targetSha}${gap}# ${targetVersion}${terminator}`;
   }
   return `${match[1]}${targetSha}${comment}${terminator}`;
 };
-for (const filePath of files) {
-  const relativePath = path.relative(directory, filePath).split(path.sep).join("/");
-  const exception = exceptions.get(relativePath);
-  if (exception) {
-    matchedExceptions.add(relativePath);
-    report.skipped.push({
-      path: relativePath,
-      owner: String(exception.owner || ""),
-      expiresAt: String(exception.expiresAt || "")
-    });
-    continue;
-  }
-  const original = fs.readFileSync(filePath, "utf8");
-  const lines = original.split("\n");
+// Rewrite every file in memory and write only once all of them succeed, so a
+// fail-closed run leaves the checkout byte-identical instead of half-updated.
+const rewritten = [];
+for (const source of sources) {
   let fileChanges = 0;
-  const rewritten = lines.map((line) => {
-    const rewrittenLine = rewritePinLine(line);
+  const lines = source.lines.map((line, index) => {
+    const rewrittenLine = rewritePinLine(line, `${source.relativePath}:${index + 1}`);
     if (rewrittenLine !== line) {
       fileChanges += 1;
     }
@@ -352,9 +394,12 @@ for (const filePath of files) {
   if (fileChanges === 0) {
     continue;
   }
-  fs.writeFileSync(filePath, `${rewritten.join("\n")}`, "utf8");
-  report.changed += fileChanges;
-  report.files.push({ path: relativePath, lines: fileChanges });
+  rewritten.push({ filePath: source.filePath, content: lines.join("\n"), lines: fileChanges });
+}
+for (const file of rewritten) {
+  fs.writeFileSync(file.filePath, file.content, "utf8");
+  report.changed += file.lines;
+  report.files.push({ path: relativeToConsumer(file.filePath), lines: file.lines });
 }
 for (const [entryPath, entry] of exceptions) {
   if (!matchedExceptions.has(entryPath)) {
@@ -391,8 +436,8 @@ for (const companion of reviewedCompanions) {
   let companionChanges = 0;
   if (companion.mode === "pin-lines") {
     const lines = fs.readFileSync(companionPath, "utf8").split("\n");
-    const rewritten = lines.map((line) => {
-      const rewrittenLine = rewritePinLine(line);
+    const rewritten = lines.map((line, index) => {
+      const rewrittenLine = rewritePinLine(line, `${companion.path}:${index + 1}`);
       if (rewrittenLine !== line) {
         companionChanges += 1;
       }

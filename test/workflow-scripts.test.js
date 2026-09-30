@@ -648,15 +648,15 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.match(malformed.stderr, /40-character commit SHA/);
 });
 
-test("moved pin comments keep the consumer's own comment spacing", (t) => {
+test("moved pin comments keep the consumer's own comment spacing", async (t) => {
   // The consumer owns the gap between its pin and a `# vX.Y.Z` comment,
   // because its own formatter owns the file. Enrolled repositories disagree:
   // IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects one
   // space, while unity-helpers runs Prettier over `.github/` and rewrites two
   // spaces back to one. A hard-coded width broke unity-helpers' `main` on
   // the v1.16.0 offer (#307), so the rewrite must reproduce each repository's
-  // existing bytes instead of normalizing them. Every case runs under both
-  // conventions.
+  // existing bytes instead of normalizing them. Every case runs under every
+  // gap the rewrite accepts.
   //
   // Each case is one moved pin under one target version. The scheduled
   // resolver only emits `vX.Y.Z` tags; the empty version proves the rewrite
@@ -670,7 +670,9 @@ test("moved pin comments keep the consumer's own comment spacing", (t) => {
   // The repository's other pin already sits at the target, so it supplies the
   // spacing evidence without moving itself.
   const precedent = (gap) => `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target}${gap}# v1.14.0`)}\n`;
-  for (const gap of [" ", "  "]) {
+  // A tab is a YAML separation space, so the rewrite preserves it like a
+  // space. Pinning the case keeps that decision from drifting.
+  for (const gap of [" ", "  ", "\t"]) {
     const other = gap === " " ? "  " : " ";
     const cases = [
       { comment: "", version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
@@ -682,25 +684,27 @@ test("moved pin comments keep the consumer's own comment spacing", (t) => {
       { comment: " # post-v1.10.0", version: "", expected: `${target} # post-v1.10.0` }
     ];
     for (const testCase of cases) {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
-      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-      const workflows = path.join(root, ".github", "workflows");
-      fs.mkdirSync(workflows, { recursive: true });
-      const original = `${precedent(gap)}${pin("return-unity-license", oldSha + testCase.comment)}\n`;
-      fs.writeFileSync(path.join(workflows, "unity.yml"), original);
-      const result = childProcess.spawnSync(
-        "bash",
-        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, testCase.version, "Ambiguous-Interactive/unity-helpers"],
-        { cwd: repoRoot, encoding: "utf8" }
-      );
-      const label = `gap ${JSON.stringify(gap)} comment ${JSON.stringify(testCase.comment)} at version ${JSON.stringify(testCase.version)}`;
-      assert.equal(result.status, 0, `${label}: ${result.stderr}`);
-      assert.deepEqual(JSON.parse(result.stdout).changed, 1, label);
-      assert.equal(
-        fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
-        `${precedent(gap)}${pin("return-unity-license", testCase.expected)}\n`,
-        label
-      );
+      await t.test(`gap ${JSON.stringify(gap)} comment ${JSON.stringify(testCase.comment)} version ${JSON.stringify(testCase.version)}`, () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
+        t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+        const workflows = path.join(root, ".github", "workflows");
+        fs.mkdirSync(workflows, { recursive: true });
+        fs.writeFileSync(
+          path.join(workflows, "unity.yml"),
+          `${precedent(gap)}${pin("return-unity-license", oldSha + testCase.comment)}\n`
+        );
+        const result = childProcess.spawnSync(
+          "bash",
+          [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, testCase.version, "Ambiguous-Interactive/unity-helpers"],
+          { cwd: repoRoot, encoding: "utf8" }
+        );
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(JSON.parse(result.stdout).changed, 1);
+        assert.equal(
+          fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+          `${precedent(gap)}${pin("return-unity-license", testCase.expected)}\n`
+        );
+      });
     }
   }
 
@@ -723,53 +727,71 @@ test("moved pin comments keep the consumer's own comment spacing", (t) => {
   );
 });
 
-test("consumer repin fails closed when the repository's comment spacing has no single evidence", (t) => {
+test("consumer repin fails closed when the repository's comment spacing has no single evidence", async (t) => {
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
   const target = "64bac446903115134dca8235410b332bc5a83547";
-  const acquire = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@";
-  const returnPin = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@";
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
   // A pin that gains a version comment needs a gap, and the only evidence is
   // what the repository already writes. A mechanical rewrite cannot tell which
-  // width a consumer's formatter accepts, so an absent or split precedent
-  // fails closed and names the repository instead of guessing.
+  // width a consumer's formatter accepts, so an absent, split, or
+  // unreproducible precedent fails closed and names the file to fix instead of
+  // guessing. Each case also proves the checkout stays byte-identical, so a
+  // fail-closed run can never leave a half-rewritten tree.
   const cases = [
     {
       name: "no version comment to copy",
-      content: `${returnPin}${oldSha}\n`,
-      expected: /None of its lock pins carries a `# vX\.Y\.Z` comment\./u
+      files: { "unity.yml": `${pin("return-unity-license", oldSha)}\n` },
+      expected: /None of its workflow lock pins carries a `# vX\.Y\.Z` comment\./u
     },
     {
       name: "two comment gaps in one repository",
-      content:
-        `${acquire}${oldSha} # v1.13.0\n` +
-        `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${oldSha}  # v1.13.0\n` +
-        `${returnPin}${oldSha}\n`,
-      expected: /Its lock pins use 2 different comment gaps: " ", "  "\./u
+      files: {
+        "a.yml": `${pin("acquire-build-lock", `${oldSha} # v1.13.0`)}\n`,
+        "b.yml": `${pin("release-build-lock", `${oldSha}  # v1.13.0`)}\n${pin("return-unity-license", oldSha)}\n`
+      },
+      expected: /Its workflow lock pins use 2 different comment gaps: " ", "  "\./u
+    },
+    {
+      // `trim()` strips a non-breaking space, so this comment passes the
+      // version test. Copying the gap is impossible and dropping it folds the
+      // `#` into the `uses:` value, which hides the pin from every later run.
+      name: "a gap that is not a space or tab",
+      files: { "unity.yml": `${pin("acquire-build-lock", `${oldSha}\u00a0# v1.13.0`)}\n` },
+      expected: /instead of spaces or tabs\.[\s\S]*`uses:` value/u
     }
   ];
   for (const testCase of cases) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-gap-"));
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    const workflows = path.join(root, ".github", "workflows");
-    fs.mkdirSync(workflows, { recursive: true });
-    fs.writeFileSync(path.join(workflows, "unity.yml"), testCase.content);
-    const result = childProcess.spawnSync(
-      "bash",
-      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
-      { cwd: repoRoot, encoding: "utf8" }
-    );
-    assert.equal(result.status, 1, testCase.name);
-    assert.match(result.stderr, testCase.expected, testCase.name);
-    assert.match(result.stderr, /Ambiguous-Interactive\/unity-helpers/, testCase.name);
-    assert.equal(
-      fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
-      testCase.content,
-      `${testCase.name}: a fail-closed run leaves the checkout untouched`
-    );
+    await t.test(testCase.name, () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-gap-"));
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      const workflows = path.join(root, ".github", "workflows");
+      fs.mkdirSync(workflows, { recursive: true });
+      for (const [name, content] of Object.entries(testCase.files)) {
+        fs.writeFileSync(path.join(workflows, name), content);
+      }
+      const result = childProcess.spawnSync(
+        "bash",
+        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, testCase.expected);
+      assert.match(result.stderr, /Ambiguous-Interactive\/unity-helpers/);
+      // The message must name the file the operator has to edit.
+      assert.match(result.stderr, /\.github\/workflows\/[a-z]+\.yml:\d+/u);
+      for (const [name, content] of Object.entries(testCase.files)) {
+        assert.equal(
+          fs.readFileSync(path.join(workflows, name), "utf8"),
+          content,
+          "a fail-closed run leaves every file byte-identical"
+        );
+      }
+    });
   }
 
-  // A repository with no lock pin at all has no pin to move, so it never
-  // needs a gap and must not fail.
+  // A repository with no lock pin at all has no pin to move, so it never needs
+  // a gap and must not fail.
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "repin-gap-"));
   t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
   fs.mkdirSync(path.join(empty, ".github", "workflows"), { recursive: true });
@@ -781,6 +803,30 @@ test("consumer repin fails closed when the repository's comment spacing has no s
   );
   assert.equal(skipped.status, 0, skipped.stderr);
   assert.deepEqual(JSON.parse(skipped.stdout).changed, 0);
+});
+
+test("consumer repin refuses a symlinked workflow instead of writing through it", (t) => {
+  // A symlink is written through, so the rewrite would edit a file outside the
+  // checkout the offer shows and `git status` would stay clean. The companion
+  // path already refuses this shape; a workflow must refuse it the same way.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-symlink-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const outside = path.join(root, "outside.yml");
+  const original = `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0\n`;
+  fs.writeFileSync(outside, original);
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  fs.symlinkSync(path.relative(workflows, outside), path.join(workflows, "linked.yml"));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8" }
+  );
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /refuse the symlinked workflow \.github\/workflows\/linked\.yml/u);
+  assert.equal(fs.readFileSync(outside, "utf8"), original, "the write never escapes the checkout");
 });
 
 test("consumer repin moves pins in a CRLF workflow and keeps the line endings", (t) => {

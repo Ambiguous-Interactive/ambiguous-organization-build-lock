@@ -168,8 +168,9 @@ An existing open repin pull request for the same target is not updated
 automatically. The offer keeps each repository's own comment spacing, so a
 repository whose formatter rejects that spacing fails its own lint on the
 offer: fix the workflow comments by hand in the format the repository's
-formatter accepts, then close the offer. The next run opens a new one.
-Automation does not rewrite an open pull request branch.
+formatter accepts, then close the offer. That target's offer is final, so the
+next release opens a new one. Automation does not rewrite an open pull request
+branch.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
