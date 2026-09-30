@@ -289,9 +289,10 @@ if (githubStat.isSymbolicLink() || !githubStat.isDirectory()) {
 visit(githubRoot);
 const report = { changed: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
-// The pins this rewrite removes, collected from the workflow lines it
-// rewrites. Only these SHAs may move inside pin-literal companions, so a
-// historical SHA quoted for another reason survives untouched.
+// The pins this rewrite removes, from the workflow lines it rewrites. Only the
+// workflow subset may move inside a pin-literal companion, so a historical SHA
+// quoted for another reason survives untouched; `workflowReplacedPins` below
+// takes that subset once the workflow pass is done.
 const replacedPins = new Set();
 // A consumer owns the gap between its pin and a `# vX.Y.Z` comment, because
 // its own formatter owns that file. The enrolled repositories disagree:
@@ -363,9 +364,8 @@ for (const filePath of files) {
 // and the file instead of guessing. A repository that has no lock pin at all
 // never reaches this path because it has no pin to move. `ownGaps` is the
 // evidence from the single companion file being rewritten: a `pin-lines`
-// companion keeps its
-// own spacing even when the workflow pins use a different one, so the offered
-// commit never leaves that file internally inconsistent.
+// companion keeps its own spacing even when the workflow pins use a different
+// one, so the offered commit never leaves that file internally inconsistent.
 const resolveVersionCommentGap = (location, ownGaps) => {
   // An empty Set carries no evidence, and an empty Set is truthy, so the size
   // check is what selects the workflow fallback.
