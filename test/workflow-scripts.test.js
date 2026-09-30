@@ -3651,8 +3651,55 @@ function snapshotBytes(root, prefix = "") {
 const repinActionPath =
   "Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock";
 
+// Every file the rewrite reads so that it can write one back: the workflow
+// walk and each of the three companion modes. A file it never reads cannot
+// carry a pin it would write back, so it is not in this list. `moves` is the
+// content the rewrite would change, and `stays` the content it would leave
+// alone; the difference between them is the whole contract, so each surface
+// carries both.
+const repinSnapshot = (lockShas) => `${JSON.stringify({
+  schemaVersion: 1,
+  organization: "Ambiguous-Interactive",
+  approvedLockShas: lockShas,
+  approvedReturnShas: [repinOldSha, repinTarget],
+  approvedDarwinReturnShas: []
+}, null, 2)}\n`;
+const repinReadableSurfaces = [
+  {
+    name: "a workflow file",
+    path: ".github/workflows/second.yml",
+    mode: null,
+    moves: () => `  - uses: ${repinActionPath}@${repinOldSha} # v1.13.0\n`,
+    stays: () => "# a note\n"
+  },
+  {
+    name: "a pin-lines companion",
+    path: "docs/pin-lines.md",
+    mode: "pin-lines",
+    moves: () => `  - uses: ${repinActionPath}@${repinOldSha} # v1.13.0\n`,
+    stays: () => "# a note\n"
+  },
+  {
+    name: "a pin-literal companion",
+    path: "docs/pin-literal.json",
+    mode: "pin-literal",
+    moves: () => `{"acquire-build-lock": "${repinOldSha}"}\n`,
+    stays: () => '{"acquire-build-lock": "not-a-pin"}\n'
+  },
+  {
+    name: "a policy-snapshot companion",
+    path: "docs/policy-snapshot.json",
+    mode: "policy-snapshot",
+    moves: () => repinSnapshot([repinOldSha]),
+    // No `stays`: the mode generates the whole document, and a decoded
+    // snapshot carrying U+FFFD can never equal generated JSON that has none,
+    // so this surface has no file the rewrite would leave alone.
+    stays: null
+  }
+];
+
 // A byte sequence Node's UTF-8 decoder cannot read. Each one becomes U+FFFD,
-// which is three bytes, so a rewrite that decodes one and writes it back both
+// which is three bytes, so a rewrite that writes such a file back both
 // destroys the byte and grows the file while the report counts only the pins
 // it moved.
 const undecodableBytes = {
@@ -3662,69 +3709,40 @@ const undecodableBytes = {
   "a truncated sequence": [0xe2, 0x9c]
 };
 
-// Every file the rewrite reads so that it can write one back: the workflow
-// walk and each of the three companion modes. A file it never reads cannot
-// carry a pin it would write back, so it is not in this list.
-const repinReadableSurfaces = [
-  {
-    name: "a workflow file",
-    path: ".github/workflows/second.yml",
-    mode: null,
-    render: () => "# a note\n"
-  },
-  {
-    name: "a pin-lines companion",
-    path: "docs/pin-lines.md",
-    mode: "pin-lines",
-    render: () => `  - uses: ${repinActionPath}@${repinOldSha} # v1.13.0\n`
-  },
-  {
-    name: "a pin-literal companion",
-    path: "docs/pin-literal.json",
-    mode: "pin-literal",
-    render: () => `{"acquire-build-lock": "${repinOldSha}"}\n`
-  },
-  {
-    name: "a policy-snapshot companion",
-    path: "docs/policy-snapshot.json",
-    mode: "policy-snapshot",
-    render: () => `${JSON.stringify({
-      schemaVersion: 1,
-      organization: "Ambiguous-Interactive",
-      approvedLockShas: [repinOldSha],
-      approvedReturnShas: [repinOldSha],
-      approvedDarwinReturnShas: []
-    }, null, 2)}\n`
-  }
-];
-
-test("consumer repin refuses every file it cannot read as UTF-8", (t) => {
-  const target = "64bac446903115134dca8235410b332bc5a83547";
-  const repository = "Ambiguous-Interactive/unity-helpers";
+// The refusal is scoped to the files the rewrite would write, and that scope
+// is the point of the test. A file it cannot read but would not change is
+// left exactly as the consumer wrote it, with no red run, because the
+// rewrite's own rule is that a shape it cannot read stays put and only a
+// shape it would damage fails the run. A permanent blocker on every
+// unrelated file would make the nightly automation unrunnable, and the only
+// escape the policy offers, a `repinExceptions` entry, reaches neither a
+// companion nor a workflow outside `.github/workflows`.
+test("consumer repin refuses a file it would write and cannot read as UTF-8", (t) => {
   const cases = [];
   for (const surface of repinReadableSurfaces) {
     for (const [description, bytes] of Object.entries(undecodableBytes)) {
-      cases.push({ surface, description, bytes });
+      cases.push({ surface, description, bytes, moves: true });
+      if (surface.stays !== null) {
+        cases.push({ surface, description, bytes, moves: false });
+      }
     }
   }
-  for (const { surface, description, bytes } of cases) {
-    const label = `${surface.name} carrying ${description}`;
-    // A fresh checkout per case: the refusal has to hold whatever else the
+  for (const { surface, description, bytes, moves } of cases) {
+    const label = `${surface.name} that ${moves ? "changes" : "does not change"} and carries ${description}`;
+    // A fresh checkout per case: the outcome has to hold whatever else the
     // checkout carries, and a refused run must leave every byte of it alone.
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-utf8-refusal-"));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
     fs.mkdirSync(path.dirname(path.join(root, surface.path)), { recursive: true });
-    // A clean workflow whose pin moves, so the run has something to write and
-    // the refusal is proven to happen before any byte is written.
-    fs.writeFileSync(
-      path.join(root, ".github", "workflows", "unity.yml"),
-      `- uses: ${repinActionPath}@${repinOldSha} # v1.13.0\n`
-    );
+    // A clean workflow whose pin moves in every case, so the run has real work
+    // to do and a run that stays green has still done it.
+    const movedRelative = path.posix.join(".github", "workflows", "unity.yml");
+    fs.writeFileSync(path.join(root, movedRelative), `- uses: ${repinActionPath}@${repinOldSha} # v1.13.0\n`);
     fs.writeFileSync(
       path.join(root, surface.path),
       Buffer.concat([
-        Buffer.from(surface.render(), "utf8"),
+        Buffer.from(moves ? surface.moves() : surface.stays(), "utf8"),
         Buffer.from("caf\u00e9 \u2014 "),
         Buffer.from(bytes),
         Buffer.from("\n")
@@ -3733,33 +3751,51 @@ test("consumer repin refuses every file it cannot read as UTF-8", (t) => {
     fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
       schemaVersion: 1,
       organization: "Ambiguous-Interactive",
-      approvedLockShas: [repinOldSha, target],
-      approvedReturnShas: [repinOldSha, target],
+      approvedLockShas: [repinOldSha, repinTarget],
+      approvedReturnShas: [repinOldSha, repinTarget],
       approvedDarwinReturnShas: [],
-      repositories: [{ repository, defaultBranch: "main" }],
+      repositories: [{ repository: repinOrganization, defaultBranch: "main" }],
       exceptions: [],
       repinExceptions: [],
       repinCompanions: surface.mode === null
         ? []
-        : [{ repository, path: surface.path, mode: surface.mode }]
+        : [{ repository: repinOrganization, path: surface.path, mode: surface.mode }]
     }));
     const before = snapshotBytes(root);
     const result = childProcess.spawnSync(
       "bash",
-      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", repository],
+      [
+        path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins",
+        root, repinTarget, "v1.14.0", repinOrganization
+      ],
       { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
     );
-    assert.equal(result.status, 1, `${label}: expected failure, got ${result.status}: ${result.stdout}`);
-    assert.match(result.stderr, /not valid UTF-8/, `${label}: ${result.stderr}`);
-    assert.ok(
-      result.stderr.includes(surface.path),
-      `${label}: the error must name ${surface.path}: ${result.stderr}`
-    );
-    assert.equal(result.stdout, "", `${label}: a refused rewrite reports nothing it could offer`);
+    if (!moves) {
+      assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+      assert.equal(
+        fs.readFileSync(path.join(root, movedRelative), "utf8"),
+        `- uses: ${repinActionPath}@${repinTarget} # v1.14.0\n`,
+        `${label}: the run must still move every other pin`
+      );
+    } else {
+      assert.equal(result.status, 1, `${label}: expected failure, got ${result.status}: ${result.stdout}`);
+      assert.match(result.stderr, /not valid UTF-8/, `${label}: ${result.stderr}`);
+      assert.ok(
+        result.stderr.includes(surface.path),
+        `${label}: the error must name ${surface.path}: ${result.stderr}`
+      );
+      assert.equal(result.stdout, "", `${label}: a refused rewrite reports nothing it could offer`);
+    }
+    // Either way the file the rewrite refused to read keeps every byte it was
+    // given: refusing and skipping are both byte-exact.
     const after = snapshotBytes(root);
     for (const [relative, bytesBefore] of Object.entries(before)) {
-      if (relative === "policy.json") continue;
-      assert.ok(after[relative].equals(bytesBefore), `${label}: a refused rewrite changed ${relative}`);
+      // A refused run writes nothing at all, so the moving pin stays put too. A
+      // green run moves it, which is the only file the assertion may skip.
+      if (relative === "policy.json" || (!moves && relative === movedRelative)) {
+        continue;
+      }
+      assert.ok(after[relative].equals(bytesBefore), `${label}: the rewrite changed ${relative}`);
     }
   }
 });
@@ -3872,6 +3908,7 @@ test("consumer repin changes only the pin bytes of a file it can read exactly", 
 });
 
 const repinOldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+const repinTarget = "64bac446903115134dca8235410b332bc5a83547";
 const repinOrganization = "Ambiguous-Interactive";
 
 function gitRun(cwd, ...args) {
