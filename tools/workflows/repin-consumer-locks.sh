@@ -263,7 +263,8 @@ const visit = (entry) => {
     if (item.isSymbolicLink()) {
       throw new Error(
         `Repins refuse the symlink ${relativeToConsumer(itemPath)} under .github; a rewrite would ` +
-          "either edit the file it points at outside the reviewed checkout or miss the pins inside it."
+          "either edit the file it points at instead of the reviewed checkout, or miss the pins " +
+          "inside a linked directory and report no change at all."
       );
     }
     if (item.isDirectory()) {
@@ -349,11 +350,14 @@ for (const filePath of files) {
 // consumer's formatter accepts, so it fails closed and names the repository
 // and the file instead of guessing. A repository that has no lock pin at all
 // never reaches this path because it has no pin to move. `ownGaps` is the
-// evidence from the file being rewritten: a `pin-lines` companion keeps its
+// evidence from the single companion file being rewritten: a `pin-lines`
+// companion keeps its
 // own spacing even when the workflow pins use a different one, so the offered
-// commit never leaves a file internally inconsistent.
+// commit never leaves that file internally inconsistent.
 const resolveVersionCommentGap = (location, ownGaps) => {
-  const gaps = ownGaps || versionCommentGaps;
+  // An empty Set carries no evidence, and an empty Set is truthy, so the size
+  // check is what selects the workflow fallback.
+  const gaps = ownGaps && ownGaps.size > 0 ? ownGaps : versionCommentGaps;
   if (gaps.size === 1) {
     return [...gaps][0];
   }
@@ -391,11 +395,13 @@ const rewritePinLine = (line, location, ownGaps) => {
   }
   return `${match[1]}${targetSha}${comment}${terminator}`;
 };
-// Every write is buffered and flushed once, at the end, so a fail-closed run
-// leaves the checkout byte-identical instead of half-updated. A throw can come
-// from a later workflow file, from a companion that is not a regular file, or
-// from a companion that still names a stale pin, so the workflow flush alone
-// would not be enough.
+// Every write is buffered and flushed once, at the end, so every check fails
+// closed before anything is written. A throw can come from a later workflow
+// file, from a companion that is not a regular file, or from a companion that
+// still names a stale pin, so flushing the workflow pass on its own would not
+// be enough. A `writeFileSync` that fails inside the flush loop is the one case
+// that cannot be atomic across files; it leaves the run red with no report, so
+// the caller stages nothing and the clone is discarded.
 const pendingWrites = [];
 for (const source of sources) {
   let fileChanges = 0;
@@ -413,6 +419,12 @@ for (const source of sources) {
   report.changed += fileChanges;
   report.files.push({ path: source.relativePath, lines: fileChanges });
 }
+// Only a workflow pin this rewrite removes may move inside a pin-literal
+// companion. A `pin-lines` companion can name the same SHA for its own reasons,
+// and letting that widen the set would rewrite a reviewed witness in the
+// pin-literal file and skip the stale-pin check below, which is the protection
+// the comment above this set promises.
+const workflowReplacedPins = new Set(replacedPins);
 for (const [entryPath, entry] of exceptions) {
   if (!matchedExceptions.has(entryPath)) {
     report.unmatched.push({
@@ -483,10 +495,10 @@ for (const companion of reviewedCompanions) {
     // different reviewed value and must survive untouched.
     const replaceStandalone = (sha) =>
       updated.replace(new RegExp(`(?<![0-9a-fA-F])${sha}(?![0-9a-fA-F])`, "g"), () => targetSha);
-    for (const replacedPin of [...replacedPins].sort()) {
+    for (const replacedPin of [...workflowReplacedPins].sort()) {
       updated = replaceStandalone(replacedPin);
     }
-    if (replacedPins.size === 0) {
+    if (workflowReplacedPins.size === 0) {
       // No workflow pin was removed, so nothing above could heal a lagging
       // companion. Standalone authorized tokens that are not the target may
       // be reviewed witnesses, and a mechanical rewrite cannot tell them

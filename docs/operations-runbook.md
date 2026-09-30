@@ -172,15 +172,19 @@ formatter accepts, then close the offer. That target's offer is final, so the
 next release opens a new one. Automation does not rewrite an open pull request
 branch.
 
-The rewrite itself fails closed before it writes anything, and the error names
+The rewrite checks everything before it writes anything, and the error names
 the repository, the file, and the line to fix. It reports that a line needs a
 version comment but the lock pins carry none, or carry more than one comment
 gap, or that an existing version comment separates the pin with something other
-than spaces. The checkout stays byte-identical, so the fix is to change those
-comments in the format the repository's own formatter accepts, then let the
-next run open a new offer. The same applies to a symlink under `.github`,
-which the rewrite refuses rather than following, and to a `repinCompanions`
-entry that is not a regular file.
+than spaces. Every one of those refusals leaves the checkout byte-identical,
+so the fix is to change those comments in the format the repository's own
+formatter accepts, then let the next run open a new offer. The same applies to
+a symlink under `.github`, which the rewrite refuses rather than following; to
+a `repinCompanions` entry that is not a regular file; and to one whose path
+cannot be read at all, which is not the same as a missing companion and
+surfaces as the raw filesystem error rather than a named one. Only a write that
+fails while the buffered changes are being committed cannot be undone, and it
+emits no report, so nothing is staged or pushed.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible

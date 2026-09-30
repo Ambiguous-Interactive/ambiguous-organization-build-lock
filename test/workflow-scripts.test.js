@@ -874,6 +874,60 @@ test("consumer repin refuses a symlink under .github instead of following it", (
   }
 });
 
+test("a pin-lines companion with no version comment falls back to the workflow gap", (t) => {
+  // A companion with no version comment of its own carries no evidence, and an
+  // empty Set is truthy, so the fallback has to test the size. Without it the
+  // run fails closed on a repository whose workflows already say the answer.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companion-fallback-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "workflows", "unity.yml"),
+    `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target}   # v1.14.0`)}\n`
+  );
+  // Two spaces in the workflow evidence, so a one-space answer proves the
+  // workflow set was used rather than the companion's own.
+  const companion = [
+    pin("acquire-build-lock", oldSha),
+    pin("return-unity-license", oldSha),
+    ""
+  ].join("\n");
+  fs.writeFileSync(path.join(root, "docs", "pins.md"), companion);
+  const policyPath = path.join(root, "policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: [
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/pins.md", mode: "pin-lines" }
+    ]
+  }));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.readFileSync(path.join(root, "docs", "pins.md"), "utf8"),
+    [
+      pin("acquire-build-lock", `${target}   # v1.14.0`),
+      pin("return-unity-license", `${target}   # v1.14.0`),
+      ""
+    ].join("\n")
+  );
+});
+
 test("a protected workflow is neither read nor used as comment spacing evidence", (t) => {
   // A `repinExceptions` file is never rewritten, so it is not a reviewed
   // surface for this run. If it were still read, it could veto the whole
@@ -911,8 +965,8 @@ test("a protected workflow is neither read nor used as comment spacing evidence"
     repinCompanions: []
   }));
   const cases = [
-    { name: "a protected workflow with a different gap", mode: 0o644, expectRewrite: true },
-    { name: "a protected workflow that cannot be read", mode: 0o000, expectRewrite: true }
+    { name: "a protected workflow with a different gap", mode: 0o644 },
+    { name: "a protected workflow that cannot be read", mode: 0o000 }
   ];
   for (const testCase of cases) {
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "repin-protected-"));
@@ -952,8 +1006,10 @@ test("a protected workflow is neither read nor used as comment spacing evidence"
 
 test("a companion that fails closed leaves every rewritten file byte-identical", (t) => {
   // A fail-closed run must leave the whole checkout untouched, not only the
-  // workflow files. The companion block runs after the workflow pass and can
-  // still throw, so a write flushed there would leave a half-updated tree.
+  // workflow files. A companion can still fail after an earlier companion has
+  // already decided what to change, so a write flushed per companion would
+  // leave a half-updated tree. The refusal therefore has to come from a
+  // companion that is processed after the one that moves a pin.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-atomic-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
@@ -961,18 +1017,15 @@ test("a companion that fails closed leaves every rewritten file byte-identical",
   const pin = (action, ref) =>
     `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
   const workflow = `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", oldSha)}\n`;
-  const companion = `${pin("release-build-lock", `${oldSha} # v1.13.0`)}\n`;
-  const stale = `const policyCommit = "${oldSha}";\n`;
-  const outside = path.join(root, "secret.txt");
+  // A companion whose own comment gap is a tab fails closed when the rewrite
+  // reaches it, which is after `a.md` has already been rewritten in memory.
+  const moved = pin("acquire-build-lock", `${oldSha}  # v1.13.0`) + "\n";
+  const refused = pin("release-build-lock", `${oldSha}\t# v1.13.0`) + "\n";
   fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
-  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, ".github", "workflows", "unity.yml"), workflow);
-  fs.writeFileSync(path.join(root, "scripts", "pin.md"), companion);
-  fs.writeFileSync(path.join(root, "scripts", "pin.js"), stale);
-  fs.writeFileSync(outside, "untouched\n");
-  // A symlinked companion is refused after the workflow pass has already
-  // decided what to write, so this is where a flush would leak.
-  fs.symlinkSync(path.relative(path.join(root, "scripts"), outside), path.join(root, "scripts", "linked.md"));
+  fs.writeFileSync(path.join(root, "docs", "a.md"), moved);
+  fs.writeFileSync(path.join(root, "docs", "b.md"), refused);
   const policyPath = path.join(root, "policy.json");
   fs.writeFileSync(policyPath, JSON.stringify({
     schemaVersion: 1,
@@ -984,8 +1037,8 @@ test("a companion that fails closed leaves every rewritten file byte-identical",
     exceptions: [],
     repinExceptions: [],
     repinCompanions: [
-      { repository: "Ambiguous-Interactive/unity-helpers", path: "scripts/pin.md", mode: "pin-lines" },
-      { repository: "Ambiguous-Interactive/unity-helpers", path: "scripts/linked.md", mode: "pin-lines" }
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/a.md", mode: "pin-lines" },
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/b.md", mode: "pin-lines" }
     ]
   }));
   const result = childProcess.spawnSync(
@@ -994,14 +1047,59 @@ test("a companion that fails closed leaves every rewritten file byte-identical",
     { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
   );
   assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /scripts\/linked\.md is not a regular file/u);
+  assert.match(result.stderr, /docs\/b\.md:1 separates its pin/u);
   assert.equal(
     fs.readFileSync(path.join(root, ".github", "workflows", "unity.yml"), "utf8"),
     workflow,
     "the workflow pass decided to rewrite this file, and the run still left it alone"
   );
-  assert.equal(fs.readFileSync(path.join(root, "scripts", "pin.md"), "utf8"), companion);
-  assert.equal(fs.readFileSync(outside, "utf8"), "untouched\n");
+  assert.equal(
+    fs.readFileSync(path.join(root, "docs", "a.md"), "utf8"),
+    moved,
+    "the companion pass decided to rewrite this file, and the run still left it alone"
+  );
+  assert.equal(fs.readFileSync(path.join(root, "docs", "b.md"), "utf8"), refused);
+});
+
+test("consumer repin fails closed when a companion path cannot be read", (t) => {
+  // Only a missing companion means absent. A path whose parent is a file
+  // returns `ENOTDIR`, and reporting that as a missing companion would offer
+  // a commit that silently omits an artifact the policy requires.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companion-parent-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, ".github", "workflows", "unity.yml"),
+    `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target} # v1.14.0`)}\n${pin("return-unity-license", oldSha)}\n`
+  );
+  // `docs` is a regular file, so `docs/pins.md` cannot be stat'ed at all.
+  fs.writeFileSync(path.join(root, "docs"), "not a directory\n");
+  const policyPath = path.join(root, "policy.json");
+  fs.writeFileSync(policyPath, JSON.stringify({
+    schemaVersion: 1,
+    organization: "Ambiguous-Interactive",
+    approvedLockShas: [oldSha, target],
+    approvedReturnShas: [target],
+    approvedDarwinReturnShas: [],
+    repositories: [{ repository: "Ambiguous-Interactive/unity-helpers" }],
+    exceptions: [],
+    repinExceptions: [],
+    repinCompanions: [
+      { repository: "Ambiguous-Interactive/unity-helpers", path: "docs/pins.md", mode: "pin-lines" }
+    ]
+  }));
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: policyPath } }
+  );
+  assert.equal(result.status, 1, `a run that reported a missing companion would be green: ${result.stdout}`);
+  assert.match(result.stderr, /ENOTDIR/u);
+  assert.equal(result.stdout, "", "no report is emitted, so no caller can act on a missing companion");
 });
 
 test("a pin-lines companion keeps its own comment spacing", (t) => {
@@ -1529,7 +1627,7 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
       ""
     ].join("\n")
   );
-  const writePolicy = () => {
+  const writePolicy = (overrides) => {
     fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
       schemaVersion: 1,
       organization: "Ambiguous-Interactive",
@@ -1541,7 +1639,8 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
       repinExceptions: [],
       repinCompanions: [
         { repository: "Ambiguous-Interactive/unity-helpers", path: "tests/pin-contract.js", mode: "pin-literal" }
-      ]
+      ],
+      ...overrides
     }));
   };
   writePolicy();
@@ -1592,6 +1691,66 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
   assert.equal(
     fs.readFileSync(path.join(root, "tests", "pin-contract.js"), "utf8"),
     [`const policyCommit = "${target}";`, `const witnessDigest = "9f${witnessSha}aa11";`, ""].join("\n")
+  );
+
+  // A pin in a `pin-lines` companion is not a pin this rewrite removed, so it
+  // must not widen the set of SHAs a pin-literal companion may move. Here the
+  // workflows are already at the target, the documentation companion still
+  // names the old SHA, and the pin-literal file quotes that same SHA as a
+  // reviewed witness. Only a workflow pin may move it, so the witness stays.
+  fs.writeFileSync(
+    path.join(workflows, "unity.yml"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`,
+      ""
+    ].join("\n")
+  );
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  const pinDoc = path.join(root, "docs", "pin-doc.md");
+  const docLine = `uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@`;
+  fs.writeFileSync(pinDoc, `## Example\n\n- ${docLine}${oldSha} # v1.13.0\n`);
+  const witness = [`const policyCommit = "${target}";`, `const reviewedWitness = "${oldSha}";`, ""].join("\n");
+  fs.writeFileSync(path.join(root, "tests", "pin-contract.js"), witness);
+  const policy = JSON.parse(fs.readFileSync(path.join(root, "policy.json"), "utf8"));
+  // Ahead of the pin-literal entry, so the companion pin is already in the
+  // set when the pin-literal file is rewritten.
+  policy.repinCompanions.unshift({
+    repository: "Ambiguous-Interactive/unity-helpers",
+    path: "docs/pin-doc.md",
+    mode: "pin-lines"
+  });
+  writePolicy(policy);
+  const isolated = runRewrite();
+  assert.equal(isolated.status, 0, isolated.stderr);
+  assert.equal(
+    fs.readFileSync(pinDoc, "utf8"),
+    `## Example\n\n- ${docLine}${target} # v1.14.0\n`
+  );
+  assert.equal(
+    fs.readFileSync(path.join(root, "tests", "pin-contract.js"), "utf8"),
+    witness,
+    "a companion pin does not license a pin-literal witness to move"
+  );
+
+  // The same separation decides whether the stale-pin check runs at all. No
+  // workflow pin was removed, and the only pin that moved lives in a
+  // companion, so a pin-literal file that names only the stale pin must still
+  // fail closed for operator review rather than riding on the companion. The
+  // documentation companion is put back to the stale release so that it moves
+  // again on this run.
+  fs.writeFileSync(pinDoc, `## Example\n\n- ${docLine}${oldSha} # v1.13.0\n`);
+  const onlyStale = [`const policyCommit = "${oldSha}";`, ""].join("\n");
+  fs.writeFileSync(path.join(root, "tests", "pin-contract.js"), onlyStale);
+  const guarded = runRewrite();
+  assert.equal(guarded.status, 1, `expected failure, got ${guarded.status}: ${guarded.stdout}`);
+  assert.match(guarded.stderr, /stale pin constant from a reviewed witness/);
+  assert.equal(
+    fs.readFileSync(path.join(root, "tests", "pin-contract.js"), "utf8"),
+    onlyStale,
+    "a fail-closed run leaves the companion untouched"
   );
 });
 

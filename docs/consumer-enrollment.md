@@ -92,9 +92,9 @@ drift issue lists them with the repository and path.
 The rewrite preserves each consumer's own pin comment spacing. A moved pin
 keeps the exact gap its line already has before the `# vX.Y.Z` comment, a pin
 with a version comment is updated in place, and a pin without one gains one in
-the gap the same file's other lock pins already use, so every moved pin stays
-human-readable and Dependabot-visible. A `pin-lines` companion is its own
-file with its own formatter, so its own comments are its evidence; the
+the gap the repository's other workflow lock pins already use, so every moved
+pin stays human-readable and Dependabot-visible. A `pin-lines` companion is
+its own file with its own formatter, so its own comments are its evidence; the
 workflow pins are the fallback for a companion that carries no version
 comment. The consumer's own formatter owns that gap and the organization is
 not uniform: IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects
@@ -106,14 +106,19 @@ an existing version comment uses any other gap. A tab is not a gap: libyaml
 rejects one before a comment as a syntax error. Fix those comments by hand in
 the repository's own format and repin again. A pin already at the target
 keeps its current shape. A comment that is not a version, such as a reviewed
-witness note, survives untouched. A `repinExceptions` file is never read, so
-it can neither supply a gap nor fail the run. A symlink under `.github` fails
-closed: a workflow reached through one would be written outside the reviewed
-checkout, and a symlinked directory would hide every pin inside it. A
-fail-closed rewrite leaves the whole checkout byte-identical, workflows and
-companions alike, including a file that keeps CRLF line endings. Consumer
-lints own the spacing: they must accept the comment form the repository
-already uses.
+witness note, survives untouched. Only a workflow pin this rewrite removes may
+move inside a `pin-literal` companion, so a companion that quotes a SHA for
+its own reason cannot license a reviewed witness to change. A
+`repinExceptions` file is never read, so it can neither supply a gap nor fail
+the run. A symlink under `.github` fails closed: a workflow reached through
+one would be written instead of the reviewed checkout, and a symlinked
+directory would hide every pin inside it. Every check fails closed before
+anything is written, so a refused rewrite leaves the whole checkout
+byte-identical, workflows and companions alike, including a file that keeps
+CRLF line endings. A write that fails while the buffered changes are being
+committed is the one case that cannot be undone; it leaves the run red and
+emits no report, so no caller acts on it. Consumer lints own the spacing:
+they must accept the comment form the repository already uses.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` version comment, so
 the repinned pins are Dependabot-visible. Two limits keep the central
