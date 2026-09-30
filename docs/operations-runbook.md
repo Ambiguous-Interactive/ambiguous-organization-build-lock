@@ -298,6 +298,13 @@ as the consumer wrote them, with no warning and no red run:
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
 
+A `uses:` pin line is read with the same key machinery. A bare, quoted or cased
+key, a space before its colon, and a repository name in any case all name the
+pin GitHub reads, so all of them move. The line is rebuilt from the key, its
+marker and its gap, so the spelling comes back out as it was written. A tag or
+an anchor on the key or the value, a flow mapping, a quoted value, a tag
+instead of a commit, and a repository this one does not own stay put.
+
 A comment after `repository:`, after the `ref:` value, on the `with:` line
 itself or on the step's `uses:` line is read, so none of those keeps the pin
 behind.
