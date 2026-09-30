@@ -131,6 +131,27 @@ test("non-Markdown files are discoverable skill resources or rejected", async (t
   );
 });
 
+test("an unreadable Markdown file is reported, not summarized with U+FFFD", async (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { generateIndex, verifyRepository } = await loadHarness();
+  // One raw byte inside an otherwise valid skill document. A lossy decode
+  // would write U+FFFD into the generated index and the drift check would then
+  // pass on the replacement character instead of reporting the source.
+  const skillPath = path.join(root, ".llm", "skills", "example", "SKILL.md");
+  const source = fs.readFileSync(skillPath);
+  fs.writeFileSync(
+    skillPath,
+    Buffer.concat([source, Buffer.from("\ncaf"), Buffer.from([0x89]), Buffer.from("-note\n")])
+  );
+
+  assert.throws(() => generateIndex(root), /The encoded data was not valid/);
+  assert.match(
+    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
+    /The encoded data was not valid/
+  );
+});
+
 test("nested SKILL.md files remain resources of their top-level skill", async (t) => {
   const root = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -231,7 +231,15 @@ function catalog(root) {
       continue;
     }
     if ([INDEX_PATH, ".llm/context.md"].includes(relativePath)) continue;
-    const text = fs.readFileSync(path.join(root, relativePath), "utf8");
+    // Read as bytes and decode strictly. `readFileSync(path, "utf8")` replaces
+    // every byte it cannot decode with U+FFFD, which is three bytes long, so a
+    // lossy read would write the replacement character into the generated
+    // index and the drift check would then pass on it. A file this harness
+    // cannot read exactly is reported rather than summarized. `ignoreBOM`
+    // keeps a byte order mark, which the default decoder strips.
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      fs.readFileSync(path.join(root, relativePath))
+    );
     const skillMatch = relativePath.match(SKILL_PATTERN);
     try {
       if (skillMatch) {
