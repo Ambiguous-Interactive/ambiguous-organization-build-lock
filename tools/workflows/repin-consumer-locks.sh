@@ -288,7 +288,7 @@ const refValuePattern = /^([0-9a-f]{40})((?:[ \t]+#.*)?[ \t]*)$/;// A pin line i
 // and all, so that `commentGap` below can refuse a gap it cannot reproduce.
 // A `#` with no separation space is part of the plain scalar, so that shape
 // has no comment and is not a pin.
-const pinValuePattern = /^([^\s"'\[\]{},]+@[0-9a-f]{40})(\s+#.*|[ \t]+#.*)?$/;
+const pinValuePattern = /^([^\s"'\[\]{},]+@[0-9a-f]{40})(\s+#.*|[ \t]*)$/;
 const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
 // A workflow file may end its lines with CRLF. `split("\n")` leaves the `\r`
 // on every line, and the pattern's `$` anchor does not match before it, so
@@ -321,7 +321,11 @@ const matchPinLine = (line) => {
   if (value === null || !value[1].toLowerCase().startsWith(foldedLockRepository + "/")) {
     return null;
   }
-  const at = value[1].indexOf("@") + 1;
+  // The value pattern binds the last `@` in the value, because its character
+  // class is greedy, so the prefix is cut at the last one. Cutting at the first
+  // deleted everything between the two on a value carrying a ref inside its
+  // path, and the rewrite reported a move it had not made.
+  const at = value[1].lastIndexOf("@") + 1;
   const prefix = key[1] + key[2] + key[3] + ":" + (key[4] || "") + value[1].slice(0, at);
   // Index 0 is the whole line, as a regexp match would be, so the three groups
   // the callers read land on the indices they already read them on.

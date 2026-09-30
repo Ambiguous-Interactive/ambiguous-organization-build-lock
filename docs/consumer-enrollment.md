@@ -157,13 +157,20 @@ they were read. No `# vX.Y.Z` comment is added, because a `ref:` is not a
 `uses:` pin and Dependabot never reads it.
 
 A `uses:` pin line is read with the same key machinery. A key may be bare,
-quoted, in any case, and may carry a space before its colon, and a repository
-name is compared folded, because GitHub reads all of those the same way and a
-pattern that accepted only `uses:` left a working pin behind while the run
-reported the repository already pinned. The line is rebuilt from the key, its
-marker and its gap, so every one of those spellings comes back out as it was
-written. A tag or an anchor on the key or the value, a flow mapping, and a
-quoted value are different values and stay put.
+quoted, or carry a space before its colon, and a repository name is compared
+folded, and a pattern that accepted only a bare `uses:` left a working pin
+behind while the run reported the repository already pinned. The line is
+rebuilt from the key, its marker and its gap, so every one of those spellings
+comes back out as it was written. A key in another case is read too: it is not
+a `uses:` key to GitHub's own schema, so a workflow carrying one fails
+validation there anyway, and reading it keeps a spelling from freezing a pin.
+
+These stay put on a `uses:` line: a tag or an anchor on the key or the value,
+a flow mapping, a quoted value, a tag instead of a commit, a commit that is
+not 40 lowercase hexadecimal characters, a `#` with no separation space, and a
+repository with no action path under it, which names this repository rather
+than an action of it. Whitespace after the value is not part of the pin and
+does not stop it moving.
 
 A `ref:` stays as the consumer wrote it whenever the rewrite cannot read it
 as a commit, a `with:` stays whenever it cannot read it as a key, and a

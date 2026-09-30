@@ -298,12 +298,20 @@ as the consumer wrote them, with no warning and no red run:
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
 
-A `uses:` pin line is read with the same key machinery. A bare, quoted or cased
-key, a space before its colon, and a repository name in any case all name the
-pin GitHub reads, so all of them move. The line is rebuilt from the key, its
-marker and its gap, so the spelling comes back out as it was written. A tag or
-an anchor on the key or the value, a flow mapping, a quoted value, a tag
-instead of a commit, and a repository this one does not own stay put.
+A `uses:` pin line is read with the same key machinery. A bare or quoted key, a
+space before its colon, and a repository name in any case all name the pin a
+reader accepts, so all of them move, and the line is rebuilt from the key, its
+marker and its gap so the spelling comes back out as it was written. A key in
+another case is read too: it is not a `uses:` key to GitHub's own schema, so a
+workflow carrying one fails validation there anyway, and reading it keeps a
+spelling from freezing a pin behind a green run.
+
+These stay put on a `uses:` line: a tag or an anchor on the key or the value, a
+flow mapping, a quoted value, a tag instead of a commit, a commit that is not
+40 lowercase hexadecimal characters, a `#` with no separation space, and a
+repository with no action path under it, which names this repository rather
+than an action of it. Whitespace after the value is not part of the pin and
+does not stop it moving.
 
 A comment after `repository:`, after the `ref:` value, on the `with:` line
 itself or on the step's `uses:` line is read, so none of those keeps the pin
