@@ -9,9 +9,12 @@ impact on licensed-resource safety and consumer CI churn.
 - Session 098 reviewed all 14 open issues and found no open pull requests in
   this repository. It selected #283, the current repin YAML comment defect,
   for its direct consumer CI impact and zero licensed Unity job changes.
-- #283 is being fixed in `tools/workflows/repin-consumer-locks.sh`: moved
-  pins write two spaces before version comments and accept existing spacing.
-  The local CI-equivalent passes; the PR and live repin evidence remain open.
+- Session 114's #283 hard-coded two spaces before every repin version comment.
+  That is IshoBoy's rule, not the organization's: unity-helpers runs Prettier
+  over `.github/` and asserts one space, so the v1.16.0 offer left its `main`
+  red after auto-merge (#307). The rewrite now keeps each consumer's own
+  spacing, reads a new comment's gap from that repository, and fails closed on
+  an absent or split precedent.
 - Higher impact items remain gated by external evidence or authority: #51
   needs owner-approved secret scope changes; #83 needs entitlement and portal
   proof; #44 needs ruleset authority; #113 needs its reported findings
@@ -51,9 +54,9 @@ impact on licensed-resource safety and consumer CI churn.
   6a384393c). The analyzer still refuses every Darwin return until
   `approvedDarwinReturnShas` names a release (#231).
 - Repin automation honors reviewed, expiring `repinExceptions`, closes its
-  own superseded offers, normalizes release version comments for
-  Dependabot visibility, and enables auto-merge on every offer (squash
-  preferred; a repository-level `Allow auto-merge` opt-out restores a
+  own superseded offers, updates release version comments in each consumer's
+  own spacing for Dependabot visibility, and enables auto-merge on every offer
+  (squash preferred; a repository-level `Allow auto-merge` opt-out restores a
   manual gate). A closed repin pull request is the consumer's adoption
   answer: never re-offered, never force-updated.
 - The 64-code audit vocabulary is test-locked to `docs/consumer-enrollment.md`.

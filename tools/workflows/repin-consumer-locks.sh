@@ -73,9 +73,10 @@ resolve_repin_target() {
 
 rewrite_pins() {
   # Mechanical mutation contract: replace only the 40-hex reference suffix on
-  # `uses:` lines that name this repository's actions, and normalize a trailing
-  # `# vX.Y.Z` comment when the release tag is known. Everything else is
-  # untouched, and the target must already be authorized in both allowlists.
+  # `uses:` lines that name this repository's actions, and update a trailing
+  # `# vX.Y.Z` comment to the new release in the spacing the consumer's own
+  # files already use. Everything else is untouched, and the target must
+  # already be authorized in both allowlists.
   # A reviewed, unexpired repin exception preserves one whole workflow file so
   # a pin-only update cannot move a caller to an action whose input contract
   # it cannot satisfy. Reviewed `repinCompanions` files carry the consumer
@@ -231,6 +232,14 @@ for (const entry of companionEntries) {
 const linePattern =
   /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
 const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
+// A workflow file may end its lines with CRLF. `split("\n")` leaves the `\r`
+// on every line, and the pattern's `$` anchor does not match before it, so
+// the match drops the terminator and `rewritePinLine` puts it back. Without
+// this the pattern skips every pin in such a file: the rewrite reports no
+// change, the automation closes its own offer as superseded, and the
+// consumer keeps a stale pin with no evidence that anything was missed.
+const matchPinLine = (line) => linePattern.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
+const lineTerminator = (line) => (line.endsWith("\r") ? "\r" : "");
 const versionGrammar = /^v\d+\.\d+\.\d+$/;
 // The version comment is a machine-readable contract, so the target version
 // must be a release tag. The scheduled resolver emits only `vX.Y.Z` tags;
@@ -241,9 +250,23 @@ if (targetVersion && !versionGrammar.test(targetVersion)) {
   );
 }
 const files = [];
+const relativeToConsumer = (filePath) =>
+  path.relative(directory, filePath).split(path.sep).join("/");
 const visit = (entry) => {
   for (const item of fs.readdirSync(entry, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const itemPath = path.join(entry, item.name);
+    // A symlink is followed on read and written through, so a workflow reached
+    // through one would be edited outside the checkout the offer shows while
+    // `git status` stays clean, and a symlinked directory would hide every pin
+    // inside it so the run would report no change and close its own offer as
+    // superseded. Neither is a reviewed surface, so refuse them by name.
+    if (item.isSymbolicLink()) {
+      throw new Error(
+        `Repins refuse the symlink ${relativeToConsumer(itemPath)} under .github; a rewrite would ` +
+          "either edit the file it points at instead of the reviewed checkout, or miss the pins " +
+          "inside a linked directory and report no change at all."
+      );
+    }
     if (item.isDirectory()) {
       visit(itemPath);
     } else if (/\.(yml|yaml)$/.test(item.name)) {
@@ -251,34 +274,68 @@ const visit = (entry) => {
     }
   }
 };
-visit(path.join(directory, ".github"));
+// `.github` is the one entry the walk below never sees inside itself, so it
+// needs its own check. A committed symlink there would send the rewrite into
+// a directory outside the reviewed checkout, and the report would name paths
+// that do not exist in it.
+const githubRoot = path.join(directory, ".github");
+const githubStat = fs.lstatSync(githubRoot);
+if (githubStat.isSymbolicLink() || !githubStat.isDirectory()) {
+  throw new Error(
+    "Repins refuse a .github that is not a directory in the reviewed checkout; a rewrite would " +
+      "edit whatever it points at instead."
+  );
+}
+visit(githubRoot);
 const report = { changed: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
-// The pins this rewrite removes, collected from the workflow lines it
-// rewrites. Only these SHAs may move inside pin-literal companions, so a
-// historical SHA quoted for another reason survives untouched.
+// The pins this rewrite removes, from the workflow lines it rewrites. Only the
+// workflow subset may move inside a pin-literal companion, so a historical SHA
+// quoted for another reason survives untouched; `workflowReplacedPins` below
+// takes that subset once the workflow pass is done.
 const replacedPins = new Set();
-const rewritePinLine = (line) => {
-  const match = linePattern.exec(line);
-  if (!match || match[2] === targetSha) {
-    return line;
+// A consumer owns the gap between its pin and a `# vX.Y.Z` comment, because
+// its own formatter owns that file. The enrolled repositories disagree:
+// IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects one space
+// as an error, while unity-helpers runs Prettier over `.github/` and rewrites
+// two spaces back to one. A single canonical width therefore breaks one of
+// them on every release, so the rewrite never normalizes the gap. It reads
+// the gap this repository already uses and reuses it.
+const versionCommentGaps = new Set();
+// `linePattern` accepts any `\s` run before `#`, and `trim()` strips the
+// Unicode spaces too, so a comment can pass the version test while carrying a
+// gap that is not a space. Copying that gap is impossible and dropping it is
+// worse: YAML reads a `#` with no separation space as part of the plain
+// scalar, so the rewrite would fold `# vX.Y.Z` into the `uses:` value and the
+// pin would then match nothing on any later run. A tab fails the same way from
+// the other side: libyaml rejects a tab before a comment as a syntax error, so
+// a tab is a space the consumer never wrote. A gap the rewrite cannot reproduce
+// is evidence it must not touch, so it fails closed and names the file and
+// line. Only a version comment needs this: a witness comment is written back
+// verbatim and never re-formed.
+const gapPattern = /^ +$/;
+const commentGap = (comment, location) => {
+  // Match the whole gap, not a prefix of it, so a gap that mixes a space with
+  // another whitespace character is refused and reported as it really is.
+  const gap = /^\s+/.exec(comment)[0];
+  if (!gapPattern.test(gap)) {
+    throw new Error(
+      `${repository} ${location} separates its pin from \`${comment.trim()}\` with ` +
+        `${JSON.stringify(gap)} instead of one or more spaces. Only a space separates a pin from a ` +
+        "comment in YAML: libyaml rejects a tab as a syntax error, and a gap the rewrite cannot " +
+        "reproduce risks folding the comment into the `uses:` value and hiding the pin from every " +
+        "later run. Fix the comment by hand and repin again."
+    );
   }
-  replacedPins.add(match[2]);
-  // A moved pin normalizes its release comment: a `# vX.Y.Z` comment tracks
-  // the new release, a missing comment gains it so every moved pin stays
-  // human-readable and Dependabot-visible, and any other reviewed witness
-  // comment survives untouched. An unknown target version changes no
-  // comment: a stale version label is better evidence than a deleted one.
-  const rawComment = (match[3] || "").trim();
-  if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
-    // Keep YAML's default comments rule happy. The pin-line pattern accepts
-    // existing comments with one or more spaces, then writes the canonical two.
-    return `${match[1]}${targetSha}  # ${targetVersion}`;
-  }
-  return `${match[1]}${targetSha}${match[3] || ""}`;
+  return gap;
 };
+// Read every workflow file once and record the comment gaps the repository
+// already uses. A file a reviewed `repinExceptions` entry protects is never
+// rewritten, so it is neither evidence nor read: it cannot veto the run and
+// it cannot fail the read.
+const sources = [];
 for (const filePath of files) {
-  const relativePath = path.relative(directory, filePath).split(path.sep).join("/");
+  const relativePath = relativeToConsumer(filePath);
   const exception = exceptions.get(relativePath);
   if (exception) {
     matchedExceptions.add(relativePath);
@@ -289,11 +346,79 @@ for (const filePath of files) {
     });
     continue;
   }
-  const original = fs.readFileSync(filePath, "utf8");
-  const lines = original.split("\n");
+  const lines = fs.readFileSync(filePath, "utf8").split("\n");
+  sources.push({ filePath, relativePath, lines });
+  for (const [index, line] of lines.entries()) {
+    const match = matchPinLine(line);
+    const comment = match ? match[3] || "" : "";
+    if (comment !== "" && versionCommentPattern.test(comment.trim())) {
+      versionCommentGaps.add(commentGap(comment, `${relativePath}:${index + 1}`));
+    }
+  }
+}
+// A moved pin without a version comment gains one, so Dependabot can read
+// the release. That new comment needs a gap, and the only evidence is what
+// the repository already writes. No precedent, or more than one gap in one
+// file, is ambiguous evidence: a mechanical rewrite cannot tell which width the
+// consumer's formatter accepts, so it fails closed and names the repository
+// and the file instead of guessing. A repository that has no lock pin at all
+// never reaches this path because it has no pin to move. `ownGaps` is the
+// evidence from the single companion file being rewritten: a `pin-lines`
+// companion keeps its own spacing even when the workflow pins use a different
+// one, so the offered commit never leaves that file internally inconsistent.
+const resolveVersionCommentGap = (location, ownGaps) => {
+  // An empty Set carries no evidence, and an empty Set is truthy, so the size
+  // check is what selects the workflow fallback.
+  const gaps = ownGaps && ownGaps.size > 0 ? ownGaps : versionCommentGaps;
+  if (gaps.size === 1) {
+    return [...gaps][0];
+  }
+  const observed = [...gaps];
+  const evidence = observed.length === 0
+    ? "None of its lock pins carries a `# vX.Y.Z` comment."
+    : `Its lock pins use ${observed.length} different comment gaps: ${observed
+      .map((gap) => JSON.stringify(gap))
+      .join(", ")}.`;
+  throw new Error(
+    `${repository} ${location} needs a version comment. ${evidence} The rewrite cannot match the ` +
+      "repository's comment spacing, so it fails closed instead of guessing. Make the version " +
+      "comments uniform in the repository's own format, then repin again."
+  );
+};
+const rewritePinLine = (line, location, ownGaps) => {
+  const match = matchPinLine(line);
+  if (!match || match[2] === targetSha) {
+    return line;
+  }
+  replacedPins.add(match[2]);
+  // A moved pin updates its release comment: a `# vX.Y.Z` comment tracks the
+  // new release, a missing comment gains one so every moved pin stays
+  // human-readable and Dependabot-visible, and any other reviewed witness
+  // comment survives untouched. An unknown target version changes no
+  // comment: a stale version label is better evidence than a deleted one.
+  const comment = match[3] || "";
+  const rawComment = comment.trim();
+  const terminator = lineTerminator(line);
+  if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
+    const gap = comment === ""
+      ? resolveVersionCommentGap(location, ownGaps)
+      : commentGap(comment, location);
+    return `${match[1]}${targetSha}${gap}# ${targetVersion}${terminator}`;
+  }
+  return `${match[1]}${targetSha}${comment}${terminator}`;
+};
+// Every write is buffered and flushed once, at the end, so every check fails
+// closed before anything is written. A throw can come from a later workflow
+// file, from a companion that is not a regular file, or from a companion that
+// still names a stale pin, so flushing the workflow pass on its own would not
+// be enough. A `writeFileSync` that fails inside the flush loop is the one case
+// that cannot be atomic across files; it leaves the run red with no report, so
+// the caller stages nothing and the clone is discarded.
+const pendingWrites = [];
+for (const source of sources) {
   let fileChanges = 0;
-  const rewritten = lines.map((line) => {
-    const rewrittenLine = rewritePinLine(line);
+  const lines = source.lines.map((line, index) => {
+    const rewrittenLine = rewritePinLine(line, `${source.relativePath}:${index + 1}`);
     if (rewrittenLine !== line) {
       fileChanges += 1;
     }
@@ -302,10 +427,16 @@ for (const filePath of files) {
   if (fileChanges === 0) {
     continue;
   }
-  fs.writeFileSync(filePath, `${rewritten.join("\n")}`, "utf8");
+  pendingWrites.push({ filePath: source.filePath, content: lines.join("\n") });
   report.changed += fileChanges;
-  report.files.push({ path: relativePath, lines: fileChanges });
+  report.files.push({ path: source.relativePath, lines: fileChanges });
 }
+// Only a workflow pin this rewrite removes may move inside a pin-literal
+// companion. A `pin-lines` companion can name the same SHA for its own reasons,
+// and letting that widen the set would rewrite a reviewed witness in the
+// pin-literal file and skip the stale-pin check below, which is the protection
+// the comment above this set promises.
+const workflowReplacedPins = new Set(replacedPins);
 for (const [entryPath, entry] of exceptions) {
   if (!matchedExceptions.has(entryPath)) {
     report.unmatched.push({
@@ -322,7 +453,14 @@ const reviewedCompanions = companions.map((companion) => {
   let companionStat;
   try {
     companionStat = fs.lstatSync(companionPath);
-  } catch {
+  } catch (error) {
+    // Only a missing entry means the companion is absent. A path whose parent
+    // is a file, or one the checkout cannot read, is not the same fact, and
+    // reporting it as absent would offer a commit that silently omits a
+    // policy-required artifact.
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
     report.unmatchedCompanions.push({ path: companion.path, mode: companion.mode });
     return null;
   }
@@ -341,15 +479,26 @@ for (const companion of reviewedCompanions) {
   let companionChanges = 0;
   if (companion.mode === "pin-lines") {
     const lines = fs.readFileSync(companionPath, "utf8").split("\n");
-    const rewritten = lines.map((line) => {
-      const rewrittenLine = rewritePinLine(line);
+    // A companion is its own file with its own formatter, so its own comments
+    // are the first evidence for a comment it has to gain. The workflow set is
+    // the fallback for a companion that carries no version comment at all.
+    const ownGaps = new Set();
+    for (const [index, line] of lines.entries()) {
+      const match = matchPinLine(line);
+      const comment = match ? match[3] || "" : "";
+      if (comment !== "" && versionCommentPattern.test(comment.trim())) {
+        ownGaps.add(commentGap(comment, `${companion.path}:${index + 1}`));
+      }
+    }
+    const rewrittenLines = lines.map((line, index) => {
+      const rewrittenLine = rewritePinLine(line, `${companion.path}:${index + 1}`, ownGaps);
       if (rewrittenLine !== line) {
         companionChanges += 1;
       }
       return rewrittenLine;
     });
     if (companionChanges > 0) {
-      fs.writeFileSync(companionPath, `${rewritten.join("\n")}`, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: rewrittenLines.join("\n") });
     }
   } else if (companion.mode === "pin-literal") {
     const original = fs.readFileSync(companionPath, "utf8");
@@ -358,10 +507,10 @@ for (const companion of reviewedCompanions) {
     // different reviewed value and must survive untouched.
     const replaceStandalone = (sha) =>
       updated.replace(new RegExp(`(?<![0-9a-fA-F])${sha}(?![0-9a-fA-F])`, "g"), () => targetSha);
-    for (const replacedPin of [...replacedPins].sort()) {
+    for (const replacedPin of [...workflowReplacedPins].sort()) {
       updated = replaceStandalone(replacedPin);
     }
-    if (replacedPins.size === 0) {
+    if (workflowReplacedPins.size === 0) {
       // No workflow pin was removed, so nothing above could heal a lagging
       // companion. Standalone authorized tokens that are not the target may
       // be reviewed witnesses, and a mechanical rewrite cannot tell them
@@ -386,7 +535,7 @@ for (const companion of reviewedCompanions) {
     }
     if (updated !== original) {
       companionChanges = 1;
-      fs.writeFileSync(companionPath, updated, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: updated });
     }
   } else if (companion.mode === "policy-snapshot") {
     // Mirror the reviewed allowlists exactly: the same content a consumer
@@ -405,11 +554,14 @@ for (const companion of reviewedCompanions) {
     const updated = `${JSON.stringify(snapshot, null, 2)}\n`;
     if (updated !== original) {
       companionChanges = 1;
-      fs.writeFileSync(companionPath, updated, "utf8");
+      pendingWrites.push({ filePath: companionPath, content: updated });
     }
   }
   report.changed += companionChanges;
   report.companions.push({ path: companion.path, mode: companion.mode, lines: companionChanges });
+}
+for (const write of pendingWrites) {
+  fs.writeFileSync(write.filePath, write.content, "utf8");
 }
 process.stdout.write(`${JSON.stringify(report)}\n`);
 EOF

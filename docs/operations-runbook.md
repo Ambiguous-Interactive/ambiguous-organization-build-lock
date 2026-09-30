@@ -142,8 +142,9 @@ authorization merge.
 For each enrolled repository the workflow clones the default branch, rewrites
 only the `@<sha>` suffix of `uses:` references to this repository's actions
 (plus the `# vX.Y.Z` comment: a moved pin without a comment gains one, and a
-comment that is not a version stays; normalized comments have two spaces
-before `#`), carries the reviewed companion files
+comment that is not a version stays; each comment keeps the exact gap its own
+line already has, and a new one takes the gap the repository already uses),
+carries the reviewed companion files
 named in the policy through their mechanical rewrites, and opens one pull
 request per repository on the stable branch prefix `automation/repin-lock-`.
 The per-repository result is recorded in the run summary; any repository
@@ -164,10 +165,27 @@ exactly, opens the pull request from it, and never force-updates a branch
 that holds other work.
 
 An existing open repin pull request for the same target is not updated
-automatically. If an older offer fails yamllint because its version comments
-have one space before `#`, the maintainer must push the two-space correction
-to that existing pull request branch. Automation does not rewrite an open
-pull request branch.
+automatically. The offer keeps each repository's own comment spacing, so a
+formatter no longer rejects it for the gap. If an offer still fails a consumer
+lint, fix the workflow comments by hand in the format the repository's
+formatter accepts, then close the offer. That target's offer is final, so the
+next release opens a new one. Automation does not rewrite an open pull request
+branch.
+
+The rewrite checks everything before it writes anything. A comment-spacing
+refusal names the repository, the file, and the line to fix: a line needs a
+version comment but the lock pins carry none, or carry more than one comment
+gap, or an existing version comment separates the pin with something other than
+spaces. A symlink or companion refusal names the path it refuses. Every one of
+those refusals leaves the checkout byte-identical,
+so the fix is to change those comments in the format the repository's own
+formatter accepts, then let the next run open a new offer. The same applies to
+a symlink under `.github`, which the rewrite refuses rather than following; to
+a `repinCompanions` entry that is not a regular file; and to one whose path
+cannot be read at all, which is not the same as a missing companion and
+surfaces as the raw filesystem error rather than a named one. Only a write that
+fails while the buffered changes are being committed cannot be undone, and it
+emits no report, so nothing is staged or pushed.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
