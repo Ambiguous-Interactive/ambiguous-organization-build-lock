@@ -137,19 +137,21 @@ release's actions against another release's policy. The anchor is the sibling
 `repository:` key in the same `with:` block, never the value of the `ref:`. An
 enrolled consumer checks out a different repository at a literal 40-character
 commit, and a value-only rule would point that checkout at this repository's
-release. So the rule has three anchors. The step must run `actions/checkout` at
-a 40-character commit, so a `repository:` and a `ref:` on any other step stay
-put: a reusable-workflow call passes both to the called workflow as its own
-inputs, and no other action's meaning for them is knowable here. The `with:`
-block must name this repository. The `ref:` must be a direct child key of that
-same block, and its value must be 40 lowercase hexadecimal characters. A key is
-read in any case and with or without quotes, because GitHub reads an action's
-`with:` that way; the repository value is compared the same way, because a name
-that differs only in case is the same repository. The `with:` block may be
-written before or after the `uses:` it belongs to, and a comment on the step's
-own `uses:` line is read, because a YAML mapping is unordered and GitHub reads
-either order. Only the SHA is replaced. The key spelling, the gap on either
-side of its colon, the indentation, a comment already on the line, the
+release. So the rule reads four things. The `with:` block must be a key of a
+step, which is a column and not an assumption about the file above it. The step
+must run `actions/checkout` at 40 lowercase hexadecimal characters, so a
+`repository:` and a `ref:` on any other step stay put: a reusable-workflow call
+passes both to the called workflow as its own inputs, and no other action's
+meaning for them is knowable here. The `with:` block must name this repository.
+The `ref:` must be a direct child key of that same block, and its value must be
+40 lowercase hexadecimal characters. A key is read in any case and with or
+without quotes, because GitHub reads an action's `with:` that way; the
+repository value is compared the same way, because a name that differs only in
+case is the same repository. The `with:` block may be written before or after
+the `uses:` it belongs to, and a comment on the step's own `uses:` line is
+read, because a YAML mapping is unordered and GitHub reads either order. Only
+the SHA is replaced. The key spelling, the gap on either side of its colon, the
+indentation, any `- ` in front of the key, a comment already on the line, the
 whitespace behind that comment and the line terminator are all written back as
 they were read. No `# vX.Y.Z` comment is added, because a `ref:` is not a
 `uses:` pin and Dependabot never reads it.
@@ -172,8 +174,16 @@ cannot read is not evidence. These shapes are among those that stay:
   it are inputs of a reusable-workflow call or of some other key. That is the
   anchor above rather than a spelling of the key, and a `with:` written beside
   a sequence item rather than in it belongs to no step either.
-- a `uses:` on the step that is quoted, written on the line below, or
-  carrying a tag or an anchor in front of the key.
+- a `uses:` on the step carrying a tag or an anchor in front of the key.
+  A quoted key and a `uses:` on the line below the step's marker are read,
+  because a YAML reader reads them and so does this rule.
+- a step whose `uses:` is not `actions/checkout` at 40 lowercase
+  hexadecimal characters: a tag such as `actions/checkout@v4`, an
+  uppercase commit, a name in another case, 39 or 41 characters, or a
+  quoted value. The anchor is the pinned spelling, so none of these is it.
+- a block that names this repository twice, or that writes `ref:` twice.
+  A key written twice is read as the last one, and this rule is in no
+  position to say which of the two a reader used.
 - a step written as a bare `-` with its keys on the lines after it, and a
   step that is an alias or a merge of another one.
 - a `ref:` whose value is a folded block scalar, such as `ref: >-`.

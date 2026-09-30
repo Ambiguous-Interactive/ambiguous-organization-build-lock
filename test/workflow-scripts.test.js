@@ -2461,8 +2461,8 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       refLine: "          ref: " + target
     },
     {
-      name: "a with: block under a step that opens a block scalar first",
-      why: "the text of a step's own env: block is not a key, and a body line must not be read as the end of the step",
+      name: "the step above the with: block opens a block scalar",
+      why: "the body of a step's own env: scalar is text and not a key, and the backward walk has to step over it to reach the step that owns the block",
       lines: [
         "      - uses: azure/webapps-deploy@v3",
         "        env:",
@@ -2579,6 +2579,72 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       ],
       refs: 1,
       refLine: "          ref:  " + target
+    },
+    {
+      name: "a child of the block written as a sequence item",
+      why: "the marker in front of the key is part of the line, and a rebuild from the key alone dropped the dash and turned a file that parsed into one that does not",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          - ref: " + oldSha,
+        "            repository: " + lockRepository,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          - ref: " + target
+    },
+    {
+      name: "the block names this repository twice",
+      why: "a key written twice is read as the last one, and this rule is in no position to say which of the two the reader used",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          repository: Ambiguous-Interactive/unity-helpers",
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "the block names this repository twice, the other way round",
+      why: "the order of the two names does not change that the block is not read",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: Ambiguous-Interactive/unity-helpers",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "the block writes ref: twice",
+      why: "two refs and one is not the key this rule reads",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: main",
+        "          ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "trailing whitespace on the step's own uses: value",
+      why: "the value is read without its comment and without the space behind it, so a step whose uses: line ends in a space still anchors",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   ",
+        ...withBlock(lockRepository, oldSha),
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target
     },
     {
       name: "a tab-indented ref: line",
@@ -2734,14 +2800,40 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
         testCase.name + ": the rewritten line is not exactly " + JSON.stringify(testCase.refLine) + "\n" + rewritten
       );
     }
+    const after = fs.readFileSync(file, "utf8");
     // A case that keeps a value on purpose says so; every other one must
     // leave no occurrence of the old SHA behind.
     if (!testCase.staleSurvives) {
       assert.equal(
-        fs.readFileSync(file, "utf8").includes(oldSha),
+        after.includes(oldSha),
         false,
         testCase.name + ": a stale pin survived. " + testCase.why
       );
+    } else {
+      // A refusal is not a partial rewrite of the block. The sibling lock pin
+      // this case carries does move, so what is checked is every other line:
+      // only a line that now carries the new target may differ at all, and it
+      // has to have carried the old one before.
+      const before = prefix.concat(testCase.lines, [""]).join("\n").split("\n");
+      const now = after.split("\n");
+      assert.equal(now.length, before.length, testCase.name + ": the line count changed. " + testCase.why);
+      for (let index = 0; index < now.length; index += 1) {
+        if (now[index] === before[index]) {
+          continue;
+        }
+        assert.ok(
+          before[index].includes(oldSha) && now[index].includes(target),
+          testCase.name + ": a line changed that did not carry the pin:\n  - " +
+            before[index] + "\n  + " + now[index] + "\n" + testCase.why
+        );
+        // And the change is the SHA and nothing else on that line.
+        assert.equal(
+          now[index].split(oldSha).length,
+          before[index].split(target).length,
+          testCase.name + ": more than the SHA changed on this line:\n  - " +
+            before[index] + "\n  + " + now[index]
+        );
+      }
     }
   }
   // The value keeps its own case rule: an uppercase SHA is not an immutable

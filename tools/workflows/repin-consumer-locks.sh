@@ -675,11 +675,25 @@ const refLineIndices = (lines, literal) => {
       if (indent !== childIndent) {
         continue;
       }
-      // The indent is carried as text, not as a width, so a line that is
-      // indented with tabs comes back with its tabs.
-      children.push({ index, indent: key[1], key: key[3], gap: key[4] || "", value: key[5] || "" });
+      // The indent and the marker in front of the key are carried as text,
+      // not as widths, so a line indented with tabs comes back with its tabs
+      // and a child written as a sequence item comes back with its dash. A
+      // rebuild from the key alone dropped the dash, and a file that parsed
+      // then did not.
+      children.push({ index, indent: key[1], marker: key[2], key: key[3], gap: key[4] || "", value: key[5] || "" });
     }
-    if (!children.some((child) => unquoteKey(child.key) === "repository" && bareRepository(child.value) === foldedLockRepository)) {
+    // A key written twice is read as the last one, and this rule is in no
+    // position to say which of the two the reader used, so a block that names
+    // this repository twice, or a `ref:` twice, is not read at all. Guessing
+    // here would move a `ref:` that belongs to a different key.
+    const repositoryKeys = children.filter((child) => unquoteKey(child.key) === "repository");
+    if (repositoryKeys.length !== 1) {
+      continue;
+    }
+    if (bareRepository(repositoryKeys[0].value) !== foldedLockRepository) {
+      continue;
+    }
+    if (children.filter((child) => unquoteKey(child.key) === "ref").length > 1) {
       continue;
     }
     for (const child of children) {
@@ -697,7 +711,7 @@ const refLineIndices = (lines, literal) => {
         replacedPins.add(match[1]);
         eligible.set(
           child.index,
-          child.indent + child.key + ":" + child.gap + targetSha + (match[2] || "") +
+          child.indent + child.marker + child.key + ":" + child.gap + targetSha + (match[2] || "") +
             lineTerminator(lines[child.index])
         );
       }
