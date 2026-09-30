@@ -187,6 +187,20 @@ surfaces as the raw filesystem error rather than a named one. Only a write that
 fails while the buffered changes are being committed cannot be undone, and it
 emits no report, so nothing is staged or pushed.
 
+The rewrite reads a file as bytes and decodes it as UTF-8, so a file that is
+not valid UTF-8 is refused by name, like a symlink. The reason is that Node
+replaces every byte it cannot decode with U+FFFD, which is three bytes long: a
+rewrite that read such a file and wrote it back would destroy a byte the pin
+does not name, grow the file, and report only the pins it moved. Re-save the
+file as UTF-8 and let the next run open a new offer. A file it can read is
+never changed outside the pin: multi-byte characters, tabs, a missing final
+line feed, and a byte order mark all come back as they were. A byte order
+mark is read as encoding metadata rather than content, so a pin on the first
+line of the file still moves instead of staying behind a green run. The two
+rewrites of the reviewed central policy behave the same way: a release
+authorization and a repository onboarding both refuse a policy that is not
+valid UTF-8 rather than committing U+FFFD in its place.
+
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible
 (2026-09-09 issue 263). A non-empty target version must match

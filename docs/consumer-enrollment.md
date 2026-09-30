@@ -122,13 +122,27 @@ its own reason cannot license a reviewed witness to change. A
 `repinExceptions` file is never read, so it can neither supply a gap nor fail
 the run. A symlink under `.github` fails closed: a workflow reached through
 one would be written instead of the reviewed checkout, and a symlinked
-directory would hide every pin inside it. Every check fails closed before
+directory would hide every pin inside it. A file that is not valid UTF-8 fails
+closed the same way. Node replaces every byte it cannot decode with U+FFFD,
+which is three bytes long, so a rewrite that read such a file and wrote it
+back would destroy a byte the pin does not name, grow the file, and report
+only the pins it moved. The refusal names the repository and the file, and the
+remedy is to re-save the file as UTF-8. Every check fails closed before
 anything is written, so a refused rewrite leaves the whole checkout
 byte-identical, workflows and companions alike, including a file that keeps
 CRLF line endings. A write that fails while the buffered changes are being
 committed is the one case that cannot be undone; it leaves the run red and
 emits no report, so no caller acts on it. Consumer lints own the spacing:
 they must accept the comment form the repository already uses.
+
+A file the rewrite can read exactly round-trips exactly: the pin bytes change
+and every other byte comes back as it was, whether it is a multi-byte
+character, a tab, a missing final line feed, or a byte order mark. A byte
+order mark is encoding metadata rather than content, so a key pattern never
+sees it and a pin on the first line of the file still moves; the mark itself
+is read aside and written back, so the file keeps it. Only a byte sequence
+that is not valid UTF-8 is refused, so a file that carries a NUL byte or any
+other character a reader accepts is left byte for byte as it was.
 
 A checkout of this repository is pinned twice: in the `uses:` line of the
 action, and in the `ref:` of the `actions/checkout` step that fetches the
