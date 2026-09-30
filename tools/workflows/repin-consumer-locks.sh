@@ -237,8 +237,58 @@ for (const entry of companionEntries) {
   }
   companions.push({ path: entry.path, mode: String(entry.mode) });
 }
-const linePattern =
-  /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
+// A key may be quoted, may carry a space before its colon, and is matched
+// without regard to case: GitHub reads an action's `with:` that way, so
+// `"with":`, `'with':`, and `with :` are the same key to it and to a YAML
+// reader. A key pattern that accepted only `word:` froze a real pin on
+// every other spelling, and a stale pin with a green run is the outcome
+// this rewrite must never produce.
+const yamlKey = "(?:\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*)[ \t]*";
+// A key may sit behind a sequence marker, because a step's first key is
+// written as `- uses:`. The key's column is the indent plus that marker, and
+// it is the column that decides what is a sibling of what, so both are
+// captured rather than measured from the physical line.
+// The gap in front of the value is captured as well, because a line that is
+// rebuilt from the key and the value has to put the gap back: `ref:  <sha>`
+// and `ref: <sha>` are the same pin written by two different people, and a
+// rewrite that re-spaces one of them edits a byte the pin did not name.
+const keyPattern = new RegExp(
+  "^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):(?:([ \\t]+)(.*))?$"
+);
+// The column the key sits at, which is what a sibling shares: the line's own
+// indent plus any sequence marker in front of it.
+const keyIndentOf = (match) => match[1].length + match[2].length;
+// `with:` opens the block mapping a checkout reads its inputs from. A
+// comment may follow it: a step whose `with:` line carries a comment is
+// ordinary YAML, and refusing it would freeze a real pin while the run
+// reports the repository already pinned. A tag, an anchor, or a flow
+// mapping on the same line is a different value and stays a documented
+// limit, so the pattern ends at the comment.
+const withPattern = new RegExp("^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):[ \\t]*(?:#.*)?$", "i");
+// A comment needs a space in front of it. Without one, YAML reads the `#`
+// and everything after it as part of the plain scalar, so the value is not
+// a commit and moving it would edit a line that is not a pin. The `uses:`
+// path refuses that shape; the `ref:` path refuses it for the same reason.
+//
+// This pattern reads a VALUE, not a line. The key was already matched and
+// already accepted in any spelling, and a pattern that re-read the key from
+// the physical line would reject the quoted spellings the key match accepts:
+// a step may write `'ref':` and a re-read of `ref` freezes the pin.
+// The value is read whole: the gap in front of the SHA, the SHA, and
+// everything after it. A `#` with no gap in front of it is part of the plain
+// scalar, so that shape is not a commit and stays put.
+const refValuePattern = /^([0-9a-f]{40})((?:[ \t]+#.*)?[ \t]*)$/;// A pin line is a `uses:` key whose value is this repository's action at a
+// 40-character commit. A pattern that accepted only a bare `uses:` froze a
+// real pin on every other spelling, and a stale pin behind a green run is the
+// outcome this rewrite must never produce, so the key is read with the same
+// machinery the checkout `ref:` rule reads its key with. A tag or an anchor in
+// front of the key, a flow mapping, and a quoted or tagged value are
+// different values and stay a documented limit.
+// The gap in front of a comment is read as whatever the consumer wrote, spaces
+// and all, so that `commentGap` below can refuse a gap it cannot reproduce.
+// A `#` with no separation space is part of the plain scalar, so that shape
+// has no comment and is not a pin.
+const pinValuePattern = /^([^\s"'\[\]{},]+@[0-9a-f]{40})(\s+#.*|[ \t]+#.*)?$/;
 const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
 // A workflow file may end its lines with CRLF. `split("\n")` leaves the `\r`
 // on every line, and the pattern's `$` anchor does not match before it, so
@@ -246,7 +296,37 @@ const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
 // this the pattern skips every pin in such a file: the rewrite reports no
 // change, the automation closes its own offer as superseded, and the
 // consumer keeps a stale pin with no evidence that anything was missed.
-const matchPinLine = (line) => linePattern.exec(stripTerminator(line));
+// The value is compared folded: a GitHub repository name is an identifier
+// GitHub reads without regard to case, so a spelling that differs only in
+// case names this repository and a pin left behind would be a real one.
+const lockRepository = lockPrefix.replace(/\/$/, "");
+const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim().toLowerCase();
+const foldedLockRepository = lockRepository.toLowerCase();
+// A quoted key is the same key to a YAML reader as its bare spelling, and
+// YAML allows a space before the colon, which belongs to the key's text and
+// not to its name. Both are folded here so a key is compared by its name.
+const unquoteKey = (key) =>
+  key.trim().replace(/^(?:"([^"]*)"|'([^']*)')$/, "$1$2").toLowerCase();
+// The match carries the line up to and including the value's `@`, the SHA, and
+// the comment, which is the shape the rewrite and the comment-spacing rules
+// already read. The prefix is rebuilt from the key, its marker and its gap, so
+// a quoted key and a gap before a colon come back out byte for byte.
+const matchPinLine = (line) => {
+  const text = stripTerminator(line);
+  const key = keyPattern.exec(text);
+  if (key === null || unquoteKey(key[3]) !== "uses") {
+    return null;
+  }
+  const value = pinValuePattern.exec(key[5] || "");
+  if (value === null || !value[1].toLowerCase().startsWith(foldedLockRepository + "/")) {
+    return null;
+  }
+  const at = value[1].indexOf("@") + 1;
+  const prefix = key[1] + key[2] + key[3] + ":" + (key[4] || "") + value[1].slice(0, at);
+  // Index 0 is the whole line, as a regexp match would be, so the three groups
+  // the callers read land on the indices they already read them on.
+  return [text, prefix, value[1].slice(at), value[2] || ""];
+};
 const lineTerminator = (line) => (line.endsWith("\r") ? "\r" : "");
 const stripTerminator = (line) => (line.endsWith("\r") ? line.slice(0, -1) : line);
 // A block scalar turns everything more indented than its opening key into
@@ -504,58 +584,6 @@ const rewritePinLine = (line, location, ownGaps) => {
 // rewrite is anchored on the sibling `repository:` key, read from the same
 // `with:` block. Only direct children count, so a `ref:` nested under another
 // key is not a sibling of `repository:` and never moves.
-// A key may be quoted, may carry a space before its colon, and is matched
-// without regard to case: GitHub reads an action's `with:` that way, so
-// `"with":`, `'with':`, and `with :` are the same key to it and to a YAML
-// reader. A key pattern that accepted only `word:` froze a real pin on
-// every other spelling, and a stale pin with a green run is the outcome
-// this rewrite must never produce.
-const yamlKey = "(?:\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*)[ \t]*";
-// A key may sit behind a sequence marker, because a step's first key is
-// written as `- uses:`. The key's column is the indent plus that marker, and
-// it is the column that decides what is a sibling of what, so both are
-// captured rather than measured from the physical line.
-// The gap in front of the value is captured as well, because a line that is
-// rebuilt from the key and the value has to put the gap back: `ref:  <sha>`
-// and `ref: <sha>` are the same pin written by two different people, and a
-// rewrite that re-spaces one of them edits a byte the pin did not name.
-const keyPattern = new RegExp(
-  "^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):(?:([ \\t]+)(.*))?$"
-);
-// The column the key sits at, which is what a sibling shares: the line's own
-// indent plus any sequence marker in front of it.
-const keyIndentOf = (match) => match[1].length + match[2].length;
-// `with:` opens the block mapping a checkout reads its inputs from. A
-// comment may follow it: a step whose `with:` line carries a comment is
-// ordinary YAML, and refusing it would freeze a real pin while the run
-// reports the repository already pinned. A tag, an anchor, or a flow
-// mapping on the same line is a different value and stays a documented
-// limit, so the pattern ends at the comment.
-const withPattern = new RegExp("^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):[ \\t]*(?:#.*)?$", "i");
-// A comment needs a space in front of it. Without one, YAML reads the `#`
-// and everything after it as part of the plain scalar, so the value is not
-// a commit and moving it would edit a line that is not a pin. The `uses:`
-// path refuses that shape; the `ref:` path refuses it for the same reason.
-//
-// This pattern reads a VALUE, not a line. The key was already matched and
-// already accepted in any spelling, and a pattern that re-read the key from
-// the physical line would reject the quoted spellings the key match accepts:
-// a step may write `'ref':` and a re-read of `ref` freezes the pin.
-// The value is read whole: the gap in front of the SHA, the SHA, and
-// everything after it. A `#` with no gap in front of it is part of the plain
-// scalar, so that shape is not a commit and stays put.
-const refValuePattern = /^([0-9a-f]{40})((?:[ \t]+#.*)?[ \t]*)$/;
-const lockRepository = lockPrefix.replace(/\/$/, "");
-// The value is compared folded: a GitHub repository name is an identifier
-// GitHub reads without regard to case, so a spelling that differs only in
-// case names this repository and a pin left behind would be a real one.
-const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim().toLowerCase();
-const foldedLockRepository = lockRepository.toLowerCase();
-// A quoted key is the same key to a YAML reader as its bare spelling, and
-// YAML allows a space before the colon, which belongs to the key's text and
-// not to its name. Both are folded here so a key is compared by its name.
-const unquoteKey = (key) =>
-  key.trim().replace(/^(?:"([^"]*)"|'([^']*)')$/, "$1$2").toLowerCase();
 // The step has to be a checkout for `repository:` and `ref:` to be checkout
 // inputs. Without this anchor the rule would move a `with:` pair that is
 // something else entirely: a reusable-workflow call passes `repository` and

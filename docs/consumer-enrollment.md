@@ -156,6 +156,15 @@ whitespace behind that comment and the line terminator are all written back as
 they were read. No `# vX.Y.Z` comment is added, because a `ref:` is not a
 `uses:` pin and Dependabot never reads it.
 
+A `uses:` pin line is read with the same key machinery. A key may be bare,
+quoted, in any case, and may carry a space before its colon, and a repository
+name is compared folded, because GitHub reads all of those the same way and a
+pattern that accepted only `uses:` left a working pin behind while the run
+reported the repository already pinned. The line is rebuilt from the key, its
+marker and its gap, so every one of those spellings comes back out as it was
+written. A tag or an anchor on the key or the value, a flow mapping, and a
+quoted value are different values and stay put.
+
 A `ref:` stays as the consumer wrote it whenever the rewrite cannot read it
 as a commit, a `with:` stays whenever it cannot read it as a key, and a
 `uses:` that cannot be read as a checkout is no anchor at all. A value it

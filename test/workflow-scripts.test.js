@@ -676,7 +676,103 @@ test("moved pin comments keep the consumer's own comment spacing", async (t) => 
   const precedent = (gap) => `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target}${gap}# v1.14.0`)}\n`;
   for (const gap of [" ", "  "]) {
     const other = gap === " " ? "  " : " ";
-    const cases = [
+  test("consumer repin moves a uses: pin through every spelling a workflow may write", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-uses-spellings-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = repinOldSha;
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const lockRepository = "Ambiguous-Interactive/ambiguous-organization-build-lock";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  // Each spelling below froze a real pin before: the rewrite reported nothing to
+  // change, the automation called the repository already pinned and closed its
+  // own offer, and the stale pin had no evidence against it. `pinLine` is the
+  // exact line the rewrite has to produce, because a count proves a pin moved
+  // and the line proves how it was rebuilt.
+  const cases = [
+    {
+      name: "a quoted uses: key",
+      why: "a quoted key is the same key to a YAML reader and to GitHub, and a pattern that accepted only a bare `uses:` froze the pin with the run reporting the repository already pinned",
+      lines: [
+        "      - \"uses\": " + lockRepository + "/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      pinLine: "      - \"uses\": " + lockRepository + "/.github/actions/acquire-build-lock@" + target + " # v1.14.0"
+    },
+    {
+      name: "a uses: key with a space before its colon",
+      why: "YAML allows it and GitHub reads the key, so a pattern that required `uses:` exactly froze a real pin",
+      lines: [
+        "      - uses : " + lockRepository + "/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      pinLine: "      - uses : " + lockRepository + "/.github/actions/acquire-build-lock@" + target + " # v1.14.0"
+    },
+    {
+      name: "a two-space gap in front of the value",
+      why: "the gap is the consumer's own spacing, and a rebuild that normalises it edits a byte the pin did not name",
+      lines: [
+        "      - uses:  " + lockRepository + "/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      pinLine: "      - uses:  " + lockRepository + "/.github/actions/acquire-build-lock@" + target + " # v1.14.0"
+    },
+    {
+      name: "a uses: key in another case",
+      why: "GitHub reads an action's key without regard to case, so this names the same pin",
+      lines: [
+        "      - USES: " + lockRepository + "/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      pinLine: "      - USES: " + lockRepository + "/.github/actions/acquire-build-lock@" + target + " # v1.14.0"
+    },
+    {
+      name: "a repository name in another case on the uses: line",
+      why: "GitHub reads a repository name without regard to case, so a spelling that differs only in case names the same pin",
+      lines: [
+        "      - uses: AMBIGUOUS-INTERACTIVE/Ambiguous-Organization-Build-Lock/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      pinLine: "      - uses: AMBIGUOUS-INTERACTIVE/Ambiguous-Organization-Build-Lock/.github/actions/acquire-build-lock@" + target + " # v1.14.0"
+    },  ];
+  const runRewrite = () =>
+    childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+  const file = path.join(workflows, "unity.yml");
+  for (const testCase of cases) {
+    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:", ...testCase.lines, ""].join("\n"));
+    const result = runRewrite();
+    assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.uses, 1, testCase.name + ": " + testCase.why);
+    assert.equal(report.changed, 1, testCase.name + ": " + testCase.why);
+    assert.ok(
+      fs.readFileSync(file, "utf8").split("\n").includes(testCase.pinLine),
+      testCase.name + ": the rewritten line is not exactly " + JSON.stringify(testCase.pinLine) + "\n" + fs.readFileSync(file, "utf8")
+    );
+  }
+  // The shapes that are not this repository's pin, or are not a pinned commit,
+  // stay put. A rewrite that moved any of them would edit a line that is not a
+  // pin, which is the outcome worse than a frozen one.
+  for (const line of [
+    "      - !!str uses: " + lockRepository + "/.github/actions/a@" + oldSha + " # v1.13.0",
+    "      - uses: !!str " + lockRepository + "/.github/actions/a@" + oldSha + " # v1.13.0",
+    "      - uses: &p " + lockRepository + "/.github/actions/a@" + oldSha + " # v1.13.0",
+    "      - {uses: " + lockRepository + "/.github/actions/a@" + oldSha + "} # v1.13.0",
+    "      - uses: " + lockRepository + "/.github/actions/a@v1.2.3 # v1.13.0",
+    "      - uses: Ambiguous-Interactive/other-repo/.github/actions/a@" + oldSha + " # v1.13.0",
+    "      - uses: " + lockRepository + "/.github/actions/a@" + oldSha.toUpperCase() + " # v1.13.0"
+  ]) {
+    fs.writeFileSync(file, ["jobs:", "  unity:", "    steps:", line, ""].join("\n"));
+    const result = runRewrite();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      JSON.parse(result.stdout).changed,
+      0,
+      "a line that is not a pinned commit of this repository moved: " + line
+    );
+  }
+});
+
+  const cases = [
       { comment: "", version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
       { comment: `${gap}# v1.13.0`, version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
       { comment: `${other}# v1.13.0`, version: "v1.14.0", expected: `${target}${other}# v1.14.0` },
@@ -2826,12 +2922,20 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
           testCase.name + ": a line changed that did not carry the pin:\n  - " +
             before[index] + "\n  + " + now[index] + "\n" + testCase.why
         );
-        // And the change is the SHA and nothing else on that line.
+        // The change is the SHA, and the version comment that tracks it: a
+        // `uses:` pin's `# vX.Y.Z` label names the release it was pinned at, so
+        // moving the SHA moves the label with it. Nothing else on the line may
+        // change, and an exact comparison is what says so: a dropped marker, a
+        // re-spaced key or a rewritten path all fail here, where a comparison
+        // of segment counts would not.
+        const expected = before[index]
+          .split(oldSha).join(target)
+          .replace(/# v\d+\.\d+\.\d+/, "# v1.14.0");
         assert.equal(
-          now[index].split(oldSha).length,
-          before[index].split(target).length,
-          testCase.name + ": more than the SHA changed on this line:\n  - " +
-            before[index] + "\n  + " + now[index]
+          now[index],
+          expected,
+          testCase.name + ": more than the SHA and its version comment changed on this line:\n  - " +
+            before[index] + "\n  + " + now[index] + "\n  want " + expected
         );
       }
     }
