@@ -2293,6 +2293,30 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       refs: 1
     },
     {
+      name: "a quoted ref: key",
+      why: "a quoted key is the same key to a YAML reader and to GitHub, and re-reading the key from the physical line rejected the spelling the key match accepts",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          'ref': " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
+      name: "a quoted key and a space before its colon",
+      why: "a quoted key may carry the same gap a bare one does",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          \"repository\" : " + lockRepository,
+        "          \"ref\" : " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1
+    },
+    {
       name: "a space before each colon",
       why: "YAML allows it and GitHub reads the key, so a pattern that required key: exactly froze a real pin",
       lines: [
@@ -2443,6 +2467,18 @@ test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
     {
       name: "a deploy action",
       lines: [
+        "      - uses: azure/webapps-deploy@v3",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0
+    },
+    {
+      name: "a step below a checkout step",
+      why: "the walk above stops at this step's own sequence marker, so a checkout in the step above cannot lend its anchor to a ref: that is not a checkout here",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          fetch-depth: 1",
         "      - uses: azure/webapps-deploy@v3",
         ...withBlock(lockRepository, oldSha)
       ],

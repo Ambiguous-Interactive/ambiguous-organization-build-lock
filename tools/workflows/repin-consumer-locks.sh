@@ -510,7 +510,7 @@ const rewritePinLine = (line, location, ownGaps) => {
 // reader. A key pattern that accepted only `word:` froze a real pin on
 // every other spelling, and a stale pin with a green run is the outcome
 // this rewrite must never produce.
-const yamlKey = "\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*[ \t]*";
+const yamlKey = "(?:\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*)[ \t]*";
 // A key may sit behind a sequence marker, because a step's first key is
 // written as `- uses:`. The key's column is the indent plus that marker, and
 // it is the column that decides what is a sibling of what, so both are
@@ -532,7 +532,12 @@ const withPattern = new RegExp("^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):[ \\t
 // and everything after it as part of the plain scalar, so the value is not
 // a commit and moving it would edit a line that is not a pin. The `uses:`
 // path refuses that shape; the `ref:` path refuses it for the same reason.
-const refValuePattern = /^([ \t]*[Rr][Ee][Ff][ \t]*:[ \t]+)([0-9a-f]{40})(?=[ \t]|$)([ \t]+#.*)?$/;
+//
+// This pattern reads a VALUE, not a line. The key was already matched and
+// already accepted in any spelling, and a pattern that re-read the key from
+// the physical line would reject the quoted spellings the key match accepts:
+// a step may write `'ref':` and a re-read of `ref` freezes the pin.
+const refValuePattern = /^(?:[ \t]+)([0-9a-f]{40})(?=[ \t]|$)([ \t]+#.*)?$/;
 const lockRepository = lockPrefix.replace(/\/$/, "");
 // The value is compared folded: a GitHub repository name is an identifier
 // GitHub reads without regard to case, so a spelling that differs only in
@@ -555,6 +560,14 @@ const checkoutStepUses = /^actions\/checkout@[0-9a-f]{40}$/;
 // The `uses:` that owns a `with:` block is a sibling of it, so the step is
 // read from the block's own line upwards, stopping at the first line that
 // leaves the step's mapping.
+// The `uses:` that owns a `with:` block is a key of the same step, so the
+// step is read from the block's own line upwards. A step is a sequence item,
+// and a sequence item is the one line in it that carries a marker. So the
+// walk reads keys until the first marker, and that marker is where the step
+// ends: a checkout above the marker belongs to the step above, and lending
+// its anchor to this one would rewrite a `ref:` on any action as if it
+// checked out here. A key nested deeper than the `with:` is not a key of the
+// step and is skipped.
 const opensACheckout = (lines, literal, start, blockIndent) => {
   for (let index = start - 1; index >= 0; index -= 1) {
     if (literal.has(index)) {
@@ -564,29 +577,17 @@ const opensACheckout = (lines, literal, start, blockIndent) => {
     if (line.trim() === "" || line.trimStart().startsWith("#")) {
       continue;
     }
-    // The step ends at the first line whose own indent leaves the step's
-    // column. The LINE's indent is the test rather than the key's, because
-    // the first key of a step carries the sequence marker and its key column
-    // sits two further right than the keys that follow it. A `uses:` written
-    // on the marker line is therefore shallower than its own `with:`, and
-    // the first key is read as a member of the step rather than as the end
-    // of one.
     const key = keyPattern.exec(line);
     if (!key) {
       continue;
     }
-    // A line that carries a sequence marker is a step of its own, and the
-    // key in it sits past that marker. A line that does not is a key of the
-    // step it is already inside. So the two are compared against the
-    // `with:` column the way they are written, and a `uses:` on either
-    // counts as the checkout that owns this block.
     if (key[2].length > 0) {
-      if (key[1].length > blockIndent) {
-        return false;
-      }
-    } else if (key[1].length < blockIndent) {
-      return false;
-    } else if (key[1].length > blockIndent) {
+      // The step's own first key is written on its marker line, so it is the
+      // one marker the walk reads; any other marker is a step of its own. A
+      // key nested deeper than the `with:` is not a key of the step at all.
+      return unquoteKey(key[3]) === "uses" && checkoutStepUses.test((key[4] || "").trim());
+    }
+    if (keyIndentOf(key) > blockIndent) {
       continue;
     }
     if (unquoteKey(key[3]) === "uses" && checkoutStepUses.test((key[4] || "").trim())) {
@@ -601,7 +602,7 @@ const opensACheckout = (lines, literal, start, blockIndent) => {
 // indent. Blank and comment lines belong to no key and are skipped, and a
 // line inside a block scalar is text rather than structure.
 const refLineIndices = (lines, literal) => {
-  const eligible = new Set();
+  const eligible = new Map();
   for (let start = 0; start < lines.length; start += 1) {
     if (literal.has(start)) {
       continue;
@@ -637,35 +638,38 @@ const refLineIndices = (lines, literal) => {
       if (indent !== childIndent) {
         continue;
       }
-      children.push({ index, key: key[3], value: (key[4] || "").replace(/\s+$/, "") });
+      children.push({ index, indent: key[1].length, key: key[3], value: (key[4] || "").replace(/\s+$/, "") });
     }
     if (!children.some((child) => unquoteKey(child.key) === "repository" && bareRepository(child.value) === foldedLockRepository)) {
       continue;
     }
     for (const child of children) {
-      if (unquoteKey(child.key) === "ref" && refValuePattern.test(stripTerminator(lines[child.index]))) {
-        eligible.add(child.index);
+      if (unquoteKey(child.key) !== "ref") {
+        continue;
+      }
+      const match = refValuePattern.exec(" " + child.value);
+      if (match && match[1] !== targetSha) {
+        // The rewrite is built here, from the parsed key, and carried to the
+        // write pass. Re-reading the line there would re-read the key from
+        // the physical text, and a quoted `'ref':` is a key this rule
+        // accepts and a line pattern does not.
+        replacedPins.add(match[1]);
+        eligible.set(
+          child.index,
+          " ".repeat(child.indent) + child.key + ": " + targetSha +
+            (match[2] || "") + lineTerminator(lines[child.index])
+        );
       }
     }
   }
   return eligible;
 };
-// Move a `ref:` by rewriting only its 40-character value. Nothing else on the
-// line changes: a `ref:` is not a `uses:` pin, so Dependabot never reads it
-// and no version comment is added. The SHA joins `replacedPins` for the same
-// reason a `uses:` pin does, so a `pin-literal` companion quoting the policy
-// commit can heal alongside the workflow that named it.
-const rewriteRefLine = (line) => {
-  const match = refValuePattern.exec(stripTerminator(line));
-  if (!match || match[2] === targetSha) {
-    return line;
-  }
-  replacedPins.add(match[2]);
-  // The trailing comment is optional, so the group is absent when there is
-  // none. Spelled out rather than templated, because an absent group in a
-  // template literal is the text "undefined".
-  return `${match[1]}${targetSha}${match[3] || ""}${lineTerminator(line)}`;
-};
+// A `ref:` moves by rewriting only its 40-character value, and the line is
+// rebuilt in `refLineIndices` where the key was already parsed. Nothing else
+// on the line changes: a `ref:` is not a `uses:` pin, so Dependabot never
+// reads it and no version comment is added. The SHA joins `replacedPins` for
+// the same reason a `uses:` pin does, so a `pin-literal` companion quoting
+// the policy commit can heal alongside the workflow that named it.
 // Every write is buffered and flushed once, at the end, so every check fails
 // closed before anything is written. A throw can come from a later workflow
 // file, from a companion that is not a regular file, or from a companion that
@@ -684,7 +688,7 @@ for (const source of sources) {
     const rewrittenLine = source.literal.has(index)
       ? line
       : refLines.has(index)
-        ? rewriteRefLine(line)
+        ? refLines.get(index)
         : rewritePinLine(line, `${source.relativePath}:${index + 1}`);
     if (rewrittenLine !== line) {
       fileChanges += 1;
