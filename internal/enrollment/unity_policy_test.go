@@ -3663,18 +3663,46 @@ jobs:
 	}
 
 	const canonicalClassifierCheckout = "          fetch-depth: 0\n          persist-credentials: false\n"
+	const ruleLinesStep = "      - name: Check added rule lines\n" +
+		"        run: |\n" +
+		"          python3 scripts/lint-line-length.py --self-test\n" +
+		"          python3 scripts/lint-line-length.py --require-change\n"
+	noRuleLinesWorkflow := strings.Replace(workflow, ruleLinesStep, "", 1)
+	if noRuleLinesWorkflow == workflow {
+		t.Fatal("the rule-lines fixture moved")
+	}
 	for _, checkout := range []struct {
-		with     string
-		accepted bool
+		with      string
+		accepted  bool
+		ruleLines bool
 	}{
-		{"          fetch-depth: 0\n          filter: blob:none\n          sparse-checkout: .github\n          persist-credentials: false\n", true},
-		{"          fetch-depth: 0\n          filter: blob:none\n          persist-credentials: false\n", true},
-		{"          fetch-depth: 0\n          filter: tree:0\n          persist-credentials: false\n", false},
-		{"          fetch-depth: 0\n          sparse-checkout: Assets\n          persist-credentials: false\n", false},
-		{"          fetch-depth: 0\n          sparse-checkout: |\n            .github\n            scripts\n          persist-credentials: false\n", false},
+		// A blobless clone still materializes the whole HEAD tree, so
+		// `filter` composes with the rule-lines step.
+		{"          fetch-depth: 0\n          filter: blob:none\n          persist-credentials: false\n", true, true},
+		// The rule-lines step runs a consumer script outside the workflow
+		// directory, so sparse-checkout acceptance needs the two-step job.
+		{"          fetch-depth: 0\n          sparse-checkout: .github\n          persist-credentials: false\n", true, false},
+		{"          fetch-depth: 0\n          filter: blob:none\n          sparse-checkout: .github\n          persist-credentials: false\n", true, false},
+		// The same sparse keys plus the rule-lines step can never succeed,
+		// so the combination fails closed instead of red-ing every consumer
+		// pull request.
+		{"          fetch-depth: 0\n          sparse-checkout: .github\n          persist-credentials: false\n", false, true},
+		{"          fetch-depth: 0\n          filter: blob:none\n          sparse-checkout: .github\n          persist-credentials: false\n", false, true},
+		{"          fetch-depth: 0\n          filter: tree:0\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          filter: blob:limit=256\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          filter: ${{ github.ref }}\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          sparse-checkout: Assets\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          sparse-checkout: .github/**\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          sparse-checkout: |\n            .github\n            scripts\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          ref: main\n          persist-credentials: false\n", false, false},
+		{"          fetch-depth: 0\n          filter: [\"blob:none\"]\n          persist-credentials: false\n", false, false},
 	} {
-		checkoutWorkflow := strings.Replace(workflow, canonicalClassifierCheckout, checkout.with, 1)
-		if checkoutWorkflow == workflow {
+		base := workflow
+		if !checkout.ruleLines {
+			base = noRuleLinesWorkflow
+		}
+		checkoutWorkflow := strings.Replace(base, canonicalClassifierCheckout, checkout.with, 1)
+		if checkoutWorkflow == base {
 			t.Fatal("the classifier checkout fixture moved")
 		}
 		checkoutResult, err := AnalyzeUnityEnrollment(

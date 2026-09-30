@@ -88,6 +88,34 @@ test("changed path discovery uses bounded literal git diff arguments", () => {
   assert.throws(() => findChangedPaths("main", headSHA, () => ""), /full commit SHAs/);
 });
 
+/*
+ * The enrollment policy allows the classifier checkout to run a blobless
+ * clone (`filter: blob:none`) with `persist-credentials: false`. That shape is
+ * only safe because the runtime never reads file contents: `--name-only` skips
+ * patch bodies, and `--no-ext-diff` plus `--no-textconv` skip the external
+ * filters that would read blobs. Pin the runtime against the committed source
+ * so a future edit that adds any second git call or a blob-reading flag fails
+ * here instead of failing closed in a consumer's uncredentialed clone. Both
+ * the quoted and the absolute spelling of the binary resolve to the same tool
+ * under the sanitized PATH, so the count covers both.
+ */
+test("committed classifier runtime makes exactly one tree-only git call", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", ".github", "dist", "classify-unity-changes.js"),
+    "utf8"
+  );
+  assert.equal(
+    (source.match(/\/usr\/bin\/git/g) || []).length +
+      (source.match(/"git"/g) || []).length,
+    1,
+    "the classifier must make exactly one git call"
+  );
+  assert.match(
+    source,
+    /"diff",\s*"--name-only",\s*"--no-renames",\s*"--no-ext-diff",\s*"--no-textconv"/
+  );
+});
+
 test("classifier defaults output true before any fallible pull request work", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
