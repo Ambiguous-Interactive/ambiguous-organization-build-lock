@@ -89,12 +89,20 @@ a repin exception whose protected file no longer exists. The finding codes
 are `expired-repin-exception` and `stale-repin-exception`, and the audit
 drift issue lists them with the repository and path.
 
-The rewrite normalizes pin comments. A moved pin carries two spaces before
-its `# vX.Y.Z` comment for the new release. A pin without a comment gains
-one, and a pin with a version comment is updated. The rewrite accepts either
-one or more spaces before an existing comment. A pin already at the target
-keeps its current shape. A comment that is not a version, such as a reviewed
-witness note, survives untouched.
+The rewrite preserves each consumer's own pin comment spacing. A moved pin
+keeps the exact gap its line already has before the `# vX.Y.Z` comment, a pin
+with a version comment is updated in place, and a pin without one gains one in
+the gap the rest of that repository already uses, so every moved pin stays
+human-readable and Dependabot-visible. The consumer's own formatter owns that
+gap and the organization is not uniform: IshoBoy's yamllint sets
+`min-spaces-from-content: 2` and rejects one space, while unity-helpers runs
+Prettier over `.github/` and rewrites two spaces back to one. A pin that has to
+gain a comment in a repository whose pins carry no version comment, or carry
+two different gaps, fails closed and names the repository; add the version
+comments by hand in the repository's own format and repin again. A pin already
+at the target keeps its current shape. A comment that is not a version, such as
+a reviewed witness note, survives untouched. Consumer lints own the spacing:
+they must accept the comment form the repository already uses.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` version comment, so
 the normalized pins are Dependabot-visible. Two limits keep the central

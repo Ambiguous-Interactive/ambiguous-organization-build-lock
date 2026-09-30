@@ -142,8 +142,9 @@ authorization merge.
 For each enrolled repository the workflow clones the default branch, rewrites
 only the `@<sha>` suffix of `uses:` references to this repository's actions
 (plus the `# vX.Y.Z` comment: a moved pin without a comment gains one, and a
-comment that is not a version stays; normalized comments have two spaces
-before `#`), carries the reviewed companion files
+comment that is not a version stays; each comment keeps the exact gap its own
+line already has, and a new one takes the gap the repository already uses),
+carries the reviewed companion files
 named in the policy through their mechanical rewrites, and opens one pull
 request per repository on the stable branch prefix `automation/repin-lock-`.
 The per-repository result is recorded in the run summary; any repository
@@ -164,10 +165,11 @@ exactly, opens the pull request from it, and never force-updates a branch
 that holds other work.
 
 An existing open repin pull request for the same target is not updated
-automatically. If an older offer fails yamllint because its version comments
-have one space before `#`, the maintainer must push the two-space correction
-to that existing pull request branch. Automation does not rewrite an open
-pull request branch.
+automatically. The offer keeps each repository's own comment spacing, so a
+repository whose formatter rejects that spacing fails its own lint on the
+offer: fix the workflow comments by hand in the format the repository's
+formatter accepts, then close the offer. The next run opens a new one.
+Automation does not rewrite an open pull request branch.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible

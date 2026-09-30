@@ -73,9 +73,10 @@ resolve_repin_target() {
 
 rewrite_pins() {
   # Mechanical mutation contract: replace only the 40-hex reference suffix on
-  # `uses:` lines that name this repository's actions, and normalize a trailing
-  # `# vX.Y.Z` comment when the release tag is known. Everything else is
-  # untouched, and the target must already be authorized in both allowlists.
+  # `uses:` lines that name this repository's actions, and update a trailing
+  # `# vX.Y.Z` comment to the new release in the spacing the consumer's own
+  # files already use. Everything else is untouched, and the target must
+  # already be authorized in both allowlists.
   # A reviewed, unexpired repin exception preserves one whole workflow file so
   # a pin-only update cannot move a caller to an action whose input contract
   # it cannot satisfy. Reviewed `repinCompanions` files carry the consumer
@@ -231,6 +232,14 @@ for (const entry of companionEntries) {
 const linePattern =
   /^(\s*(?:-\s+)?uses:\s*Ambiguous-Interactive\/ambiguous-organization-build-lock\/\S+?@)([0-9a-f]{40})(\s+#.*)?$/;
 const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
+// A workflow file may end its lines with CRLF. `split("\n")` leaves the `\r`
+// on every line, and the pattern's `$` anchor does not match before it, so
+// the match drops the terminator and `rewritePinLine` puts it back. Without
+// this the pattern skips every pin in such a file: the rewrite reports no
+// change, the automation closes its own offer as superseded, and the
+// consumer keeps a stale pin with no evidence that anything was missed.
+const matchPinLine = (line) => linePattern.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
+const lineTerminator = (line) => (line.endsWith("\r") ? "\r" : "");
 const versionGrammar = /^v\d+\.\d+\.\d+$/;
 // The version comment is a machine-readable contract, so the target version
 // must be a release tag. The scheduled resolver emits only `vX.Y.Z` tags;
@@ -258,24 +267,65 @@ const matchedExceptions = new Set();
 // rewrites. Only these SHAs may move inside pin-literal companions, so a
 // historical SHA quoted for another reason survives untouched.
 const replacedPins = new Set();
+// A consumer owns the gap between its pin and a `# vX.Y.Z` comment, because
+// its own formatter owns that file. The enrolled repositories disagree:
+// IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects one space
+// as an error, while unity-helpers runs Prettier over `.github/` and rewrites
+// two spaces back to one. A single canonical width therefore breaks one of
+// them on every release, so the rewrite never normalizes the gap. It reads
+// the gap this repository already uses and reuses it.
+const versionCommentGaps = new Set();
+for (const filePath of files) {
+  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+    const match = matchPinLine(line);
+    const comment = match ? match[3] || "" : "";
+    if (comment !== "" && versionCommentPattern.test(comment.trim())) {
+      versionCommentGaps.add(/^[ \t]*/.exec(comment)[0]);
+    }
+  }
+}
+// A moved pin without a version comment gains one, so Dependabot can read
+// the release. That new comment needs a gap, and the only evidence is what
+// the repository already writes. No precedent, or two different gaps in one
+// repository, is ambiguous evidence: a mechanical rewrite cannot tell which
+// width the consumer's formatter accepts, so it fails closed and names the
+// repository instead of guessing. A repository that has no lock pin at all
+// never reaches this path because it has no pin to move.
+const versionCommentGap = () => {
+  if (versionCommentGaps.size === 1) {
+    return [...versionCommentGaps][0];
+  }
+  const gaps = [...versionCommentGaps];
+  const evidence = gaps.length === 0
+    ? "None of its lock pins carries a `# vX.Y.Z` comment."
+    : `Its lock pins use ${gaps.length} different comment gaps: ${gaps
+      .map((gap) => JSON.stringify(gap))
+      .join(", ")}.`;
+  throw new Error(
+    `${repository} ${evidence} The rewrite cannot match the repository's comment spacing, ` +
+      "so it fails closed instead of guessing. Make the version comments uniform in the " +
+      "repository's own format, then repin again."
+  );
+};
 const rewritePinLine = (line) => {
-  const match = linePattern.exec(line);
+  const match = matchPinLine(line);
   if (!match || match[2] === targetSha) {
     return line;
   }
   replacedPins.add(match[2]);
-  // A moved pin normalizes its release comment: a `# vX.Y.Z` comment tracks
-  // the new release, a missing comment gains it so every moved pin stays
+  // A moved pin updates its release comment: a `# vX.Y.Z` comment tracks the
+  // new release, a missing comment gains one so every moved pin stays
   // human-readable and Dependabot-visible, and any other reviewed witness
   // comment survives untouched. An unknown target version changes no
   // comment: a stale version label is better evidence than a deleted one.
-  const rawComment = (match[3] || "").trim();
+  const comment = match[3] || "";
+  const rawComment = comment.trim();
+  const terminator = lineTerminator(line);
   if (targetVersion && (rawComment === "" || versionCommentPattern.test(rawComment))) {
-    // Keep YAML's default comments rule happy. The pin-line pattern accepts
-    // existing comments with one or more spaces, then writes the canonical two.
-    return `${match[1]}${targetSha}  # ${targetVersion}`;
+    const gap = comment === "" ? versionCommentGap() : /^[ \t]*/.exec(comment)[0];
+    return `${match[1]}${targetSha}${gap}# ${targetVersion}${terminator}`;
   }
-  return `${match[1]}${targetSha}${match[3] || ""}`;
+  return `${match[1]}${targetSha}${comment}${terminator}`;
 };
 for (const filePath of files) {
   const relativePath = path.relative(directory, filePath).split(path.sep).join("/");

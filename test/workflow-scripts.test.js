@@ -603,12 +603,13 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   const lines = fs.readFileSync(path.join(workflows, "unity.yml"), "utf8").split("\n");
   assert.equal(
     lines[3],
-    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target}  # v1.14.0`
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`,
+    "a moved pin keeps the repository's own comment spacing"
   );
   assert.equal(
     lines[4],
-    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target}  # v1.14.0`,
-    "a moved pin without a comment gains the release version comment"
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target} # v1.14.0`,
+    "a moved pin without a comment gains the release version comment in the repository's own spacing"
   );
   assert.equal(
     lines[5],
@@ -647,7 +648,16 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.match(malformed.stderr, /40-character commit SHA/);
 });
 
-test("moved pin comments follow the disposition matrix for every comment and version shape", (t) => {
+test("moved pin comments keep the consumer's own comment spacing", (t) => {
+  // The consumer owns the gap between its pin and a `# vX.Y.Z` comment,
+  // because its own formatter owns the file. Enrolled repositories disagree:
+  // IshoBoy's yamllint sets `min-spaces-from-content: 2` and rejects one
+  // space, while unity-helpers runs Prettier over `.github/` and rewrites two
+  // spaces back to one. A hard-coded width broke unity-helpers' `main` on
+  // the v1.16.0 offer (#307), so the rewrite must reproduce each repository's
+  // existing bytes instead of normalizing them. Every case runs under both
+  // conventions.
+  //
   // Each case is one moved pin under one target version. The scheduled
   // resolver only emits `vX.Y.Z` tags; the empty version proves the rewrite
   // never deletes a reviewed label when the tag is unknown, and the
@@ -655,43 +665,50 @@ test("moved pin comments follow the disposition matrix for every comment and ver
   // contract.
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
   const target = "64bac446903115134dca8235410b332bc5a83547";
-  const prefix = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@";
-  const cases = [
-    { comment: "", version: "v1.14.0", expected: `${target}  # v1.14.0` },
-    { comment: " # v1.13.0", version: "v1.14.0", expected: `${target}  # v1.14.0` },
-    { comment: "  # v1.13.0", version: "v1.14.0", expected: `${target}  # v1.14.0` },
-    { comment: " # post-v1.10.0", version: "v1.14.0", expected: `${target} # post-v1.10.0` },
-    { comment: "", version: "", expected: `${target}` },
-    { comment: " # v1.13.0", version: "", expected: `${target} # v1.13.0` },
-    { comment: " # post-v1.10.0", version: "", expected: `${target} # post-v1.10.0` }
-  ];
-  for (const testCase of cases) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    const workflows = path.join(root, ".github", "workflows");
-    fs.mkdirSync(workflows, { recursive: true });
-    fs.writeFileSync(
-      path.join(workflows, "unity.yml"),
-      `${prefix}${oldSha}${testCase.comment}\n`
-    );
-    const result = childProcess.spawnSync(
-      "bash",
-      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, testCase.version, "Ambiguous-Interactive/unity-helpers"],
-      { cwd: repoRoot, encoding: "utf8" }
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(
-      fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
-      `${prefix}${testCase.expected}\n`,
-      `comment ${JSON.stringify(testCase.comment)} at version ${JSON.stringify(testCase.version)}`
-    );
+  const pin = (action, ref) =>
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/${action}@${ref}`;
+  // The repository's other pin already sits at the target, so it supplies the
+  // spacing evidence without moving itself.
+  const precedent = (gap) => `jobs:\n  unity:\n    steps:\n${pin("acquire-build-lock", `${target}${gap}# v1.14.0`)}\n`;
+  for (const gap of [" ", "  "]) {
+    const other = gap === " " ? "  " : " ";
+    const cases = [
+      { comment: "", version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
+      { comment: `${gap}# v1.13.0`, version: "v1.14.0", expected: `${target}${gap}# v1.14.0` },
+      { comment: `${other}# v1.13.0`, version: "v1.14.0", expected: `${target}${other}# v1.14.0` },
+      { comment: " # post-v1.10.0", version: "v1.14.0", expected: `${target} # post-v1.10.0` },
+      { comment: "", version: "", expected: `${target}` },
+      { comment: `${gap}# v1.13.0`, version: "", expected: `${target}${gap}# v1.13.0` },
+      { comment: " # post-v1.10.0", version: "", expected: `${target} # post-v1.10.0` }
+    ];
+    for (const testCase of cases) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      const workflows = path.join(root, ".github", "workflows");
+      fs.mkdirSync(workflows, { recursive: true });
+      const original = `${precedent(gap)}${pin("return-unity-license", oldSha + testCase.comment)}\n`;
+      fs.writeFileSync(path.join(workflows, "unity.yml"), original);
+      const result = childProcess.spawnSync(
+        "bash",
+        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, testCase.version, "Ambiguous-Interactive/unity-helpers"],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      const label = `gap ${JSON.stringify(gap)} comment ${JSON.stringify(testCase.comment)} at version ${JSON.stringify(testCase.version)}`;
+      assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+      assert.deepEqual(JSON.parse(result.stdout).changed, 1, label);
+      assert.equal(
+        fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+        `${precedent(gap)}${pin("return-unity-license", testCase.expected)}\n`,
+        label
+      );
+    }
   }
 
   const injection = fs.mkdtempSync(path.join(os.tmpdir(), "repin-comments-"));
   t.after(() => fs.rmSync(injection, { recursive: true, force: true }));
   const workflows = path.join(injection, ".github", "workflows");
   fs.mkdirSync(workflows, { recursive: true });
-  fs.writeFileSync(path.join(workflows, "unity.yml"), `${prefix}${oldSha}\n`);
+  fs.writeFileSync(path.join(workflows, "unity.yml"), `${pin("acquire-build-lock", oldSha)}\n`);
   const hostile = childProcess.spawnSync(
     "bash",
     [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", injection, target, "v1.14.0\nrun: exploit", "Ambiguous-Interactive/unity-helpers"],
@@ -701,8 +718,109 @@ test("moved pin comments follow the disposition matrix for every comment and ver
   assert.match(hostile.stderr, /vMAJOR\.MINOR\.PATCH target version/);
   assert.equal(
     fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
-    `${prefix}${oldSha}\n`,
+    `${pin("acquire-build-lock", oldSha)}\n`,
     "a fail-closed run leaves the pin untouched"
+  );
+});
+
+test("consumer repin fails closed when the repository's comment spacing has no single evidence", (t) => {
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const acquire = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@";
+  const returnPin = "      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@";
+  // A pin that gains a version comment needs a gap, and the only evidence is
+  // what the repository already writes. A mechanical rewrite cannot tell which
+  // width a consumer's formatter accepts, so an absent or split precedent
+  // fails closed and names the repository instead of guessing.
+  const cases = [
+    {
+      name: "no version comment to copy",
+      content: `${returnPin}${oldSha}\n`,
+      expected: /None of its lock pins carries a `# vX\.Y\.Z` comment\./u
+    },
+    {
+      name: "two comment gaps in one repository",
+      content:
+        `${acquire}${oldSha} # v1.13.0\n` +
+        `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/release-build-lock@${oldSha}  # v1.13.0\n` +
+        `${returnPin}${oldSha}\n`,
+      expected: /Its lock pins use 2 different comment gaps: " ", "  "\./u
+    }
+  ];
+  for (const testCase of cases) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-gap-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const workflows = path.join(root, ".github", "workflows");
+    fs.mkdirSync(workflows, { recursive: true });
+    fs.writeFileSync(path.join(workflows, "unity.yml"), testCase.content);
+    const result = childProcess.spawnSync(
+      "bash",
+      [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    assert.equal(result.status, 1, testCase.name);
+    assert.match(result.stderr, testCase.expected, testCase.name);
+    assert.match(result.stderr, /Ambiguous-Interactive\/unity-helpers/, testCase.name);
+    assert.equal(
+      fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+      testCase.content,
+      `${testCase.name}: a fail-closed run leaves the checkout untouched`
+    );
+  }
+
+  // A repository with no lock pin at all has no pin to move, so it never
+  // needs a gap and must not fail.
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "repin-gap-"));
+  t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(empty, ".github", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(empty, ".github", "workflows", "unity.yml"), "jobs: {}\n");
+  const skipped = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", empty, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8" }
+  );
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.deepEqual(JSON.parse(skipped.stdout).changed, 0);
+});
+
+test("consumer repin moves pins in a CRLF workflow and keeps the line endings", (t) => {
+  // `split("\n")` leaves the `\r` on every line and the pin pattern's `$`
+  // anchor does not match before it, so a CRLF checkout used to match no pin
+  // at all: the run reported no change, closed its own offer as superseded,
+  // and left the consumer on a stale pin with no evidence that anything was
+  // missed. The rewrite has to see the pin and put the terminator back.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-crlf-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
+  const target = "64bac446903115134dca8235410b332bc5a83547";
+  const workflows = path.join(root, ".github", "workflows");
+  fs.mkdirSync(workflows, { recursive: true });
+  const original = [
+    "jobs:",
+    "  unity:",
+    "    steps:",
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
+    `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${oldSha}`,
+    ""
+  ].join("\r\n");
+  fs.writeFileSync(path.join(workflows, "unity.yml"), original);
+  const result = childProcess.spawnSync(
+    "bash",
+    [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", "Ambiguous-Interactive/unity-helpers"],
+    { cwd: repoRoot, encoding: "utf8" }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).changed, 2);
+  assert.equal(
+    fs.readFileSync(path.join(workflows, "unity.yml"), "utf8"),
+    [
+      "jobs:",
+      "  unity:",
+      "    steps:",
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`,
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${target} # v1.14.0`,
+      ""
+    ].join("\r\n")
   );
 });
 
@@ -711,7 +829,7 @@ test("consumer repin preserves reviewed compatibility exceptions and fails close
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
   const target = "64bac446903115134dca8235410b332bc5a83547";
-  const legacyPin = `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${oldSha}`;
+  const legacyPin = `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${oldSha} # v1.13.0`;
   const writeWorkflow = (repository, name, pinLine) => {
     const workflows = path.join(root, "consumers", repository, ".github", "workflows");
     fs.mkdirSync(workflows, { recursive: true });
@@ -961,7 +1079,7 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
     [
       "## Example",
       "",
-      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target}  # v1.14.0`,
+      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${target} # v1.14.0`,
       ""
     ].join("\n")
   );
@@ -1189,7 +1307,7 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
       "jobs:",
       "  unity:",
       "    steps:",
-      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha}`,
+      `      - uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
       ""
     ].join("\n")
   );
@@ -1209,7 +1327,7 @@ test("consumer repin refuses a companion that is not a regular file", (t) => {
   fs.mkdirSync(workflows, { recursive: true });
   fs.writeFileSync(
     path.join(workflows, "unity.yml"),
-    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${repinOldSha}\n`
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock@${repinOldSha} # v1.13.0\n`
   );
   const outside = path.join(root, "outside-secret.txt");
   fs.writeFileSync(outside, "untouched\n");
@@ -1262,11 +1380,16 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
   gitRun(seed, "remote", "add", "origin", remotePath);
   const workflows = path.join(seed, ".github", "workflows");
   fs.mkdirSync(workflows, { recursive: true });
-  const writePin = (sha) => fs.writeFileSync(
+  // Every enrolled consumer carries a `# vX.Y.Z` comment on its lock pins, so
+  // the seeded checkout does too: a pin without one has no comment spacing to
+  // copy and the rewrite correctly fails closed. The single space matches
+  // unity-helpers and DxMessaging, whose Prettier and contract tests reject a
+  // wider gap.
+  const writePin = (sha, version) => fs.writeFileSync(
     path.join(workflows, "unity.yml"),
-    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${sha}\n`
+    `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${sha} # ${version}\n`
   );
-  writePin(state.atTarget ? releaseSha : repinOldSha);
+  writePin(state.atTarget ? releaseSha : repinOldSha, state.atTarget ? "v1.14.0" : "v1.13.0");
   for (const [relativePath, content] of Object.entries(state.companionFiles || {})) {
     const filePath = path.join(seed, relativePath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -1277,12 +1400,9 @@ function createConsumerRemote(root, name, state, releaseSha, branchName) {
   gitRun(seed, "push", "-q", "origin", "master");
   if (state.automation) {
     gitRun(seed, "checkout", "-qB", branchName);
-    // A branch a current run pushed carries the release version comment the
-    // rewrite normalizes onto every moved pin.
-    fs.writeFileSync(
-      path.join(workflows, "unity.yml"),
-      `- uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/return-unity-license@${releaseSha}  # v1.14.0\n`
-    );
+    // A branch a current run pushed already carries the repinned pin, so its
+    // content has to match what this run would produce exactly.
+    writePin(releaseSha, "v1.14.0");
     gitRun(seed, "add", "-A");
     gitRun(seed, "commit", "-m", "chore: repin organization lock actions to v1.14.0");
     gitRun(seed, "push", "-q", "origin", branchName);
@@ -1771,8 +1891,8 @@ test("consumer repin commits companion artifacts and lists them in the pull requ
     harness.remotePath("dxmessaging"),
     "show", `${harness.branchName}:docs/ops/pin-doc.md`
   );
-  assert.match(pushedDoc, new RegExp(`acquire-build-lock@${harness.releaseSha}  # v1.14.0`));
-  assert.match(pushedDoc, new RegExp(`return-unity-license@${harness.releaseSha}  # v1.14.0`));
+  assert.match(pushedDoc, new RegExp(`acquire-build-lock@${harness.releaseSha} # v1.14.0`));
+  assert.match(pushedDoc, new RegExp(`return-unity-license@${harness.releaseSha} # v1.14.0`));
   const pushedWorkflow = gitRun(
     harness.remotePath("dxmessaging"),
     "show", `${harness.branchName}:.github/workflows/unity.yml`
