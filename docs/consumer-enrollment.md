@@ -122,12 +122,15 @@ its own reason cannot license a reviewed witness to change. A
 `repinExceptions` file is never read, so it can neither supply a gap nor fail
 the run. A symlink under `.github` fails closed: a workflow reached through
 one would be written instead of the reviewed checkout, and a symlinked
-directory would hide every pin inside it. A file that is not valid UTF-8 fails
-closed the same way. Node replaces every byte it cannot decode with U+FFFD,
-which is three bytes long, so a rewrite that read such a file and wrote it
-back would destroy a byte the pin does not name, grow the file, and report
-only the pins it moved. The refusal names the repository and the file, and the
-remedy is to re-save the file as UTF-8. Every check fails closed before
+directory would hide every pin inside it. A file the rewrite would write and
+cannot read as UTF-8 fails closed too. Node replaces every byte it cannot
+decode with U+FFFD, which is three bytes long, so writing such a file back
+would destroy a byte the pin does not name, grow the file, and report only
+the pins it moved. The refusal names the repository and the file, and the
+remedy is to re-save the file as UTF-8. The scope is the files the rewrite
+would change, because only a written file can lose a byte. A file it reads
+and leaves alone stays exactly as the consumer wrote it, with no red run, like
+any other shape it cannot read. Every check fails closed before
 anything is written, so a refused rewrite leaves the whole checkout
 byte-identical, workflows and companions alike, including a file that keeps
 CRLF line endings. A write that fails while the buffered changes are being
@@ -142,7 +145,12 @@ order mark is encoding metadata rather than content, so a key pattern never
 sees it and a pin on the first line of the file still moves; the mark itself
 is read aside and written back, so the file keeps it. Only a byte sequence
 that is not valid UTF-8 is refused, so a file that carries a NUL byte or any
-other character a reader accepts is left byte for byte as it was.
+other character a reader accepts is left byte for byte as it was. The two
+rewrites of the reviewed central policy refuse any policy that is not valid
+UTF-8, because both read that file and write it back. A byte order mark is
+not moved there: every reader of the policy, Node and all three Go analyzers,
+rejects one, so a marked policy fails in the authorization script exactly as
+it always has.
 
 A checkout of this repository is pinned twice: in the `uses:` line of the
 action, and in the `ref:` of the `actions/checkout` step that fetches the
