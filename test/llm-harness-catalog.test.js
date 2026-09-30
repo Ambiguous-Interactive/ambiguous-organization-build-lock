@@ -145,10 +145,10 @@ test("an unreadable Markdown file is reported, not summarized with U+FFFD", asyn
     Buffer.concat([source, Buffer.from("\ncaf"), Buffer.from([0x89]), Buffer.from("-note\n")])
   );
 
-  assert.throws(() => generateIndex(root), /The encoded data was not valid/);
+  assert.throws(() => generateIndex(root), /\.llm\/skills\/example\/SKILL\.md: not valid UTF-8/);
   assert.match(
     verifyRepository(root, { checkPointers: false }).errors.join("\n"),
-    /The encoded data was not valid/
+    /\.llm\/skills\/example\/SKILL\.md: not valid UTF-8/
   );
 });
 
@@ -288,6 +288,20 @@ test("progress records reject credential-shaped literals without echoing them", 
   let errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
   assert.match(errors, /credential-shaped literal/, "NUL-containing file");
   assert.ok(!errors.includes(binaryCredential), "binary credential must not be echoed");
+
+  // A byte inside the literal used to suppress the finding: a lossy decode
+  // replaced it with U+FFFD, so the literal pattern no longer matched. The
+  // byte has to sit inside the credential for that to happen, which is why a
+  // stray byte elsewhere in the record was never enough to hide one.
+  fs.writeFileSync(record, Buffer.concat([
+    Buffer.from("# Session 001\n\n"),
+    Buffer.from("-----BEGIN "),
+    Buffer.from([0x89]),
+    Buffer.from("PRIVATE KEY-----\n")
+  ]));
+  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.match(errors, /credential-shaped literal/, "a stray byte must not hide a credential");
+  assert.ok(!errors.includes("BEGIN"), "the credential must not be echoed");
 
   fs.writeFileSync(record, [
     "# Session 001",
