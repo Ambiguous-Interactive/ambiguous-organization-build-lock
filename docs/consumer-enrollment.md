@@ -138,27 +138,26 @@ release's actions against another release's policy. The anchor is the sibling
 enrolled consumer checks out a different repository at a literal 40-character
 commit, and a value-only rule would point that checkout at this repository's
 release. So the rule has three anchors. The step must run `actions/checkout` at
-a reviewed commit, so a `repository:` and a `ref:` on any other step stay put:
-a reusable-workflow call passes both to the called workflow as its own inputs,
-and no other action's meaning for them is knowable here. The `with:` block must
-name this repository. The `ref:` must be a direct child key of that same block,
-and its value must be 40 lowercase hexadecimal characters. A key is read in any
-case and with or without quotes, because GitHub reads an action's `with:` that
-way; the repository value is compared the same way, because a name that differs
-only in case is the same repository. The `with:` block may be written before or
-after the `uses:` it belongs to, and a comment on the step's own `uses:` line
-is read, because a YAML mapping is unordered and GitHub reads either order.
-Only the SHA is replaced: the key spelling, the gap before its colon, the
-indentation, a comment already on the line and the line terminator are all
-written back as they were read. No `# vX.Y.Z` comment is added, because a
-`ref:` is not a `uses:` pin and Dependabot never reads it. The two things that
-do not survive are trailing whitespace after the value and a tab-indented line,
-which comes back space-indented; neither is valid YAML indentation, so no
-workflow this rewrite is offered carries one.
+a 40-character commit, so a `repository:` and a `ref:` on any other step stay
+put: a reusable-workflow call passes both to the called workflow as its own
+inputs, and no other action's meaning for them is knowable here. The `with:`
+block must name this repository. The `ref:` must be a direct child key of that
+same block, and its value must be 40 lowercase hexadecimal characters. A key is
+read in any case and with or without quotes, because GitHub reads an action's
+`with:` that way; the repository value is compared the same way, because a name
+that differs only in case is the same repository. The `with:` block may be
+written before or after the `uses:` it belongs to, and a comment on the step's
+own `uses:` line is read, because a YAML mapping is unordered and GitHub reads
+either order. Only the SHA is replaced. The key spelling, the gap on either
+side of its colon, the indentation, a comment already on the line, the
+whitespace behind that comment and the line terminator are all written back as
+they were read. No `# vX.Y.Z` comment is added, because a `ref:` is not a
+`uses:` pin and Dependabot never reads it.
 
 A `ref:` stays as the consumer wrote it whenever the rewrite cannot read it
-as a commit, and a `with:` stays whenever it cannot read it as a key. A
-value it cannot read is not evidence, so the list is this:
+as a commit, a `with:` stays whenever it cannot read it as a key, and a
+`uses:` that cannot be read as a checkout is no anchor at all. A value it
+cannot read is not evidence. These shapes are among those that stay:
 
 - an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
 - a branch or a tag, such as `ref: main`.
@@ -169,8 +168,17 @@ value it cannot read is not evidence, so the list is this:
 - a `with:` with a tag or an anchor on it, such as `with: !!map`.
 - a `with:` written as a flow mapping on one line, such as
   `with: {repository: ..., ref: ...}`.
-- a `with:` that is not on an `actions/checkout` step, which is the
-  anchor above rather than a spelling of the key.
+- a `with:` that is not inside a step, so a `repository:` and a `ref:` under
+  it are inputs of a reusable-workflow call or of some other key. That is the
+  anchor above rather than a spelling of the key, and a `with:` written beside
+  a sequence item rather than in it belongs to no step either.
+- a `uses:` on the step that is quoted, written on the line below, or
+  carrying a tag or an anchor in front of the key.
+- a step written as a bare `-` with its keys on the lines after it, and a
+  step that is an alias or a merge of another one.
+- a `ref:` whose value is a folded block scalar, such as `ref: >-`.
+- a `ref:` indented with a tab in a block whose other keys are indented with
+  spaces, because a tab-indented line is not a key of that block.
 - a `repository:` value this repository names with a trailing slash, or as
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.

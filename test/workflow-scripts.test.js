@@ -2108,8 +2108,8 @@ test("consumer repin shields samples in a block scalar without shielding real pi
         "      - name: |",
         "          Acquire the organization Unity build lock and wait for the queue.",
         "          Then run the licensed build to completion.",
-        uses("        ", "acquire-build-lock", oldSha, "1.13.0"),
-        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        uses: " + lockRepository + "/.github/actions/acquire-build-lock@" + oldSha + " # v1.13.0",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "        with:",
         "          repository: " + lockRepository,
         "          ref: " + oldSha,
@@ -2332,6 +2332,11 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
   fs.mkdirSync(workflows, { recursive: true });
   const uses = (indent, action) =>
     indent + "- uses: " + lockRepository + "/.github/actions/" + action + "@" + oldSha + " # v1.13.0";
+  const withBlock = (repository, ref) => [
+    "        with:",
+    "          repository: " + repository,
+    "          ref: " + ref
+  ];
   // Each case is a spelling a real workflow may use, and each one used to
   // freeze a real pin: the rewrite reported nothing to change, the
   // automation called the repository already pinned, and the stale pin had
@@ -2443,6 +2448,48 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       staleSurvives: true
     },
     {
+      name: "a with: block under a step whose name wraps onto the next line",
+      why: "the continuation of a plain scalar is not a key and is not a step boundary, so the walk has to step over it",
+      lines: [
+        "      - name: a name long enough that the reader wraps it",
+        "          onto a second line",
+        "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        ...withBlock(lockRepository, oldSha),
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target
+    },
+    {
+      name: "a with: block under a step that opens a block scalar first",
+      why: "the text of a step's own env: block is not a key, and a body line must not be read as the end of the step",
+      lines: [
+        "      - uses: azure/webapps-deploy@v3",
+        "        env:",
+        "          SCRIPT: |",
+        "            echo not-a-key",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        ...withBlock(lockRepository, oldSha),
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target
+    },
+    {
+      name: "the last step of a file is not a checkout",
+      why: "the walk runs to the end of the file, and a file that ends inside a step must not run off it",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          fetch-depth: 1",
+        "      - uses: azure/webapps-deploy@v3",
+        ...withBlock(lockRepository, oldSha),
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
       name: "a comment on the step's own uses: line",
       why: "the sibling with: line is read with its comment, so refusing one here would freeze a real pin while the run reports the repository already pinned",
       lines: [
@@ -2504,6 +2551,99 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
       ],
       refs: 0,
       staleSurvives: true
+    },
+    {
+      name: "the file ends inside a step that is not a checkout",
+      why: "the walk runs to the end of the line list, and a file whose last step is the one holding the block must end the walk there",
+      header: false,
+      lines: [
+        "jobs:",
+        "  unity:",
+        "    steps:",
+        uses("      ", "release-build-lock"),
+        "      - uses: azure/webapps-deploy@v3",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a wider gap in front of the value",
+      why: "the gap in front of the value is the consumer's own spacing, and a rewrite that re-spaces it edits a byte the pin did not name",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref:  " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref:  " + target
+    },
+    {
+      name: "a tab-indented ref: line",
+      why: "the indent is carried as text and not as a width, so a block whose own indent is tabs comes back with its tabs",
+      lines: [
+        "\t- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "\t  with:",
+        "\t    repository: " + lockRepository,
+        "\t    ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "\t    ref: " + target
+    },
+    {
+      name: "a tab-indented ref: line beside a space-indented sibling",
+      why: "a tab-indented line is not a key of a space-indented block, and a key that is not a direct child is not this rule's to move",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "\t        ref: " + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a tab in front of the value",
+      why: "a tab is a legal gap after a colon, and it is the consumer's own",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref:\t" + oldSha,
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref:\t" + target
+    },
+    {
+      name: "trailing whitespace after the value",
+      why: "the value is read whole, and the whitespace behind it is part of the line the consumer wrote",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha + "   ",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target + "   "
+    },
+    {
+      name: "trailing whitespace after a comment",
+      why: "a comment is not the value, so the whitespace behind it survives too",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          repository: " + lockRepository,
+        "          ref: " + oldSha + "  # audited  ",
+        uses("      ", "release-build-lock")
+      ],
+      refs: 1,
+      refLine: "          ref: " + target + "  # audited  "
     },
     {
       name: "a comment on the ref: line, with the consumer's own gap",
@@ -2675,6 +2815,87 @@ test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
       refs: 0
     },
     {
+      name: "a non-checkout step with the pair, then a checkout step",
+      why: "the walk has to end at the next step, and a checkout after the block is not the step the block belongs to",
+      lines: [
+        "      - uses: azure/webapps-deploy@v3",
+        ...withBlock(lockRepository, oldSha),
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          fetch-depth: 1",
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a step whose own name holds a checkout-shaped value",
+      why: "the anchor is the key `uses:` and not any value that looks like a checkout, and a name is free to hold one",
+      lines: [
+        "      - name: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        run: echo hi",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a step whose uses: is another action at a literal commit",
+      why: "an enrolled consumer checks out a different repository at a literal 40-character commit, and that step is not the checkout the anchor names",
+      lines: [
+        "      - uses: azure/webapps-deploy@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a checkout uses: whose SHA is uppercase",
+      why: "the anchor takes the lowercase hexadecimal spelling the pinned form is written in, and an uppercase one is not it",
+      lines: [
+        "      - uses: actions/checkout@3D3C42E5AAC5BA805825DA76410C181273BA90B1",
+        ...withBlock(lockRepository, oldSha)
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a with: block beside the sequence item rather than in it",
+      why: "a step's keys share the column of the marker line's key, so a with: written beside the item belongs to no step",
+      lines: [
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "      with:",
+        "        repository: " + lockRepository,
+        "        ref: " + oldSha,
+      ],
+      refs: 0,
+      staleSurvives: true
+    },
+    {
+      name: "a with: block on a job, below a checkout step",
+      why: "the walk up from the block meets the step's marker first, and a marker only owns the column its own keys sit in, so a block one column left belongs to no step",
+      header: false,
+      lines: [
+        "on: push",
+        "jobs:",
+        "  a:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "        with:",
+        "          fetch-depth: 1",
+        "    with:",
+        "      repository: " + lockRepository,
+        "      ref: " + oldSha,
+        "  b:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: " + lockRepository + "/.github/actions/release-build-lock@" + oldSha + " # v1.13.0"
+      ],
+      refs: 0,
+      staleSurvives: true,
+      selfContained: true
+    },
+    {
       name: "a job with no uses: at all",
       lines: [
         "  job:",
@@ -2704,7 +2925,11 @@ test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
   const file = path.join(workflows, "unity.yml");
   const realPin = "      - uses: " + lockRepository + "/.github/actions/release-build-lock@" + oldSha + " # v1.13.0";
   for (const testCase of cases) {
-    fs.writeFileSync(file, ["jobs:", "  a:", "    steps:", ...testCase.lines, realPin, ""].join("\n"));
+    // A self-contained case is a whole file: it carries its own header, its own
+    // trailing pin, and nothing is appended to it.
+    const head = testCase.selfContained ? [] : ["jobs:", "  a:", "    steps:"];
+    const tail = testCase.selfContained ? [""] : [realPin, ""];
+    fs.writeFileSync(file, [...head, ...testCase.lines, ...tail].join("\n"));
     const result = runRewrite();
     assert.equal(result.status, 0, testCase.name + ": " + result.stderr);
     const report = JSON.parse(result.stdout);
@@ -2894,10 +3119,10 @@ test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (
       "        steps:",
       `            - uses: ${lockRepository}/.github/actions/acquire-build-lock@${oldSha} # v1.13.0`,
       "            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-      "            with:",
-      `                repository: ${lockRepository}`,
-      `                ref: ${oldSha}`,
-      "                path: .central-build-lock-policy"
+      "              with:",
+      `                  repository: ${lockRepository}`,
+      `                  ref: ${oldSha}`,
+      "                  path: .central-build-lock-policy"
     ].join("\r\n")
   );
   fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
@@ -2927,10 +3152,10 @@ test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (
       "        steps:",
       `            - uses: ${lockRepository}/.github/actions/acquire-build-lock@${target} # v1.14.0`,
       "            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-      "            with:",
-      `                repository: ${lockRepository}`,
-      `                ref: ${target}`,
-      "                path: .central-build-lock-policy"
+      "              with:",
+      `                  repository: ${lockRepository}`,
+      `                  ref: ${target}`,
+      "                  path: .central-build-lock-policy"
     ].join("\r\n"),
     "a CRLF workflow keeps CRLF, and a wide indent still matches"
   );

@@ -515,8 +515,12 @@ const yamlKey = "(?:\"[^\"]*\"|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*)[ \t]*";
 // written as `- uses:`. The key's column is the indent plus that marker, and
 // it is the column that decides what is a sibling of what, so both are
 // captured rather than measured from the physical line.
+// The gap in front of the value is captured as well, because a line that is
+// rebuilt from the key and the value has to put the gap back: `ref:  <sha>`
+// and `ref: <sha>` are the same pin written by two different people, and a
+// rewrite that re-spaces one of them edits a byte the pin did not name.
 const keyPattern = new RegExp(
-  "^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):(?:[ \\t]+(.*))?$"
+  "^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):(?:([ \\t]+)(.*))?$"
 );
 // The column the key sits at, which is what a sibling shares: the line's own
 // indent plus any sequence marker in front of it.
@@ -537,7 +541,10 @@ const withPattern = new RegExp("^([ \\t]*)((?:-[ \\t]+)?)(" + yamlKey + "):[ \\t
 // already accepted in any spelling, and a pattern that re-read the key from
 // the physical line would reject the quoted spellings the key match accepts:
 // a step may write `'ref':` and a re-read of `ref` freezes the pin.
-const refValuePattern = /^(?:[ \t]+)([0-9a-f]{40})(?=[ \t]|$)([ \t]+#.*)?$/;
+// The value is read whole: the gap in front of the SHA, the SHA, and
+// everything after it. A `#` with no gap in front of it is part of the plain
+// scalar, so that shape is not a commit and stays put.
+const refValuePattern = /^([0-9a-f]{40})((?:[ \t]+#.*)?[ \t]*)$/;
 const lockRepository = lockPrefix.replace(/\/$/, "");
 // The value is compared folded: a GitHub repository name is an identifier
 // GitHub reads without regard to case, so a spelling that differs only in
@@ -562,38 +569,39 @@ const checkoutStepUses = /^actions\/checkout@[0-9a-f]{40}$/;
 // repository already pinned, which is the outcome this rewrite must never
 // produce.
 const bareValue = (value) => value.replace(/[ \t]+#.*$/, "").trim();
-// A step is a sequence item, and a sequence item is the one line in it that
-// carries a marker. So a step is read by finding its own marker and then every
-// line between that marker and the next, and a `with:` block is only a checkout
-// input when such a step has a checkout `uses:` in it. Reading the whole step
-// rather than the lines above the block is what makes the `uses:` findable on
-// either side of the `with:`; a YAML mapping is unordered and GitHub reads
-// either order. Two bounds keep the read inside the step: a line shallower than
-// the `with:` column is not in the step, and a key deeper than the `with:`
-// column is nested inside the step rather than being a key of it, and every
-// key of a block mapping shares one column with the `with:`. A `with:` outside
-// any step at all -- a
-// reusable-workflow call, where `repository` and `ref` are inputs of the
-// workflow being called -- has no step, so it finds no `uses:` and is refused.
+// A step is a sequence item, and a block mapping gives every key in it one
+// column. So the step that owns a `with:` block is the sequence item whose
+// marker line's key column is that block's column, and the block belongs to it
+// only if that step carries a checkout `uses:` among its keys. The `uses:` may
+// sit on the marker line or anywhere after it, because a YAML mapping is
+// unordered and GitHub reads either order.
+//
+// The column is the whole anchor. "Any marker above" would let a `with:` that
+// is in no step at all -- a reusable-workflow call, where `repository` and
+// `ref` are inputs of the workflow being called -- borrow the anchor of a step
+// in another job, and a shallower key on the way up is what ends the search.
 const opensACheckout = (lines, literal, start, blockIndent) => {
-  const isStepMarker = (index) => {
+  const stepColumnAt = (index) => {
     if (literal.has(index)) {
-      return false;
+      return -1;
     }
     const key = keyPattern.exec(stripTerminator(lines[index]));
-    return key !== null && key[2].length > 0;
+    if (key === null || key[2].length === 0) {
+      return -1;
+    }
+    return keyIndentOf(key);
   };
-  // The `with:` may itself be the step's first key, written on the marker line.
-  let markerLine = isStepMarker(start) ? start : -1;
+  let markerLine = stepColumnAt(start) === blockIndent ? start : -1;
   for (let index = start - 1; markerLine === -1 && index >= 0; index -= 1) {
-    if (isStepMarker(index)) {
+    const column = stepColumnAt(index);
+    if (column === blockIndent) {
       markerLine = index;
       break;
     }
-    const key = keyPattern.exec(stripTerminator(lines[index]));
-    if (key !== null && keyIndentOf(key) < blockIndent) {
-      // Shallower than the `with:` and not a marker, so the `with:` is not
-      // inside a step: there is no checkout to anchor on.
+    const key = literal.has(index) ? null : keyPattern.exec(stripTerminator(lines[index]));
+    if (key !== null && key[2].length === 0 && keyIndentOf(key) < blockIndent) {
+      // Shallower than the `with:` and not a marker: the `with:` is not inside
+      // a step, so there is no checkout to anchor on.
       return false;
     }
   }
@@ -601,29 +609,25 @@ const opensACheckout = (lines, literal, start, blockIndent) => {
     return false;
   }
   for (let index = markerLine; index < lines.length; index += 1) {
-    if (index > markerLine) {
-      if (literal.has(index)) {
-        continue;
-      }
-      const line = stripTerminator(lines[index]);
-      if (line.trim() === "" || line.trimStart().startsWith("#")) {
-        continue;
-      }
-      const key = keyPattern.exec(line);
-      if (key === null) {
-        continue;
-      }
-      if (key[2].length > 0 || keyIndentOf(key) < blockIndent) {
-        // The next step, or the end of this one.
-        break;
-      }
-      // A block mapping gives every key of the step one column, so a key
-      // deeper than the `with:` belongs to a mapping nested inside the step
-      // and is not a key of the step at all.
-      if (keyIndentOf(key) === blockIndent && unquoteKey(key[3]) === "uses" && checkoutStepUses.test(bareValue(key[4] || ""))) {
-        return true;
-      }
-    } else if (checkoutStepUses.test(bareValue((keyPattern.exec(stripTerminator(lines[index]))[4] || "")))) {
+    if (literal.has(index)) {
+      continue;
+    }
+    const line = stripTerminator(lines[index]);
+    if (line.trim() === "" || line.trimStart().startsWith("#")) {
+      continue;
+    }
+    const key = keyPattern.exec(line);
+    if (key === null) {
+      // Not a key: a continuation of a multi-line plain scalar, or text this
+      // rule cannot read. Neither is a step boundary.
+      continue;
+    }
+    if (index > markerLine && (key[2].length > 0 || keyIndentOf(key) < blockIndent)) {
+      // The next step, or the end of this one. The step's own marker line
+      // carries a marker by definition, so it is not a boundary for itself.
+      break;
+    }
+    if (keyIndentOf(key) === blockIndent && unquoteKey(key[3]) === "uses" && checkoutStepUses.test(bareValue(key[5] || ""))) {
       return true;
     }
   }
@@ -671,7 +675,9 @@ const refLineIndices = (lines, literal) => {
       if (indent !== childIndent) {
         continue;
       }
-      children.push({ index, indent: key[1].length, key: key[3], value: (key[4] || "").replace(/\s+$/, "") });
+      // The indent is carried as text, not as a width, so a line that is
+      // indented with tabs comes back with its tabs.
+      children.push({ index, indent: key[1], key: key[3], gap: key[4] || "", value: key[5] || "" });
     }
     if (!children.some((child) => unquoteKey(child.key) === "repository" && bareRepository(child.value) === foldedLockRepository)) {
       continue;
@@ -680,7 +686,9 @@ const refLineIndices = (lines, literal) => {
       if (unquoteKey(child.key) !== "ref") {
         continue;
       }
-      const match = refValuePattern.exec(" " + child.value);
+      // match[1] is the SHA and match[2] is everything after it, so the line is
+      // rebuilt from the parsed key, the key's own gap, and those two.
+      const match = refValuePattern.exec(child.value);
       if (match && match[1] !== targetSha) {
         // The rewrite is built here, from the parsed key, and carried to the
         // write pass. Re-reading the line there would re-read the key from
@@ -689,8 +697,8 @@ const refLineIndices = (lines, literal) => {
         replacedPins.add(match[1]);
         eligible.set(
           child.index,
-          " ".repeat(child.indent) + child.key + ": " + targetSha +
-            (match[2] || "") + lineTerminator(lines[child.index])
+          child.indent + child.key + ":" + child.gap + targetSha + (match[2] || "") +
+            lineTerminator(lines[child.index])
         );
       }
     }

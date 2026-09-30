@@ -253,18 +253,17 @@ another release has a split offer. The anchor is the sibling `repository:` key
 of the same `with:` block, never the value of the `ref:`: an enrolled consumer
 checks out a different repository at a literal 40-character commit, and a
 value-only rule would redirect that checkout. A `ref:` moves when the step runs
-`actions/checkout` at a reviewed commit, the `with:` block names this
+`actions/checkout` at a 40-character commit, the `with:` block names this
 repository, the `ref:` is a direct child key of that block, and the value is 40
 lowercase hexadecimal characters. The `with:` block may be written before or
-after the `uses:` it belongs to. Only the SHA is replaced: the key spelling,
-the gap before its colon, the indentation, a comment already on the line and
-the line terminator are all written back as they were read, and no version
-comment is added because Dependabot does not read a `ref:`. Trailing whitespace
-after the value and tab indentation do not survive, and neither is valid YAML
-indentation. A moved `ref:` joins the set of pins a `pin-literal` companion may
-follow, so a constant that names the same commit heals with the workflow that
-named it. A `policy-snapshot` companion is built from the policy allowlists
-instead and does not follow the moved-pin set.
+after the `uses:` it belongs to. Only the SHA is replaced. The key spelling,
+the gap on either side of its colon, the indentation, a comment already on the
+line, the whitespace behind that comment and the line terminator are all
+written back as they were read, and no version comment is added because
+Dependabot does not read a `ref:`. A moved `ref:` joins the set of pins a
+`pin-literal` companion may follow, so a constant that names the same commit
+heals with the workflow that named it. A `policy-snapshot` companion is built
+from the policy allowlists instead and does not follow the moved-pin set.
 
 The rewrite reads a `with:` block, not YAML. A value it cannot read as a
 commit and a key it cannot read as a key are not evidence, so these stay
@@ -280,7 +279,16 @@ as the consumer wrote them, with no warning and no red run:
 - a quoted `repository:` value, in single or double quotes.
 - a `with:` with a tag or an anchor on it.
 - a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
-- a `with:` on a step that is not `actions/checkout`.
+- a `with:` that is not inside a step, so the pair under it is not a
+  checkout's inputs. A `with:` on a step that is not `actions/checkout` is the
+  same case, and a `with:` written beside a sequence item belongs to no step.
+- a `uses:` on the step that is quoted, written on the line below, or carrying
+  a tag or an anchor in front of the key.
+- a step written as a bare `-` with its keys on the lines after it, and a step
+  that is an alias or a merge of another one.
+- a `ref:` whose value is a folded block scalar, such as `ref: >-`.
+- a `ref:` indented with a tab in a block whose other keys are indented with
+  spaces.
 - a `repository:` value this repository names with a trailing slash, or as
   a folded scalar such as `repository: >-`.
 - a `repository:` value in any other spelling, such as a URL.
