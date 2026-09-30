@@ -381,6 +381,12 @@ func TestUnityEnrollmentRegistryRejectsInvalidRepinCompanion(t *testing.T) {
 		{"a .github YAML companion with an uppercase extension", func(value *UnityRepinCompanion) {
 			value.Path = ".github/pin-reference.YAML"
 		}},
+		{"a trailing slash", func(value *UnityRepinCompanion) {
+			value.Path = "docs/pin-reference/"
+		}},
+		{"a .github trailing slash", func(value *UnityRepinCompanion) {
+			value.Path = ".github/"
+		}},
 		{"a .github workflow", func(value *UnityRepinCompanion) {
 			value.Path = ".github/workflows/unity.yml"
 		}},

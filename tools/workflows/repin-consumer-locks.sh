@@ -140,10 +140,14 @@ const reviewedEntryKeys = new Set(["repository", "path", "reason", "owner", "exp
 const reviewedCompanionKeys = new Set(["repository", "path", "mode"]);
 // The workflow walk selects `.yml`/`.yaml` files by name, so a companion on any
 // other extension is named by nothing else and this rewrite is its only
-// writer. Mirrors `validRepinCompanionPath` in internal/enrollment.
+// writer. Mirrors `validRepinCompanionPath` in internal/enrollment, including
+// its rejection of a trailing slash: `path.posix.normalize` keeps one where
+// Go's `path.Clean` removes it, so the check is stated here rather than left
+// to the comparison. A companion names one file, and `path/` is a directory.
 const validCompanionPath = (value) =>
   typeof value === "string" && value.length > 0 &&
   !value.includes("\\") && !value.startsWith("/") && !value.startsWith("-") &&
+  !value.endsWith("/") &&
   !(value === ".github" || (value.startsWith(".github/") && /\.ya?ml$/i.test(value))) &&
   singleLine(value) &&
   !/[\x00-\x1f\x7f]/.test(value) &&
@@ -242,9 +246,46 @@ const versionCommentPattern = /^#\s*v\d+\.\d+\.\d+$/;
 // this the pattern skips every pin in such a file: the rewrite reports no
 // change, the automation closes its own offer as superseded, and the
 // consumer keeps a stale pin with no evidence that anything was missed.
-const matchPinLine = (line) => linePattern.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
+const matchPinLine = (line) => linePattern.exec(stripTerminator(line));
 const lineTerminator = (line) => (line.endsWith("\r") ? "\r" : "");
 const stripTerminator = (line) => (line.endsWith("\r") ? line.slice(0, -1) : line);
+// A block scalar turns everything more indented than its opening key into
+// literal text, and a `run: |` body is where a workflow is written, quoted,
+// and asserted on. A `uses:` or a `repository:`/`ref:` pair inside one is a
+// sample of the shape, not the shape itself, and rewriting it edits a script
+// or a fixture instead of a pin. Both rewrites below consult this, so the
+// sample and the real key are treated the same way. The block ends at the
+// first non-blank line that is not more indented than the key that opened it,
+// which is what libyaml does with a block scalar's indentation indicator
+// absent. Detecting a scalar is a heuristic on the opening line: a line whose
+// value starts with `|` or `>` after optional chomping and indentation
+// indicators. Over-detecting only skips lines the rewrites would have matched
+// by an exact key prefix, so the cost of a false positive is a pin the
+// operator carries by hand, never a wrong write.
+const blockScalarOpener = /^(\s*)[^#].*?:\s*[|>][-+0-9]*\s*(?:#.*)?$/;
+const blockScalarLines = (lines) => {
+  const literal = new Set();
+  let openIndent = -1;
+  for (const [index, line] of lines.entries()) {
+    const body = stripTerminator(line);
+    if (openIndent >= 0) {
+      if (body.trim() === "") {
+        continue;
+      }
+      const indent = body.length - body.trimStart().length;
+      if (indent > openIndent) {
+        literal.add(index);
+        continue;
+      }
+      openIndent = -1;
+    }
+    const opener = blockScalarOpener.exec(body);
+    if (opener) {
+      openIndent = opener[1].length;
+    }
+  }
+  return literal;
+};
 const versionGrammar = /^v\d+\.\d+\.\d+$/;
 // The version comment is a machine-readable contract, so the target version
 // must be a release tag. The scheduled resolver emits only `vX.Y.Z` tags;
@@ -292,12 +333,14 @@ if (githubStat.isSymbolicLink() || !githubStat.isDirectory()) {
   );
 }
 visit(githubRoot);
-const report = { changed: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
+const report = { changed: 0, refs: 0, files: [], skipped: [], unmatched: [], companions: [], unmatchedCompanions: [] };
 const matchedExceptions = new Set();
-// The pins this rewrite removes, from the workflow lines it rewrites. Only the
-// workflow subset may move inside a pin-literal companion, so a historical SHA
-// quoted for another reason survives untouched; `workflowReplacedPins` below
-// takes that subset once the workflow pass is done.
+// The pins this rewrite removes, from the workflow lines it rewrites. A
+// checkout `ref:` naming this repository is such a pin, and it moves the same
+// way. Only the workflow subset may move inside a pin-literal companion, so a
+// historical SHA quoted for another reason survives untouched;
+// `workflowReplacedPins` below takes that subset once the workflow pass is
+// done.
 const replacedPins = new Set();
 // A consumer owns the gap between its pin and a `# vX.Y.Z` comment, because
 // its own formatter owns that file. The enrolled repositories disagree:
@@ -352,8 +395,14 @@ for (const filePath of files) {
     continue;
   }
   const lines = fs.readFileSync(filePath, "utf8").split("\n");
-  sources.push({ filePath, relativePath, lines });
+  // A line inside a block scalar is a sample of a workflow, not a workflow,
+  // so it is neither rewritten below nor read as comment-gap evidence.
+  const literal = blockScalarLines(lines);
+  sources.push({ filePath, relativePath, lines, literal });
   for (const [index, line] of lines.entries()) {
+    if (literal.has(index)) {
+      continue;
+    }
     const match = matchPinLine(line);
     const comment = match ? match[3] || "" : "";
     if (comment !== "" && versionCommentPattern.test(comment.trim())) {
@@ -427,10 +476,14 @@ const bareRepository = (value) => value.replace(/[ \t]+#.*$/, "").trim();
 // Collect the line indices a checkout `ref:` may move on. A `with:` block is
 // a block mapping, so every direct child shares one indent: the first deeper
 // line fixes it and the block ends at the first line at or above the `with:`
-// indent. Blank and comment lines belong to no key and are skipped.
-const refLineIndices = (lines) => {
+// indent. Blank and comment lines belong to no key and are skipped, and a
+// line inside a block scalar is text rather than structure.
+const refLineIndices = (lines, literal) => {
   const eligible = new Set();
   for (let start = 0; start < lines.length; start += 1) {
+    if (literal.has(start)) {
+      continue;
+    }
     const withMatch = withPattern.exec(stripTerminator(lines[start]));
     if (!withMatch) {
       continue;
@@ -439,6 +492,8 @@ const refLineIndices = (lines) => {
     let childIndent = -1;
     const children = [];
     for (let index = start + 1; index < lines.length; index += 1) {
+      // A `with:` inside a block scalar is not a `with:` block at all, and the
+      // scan skips the opening line above, so nothing inside one is read here.
       const line = stripTerminator(lines[index]);
       if (line.trim() === "" || line.trimStart().startsWith("#")) {
         continue;
@@ -494,28 +549,39 @@ for (const source of sources) {
   let fileChanges = 0;
   // The `ref:` scan runs on the original lines, before any `uses:` pin moves,
   // so the sibling `repository:` it anchors on is the one the consumer wrote.
-  const refLines = refLineIndices(source.lines);
+  const refLines = refLineIndices(source.lines, source.literal);
+  const refChanges = new Set();
   const lines = source.lines.map((line, index) => {
-    const rewrittenLine = refLines.has(index)
-      ? rewriteRefLine(line)
-      : rewritePinLine(line, `${source.relativePath}:${index + 1}`);
+    const rewrittenLine = source.literal.has(index)
+      ? line
+      : refLines.has(index)
+        ? rewriteRefLine(line)
+        : rewritePinLine(line, `${source.relativePath}:${index + 1}`);
     if (rewrittenLine !== line) {
       fileChanges += 1;
+      if (refLines.has(index)) {
+        refChanges.add(index);
+      }
     }
     return rewrittenLine;
   });
+  source.refChanges = refChanges;
   if (fileChanges === 0) {
     continue;
   }
   pendingWrites.push({ filePath: source.filePath, content: lines.join("\n") });
   report.changed += fileChanges;
+  // The two mutations are reported apart because the pull request body names
+  // which one happened, and a run that moves only a checkout `ref:` moved no
+  // `uses:` reference.
+  report.refs += [...source.refChanges].length;
   report.files.push({ path: source.relativePath, lines: fileChanges });
 }
-// Only a workflow pin this rewrite removes may move inside a pin-literal
-// companion. A `pin-lines` companion can name the same SHA for its own reasons,
-// and letting that widen the set would rewrite a reviewed witness in the
-// pin-literal file and skip the stale-pin check below, which is the protection
-// the comment above this set promises.
+// Only a pin this rewrite removes from a workflow may move inside a
+// pin-literal companion. A `pin-lines` companion can name the same SHA for its
+// own reasons, and letting that widen the set would rewrite a reviewed witness
+// in the pin-literal file and skip the stale-pin check below, which is the
+// protection the comment above this set promises.
 const workflowReplacedPins = new Set(replacedPins);
 for (const [entryPath, entry] of exceptions) {
   if (!matchedExceptions.has(entryPath)) {
@@ -590,28 +656,27 @@ for (const companion of reviewedCompanions) {
     for (const replacedPin of [...workflowReplacedPins].sort()) {
       updated = replaceStandalone(replacedPin);
     }
-    if (workflowReplacedPins.size === 0) {
-      // No workflow pin was removed, so nothing above could heal a lagging
-      // companion. Standalone authorized tokens that are not the target may
-      // be reviewed witnesses, and a mechanical rewrite cannot tell them
-      // apart from stale pins. A healed companion names the target as its pin
-      // constant; one that names no target anywhere still carries a stale
-      // pin, so fail closed for operator review.
-      const approvedLocks = lowered(policy.approvedLockShas);
-      const standaloneTokens = [...original.matchAll(/(?<![0-9a-fA-F])([0-9a-f]{40})(?![0-9a-fA-F])/g)]
-        .map((match) => match[1]);
-      const namesTarget = standaloneTokens.some((token) => token === targetSha);
-      const hasStaleToken = standaloneTokens.some(
-        (token) => token !== targetSha && approvedLocks.has(token)
+    // A mechanical rewrite cannot tell a stale pin constant from a reviewed
+    // historical witness, so it resolves neither and fails closed on both.
+    // The check reads the rewritten text, because that is the state the offer
+    // carries: a pin the replacement above healed now reads as the target, and
+    // a companion that names the target holds a healed constant beside whatever
+    // witness it also carries. A token that is still authorized, is not the
+    // target, and is not the one any moved pin replaced was never a pin this
+    // run healed, and one the rewrite cannot account for.
+    const approvedLocks = lowered(policy.approvedLockShas);
+    const standaloneTokens = [...updated.matchAll(/(?<![0-9a-fA-F])([0-9a-f]{40})(?![0-9a-fA-F])/g)]
+      .map((match) => match[1]);
+    const namesTarget = standaloneTokens.some((token) => token === targetSha);
+    const unaccounted = standaloneTokens.some(
+      (token) => token !== targetSha && approvedLocks.has(token)
+    );
+    if (unaccounted && !namesTarget) {
+      throw new Error(
+        `The pin-literal companion ${companion.path} still names an authorized pin that no ` +
+          "workflow pin this rewrite removes accounts for. A mechanical edit cannot tell a " +
+          "stale pin constant from a reviewed witness; review the companion and update it by hand."
       );
-      if (hasStaleToken && !namesTarget) {
-        throw new Error(
-          `The pin-literal companion ${companion.path} still names an authorized pin while ` +
-            "the workflows carry no pin this rewrite removes. A mechanical edit cannot tell " +
-            "a stale pin constant from a reviewed witness; review the companion and update " +
-            "it by hand."
-        );
-      }
     }
     if (updated !== original) {
       companionChanges = 1;
@@ -653,13 +718,17 @@ open_repin_pull_request() {
   # paths cannot drift.
   local repository="$1" branch_name="$2" label="$3" target_sha="$4"
   local authorization="$5" file_list="$6" preserved_section="$7" companion_section="$8"
+  local ref_count="$9"
   local body_file
   body_file="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/repin-consumer-locks.XXXXXX")"
   local mutation_bullet="Only the \`@<sha>\` suffix of \`uses:\` references to
   \`${lock_repository_prefix%/*}\` changed, plus \`# vX.Y.Z\` version comments
-  (updated or added). A checkout \`ref:\` naming that repository moved with
-  them."
+  (updated or added)."
   local references_section=""
+  if [ "${ref_count}" != "0" ]; then
+    mutation_bullet="${mutation_bullet}
+- A checkout \`ref:\` naming that repository moved with them."
+  fi
   if [ -z "${file_list}" ]; then
     mutation_bullet="No \`uses:\` pin needed a change; this pull request carries reviewed companion artifacts only."
   else
@@ -879,6 +948,12 @@ repin_consumer() {
       echo "::error::${repository}: could not read the rewrite report." >&2
       exit 1
     fi
+    local ref_count
+    if ! ref_count="$(printf '%s' "${report}" | jq -er '.refs | if type == "number" then . else 0 end')" ||
+      [[ ! "${ref_count}" =~ ^[0-9]+$ ]]; then
+      echo "::error::${repository}: could not read the checkout ref count." >&2
+      exit 1
+    fi
     local preserved preserved_count
     if ! preserved="$(printf '%s' "${report}" | jq -r '
       .skipped[] | "- `\(.path)` preserved; reviewed by \(.owner) until \(.expiresAt)"
@@ -1065,7 +1140,8 @@ ${preserved}
       fi
       open_repin_pull_request \
         "${repository}" "${branch_name}" "${label}" "${target_sha}" \
-        "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}"
+        "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}" \
+        "${ref_count}"
       printf '%s\n' "| \`${repository}\` | opened repin pull request to \`${label}\` from the existing branch |" >> "${GITHUB_STEP_SUMMARY}"
       exit 0
     fi
@@ -1078,7 +1154,8 @@ ${preserved}
     fi
     open_repin_pull_request \
       "${repository}" "${branch_name}" "${label}" "${target_sha}" \
-      "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}"
+      "${authorization}" "${file_list}" "${preserved_section}" "${companion_section}" \
+      "${ref_count}"
     local lines_word="lines"
     if [ "${changed}" = "1" ]; then
       lines_word="line"

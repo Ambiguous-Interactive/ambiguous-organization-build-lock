@@ -224,10 +224,10 @@ one consumer file that derives its content from the pin, with one mechanical
 rewrite mode. `pin-lines` applies the same `uses:` pin rewrite to every line
 of the file. `pin-literal` replaces the pinned SHAs that this rewrite
 removes, as standalone tokens only, so a SHA embedded in a longer hex
-constant survives. The path may be under `.github/`. It must not be a
-`.yml` or `.yaml` file there, because the `uses:` pin rewrite already walks
-every YAML file under `.github/` and two writers on one file would be two
-interpretations of one pin. When a rewrite removes no pin, a `pin-literal`
+constant survives. The path may be under `.github/`. It must not name a
+`.yml` or `.yaml` file there, whatever its case, because the `uses:` pin
+rewrite already walks every such file and two writers on one file would be
+two interpretations of one pin. When a rewrite removes no pin, a `pin-literal`
 companion that names no target pin anywhere still carries a stale pin, and
 the rewrite fails closed: it cannot tell a stale pin constant from a reviewed
 historical witness, so an operator updates that file by hand. `policy-snapshot` mirrors
@@ -247,13 +247,26 @@ run another release has a split offer. The anchor is the sibling
 an enrolled consumer checks out a different repository at a literal
 40-character commit, and a value-only rule would redirect that checkout. A
 `ref:` moves when the `with:` block names this repository, the `ref:` is a
-direct child key of that block, and the value is a 40-character SHA. An
-expression, a branch, and a tag stay as the consumer wrote them, and a
-`ref:` nested under another key never moves. Only the SHA changes, and no
-version comment is added, because Dependabot does not read a `ref:`. A moved
-`ref:` joins the set of pins a `pin-literal` companion may follow, so a
-policy-snapshot or constant that names the same commit heals with the
-workflow that named it.
+direct child key of that block, and the value is a 40-character SHA. Only
+the SHA changes, and no version comment is added, because Dependabot does
+not read a `ref:`. A moved `ref:` joins the set of pins a `pin-literal`
+companion may follow, so a policy snapshot or constant that names the same
+commit heals with the workflow that named it.
+
+The rewrite reads a `with:` block, not YAML. Three shapes therefore stay as
+the consumer wrote them, with no warning and no red run:
+
+- an expression, such as `ref: ${{ steps.policy_pin.outputs.sha }}`.
+- a branch or a tag.
+- a flow mapping on one line, such as `with: {repository: ..., ref: ...}`.
+
+The first two are the consumer's own choice and usually self-healing. The
+third is a real gap: such a `ref:` does not move, so the offer still splits.
+No enrolled consumer writes that shape today. If one adopts it, the offer
+goes red in the consumer's own contract check, and the remedy is to write
+the block form. A workflow written inside a `run: |` body is text, not
+structure, so a `uses:` line or a `repository:`/`ref:` pair there is a
+sample and is left exactly as written.
 
 The workflow mints one installation token per run through the automation App
 (`BUILD_LOCK_APP_*` credentials). Both Apps are installed org-wide by

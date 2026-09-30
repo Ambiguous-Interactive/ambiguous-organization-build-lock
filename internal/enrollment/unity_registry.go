@@ -121,12 +121,12 @@ func validRepinExceptionPath(value string) bool {
 }
 
 // validRepinCompanionPath requires one normalized repository-relative file
-// that the workflow pin rewrite does not already own. That rewrite walks every
-// YAML file under `.github/`, so a companion there must not be YAML; a JSON or
-// script under `.github/` is named by nothing else and this rewrite is its
-// only writer. Companion paths are reproduced in run logs, repin pull request
-// bodies, and `git add` arguments, so control characters, backticks,
-// and option-like leading dashes are refused.
+// that the workflow pin rewrite does not already own. That rewrite selects
+// `.yml` and `.yaml` files under `.github/` by name, so a companion there
+// must not name one; a JSON or script under `.github/` is named by nothing
+// else and this rewrite is its only writer. Companion paths are reproduced in
+// run logs, repin pull request bodies, and `git add` arguments, so control
+// characters, backticks, and option-like leading dashes are refused.
 func validRepinCompanionPath(value string) bool {
 	clean, err := cleanRepositoryPath(value)
 	if err != nil || clean != value ||
