@@ -298,20 +298,22 @@ explicit release, post-action, or scheduled-reaper fallback, then confirm the
 caller is absent before rerunning. Empty PR inputs on push and dispatch do not
 perform PR API calls.
 
-A slow acquire has two possible causes, and acquire publishes each one separately
-so an operator can tell them apart without reading logs (issue #53 item 6):
+A slow acquire has two causes. Acquire publishes each one separately, so an
+operator can tell them apart without reading logs (issue #53 item 6):
 
 | Output | Meaning |
 | --- | --- |
-| `runner-wait-ms` | Time the job waited for a GitHub runner before the step could start. Measured from the exact job's own Actions timeline. Empty when GitHub records no provable timeline; never `0` for an unmeasured wait. |
-| `wait-ms` | Time this acquire step spent before its outcome. It covers the organization FIFO wait and the action's own setup reads, and it excludes the runner wait above. |
-| `queue-position` | 1-based FIFO position at the final poll. `0` when the caller never queued, because it already held the lock or admission was refused before the queue. |
-| `attempts` | Poll-loop iterations. A value above `1` means the caller queued at least once. |
+| `runner-wait-ms` | Time the job waited for a GitHub runner before the action could start. Measured from the exact job's own Actions timeline. Empty when the wait cannot be proven. |
+| `wait-ms` | Time this action spent. It covers the organization FIFO wait and the action's own setup reads. It excludes the runner wait above. |
+| `queue-position` | 1-based FIFO position this caller last waited at, and 0 when it never waited. |
+| `attempts` | Poll iterations in the acquire wait loop. |
 
-Every outcome path reports the same two phases in the job summary. A caller that
-polled more than once also gets the last observation that actually withheld the
-lock, naming the blocking holder or reservation. The phases carry only elapsed
-milliseconds and a queue position; no credential data is published.
+Every terminal summary reports `runner-wait-ms` under the same name. A caller
+that waited also gets the last observation that withheld the lock. That
+observation names the blocking holder or reservation. The phases carry only
+elapsed milliseconds and a queue position, so they publish no credential data.
+An empty `runner-wait-ms` means unproven, not zero.
+
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The return wrapper

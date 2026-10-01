@@ -2139,12 +2139,12 @@ test("acquire succeeds idempotently when this run already holds the lock", async
     assert.equal(outputs["state-sha"], "state-sha");
     assert.equal(outputs.attempts, "1");
     assert.equal(outputs["stale-recovered"], "false");
-    // This caller never queued, so it has no queue position, and no github-token means
-    // its runner wait could not be measured. Neither may be reported as a measured zero.
+    // This caller never waited in the FIFO, so it publishes no queue position. Without
+    // a github-token its runner wait cannot be proven, so it stays empty rather than 0.
     assert.equal(outputs["queue-position"], "0");
     assert.equal(outputs["runner-wait-ms"], "");
     const summary = fs.readFileSync(summaryFile, "utf8");
-    assert.match(summary, /github-runner-wait-ms=unmeasured\./);
+    assert.match(summary, /runner-wait-ms=unmeasured\./);
     assert.doesNotMatch(summary, /queue-position/);
   });
 
@@ -2857,7 +2857,7 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
                     leaseMinutes: 240,
                     pollSeconds: 1
                   }),
-                /holder=other\/repo:999:perf-benchmarks:editmode.*queue-position=1.*reason=awaiting scheduled reaper/
+                /holder=`other\/repo:999:perf-benchmarks:editmode`.*queue-position=1.*reason=`awaiting scheduled reaper/
               );
 
               assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
@@ -2887,6 +2887,11 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
 // organization FIFO wait, and a wait that was survived has to be explained on the
 // success path too, not only on timeout.
 test("acquire publishes both wait phases and explains the wait it survived", async () => {
+  // Each clock read advances 30 s, and the lock-config read is charged a distinctive
+  // extra SETUP_COST_MS. That lets the test prove wait-ms covers this action's own setup
+  // reads, which the pre-change runtime excluded by resetting its clock after them.
+  const CLOCK_STEP_MS = 30000;
+  const SETUP_COST_MS = 120000;
   const originalNow = Date.now;
   let now = 0;
   let peerReleased = false;
@@ -2894,7 +2899,7 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
   let state = semaphoreState([semaphoreHolder("other/repo", "888", "editmode")]);
 
   Date.now = () => {
-    now += 30000;
+    now += CLOCK_STEP_MS;
     return now;
   };
 
@@ -2912,6 +2917,7 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
                 return jsonResponse(200, { object: { sha: "branch-sha" } });
               }
               if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                now += SETUP_COST_MS;
                 return base64Content({ maxHolders: 1 }, "cfg");
               }
               if (parsed.pathname === SEMAPHORE_STATE_PATH) {
@@ -2965,11 +2971,20 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
       assert.equal(outputs["runner-wait-ms"], "270000");
       assert.equal(outputs["queue-position"], "1");
       assert.equal(outputs.attempts, "2");
-      assert.ok(Number(outputs["wait-ms"]) > 0, "an acquire that polled twice must report its own wait");
+      assert.ok(
+        Number(outputs["wait-ms"]) >= 270000 + SETUP_COST_MS,
+        `wait-ms must cover this action's setup reads; the pre-change clock reset after them ` +
+          `and reported ${Number(outputs["wait-ms"]) - SETUP_COST_MS}`
+      );
+      assert.notEqual(
+        outputs["wait-ms"],
+        outputs["runner-wait-ms"],
+        "the two phases must not collapse into one number"
+      );
 
       const summary = fs.readFileSync(summaryFile, "utf8");
-      assert.match(summary, /github-runner-wait-ms=270000/);
-      assert.match(summary, /holder=other\/repo:888:perf-benchmarks:editmode/);
+      assert.match(summary, /runner-wait-ms=270000/);
+      assert.match(summary, /holder=`other\/repo:888:perf-benchmarks:editmode`/);
       assert.match(summary, /queue-position=1/);
     });
   } finally {

@@ -2064,19 +2064,28 @@ async function getRunAttemptJobs(identity, authToken, options = {}) {
   return jobs;
 }
 
-// Issue #53 item 6 asks an operator to tell a GitHub-runner wait from an
-// organization FIFO wait. The runner wait happens before this process starts, but the
-// exact job record read to prove the caller identity already carries that timeline, so
-// the phase is measured with no extra API call. An unprovable timeline returns an
-// empty string, never a zero: a zero would read as "this job never waited for a
-// runner", which is a claim the evidence does not support.
+// The runner wait happens before this process starts. The exact job record read to prove
+// the caller identity already carries that timeline, so the phase costs no extra API
+// call.
+//
+// An unprovable timeline returns an empty string, never a zero. A zero would claim the
+// job never waited for a runner, and the evidence does not support that claim.
+// Date.parse is implementation-defined outside ISO 8601, so only the shape GitHub
+// documents is accepted. A span past the bound is a bad record, not a measurement.
+const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const RUNNER_WAIT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+
 function jobRunnerWaitMs(job) {
-  const created = Date.parse(String((job && job.created_at) || ""));
-  const started = Date.parse(String((job && job.started_at) || ""));
-  if (!Number.isFinite(created) || !Number.isFinite(started) || started < created) {
+  const created = String((job && job.created_at) || "");
+  const started = String((job && job.started_at) || "");
+  if (!ISO_UTC_TIMESTAMP.test(created) || !ISO_UTC_TIMESTAMP.test(started)) {
     return "";
   }
-  return String(started - created);
+  const waitMs = Date.parse(started) - Date.parse(created);
+  if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > RUNNER_WAIT_MAX_MS) {
+    return "";
+  }
+  return String(waitMs);
 }
 
 async function resolveCurrentJob(identity, authToken, options = {}) {
@@ -2960,20 +2969,23 @@ async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
   }
 }
 
+// Holder IDs, runner IDs, and reason codes come from state that peers write, so every
+// summary that renders them must escape. Render each as an inline code span so it cannot
+// inject markdown, and escape pipes because GFM splits cells on them even inside code
+// spans. This is the only rendering helper for peer-written values.
+function summaryCell(value) {
+  return value
+    ? `\`${oneLine(value).replace(/`/g, "'").replace(/\|/g, "\\|")}\``
+    : "";
+}
+
 function appendPeerTimelineSummary(peerTimeline, holderId) {
   if (!peerTimeline || peerTimeline.status === "not-applicable") {
     return;
   }
   const count = Array.isArray(peerTimeline.events) ? peerTimeline.events.length : 0;
-  // Holder IDs and reason codes come from state that peers write. Render each
-  // as an inline code span so it cannot inject markdown into the summary, and
-  // escape pipes because GFM splits cells on them even inside code spans.
-  const cell = (value) =>
-    value
-      ? `\`${oneLine(value).replace(/`/g, "'").replace(/\|/g, "\\|")}\``
-      : "";
   const header =
-    `### Peer lock activity for ${cell(holderId)}\n\n` +
+    `### Peer lock activity for ${summaryCell(holderId)}\n\n` +
     `Status: ${peerTimeline.status}${peerTimeline.reason ? ` (${oneLine(peerTimeline.reason)})` : ""}; ` +
     `window from ${peerTimeline.windowFrom || "unknown"}; ${count} event(s).` +
     `${peerTimeline.truncated ? " The window was truncated; see the peer-timeline output." : ""}\n`;
@@ -2986,8 +2998,8 @@ function appendPeerTimelineSummary(peerTimeline, holderId) {
           ? [event.reservationState, event.incidentId, event.reason].filter(Boolean).join(" ")
           : event.reason || "";
       lines.push(
-        `| ${cell(event.time)} | ${cell(event.kind)} | ${cell(event.holderId)} | ` +
-        `${cell(event.runnerId)} | ${cell(detail)} |`
+        `| ${summaryCell(event.time)} | ${summaryCell(event.kind)} | ${summaryCell(event.holderId)} | ` +
+        `${summaryCell(event.runnerId)} | ${summaryCell(detail)} |`
       );
     }
   } else if (peerTimeline.status !== "unavailable") {
@@ -2996,35 +3008,41 @@ function appendPeerTimelineSummary(peerTimeline, holderId) {
   appendSummary(lines.join("\n"));
 }
 
-// A caller that took the free slot on its first poll never queued, so there is
-// nothing to explain. A caller that polled again reports the last observation that
-// withheld the lock, using the same vocabulary the timeout path already uses, so an
-// operator reads one format for every outcome.
-// Issue #53 item 6: the summary must also name the GitHub-runner wait, which happens
-// before this process starts and is therefore visible only as the published output.
-function acquireSummary(config, waitMs, attempts, runnerWaitMs, observation) {
+// The runner wait happens before this process starts, so no outcome path can measure it
+// on its own. Publish it on every terminal summary under the same name as the output, and
+// name it unmeasured rather than zero when it cannot be proven.
+function runnerWaitText(runnerWaitMs) {
+  return `runner-wait-ms=${runnerWaitMs === "" ? "unmeasured" : runnerWaitMs}.`;
+}
+
+// A caller that was admitted on its first poll never waited, so there is nothing to
+// explain. A caller that waited reports the last observation that withheld the lock,
+// using the same vocabulary the timeout path already uses.
+function acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker }) {
   const line =
     `Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts. ` +
-    `github-runner-wait-ms=${runnerWaitMs === "" ? "unmeasured" : runnerWaitMs}.`;
-  return attempts > 1
-    ? `${line} ${observationText(config, observation, attempts, waitMs)}`
+    runnerWaitText(runnerWaitMs);
+  return blocker
+    ? `${line} ${observationText(config, blocker, attempts, waitMs)}`
     : line;
 }
 
-function observationText(config, observation, attempts, elapsedMs) {
-  const details = [`attempts=${attempts}`, `elapsed-ms=${elapsedMs}`];
+// Peer-written holder IDs, runner IDs, and reason codes are rendered through
+// summaryCell, because this text reaches an operator-facing evidence document.
+function observationText(config, observation, attempts, waitMs) {
+  const details = [`attempts=${attempts}`, `wait-ms=${waitMs}`];
   if (observation && observation.holderId) {
-    details.push(`holder=${observation.holderId}`);
+    details.push(`holder=${summaryCell(observation.holderId)}`);
     if (observation.holderRunUrl) {
-      details.push(`holder-run=${observation.holderRunUrl}`);
+      details.push(`holder-run=${summaryCell(observation.holderRunUrl)}`);
     }
     details.push(`queue-position=${observation.queuePosition}`);
-    details.push(`reason=${observation.reason}`);
+    details.push(`reason=${summaryCell(observation.reason)}`);
   } else if (observation) {
     details.push(`holder=<none>`);
     details.push(`queue-position=${observation.queuePosition}`);
     if (observation.reason) {
-      details.push(`reason=${observation.reason}`);
+      details.push(`reason=${summaryCell(observation.reason)}`);
     }
   }
   return `${config.lockName} wait state: ${details.join("; ")}.`;
@@ -3134,6 +3152,13 @@ async function runCancellationCleanup(config, identity, cancellation) {
   }
 }
 
+// The published queue position is the position this caller last waited at, and 0 when it
+// was never left waiting. Deriving it from the last blocking observation keeps one value
+// for the output, the job summary, and every outcome path.
+function queuePositionAt(blocker) {
+  return blocker ? blocker.queuePosition : 0;
+}
+
 function writeAcquireOutputs({
   acquired,
   lockName,
@@ -3141,7 +3166,7 @@ function writeAcquireOutputs({
   stateSha = "",
   waitMs,
   runnerWaitMs = "",
-  queuePosition = 0,
+  queuePosition = queuePositionAt(null),
   attempts,
   staleRecovered = false,
   quarantineRecovered = false,
@@ -3215,19 +3240,15 @@ async function acquire(config) {
 
   try {
     let lockConfig = null;
-    // Two clocks, both published. `started` is the step start, so `wait-ms` covers
-    // every moment this process spent, on every outcome path. The FIFO wait gets its
-    // own origin after the setup reads, so the configured timeout still bounds only
-    // the wait and never the setup.
+    // Two clocks, both published. `started` is the first thing this routine does, so
+    // wait-ms covers every moment from there to the outcome, on every path. The wait
+    // budget gets its own origin after the setup reads below, so timeout-minutes still
+    // bounds the organization FIFO wait and not the setup.
     const started = Date.now();
-    let deadline = started + config.timeoutMinutes * 60 * 1000;
     let attempts = 0;
     const staleRecovered = false;
     let quarantineRecovered = false;
     let lastObservation = null;
-    // The last observation that actually withheld the lock. A success reports this
-    // rather than the final poll, because the final poll is by definition the one where
-    // the lock was free and the caller was admitted, which explains nothing.
     let lastBlocker = null;
     let authFailureSince = null;
     let lastPrHeadCheckAt = 0;
@@ -3278,6 +3299,7 @@ async function acquire(config) {
             holderId: identity.holderId,
             waitMs,
             runnerWaitMs,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             admissionResult: "account-blocked-cleanup-failed",
             incidentId: incident.incidentId,
@@ -3299,6 +3321,7 @@ async function acquire(config) {
         stateSha: cleanupResult?.sha || observedStateSha || "",
         waitMs,
         runnerWaitMs,
+        queuePosition: queuePositionAt(lastBlocker),
         attempts,
         admissionResult: "account-blocked",
         incidentId: incident.incidentId,
@@ -3366,7 +3389,7 @@ async function acquire(config) {
             const message =
               `Pull request head validation failed (${oneLine(error.message)}), and exact pre-activation ` +
               `build-lock cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
-            appendSummary(message);
+            appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
             throw new Error(message, { cause: cleanupError });
           }
         }
@@ -3377,6 +3400,7 @@ async function acquire(config) {
           holderId: identity.holderId,
           waitMs,
           runnerWaitMs,
+          queuePosition: queuePositionAt(lastBlocker),
           attempts,
           staleRecovered,
           quarantineRecovered,
@@ -3384,7 +3408,7 @@ async function acquire(config) {
           admissionResult: "pr-head-check-failed"
         });
         const message = `Pull request head validation failed before ${config.lockName} admission: ${oneLine(error.message)}.`;
-        appendSummary(message);
+        appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
         const terminalError = new Error(message, { cause: error });
         terminalError.prHeadValidationFailed = true;
         throw terminalError;
@@ -3410,6 +3434,7 @@ async function acquire(config) {
             holderId: identity.holderId,
             waitMs,
             runnerWaitMs,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             staleRecovered,
             quarantineRecovered,
@@ -3418,7 +3443,7 @@ async function acquire(config) {
           const message =
             `Pull request ${config.pullRequestNumber} was superseded, and exact pre-activation build-lock ` +
             `cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
-          appendSummary(message);
+          appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
           throw new Error(message, { cause: cleanupError });
         }
       }
@@ -3429,6 +3454,7 @@ async function acquire(config) {
         holderId: identity.holderId,
         waitMs,
         runnerWaitMs,
+        queuePosition: queuePositionAt(lastBlocker),
         attempts,
         staleRecovered,
         quarantineRecovered,
@@ -3438,7 +3464,7 @@ async function acquire(config) {
       const message =
         `Stale pull request run for ${config.expectedHeadSha}; pull request #${config.pullRequestNumber} ` +
         `now points to ${result.currentHeadSha}`;
-      appendSummary(`${message}. No licensed work was admitted.`);
+      appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}. No licensed work was admitted.`);
       throw new Error(message);
     };
 
@@ -3447,7 +3473,9 @@ async function acquire(config) {
     assertAcquireConfigRequirements(config, lockConfig);
     await ensureStateBranch(config, { apiOptions });
     let lockConfigReadAt = Date.now();
-    deadline = lockConfigReadAt + config.timeoutMinutes * 60 * 1000;
+    // The wait budget starts here, so timeout-minutes bounds the organization FIFO wait
+    // and not the setup reads above.
+    const deadline = lockConfigReadAt + config.timeoutMinutes * 60 * 1000;
 
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
@@ -3613,12 +3641,12 @@ async function acquire(config) {
             stateSha: acquiredStateSha,
             waitMs,
             runnerWaitMs,
-            queuePosition: 0,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             staleRecovered,
             quarantineRecovered
           });
-          appendSummary(acquireSummary(config, waitMs, attempts, runnerWaitMs, lastBlocker));
+          appendSummary(acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker: lastBlocker }));
           console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
           console.log("::endgroup::");
           return;
@@ -3686,7 +3714,7 @@ async function acquire(config) {
           const reasons = reservationDetails
             ? `${holderReasons}; capacity reserved by ${reservationDetails}`
             : holderReasons;
-          lastObservation = lastBlocker = {
+          lastObservation = {
             holderId: holderIds,
             holderRunUrl: holderRuns,
             queuePosition: position,
@@ -3698,7 +3726,7 @@ async function acquire(config) {
               `queue-position=${position} reason=${reasons}`
           );
         } else if (reservations.length) {
-          lastObservation = lastBlocker = {
+          lastObservation = {
             holderId: "",
             holderRunUrl: "",
             queuePosition: position,
@@ -3805,16 +3833,23 @@ async function acquire(config) {
             stateSha: write.sha,
             waitMs,
             runnerWaitMs,
-            queuePosition: position,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             staleRecovered,
             quarantineRecovered
           });
-          appendSummary(acquireSummary(config, waitMs, attempts, runnerWaitMs, lastBlocker));
+          appendSummary(acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker: lastBlocker }));
           console.log(`Acquired ${config.lockName}.`);
           console.log("::endgroup::");
           return;
         }
+
+        // Reaching here means the caller was not admitted, so it is still waiting in the
+        // organization FIFO. This observation is the wait it is living through, and it is
+        // the last one on any path that ends without an admission. An admitted caller
+        // therefore reports the position and the blocker that ended its wait, which is the
+        // same value the queue-position output publishes.
+        lastBlocker = lastObservation;
 
         if (changed) {
           throwIfCancellation(cancellation);
@@ -3877,12 +3912,12 @@ async function acquire(config) {
       holderId: identity.holderId,
       waitMs,
       runnerWaitMs,
-      queuePosition: lastObservation ? lastObservation.queuePosition : 0,
+      queuePosition: queuePositionAt(lastBlocker),
       attempts,
       staleRecovered,
       quarantineRecovered
     });
-    appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
+    appendSummary(`Timed out waiting for ${config.lockName}. ${runnerWaitText(runnerWaitMs)} ${details}`);
     await cleanupAfterAcquireFailure(config, identity, "timeout", {
       maxAttempts: 3,
       conflictDelayMs: 500,
@@ -4087,7 +4122,11 @@ async function release(config) {
           globalQuarantined: false,
           incidentId: "",
           resourceHealth: resourceReport.health,
-          resourceReason: resourceReport.reason
+          resourceReason: resourceReport.reason,
+          // The removal never landed, so this run held no session and there is no session
+          // window to replay. `not-applicable` says that. `unavailable` would claim a read
+          // failed, and it carries no reason.
+          peerTimeline: { status: "not-applicable", events: [] }
         },
         UNRECORDED_RELEASE_RESULT
       );
@@ -4497,7 +4536,9 @@ async function reap(config, options = {}) {
           ? `Skipped stale holder checkpoint for ${config.lockName}; fresh state no longer matched the proven version.`
           : holderScanIncomplete
           ? `Checkpointed capacity-critical stale state for ${config.lockName}, but the bounded holder scan did not finish.`
-          : `Reaped capacity-critical stale state for ${config.lockName}.`
+          : holderReaped
+          ? `Reaped capacity-critical stale state for ${config.lockName}.`
+          : `Pruned expired cooldowns for ${config.lockName}. No stale holder was proven.`
       );
       if (holderScanIncomplete) {
         throw reapDeadlineError("holder scan after checkpoint");

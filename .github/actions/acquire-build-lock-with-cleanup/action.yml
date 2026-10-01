@@ -15,7 +15,8 @@ inputs:
     description: >-
       GitHub token with Actions read access, plus pull request read access for PR
       runs. Records the exact numeric job ID for safe stale reaping and binds
-      queued PR admission to the event head.
+      queued PR admission to the event head. It also measures runner-wait-ms, so that
+      output stays empty without it.
     required: false
   pull-request-number:
     description: Pull request number to revalidate throughout the FIFO wait. Required for pull request runs.
@@ -62,23 +63,22 @@ outputs:
     description: Lock-state file SHA after acquire.
   wait-ms:
     description: >-
-      Milliseconds this acquire step spent before its outcome, measured from the start
-      of the step. It covers the organization FIFO wait and this action's own setup
-      reads, and it excludes the time before the job reached a runner, which
-      runner-wait-ms reports.
+      Milliseconds this action spent before its outcome. Measured from the start of the
+      acquire routine, after the action reads its inputs. Covers the organization FIFO
+      wait and this action's own setup reads. Excludes the time before the job reached a
+      runner; runner-wait-ms reports that time.
   runner-wait-ms:
     description: >-
-      Milliseconds the job waited for a GitHub runner before this step could start,
-      measured from the exact job's own Actions timeline. Empty when GitHub records no
-      provable job timeline. Never zero for an unmeasured wait, because zero would
-      read as no runner wait.
+      Milliseconds the job waited for a GitHub runner before this action could start.
+      Measured from the exact job's own Actions timeline. Empty when the wait cannot be
+      proven, which needs github-token and runner-id. A proven wait shorter than the
+      one-second resolution of that timeline reports 0. An unproven wait is never 0.
   queue-position:
     description: >-
-      1-based organization FIFO position of this caller at its final poll, and 0 when
-      the caller never queued because it already held the lock or admission was
-      refused before the queue.
+      1-based organization FIFO position this caller last waited at, and 0 when it never
+      waited. The job summary reports the same value.
   attempts:
-    description: CAS attempts.
+    description: Poll iterations in the acquire wait loop.
   stale-recovered:
     description: Compatibility output; always false because only the scheduled reaper handles stale holders.
   quarantine-recovered:

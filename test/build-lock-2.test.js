@@ -1702,6 +1702,28 @@ const currentJobTimingCases = [
       started_at: "2026-06-06T00:00:00.000Z"
     },
     runnerWaitMs: ""
+  },
+  {
+    name: "leaves the wait unmeasured when a span passes the plausibility bound",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00Z",
+      started_at: "9999-12-31T23:59:59Z"
+    },
+    runnerWaitMs: ""
+  },
+  {
+    name: "leaves the wait unmeasured when the timeline is not the ISO UTC shape GitHub sends",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06 00:00:00 GMT",
+      started_at: "2026-06-06 00:04:30 GMT"
+    },
+    runnerWaitMs: ""
   }
 ];
 

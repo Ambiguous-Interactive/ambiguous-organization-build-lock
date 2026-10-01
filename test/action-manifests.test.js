@@ -676,3 +676,28 @@ test("README documents the time-bounded release retry budget", () => {
   assert.match(readme, /are both ceilings: whichever a call reaches\s+first ends its budget/);
   assert.match(readme, /deliberately no per-call attempt floor underneath/);
 });
+
+test("both acquire wait phases stay documented and keep their measured boundaries", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+  const operations = fs.readFileSync(path.join(repoRoot, "docs", "operations-runbook.md"), "utf8");
+  const manifest = readActionManifest("acquire-build-lock");
+
+  for (const name of ["runner-wait-ms", "wait-ms", "queue-position", "attempts"]) {
+    assert.match(manifest, new RegExp(`^  ${name}:$`, "m"), `${name} must stay a declared acquire output`);
+    assert.match(readme, new RegExp(`\\| \`${name}\` \\|`), `README must define ${name}`);
+  }
+  // An operator reads both surfaces together, so neither may drop the shared names or
+  // claim a boundary the code does not enforce. Fold whitespace so the assertions do
+  // not depend on how the prose happens to wrap.
+  const folded = (text) => text.replace(/\s+/g, " ");
+  assert.match(folded(readme), /Empty when the wait cannot be proven\./);
+  assert.match(folded(readme), /An empty `runner-wait-ms` means unproven, not zero\./);
+  assert.match(folded(operations), /An empty value means unproven, not zero\./);
+  assert.match(folded(manifest), /An unproven wait is never 0\./);
+  assert.match(folded(manifest), /Poll iterations in the acquire wait loop\./);
+  assert.doesNotMatch(manifest, /description: CAS attempts\./);
+  // wait-ms must not claim to start before the acquire routine, because the action
+  // reads its inputs first.
+  assert.doesNotMatch(folded(manifest), /measured from the start of the step/i);
+  assert.match(folded(manifest), /Measured from the start of the acquire routine/);
+});
