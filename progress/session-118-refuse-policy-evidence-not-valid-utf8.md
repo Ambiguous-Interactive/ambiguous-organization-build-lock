@@ -57,15 +57,15 @@ reading, so the guard adds no new failure path.
 
 ## The sweep, and the two places it was wrong
 
-Nine other Go read paths were checked. Seven needed no change, and the first
-version of this record got two of them wrong. Both errors were found by a
-second review round, and both were real.
+Eight other Go read paths were checked. Five needed no change, and the first
+version of this record got two of them wrong, and missed one. All three were
+found by review rounds, and two were real.
 
 Checked, with the reason each one is already safe:
 
-- The YAML decoder refuses invalid UTF-8 itself. Measured:
-  `invalid leading UTF-8 octet (value: 255)`. The enrollment analyzer and the
-  credential-literal audit therefore cannot substitute.
+- The YAML decoder refuses invalid UTF-8 itself, for the enrollment analyzer
+  and for the credential-literal audit. Measured:
+  `invalid leading UTF-8 octet (value: 255)`.
 - `cmd/lock-recovery-audit` validates the lock name, the run identity, and the
   provenance text, then compares a digest it recomputes. A substitution breaks
   the digest comparison, so it fails closed.
@@ -77,7 +77,7 @@ Checked, with the reason each one is already safe:
 - `cmd/llm-skill-metadata` reads an editor request from standard input and
   returns no verdict.
 
-Wrong twice, and now fixed:
+Wrong, and now fixed:
 
 - `cmd/workflow-credential-audit` in its `unity-automation` mode matched a
   literal pattern against the file bytes. This record first claimed that Go's
@@ -94,6 +94,16 @@ Wrong twice, and now fixed:
   organization-wide drift alert. The snapshot now refuses that repository,
   which is the shape an operator can act on.
 
+Missed, and now fixed:
+
+- The same snapshot read blob content it never checked. A checked-in
+  PowerShell script is scanned by matching literal needles, and
+  `strings.ToLower` decodes UTF-8, so one raw byte inside a provisioning-control
+  literal hid the finding. Measured:
+  `strings.Contains(strings.ToLower(corrupt), "uh_ensure_editor_provisioning_budget_seconds")`
+  is `false`, and `true` for the clean spelling. The snapshot now refuses a
+  blob it cannot read exactly, which also covers the file the needle matched.
+
 The transferable lesson is in the byte-safety code sample: a pattern match
 decodes, so a scan that cannot read its input exactly is not evidence that it
 found nothing.
@@ -106,6 +116,9 @@ has no representation for that code point. Reproduced on `main` after the fix:
 `onboard-unity-repository` reported the added repository, exited 0, and left
 `ef bf bd` where the escape had been. Tracked as #316, and named in both
 documents and in the byte-safety code sample.
+
+A file that is valid UTF-8 but is not text is still judged by its own parsers,
+as before.
 
 ## Verification
 
@@ -125,33 +138,36 @@ documents and in the byte-safety code sample.
   after: the `regexp` result above, and an end-to-end run of
   `workflow-credential-audit unity-automation` over a workflow holding
   `UNITY_\xffSERIAL`, which exited 0 while the clean spelling exited 1.
+- The blob refusal found in the third round was measured the same way, with the
+  `strings.ToLower` result above.
 
 ## Review rounds, and what each changed
 
 | Finding | Disposition |
 | --- | --- |
 | The byte-safety code sample taught the removed caller-side guard and a message no tool emits | Fixed. The sample shows the parser, the reader list, and the 2026-10 evidence. |
-| 11 of 15 table rows are refused by a second validator, so they only prove the message | Fixed. Every row now asserts both directions. |
+| 11 of the 16 table rows are refused by a second validator, so they only prove the message | Fixed. Every row now asserts both directions. |
 | The fixture helpers corrupted JSON syntax when a fragment did not end in a quote, while the comment claimed the file stayed valid JSON | Fixed. All three helpers now fail loudly on invalid JSON. |
 | The free-text `reason` field, the same class as `owner`, was not covered | Fixed. Added, with both assertions. |
-| The documents said every tool refuses the file, while a later shell step reads the expectations with `jq` | Fixed. Both documents now say each run validates the file before any later step reads it. |
+| The documents said every tool refuses the file, while a later shell step reads it with `jq` | Fixed. Both documents now name `jq` as a reader the run never reaches. |
 | No record of the change existed | Fixed. This file. |
 | This record claimed Go's regexp does not decode, and the Unity automation audit therefore cannot substitute | Wrong, and the claim hid a real fail-open. Fixed in the audit and in this record. |
 | This record claimed a corrupted tree path fails at `git show` | Wrong. The path reached the artifact and the whole drift alert was silenced downstream. Fixed in the snapshot and in this record. |
+| The snapshot read blob content it never checked, so one raw byte in a script literal hid a finding | Fixed. The snapshot refuses a blob it cannot read exactly. |
 | A table row that depends on a validator was not pinned, so a weakened validator kept the test green | Fixed. Both directions are asserted, and the weakening was measured. |
 | This record said four commands read the reviewed policy | Wrong. Three commands and one library re-parse. Fixed. |
+| This record counted 15 table rows, and the sweep list did not match its own count | Wrong. Fixed here. |
+| The 15 mutated inputs in the sentence below were measured by a review round, not by this session | Corrected. The claim is attributed where it belongs. |
 | A policy over the size bound and also not valid UTF-8 is refused on its size only | Accepted. Both refusals exit 2 and write nothing, so the bound is checked first, and the runbook now says so. |
 
 The first round also confirmed, with an independent mutation run, that no
 fail-closed path was removed: the onboarding command's exit code is unchanged,
-and no script, test, or document matched the old message. The second round
-measured 15 mutated policy inputs on the base and on this branch, and no input
-flipped from refused to accepted.
+and no script, test, or document matched the old message. The second review
+round measured 15 mutated policy inputs on the base and on that branch, and no
+input flipped from refused to accepted.
 
 ## Known limits, named in the documents
 
-A file that is valid UTF-8 but is not text is judged by its own parsers, as
-before. An escaped lone surrogate is the door this change does not close, and
-it is #316. The credential-literal audit in its `unity-automation` mode is not
-described in `docs/`, so its new refusal is recorded here and in the byte-safety
-sample instead of a new section.
+The credential-literal audit in its `unity-automation` mode is not described in
+`docs/`, so its new refusal is recorded here and in the byte-safety sample
+instead of a new section.

@@ -207,13 +207,15 @@ of a file the mark opens moves instead of staying behind a green run.
 Every tool that reads the reviewed policy refuses a policy that is not valid
 UTF-8. That covers the release authorization and the repository onboarding,
 which write it back, and the enrollment and merge-policy audits, which only
-read it. The merge-policy expectations file and a consumer's published
-attestation are refused the same way, and each run validates them before any
-later step reads them. None of them moves a byte order mark, because a mark is
-invalid JSON and Node and all three Go analyzers reject one. The lock runtime
-refuses a lock state file that is not valid UTF-8 for the same reason. A history
-commit it cannot read is a gap in the peer timeline, never a peer that does not
-exist.
+read it. Each run makes that refusal before any other step reads the file. The
+shell also reads the file with `jq`, which substitutes a byte it cannot read
+instead of failing, so no step reaches it. The merge-policy expectations file
+and a consumer's published attestation are refused the same way, and each run
+validates them before any later step reads them. None of them moves a byte
+order mark, because a mark is invalid JSON and Node and all three Go analyzers
+reject one. The lock runtime refuses a lock state file that is not valid UTF-8
+for the same reason. A history commit it cannot read is a gap in the peer
+timeline, never a peer that does not exist.
 
 One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
 valid UTF-8 and valid JSON, so the encoding check does not refuse it. The

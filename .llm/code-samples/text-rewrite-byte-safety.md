@@ -150,17 +150,12 @@ A read-only path is therefore safe by position, not by rule. A credential
 pattern is a literal, and a substitution breaks it. The `progress/` audit
 decodes strictly for that reason.
 
-Measured in 2026-10 on the same class, one byte inside a reviewed policy:
-
-- the enrollment audit printed "policy is valid" and exited 0,
-- the enrollment registry accepted a corrupted exception `owner`, a
-  corrupted `repinExceptions` `reason`, and a corrupted
-  `repinCompanions` `path`, because no validator inspects those bytes,
-- the merge-policy audit accepted a corrupted ruleset name and required
-  context in a consumer attestation,
-- the merge-policy audit published `complete: true` for a repository
-  whose live check context carried such a byte, with a finding that
-  named the wrong cause.
+Measured in 2026-10 on the same class, one byte inside a reviewed policy: the
+enrollment audit printed "policy is valid" and exited 0, the registry and a
+consumer attestation accepted corrupted free-text values that no validator
+inspects, and the merge-policy audit published `complete: true` for a
+repository whose live check context carried such a byte, with a finding that
+named the wrong cause.
 
 The refusals now sit in the parsers and in the one response decoder. A reader
 refuses and names the encoding in its own error, and the published finding
@@ -178,10 +173,11 @@ Measured in 2026-10: a consumer workflow whose only Unity literal carried one
 it. A safety scan that cannot read a file exactly is not evidence that it
 contains nothing, so it refuses the file and names it.
 
-A raw path is the same problem. A git tree can name a file with a byte no
-decoder can read, and the audit publishes paths. The snapshot now refuses that
-one repository, which is the shape an operator can act on: one repository is
-reported as unreadable and the rest of the audit still runs.
+A raw path and a raw file body are the same problem. A git tree can name a
+file with a byte no decoder can read, and a checked-in script is matched by
+literal needles. The snapshot now refuses the path and the body, which is the
+shape an operator can act on: one repository is reported as unreadable and the
+rest of the audit still runs.
 
 ## What a byte check cannot see
 
