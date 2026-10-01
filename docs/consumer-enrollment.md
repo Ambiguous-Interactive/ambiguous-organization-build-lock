@@ -144,8 +144,8 @@ is encoding metadata rather than content, so a key pattern never sees it. A
 pin on the first line of a file the mark opens still moves. The mark is read
 aside and written back, so the file keeps it. A `policy-snapshot` companion
 is the one exception: that mode generates the whole document, so it replaces
-the body and keeps only the mark. A NUL byte is valid UTF-8, so a file that
-carries one is left byte for byte as it was.
+the body and keeps only the mark. A NUL byte is valid UTF-8, so it does not
+refuse the file. The byte comes back with the rest of the file.
 
 The release authorization and the repository onboarding both read the
 reviewed policy and write it back, so both refuse a policy that is not valid

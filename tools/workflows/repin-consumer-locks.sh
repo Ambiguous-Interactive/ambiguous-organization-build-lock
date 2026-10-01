@@ -92,11 +92,12 @@ const path = require("node:path");
 const { TextDecoder } = require("node:util");
 const [directory, targetSha, targetVersion, policyPath, lockPrefix, repository] = process.argv.slice(2);
 // A byte sequence this rewrite cannot read is refused by name. Node replaces
-// every byte it cannot decode with U+FFFD, which is three bytes long, so a
-// rewrite that wrote such a file back would destroy a byte the pin does not
-// name, grow the file, and report only the pins it moved. That is the outcome
-// this rewrite must never produce, so it is the answer the rewrite already
-// gives a symlink, a directory and an unreadable parent.
+// every byte it cannot decode with U+FFFD, which is three bytes long. Writing
+// such a file back would destroy a byte the pin does not name. It would also
+// report only the pins it moved, so the destruction would hide behind a
+// count. A symlink, a directory and an unreadable parent already get this
+// answer, and a stale pin behind a green run is the outcome this rewrite must
+// never produce.
 const decodeUtf8 = new TextDecoder("utf-8", { fatal: true });
 const refuseUnreadable = (location) =>
   `${location} is not valid UTF-8, so this rewrite cannot read it. Node replaces every byte it ` +
@@ -125,11 +126,11 @@ const readPolicy = (policyPath) => {
 // as the consumer wrote it, with no warning and no red run, and only a shape
 // it would damage fails.
 //
-// A byte order mark is read aside instead of being left in the text. It is
-// encoding metadata rather than content, so a key pattern must not see it: a
-// pin on the first line of a file the mark opens would match no pattern, the
+// A byte order mark is read aside instead of being left in the text. The mark
+// is encoding metadata, not content, so a key pattern must not see it. A pin
+// on the first line of a file the mark opens would match no pattern, the
 // rewrite would report the repository already pinned, and the stale pin would
-// have no evidence against it. It is written back beside the text, because
+// have no evidence against it. The mark is written back beside the text, since
 // dropping it would destroy three bytes the pin does not name.
 const readTextFile = (filePath) => {
   const bytes = fs.readFileSync(filePath);

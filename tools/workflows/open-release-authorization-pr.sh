@@ -24,12 +24,12 @@ EOF
 # file it cannot read, and one of them is a file it writes back. Node replaces
 # every byte it cannot decode with U+FFFD, three bytes long, so a lossy read
 # could both answer wrongly and commit a destroyed byte in the pull request.
-# The check runs at every point where the script reads the file: once before
-# the authorization decision, and once again after the branch is cut, because
-# that checkout replaces the working tree and is what the rewrite writes.
+# The check runs twice. The first call guards the authorization decision. The
+# second guards the file the rewrite writes, because the checkout that cuts
+# the branch replaces the working tree.
 # A byte order mark is valid UTF-8, so this check does not care about one.
-# `JSON.parse` rejects it, as it always has, because every reader that matters
-# — Node and all three Go analyzers — refuses a marked policy.
+# `JSON.parse` rejects it, as it always has. Node and all three Go analyzers
+# reject a marked policy too.
 check_policy_readable() {
   if node - "${policy_path}" <<'EOF'
 const fs = require("node:fs");

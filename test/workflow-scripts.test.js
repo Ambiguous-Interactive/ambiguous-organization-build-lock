@@ -3872,52 +3872,52 @@ test("consumer repin changes only the pin bytes of a file it can read exactly", 
   };
   for (const fixture of fixtures) {
     for (const marks of fixture.marks || [null]) {
-    for (const surfaceName of fixture.surfaces) {
-      const surface = surfaces[surfaceName];
-      const markCount = marks === null ? 0 : [...marks].length;
-      const label = `${surfaceName} with ${fixture.name}` +
-        (markCount === 0 ? "" : ` and ${markCount} mark(s)`);
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-utf8-round-trip-"));
-      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-      fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
-      fs.mkdirSync(path.dirname(path.join(root, surface.path)), { recursive: true });
-      fs.writeFileSync(path.join(root, surface.path), fixture.render(repinOldSha, "v1.13.0", marks));
-      fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
-        schemaVersion: 1,
-        organization: "Ambiguous-Interactive",
-        approvedLockShas: [repinOldSha, target],
-        approvedReturnShas: [repinOldSha, target],
-        approvedDarwinReturnShas: [],
-        repositories: [{ repository, defaultBranch: "main" }],
-        exceptions: [],
-        repinExceptions: [],
-        repinCompanions: surface.mode === null
-          ? []
-          : [{ repository, path: surface.path, mode: surface.mode }]
-      }));
-      const result = childProcess.spawnSync(
-        "bash",
-        [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", repository],
-        { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
-      );
-      assert.equal(result.status, 0, `${label}: ${result.stderr}`);
-      assert.equal(
-        fs.readFileSync(path.join(root, surface.path), "utf8"),
-        fixture.render(target, "v1.14.0", marks),
-        `${label}: the rewrite must change the pin bytes and nothing else`
-      );
-      // The mark is read as no content and written back as no content. A
-      // decoder that stripped it instead of carrying it would drop it from
-      // every file the rewrite touches, which is what the base did to a
-      // `policy-snapshot` companion: the mode generates the body, so the mark
-      // has to survive outside it.
-      const leadingMarks = (bytes) => /^\uFEFF*/.exec(bytes.toString("utf8"))[0];
-      assert.equal(
-        leadingMarks(fs.readFileSync(path.join(root, surface.path))),
-        leadingMarks(Buffer.from(fixture.render(repinOldSha, "v1.13.0", marks), "utf8")),
-        `${label}: the byte order mark must survive a rewrite`
-      );
-    }
+      for (const surfaceName of fixture.surfaces) {
+        const surface = surfaces[surfaceName];
+        const markCount = marks === null ? 0 : [...marks].length;
+        const label = `${surfaceName} with ${fixture.name}` +
+          (markCount === 0 ? "" : ` and ${markCount} mark(s)`);
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-utf8-round-trip-"));
+        t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+        fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+        fs.mkdirSync(path.dirname(path.join(root, surface.path)), { recursive: true });
+        fs.writeFileSync(path.join(root, surface.path), fixture.render(repinOldSha, "v1.13.0", marks));
+        fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
+          schemaVersion: 1,
+          organization: "Ambiguous-Interactive",
+          approvedLockShas: [repinOldSha, target],
+          approvedReturnShas: [repinOldSha, target],
+          approvedDarwinReturnShas: [],
+          repositories: [{ repository, defaultBranch: "main" }],
+          exceptions: [],
+          repinExceptions: [],
+          repinCompanions: surface.mode === null
+            ? []
+            : [{ repository, path: surface.path, mode: surface.mode }]
+        }));
+        const result = childProcess.spawnSync(
+          "bash",
+          [path.join(scriptsRoot, "repin-consumer-locks.sh"), "rewrite-pins", root, target, "v1.14.0", repository],
+          { cwd: repoRoot, encoding: "utf8", env: { ...process.env, REPIN_POLICY_PATH: path.join(root, "policy.json") } }
+        );
+        assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+        assert.equal(
+          fs.readFileSync(path.join(root, surface.path), "utf8"),
+          fixture.render(target, "v1.14.0", marks),
+          `${label}: the rewrite must change the pin bytes and nothing else`
+        );
+        // The mark is read as no content and written back as no content. A
+        // decoder that stripped it instead of carrying it would drop it from
+        // every file the rewrite touches, which is what the base did to a
+        // `policy-snapshot` companion: the mode generates the body, so the mark
+        // has to survive outside it.
+        const leadingMarks = (bytes) => /^\uFEFF*/.exec(bytes.toString("utf8"))[0];
+        assert.equal(
+          leadingMarks(fs.readFileSync(path.join(root, surface.path))),
+          leadingMarks(Buffer.from(fixture.render(repinOldSha, "v1.13.0", marks), "utf8")),
+          `${label}: the byte order mark must survive a rewrite`
+        );
+      }
     }
   }
 });
@@ -4773,7 +4773,8 @@ function releaseAuthorizationHarness(t, {
   omitTag = null,
   declinedPrs = false,
   prCreateStatus = "0",
-  unreadablePolicy = false
+  unreadablePolicy = false,
+  unreadablePolicyOnMainOnly = false
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "release-authorization-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -4825,6 +4826,23 @@ function releaseAuthorizationHarness(t, {
   gitRun(seed, "push", "-q", "origin", "main", ...pushedTags.map((tag) => `refs/tags/${tag}`));
 
   gitRun(root, "clone", "-q", remotePath, work);
+
+  if (unreadablePolicyOnMainOnly) {
+    // Advance the remote default branch after the clone, so the working tree
+    // holds a readable policy while `origin/main` holds one the script cannot
+    // read. The script checks out `origin/main` before it writes, so only a
+    // check that runs after the checkout can see this file.
+    const marker = "UNREADABLE-BYTE";
+    const advanced = Buffer.from(
+      JSON.stringify({ ...policy, note: `caf${marker}-note` }),
+      "utf8"
+    );
+    advanced[advanced.indexOf(marker)] = 0x89;
+    fs.writeFileSync(path.join(seed, "unity-enrollment-policy.json"), advanced);
+    gitRun(seed, "commit", "-aqm", "policy this script cannot read");
+    gitRun(seed, "push", "-q", "origin", "main");
+    gitRun(work, "fetch", "-q", "origin");
+  }
 
   const shims = path.join(root, "shims");
   const events = path.join(root, "events.log");
@@ -5000,6 +5018,31 @@ test("release authorization refuses a policy it cannot read as UTF-8", (t) => {
     !policyOnDefaultBranch.includes(Buffer.from([0xef, 0xbf, 0xbd])),
     "the default branch never receives a U+FFFD the reviewed policy never had"
   );
+});
+
+// The script checks out `origin/main` before it writes, so the working tree
+// it starts from and the file it writes can be different files. A check that
+// runs only before the checkout reads a policy the rewrite never sees.
+test("release authorization re-checks the policy the checkout replaced", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.14.0"],
+    unreadablePolicyOnMainOnly: true
+  });
+
+  // The working tree starts readable, so the first check passes.
+  assert.doesNotMatch(
+    gitRun(harness.work, "show", "HEAD:unity-enrollment-policy.json"),
+    /�/,
+    "the cloned policy is readable before the script runs"
+  );
+
+  const result = harness.run();
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /unity-enrollment-policy\.json is not valid UTF-8/);
+  assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
 });
 
 test("release authorization never re-offers a declined release", (t) => {
