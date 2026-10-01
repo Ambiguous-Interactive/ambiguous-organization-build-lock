@@ -13,15 +13,33 @@ rationale comment was removed either.
 | `.devcontainer/scripts/verify.sh` | 34.0 s | 8.4 s |
 | `test/workflow-scripts*.test.js` | 18.4 s | 3.2 s |
 | `test/build-lock*.test.js` | 6.0 s | 2.9 s |
-| Windows CI job, `node --test` step | 78.0 s | 35.7 s |
-| Windows CI job, whole | 93 s | 51 s |
-| Linux CI job, whole | 89 s | 72 s |
+| Linux CI job, `node --test` step | 29.0 s | 20.0 s |
+| Linux CI job, whole | 82 s of steps | 66 s of steps |
+| Windows CI job, `node --test` step | 78.0 s | 35.7 s and 61.8 s |
+| Windows CI job, whole | 93 s | 51 s and 79 s |
 
-The local rows are on the development container, before and after. The CI rows
-are run 36904676960 for the Windows before and run 36929198410 for the Windows
-after. The Linux before is run 36925885236, which is the merge base; the first
-attempt used run 36904676960, which is one commit earlier, and that understated
-the before by the three tests PR #322 added.
+The local rows are on the development container, before and after. The Linux rows
+are run 36925885236, which is the merge base, and run 36934614293. The Windows
+before is run 36904676960; the Windows after is run 36929198410 and run
+36934614293.
+
+### The Windows numbers vary by nearly two times between runs
+
+Both Windows runs after the split have the same structure and different scale:
+
+| Run | Delete test | Rewrite test | Step |
+| --- | --- | --- | --- |
+| 36929198410 | 22.8 s | 34.9 s | 35.7 s |
+| 36934614293 | 38.6 s | 61.0 s | 61.8 s |
+
+Every value in the second run is about 1.7 times the first, including the step.
+`csc.exe` startup is the whole cost and the runner is what varies, so the step
+time is not a stable number. What is stable is its shape: the step is the
+slower of the two tests plus startup, not their sum. Before the split the same
+step was their sum, 31.3 s plus 45.0 s, in a 78 s step.
+
+So the honest claim is structural. The step no longer pays for both compiles in
+sequence. Its absolute time is whatever one `Add-Type` costs on that runner.
 
 ## Why the suite was slow
 
@@ -63,8 +81,9 @@ Seventy-six of seventy-eight seconds were two tests run one after the other in
 the same file. That made the Windows job the slowest job on every pull request,
 at 93 s against 89 s for the Linux job that does six times the checking.
 
-Run 36929198410 measured the fix. The two tests report 22.8 s and 34.9 s, which
-overlap rather than adding up, and the step takes 35.7 s.
+Runs 36929198410 and 36934614293 both measured the fix. In each, the step is the
+slower of the two tests plus startup rather than their sum. See the table above
+for why the absolute numbers are not stable across runs.
 
 ### Three attempts, in order
 
@@ -76,8 +95,9 @@ overlap rather than adding up, and the step takes 35.7 s.
 3. **A pinned `--test-concurrency=4`.** `node --test` defaults to one process
    per core less one. Measured on two cores: the default gives a serial run, and
    the flag gives four processes. Without the flag a two-core runner image would
-   run these four files one after another and the step would go back to about
-   78 s with nothing in the workflow saying why. Four is the file count.
+   run these four files one after another and the step would pay for both
+   compiles in sequence again, with nothing in the workflow saying why. Four is
+   the file count.
 
 ### Two options rejected
 
@@ -185,7 +205,7 @@ costs nothing: eslint already ran.
 | A support module re-exports its runtime whole, which no linter can see through | Accepted. The three modules that do it were read by hand and the export list is the statement multiset check's own input. |
 | `build-lock-support.js` generates an RSA-2048 key at module load, now once per shard | Accepted. Measured at 41 ms. No correctness effect. |
 | A Linux-green change broke the only coverage a Windows-only test has | Fixed. `no-undef` now runs on every JavaScript file, so an unbound reference in a file with no local coverage fails on every runner. |
-| The Linux job only fell from 89 s to 78 s | Accepted. `go test -race` at 17 s and `setup-go` at 12 s are what is left. Moving the race suite to its own job would add a required-check name to the branch ruleset, which this task must not change. |
+| The Linux job only fell from 82 s to 66 s of steps | Accepted. `go test -race` at 17 s and `setup-go` at 11 s are what is left. Moving the race suite to its own job would add a required-check name to the branch ruleset, which this task must not change. |
 
 ## Known limits
 
