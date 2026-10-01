@@ -867,6 +867,18 @@ function base64DecodeState(text, statePath) {
   }
 }
 
+// The peer timeline reads historical commits of the same state file. A commit
+// this runtime cannot read exactly is evidence it does not have, so it is a
+// gap. It is never a wrong identity: a lossy decode would turn one undecodable
+// byte in a holder id into U+FFFD and report a peer that does not exist.
+function base64DecodeStateOrNull(text, statePath) {
+  try {
+    return base64DecodeState(text, statePath);
+  } catch {
+    return null;
+  }
+}
+
 function writeOutput(name, value) {
   const outputPath = process.env.GITHUB_OUTPUT;
   if (!outputPath) {
@@ -2899,7 +2911,10 @@ async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
         gaps = true;
         continue;
       }
-      const snapshot = peerTimelineSnapshot(commitTime, base64Decode(data && data.content));
+      const snapshot = peerTimelineSnapshot(
+        commitTime,
+        base64DecodeStateOrNull(data && data.content, `${config.statePath}@${commit.sha}`)
+      );
       if (!snapshot) {
         gaps = true;
         continue;
