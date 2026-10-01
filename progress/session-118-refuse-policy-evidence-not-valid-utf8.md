@@ -23,8 +23,10 @@ recorded the pattern, and this session closed the readers.
 
 ## The measured shape of the defect
 
-Every result below was measured on `46b7e81e0`, the commit before this change,
-by reverting only the five production files and running the new tests.
+Every result below was measured on `46b7e81e0`, the commit before this change, by
+reverting the production files this change touches and running the new tests.
+Four of the seven carry these rows: the registry parser, the expectations
+parser, the attestation parser, and the merge-policy response decoder.
 
 | Surface | Result with one `0xFF` byte |
 | --- | --- |
@@ -39,13 +41,13 @@ by reverting only the five production files and running the new tests.
 | `audit-merge-policy` live ruleset detail | Published `complete: true`, with one finding that named the wrong cause. |
 
 Seven of those rows were the wrong verdict. They are the three places where a
-gate certified or published evidence it could not read: the enrollment audit
-certified a corrupted policy as valid, the registry and the attestation accepted
-values no validator inspects, and the live response decoder published
-`complete: true`. The other two rows name a field an ASCII pattern already
-validates, so they were refused and the guard only names the real cause. The
-tests record which is which, so a future reader does not have to measure it
-again.
+tool certified, published, or accepted evidence it could not read: the
+enrollment audit certified a corrupted policy as valid, the registry and the
+attestation parsers accepted values no validator inspects, and the live response
+decoder published `complete: true`. The other two rows name a field an ASCII
+pattern already validates, so they were refused and the guard only names the
+real cause. The tests record which is which, so a future reader does not have to
+measure it again.
 
 ## Where the refusal belongs
 
@@ -62,9 +64,9 @@ reading, so the guard adds no new failure path.
 ## The sweep, and the two places it was wrong
 
 Eight read paths were checked, in the entries below. The YAML entry covers two
-tools. Five needed no change, the first version of this record got two of them
-wrong, and it missed one. All three were found by review rounds, and two were
-real.
+tools. Five needed no change. The first version of this record got two more
+wrong, and missed a third, and all three were real. Each was found by a review
+round.
 
 Checked, with the reason each one is already safe:
 
@@ -163,7 +165,7 @@ as before.
 | A table row that depends on a validator was not pinned, so a weakened validator kept the test green | Fixed. Both directions are asserted, and the weakening was measured. |
 | This record said four commands read the reviewed policy | Wrong. Three commands and one library re-parse. Fixed. |
 | This record counted 15 table rows, and the sweep list did not match its own count | Wrong. Fixed here. |
-| This record said three of the nine measured rows were the wrong verdict | Wrong. Seven were. The sentence named the free-text fields and missed the two gates that certified or published unreadable evidence. |
+| This record said three of the nine measured rows were the wrong verdict | Wrong. Seven were. The sentence named the free-text fields and missed the enrollment audit, which certified a corrupted policy, and the response decoder, which published `complete: true`. |
 | The 15 mutated inputs in the sentence below were measured by a review round, not by this session | Corrected. The claim is attributed where it belongs. |
 | A policy over the size bound and also not valid UTF-8 is refused on its size only | Accepted. Both refusals exit 2 and write nothing, so the bound is checked first, and the runbook now says so. |
 
