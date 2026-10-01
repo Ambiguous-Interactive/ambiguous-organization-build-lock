@@ -18,7 +18,9 @@ It also applies to every reader that decides from evidence:
   command all read the reviewed policy through one parser,
 - the merge-policy audit reads its expectations and each consumer's
   published attestation through one parser each,
-- the merge-policy audit reads GitHub responses through one decoder.
+- the merge-policy audit reads GitHub responses through one decoder,
+- the Unity automation audit reads a consumer checkout,
+- the enrollment audit reads a git tree.
 
 ## The defect
 
@@ -160,8 +162,26 @@ Measured in 2026-10 on the same class, one byte inside a reviewed policy:
   whose live check context carried such a byte, with a finding that
   named the wrong cause.
 
-The refusals now sit in the parsers and in the one response decoder, so
-every reader names the encoding instead of the symptom.
+The refusals now sit in the parsers and in the one response decoder. A reader
+refuses and names the encoding in its own error, and the published finding
+keeps the stable reason code it always had, so a consumer-facing alert does not
+change shape.
+
+## A pattern match decodes too
+
+`regexp` treats its input as UTF-8 code points, and a byte it cannot decode
+becomes U+FFFD. A literal pattern then stops matching, because the text it sees
+is not the text on disk.
+
+Measured in 2026-10: a consumer workflow whose only Unity literal carried one
+`0xFF` byte passed the Unity automation audit, while the clean spelling fails
+it. A safety scan that cannot read a file exactly is not evidence that it
+contains nothing, so it refuses the file and names it.
+
+A raw path is the same problem. A git tree can name a file with a byte no
+decoder can read, and the audit publishes paths. The snapshot now refuses that
+one repository, which is the shape an operator can act on: one repository is
+reported as unreadable and the rest of the audit still runs.
 
 ## What a byte check cannot see
 

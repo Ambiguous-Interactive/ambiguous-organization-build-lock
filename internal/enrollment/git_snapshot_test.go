@@ -142,6 +142,38 @@ func TestGitSnapshotRejectsSymlinkedPolicyFile(t *testing.T) {
 	}
 }
 
+// A path reaches the published artifact and a Git path, and a byte it cannot
+// decode would be reported as a spelling nobody wrote. Git accepts such a name,
+// so the snapshot has to refuse the repository rather than publish it.
+func TestGitSnapshotRejectsPolicyPathThatIsNotValidUTF8(t *testing.T) {
+	repositoryRoot := initializeSnapshotRepository(t)
+	blobSource := filepath.Join(repositoryRoot, "source.yml")
+	if err := os.WriteFile(blobSource, []byte("jobs: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blob := runGit(t, repositoryRoot, "hash-object", "-w", blobSource)
+	runGit(
+		t,
+		repositoryRoot,
+		"update-index",
+		"--add",
+		"--cacheinfo",
+		"100644,"+blob+",.github/workflows/unity-\xffbuild.yml",
+	)
+	runGit(t, repositoryRoot, "commit", "-q", "-m", "unreadable policy path")
+	sha := runGit(t, repositoryRoot, "rev-parse", "HEAD")
+
+	_, err := LoadGitSnapshot(
+		context.Background(),
+		repositoryRoot,
+		"Ambiguous-Interactive/fixture",
+		sha,
+	)
+	if err == nil || !strings.Contains(err.Error(), "is not valid UTF-8") {
+		t.Fatalf("unreadable policy path error = %v", err)
+	}
+}
+
 func TestGitSnapshotRejectsExcessivePolicyFileCount(t *testing.T) {
 	repositoryRoot := initializeSnapshotRepository(t)
 	scriptsRoot := filepath.Join(repositoryRoot, "scripts")

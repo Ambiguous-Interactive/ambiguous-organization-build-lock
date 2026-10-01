@@ -107,8 +107,9 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 // failing, so a reviewed file that is not valid UTF-8 would be evaluated as a
 // value the organization never wrote. The refusal names the encoding, so an
 // operator is not sent to fix a spelling the file does not contain. Every field
-// in this file also has a validator, so no row here decides a verdict on its
-// own; the guard is what names the real cause.
+// in this file also has a validator, and both directions are asserted: the
+// substituted form is refused, so no row here decides a verdict on its own and
+// the guard is what names the real cause.
 func TestParseExpectationsRejectsContentThatIsNotValidUTF8(t *testing.T) {
 	content := []byte(expectationsContent(validExpectationBody()))
 	fields := map[string]string{
@@ -120,9 +121,13 @@ func TestParseExpectationsRejectsContentThatIsNotValidUTF8(t *testing.T) {
 	}
 	for name, field := range fields {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseExpectations(oneRawByteIn(t, content, field))
+			corrupted := oneRawByteIn(t, content, field)
+			_, err := ParseExpectations(corrupted)
 			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			if _, substitutedErr := ParseExpectations(withSubstitutedByte(corrupted)); substitutedErr == nil {
+				t.Fatal("the substituted form must be refused, or this row is decided by the encoding rule alone")
 			}
 		})
 	}

@@ -254,6 +254,42 @@ func TestUnityAutomationRepositoryAuditRecurses(t *testing.T) {
 	}
 }
 
+// Go's regexp decodes UTF-8 and turns a byte it cannot decode into U+FFFD, so
+// the automation pattern would stop matching the literal it exists to find. A
+// file this audit cannot read exactly is not evidence that no automation is
+// present, so the audit fails closed and names the file.
+func TestUnityAutomationAuditRefusesAFileItCannotDecode(t *testing.T) {
+	t.Parallel()
+	shapes := map[string][]byte{
+		"inside the literal": []byte("jobs:\n  a:\n    steps:\n      - run: echo UNITY_\xffSERIAL\n"),
+		"away from the literal": []byte(
+			"jobs:\n  a:\n    env:\n      NOTE: \"\xff\"\n    steps:\n      - run: echo UNITY_SERIAL\n",
+		),
+	}
+	for name, contents := range shapes {
+		contents := contents
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			path := filepath.Join(root, ".github", "workflows", "unsafe.yml")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, contents, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := auditUnityAutomationRepository(root, map[string]bool{}); err == nil ||
+				!strings.Contains(err.Error(), "is not valid UTF-8") {
+				t.Fatalf("undecodable workflow error = %v", err)
+			}
+			var stdout, stderr strings.Builder
+			if exit := dispatch([]string{"unity-automation", root}, &stdout, &stderr); exit != 1 {
+				t.Fatalf("dispatch exit = %d, want 1; stderr=%q", exit, stderr.String())
+			}
+		})
+	}
+}
+
 func TestUnityAutomationAuditFailsClosedForInvalidTargets(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing")

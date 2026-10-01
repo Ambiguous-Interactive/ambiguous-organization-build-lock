@@ -8,6 +8,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -74,6 +75,13 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 		clean, err := cleanRepositoryPath(name)
 		if err != nil || clean != name || strings.Contains(name, ":") {
 			return Snapshot{}, fmt.Errorf("invalid tree path %q", name)
+		}
+		// The path becomes a Go string that reaches the published artifact and
+		// a Git path, and a byte it cannot decode is reported as a spelling
+		// nobody wrote. Git accepts such a name, so refuse the repository
+		// instead of publishing a path the audit cannot read exactly.
+		if !utf8.ValidString(name) {
+			return Snapshot{}, fmt.Errorf("tree path %q at %s is not valid UTF-8", name, sha)
 		}
 	}
 

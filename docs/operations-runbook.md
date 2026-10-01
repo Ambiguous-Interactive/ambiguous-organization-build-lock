@@ -76,7 +76,8 @@ removed, repositories outside `Ambiguous-Interactive` are rejected, and
 duplicate or malformed entries fail closed. A policy that is not valid UTF-8
 is refused before it is parsed, because the JSON decoder would replace a byte
 it cannot read with U+FFFD and the audit would then decide from a value the
-repository never wrote.
+repository never wrote. A policy over the 64 KiB bound is refused on its size
+first, whatever else is wrong with it.
 
 Repository additions start with the secretless `Request Unity repository
 onboarding` workflow on `main`. Its trusted-main `workflow_run` consumer rejects

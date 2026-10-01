@@ -557,12 +557,15 @@ func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
 		registry.Repositories[index].RequiredContexts = []string{"CI Success"}
 	}
 	content := encodeRegistry(t, registry)
-	// substitutes marks the rows that carry the wrong verdict on their own. No
-	// field validator inspects those bytes, so with the byte substituted the
-	// policy still parses and the audit decides from text nobody wrote.
+	// parsesAfterSubstitution records what the same file does when the byte is
+	// the three bytes a decoder substitutes for it. No validator inspects the
+	// free-text bytes, so those rows still parse and the audit decides from
+	// text nobody wrote. Every other row has a validator, so the guard there
+	// only names the real cause. Both directions are asserted, so a validator
+	// that later stops rejecting a field cannot make a row quietly wrong.
 	fields := map[string]struct {
-		fragment    string
-		substitutes bool
+		fragment                string
+		parsesAfterSubstitution bool
 	}{
 		"organization":           {`"organization":"Ambiguous-Interactive"`, false},
 		"repository":             {`"repository":"Ambiguous-Interactive/DoxReloaded"`, false},
@@ -580,10 +583,9 @@ func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
 			}
-			if field.substitutes {
-				if _, err := ParseUnityEnrollmentRegistry(withSubstitutedByte(corrupted)); err != nil {
-					t.Fatalf("the substituted form must parse, or the raw byte is not the only reason: %v", err)
-				}
+			_, substitutedErr := ParseUnityEnrollmentRegistry(withSubstitutedByte(corrupted))
+			if field.parsesAfterSubstitution != (substitutedErr == nil) {
+				t.Fatalf("substituted form error = %v, want parse = %t", substitutedErr, field.parsesAfterSubstitution)
 			}
 		})
 	}

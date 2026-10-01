@@ -46,22 +46,26 @@ reader does not have to measure it again.
 ## Where the refusal belongs
 
 The parsers own it: `ParseUnityEnrollmentRegistry`, `ParseExpectations`, and
-`ParseAttestation`. Four commands read the reviewed policy and all four now
-answer the same way, including the onboarding command that used to keep its own
-copy of the check in `main.go`. One rule, one message.
+`ParseAttestation`. Three commands and one library re-parse read the reviewed
+policy, and all of them now answer the same way, including the onboarding
+command that used to keep its own copy of the check in `main.go`. One rule, one
+message.
 
 `strictDecode` owns the response guard. All five of its callers already turn a
 decode error into a named retrieval failure for the repository they were
 reading, so the guard adds no new failure path.
 
-## The sweep
+## The sweep, and the two places it was wrong
 
-Seven other Go read paths were checked and left alone, each for a stated reason
-rather than by assumption:
+Nine other Go read paths were checked. Seven needed no change, and the first
+version of this record got two of them wrong. Both errors were found by a
+second review round, and both were real.
+
+Checked, with the reason each one is already safe:
 
 - The YAML decoder refuses invalid UTF-8 itself. Measured:
   `invalid leading UTF-8 octet (value: 255)`. The enrollment analyzer and the
-  credential audit therefore cannot substitute.
+  credential-literal audit therefore cannot substitute.
 - `cmd/lock-recovery-audit` validates the lock name, the run identity, and the
   provenance text, then compares a digest it recomputes. A substitution breaks
   the digest comparison, so it fails closed.
@@ -70,13 +74,29 @@ rather than by assumption:
   issue body, so a substitution cannot reach a rendered value.
 - `internal/githubissue` decodes GitHub responses only, and every field a
   caller publishes is pattern-validated afterwards.
-- `cmd/workflow-credential-audit` matches an ASCII pattern against raw bytes.
-  Go's regexp does not decode, so the bytes it sees are the bytes on disk.
-- `internal/enrollment/git_snapshot.go` converts a path to a string and then
-  uses the same string for `git show`, which fails and becomes a retrieval
-  finding.
 - `cmd/llm-skill-metadata` reads an editor request from standard input and
   returns no verdict.
+
+Wrong twice, and now fixed:
+
+- `cmd/workflow-credential-audit` in its `unity-automation` mode matched a
+  literal pattern against the file bytes. This record first claimed that Go's
+  regexp does not decode. It does. Measured:
+  `regexp.MustCompile("UNITY_SERIAL").MatchString("UNITY_\xffSERIAL")` is
+  `false`. A consumer workflow whose only Unity literal carried one `0xFF` byte
+  passed the audit, while the clean spelling fails it. The audit now refuses a
+  file it cannot decode and names it.
+- `internal/enrollment/git_snapshot.go` turned a tree entry name into a Go
+  string. This record first claimed that the later `git show` fails. It does
+  not. The corrupted path reached the published artifact, and the issue sync
+  command then refused the whole artifact with a message that named neither the
+  encoding nor the path, so one bad file name would have silenced the
+  organization-wide drift alert. The snapshot now refuses that repository,
+  which is the shape an operator can act on.
+
+The transferable lesson is in the byte-safety code sample: a pattern match
+decodes, so a scan that cannot read its input exactly is not evidence that it
+found nothing.
 
 ## The limit this fix does not close
 
@@ -89,29 +109,49 @@ documents and in the byte-safety code sample.
 
 ## Verification
 
-- `.devcontainer/scripts/verify.sh` exits 0: 974 tests, 968 pass, 6 skipped, 0
-  fail, plus Go, race, vet, gofmt, golangci-lint, shellcheck, the JavaScript
-  lint, the LLM harness, module verification, and the credential audit.
+- `.devcontainer/scripts/verify.sh` exits 0: 974 Node tests, 968 pass, 6
+  skipped, 0 fail, every Go package green, plus race, vet, gofmt,
+  golangci-lint, shellcheck, the JavaScript lint, the LLM harness, module
+  verification, and the credential audit.
 - Every new test was run against `46b7e81e0` and fails there. A partial fix was
   measured too: with the three parser guards reverted and the response guard
   left in place, both reviewed-file command tests still fail and the response
   test passes, so each test is bound to the guard it names.
-- The three registry rows that no validator inspects assert the second half of
-  the claim: the same file with the byte substituted parses cleanly. Without
-  that assertion the table would only prove that the message wins an ordering
-  race.
+- Every table row asserts both directions. A field no validator inspects must
+  still parse with the byte substituted; a field with a validator must be
+  refused by it. Weakening one validator was measured: `validRefName` and
+  `validActorType` each fail exactly the row that depends on them.
+- The two refusals found in the second round were measured before the fix, not
+  after: the `regexp` result above, and an end-to-end run of
+  `workflow-credential-audit unity-automation` over a workflow holding
+  `UNITY_\xffSERIAL`, which exited 0 while the clean spelling exited 1.
 
 ## Review rounds, and what each changed
 
 | Finding | Disposition |
 | --- | --- |
 | The byte-safety code sample taught the removed caller-side guard and a message no tool emits | Fixed. The sample shows the parser, the reader list, and the 2026-10 evidence. |
-| 11 of 15 table rows are refused by a second validator, so they only prove the message | Fixed. Each row records whether the substituted form still parses. |
-| The fixture helpers corrupted JSON syntax when a fragment did not end in a quote, while the comment claimed the file stayed valid JSON | Fixed. Both helpers now fail loudly on invalid JSON. |
-| The free-text `reason` field, the same class as `owner`, was not covered | Fixed. Added, with the substituted-form assertion. |
+| 11 of 15 table rows are refused by a second validator, so they only prove the message | Fixed. Every row now asserts both directions. |
+| The fixture helpers corrupted JSON syntax when a fragment did not end in a quote, while the comment claimed the file stayed valid JSON | Fixed. All three helpers now fail loudly on invalid JSON. |
+| The free-text `reason` field, the same class as `owner`, was not covered | Fixed. Added, with both assertions. |
 | The documents said every tool refuses the file, while a later shell step reads the expectations with `jq` | Fixed. Both documents now say each run validates the file before any later step reads it. |
 | No record of the change existed | Fixed. This file. |
+| This record claimed Go's regexp does not decode, and the Unity automation audit therefore cannot substitute | Wrong, and the claim hid a real fail-open. Fixed in the audit and in this record. |
+| This record claimed a corrupted tree path fails at `git show` | Wrong. The path reached the artifact and the whole drift alert was silenced downstream. Fixed in the snapshot and in this record. |
+| A table row that depends on a validator was not pinned, so a weakened validator kept the test green | Fixed. Both directions are asserted, and the weakening was measured. |
+| This record said four commands read the reviewed policy | Wrong. Three commands and one library re-parse. Fixed. |
+| A policy over the size bound and also not valid UTF-8 is refused on its size only | Accepted. Both refusals exit 2 and write nothing, so the bound is checked first, and the runbook now says so. |
 
 The first round also confirmed, with an independent mutation run, that no
 fail-closed path was removed: the onboarding command's exit code is unchanged,
-and no script, test, or document matched the old message.
+and no script, test, or document matched the old message. The second round
+measured 15 mutated policy inputs on the base and on this branch, and no input
+flipped from refused to accepted.
+
+## Known limits, named in the documents
+
+A file that is valid UTF-8 but is not text is judged by its own parsers, as
+before. An escaped lone surrogate is the door this change does not close, and
+it is #316. The credential-literal audit in its `unity-automation` mode is not
+described in `docs/`, so its new refusal is recorded here and in the byte-safety
+sample instead of a new section.
