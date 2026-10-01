@@ -2070,15 +2070,18 @@ async function getRunAttemptJobs(identity, authToken, options = {}) {
 //
 // An unprovable timeline returns an empty string, never a zero. A zero would claim the
 // job never waited for a runner, and the evidence does not support that claim.
-// Date.parse is implementation-defined outside ISO 8601, so only the shape GitHub
-// documents is accepted. A span past the bound is a bad record, not a measurement.
-const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
-const RUNNER_WAIT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+// Date.parse is implementation-defined outside RFC 3339, so only the shape GitHub
+// documents is accepted. GitHub sends a Z suffix today and documents date-time, which
+// also permits a numeric offset, so both are read. A span past the bound is a corrupt
+// record, not a measurement. The bound is a year because a self-hosted runner can be
+// offline for days, and a real wait must never be discarded.
+const RFC_3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RUNNER_WAIT_MAX_MS = 365 * 24 * 60 * 60 * 1000;
 
 function jobRunnerWaitMs(job) {
   const created = String((job && job.created_at) || "");
   const started = String((job && job.started_at) || "");
-  if (!ISO_UTC_TIMESTAMP.test(created) || !ISO_UTC_TIMESTAMP.test(started)) {
+  if (!RFC_3339_TIMESTAMP.test(created) || !RFC_3339_TIMESTAMP.test(started)) {
     return "";
   }
   const waitMs = Date.parse(started) - Date.parse(created);
@@ -3034,7 +3037,7 @@ function observationText(config, observation, attempts, waitMs) {
   if (observation && observation.holderId) {
     details.push(`holder=${summaryCell(observation.holderId)}`);
     if (observation.holderRunUrl) {
-      details.push(`holder-run=${summaryCell(observation.holderRunUrl)}`);
+      details.push(`holder-run=${observation.holderRunUrl}`);
     }
     details.push(`queue-position=${observation.queuePosition}`);
     details.push(`reason=${summaryCell(observation.reason)}`);
@@ -3152,11 +3155,12 @@ async function runCancellationCleanup(config, identity, cancellation) {
   }
 }
 
-// The published queue position is the position this caller last waited at, and 0 when it
-// was never left waiting. Deriving it from the last blocking observation keeps one value
-// for the output, the job summary, and every outcome path.
-function queuePositionAt(blocker) {
-  return blocker ? blocker.queuePosition : 0;
+// The published queue position is where this caller stood in the organization FIFO, and
+// 0 when it was never observed there. An admitted caller reports where it waited, which
+// is the informative number. Every other outcome reports its last observed poll, so the
+// output and the job summary never disagree.
+function queuePositionAt(observation) {
+  return observation ? observation.queuePosition : 0;
 }
 
 function writeAcquireOutputs({
@@ -3299,7 +3303,7 @@ async function acquire(config) {
             holderId: identity.holderId,
             waitMs,
             runnerWaitMs,
-            queuePosition: queuePositionAt(lastBlocker),
+            queuePosition: queuePositionAt(lastObservation),
             attempts,
             admissionResult: "account-blocked-cleanup-failed",
             incidentId: incident.incidentId,
@@ -3321,13 +3325,14 @@ async function acquire(config) {
         stateSha: cleanupResult?.sha || observedStateSha || "",
         waitMs,
         runnerWaitMs,
-        queuePosition: queuePositionAt(lastBlocker),
+        queuePosition: queuePositionAt(lastObservation),
         attempts,
         admissionResult: "account-blocked",
         incidentId: incident.incidentId,
         resourceHealth: "blocked",
         resourceReason: incident.reason
       });
+      appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
       throw new Error(message);
     };
 
@@ -3381,6 +3386,7 @@ async function acquire(config) {
               holderId: identity.holderId,
               waitMs,
               runnerWaitMs,
+              queuePosition: queuePositionAt(lastObservation),
               attempts,
               staleRecovered,
               quarantineRecovered,
@@ -3400,7 +3406,7 @@ async function acquire(config) {
           holderId: identity.holderId,
           waitMs,
           runnerWaitMs,
-          queuePosition: queuePositionAt(lastBlocker),
+          queuePosition: queuePositionAt(lastObservation),
           attempts,
           staleRecovered,
           quarantineRecovered,
@@ -3434,7 +3440,7 @@ async function acquire(config) {
             holderId: identity.holderId,
             waitMs,
             runnerWaitMs,
-            queuePosition: queuePositionAt(lastBlocker),
+            queuePosition: queuePositionAt(lastObservation),
             attempts,
             staleRecovered,
             quarantineRecovered,
@@ -3454,7 +3460,7 @@ async function acquire(config) {
         holderId: identity.holderId,
         waitMs,
         runnerWaitMs,
-        queuePosition: queuePositionAt(lastBlocker),
+        queuePosition: queuePositionAt(lastObservation),
         attempts,
         staleRecovered,
         quarantineRecovered,
@@ -3912,7 +3918,7 @@ async function acquire(config) {
       holderId: identity.holderId,
       waitMs,
       runnerWaitMs,
-      queuePosition: queuePositionAt(lastBlocker),
+      queuePosition: queuePositionAt(lastObservation),
       attempts,
       staleRecovered,
       quarantineRecovered
@@ -4123,10 +4129,10 @@ async function release(config) {
           incidentId: "",
           resourceHealth: resourceReport.health,
           resourceReason: resourceReport.reason,
-          // The removal never landed, so this run held no session and there is no session
-          // window to replay. `not-applicable` says that. `unavailable` would claim a read
-          // failed, and it carries no reason.
-          peerTimeline: { status: "not-applicable", events: [] }
+          // The history that would prove a session window was never read, so this is
+          // unavailable, not not-applicable. Claiming no session would be a fact this
+          // path cannot support, and the manifest promises a reason with unavailable.
+          peerTimeline: { status: "unavailable", events: [], reason: UNRECORDED_RELEASE_RESULT }
         },
         UNRECORDED_RELEASE_RESULT
       );

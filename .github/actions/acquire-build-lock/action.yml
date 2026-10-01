@@ -75,8 +75,9 @@ outputs:
       one-second resolution of that timeline reports 0. An unproven wait is never 0.
   queue-position:
     description: >-
-      1-based organization FIFO position this caller last waited at, and 0 when it never
-      waited. The job summary reports the same value.
+      1-based organization FIFO position where this caller stood, and 0 when it was never
+      observed in the queue. An acquired run reports where it waited. A refused or timed
+      out run reports its last observed poll, which is what its summary reports too.
   attempts:
     description: Poll iterations in the acquire wait loop.
   stale-recovered:

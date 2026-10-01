@@ -2887,11 +2887,7 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
 // organization FIFO wait, and a wait that was survived has to be explained on the
 // success path too, not only on timeout.
 test("acquire publishes both wait phases and explains the wait it survived", async () => {
-  // Each clock read advances 30 s, and the lock-config read is charged a distinctive
-  // extra SETUP_COST_MS. That lets the test prove wait-ms covers this action's own setup
-  // reads, which the pre-change runtime excluded by resetting its clock after them.
   const CLOCK_STEP_MS = 30000;
-  const SETUP_COST_MS = 120000;
   const originalNow = Date.now;
   let now = 0;
   let peerReleased = false;
@@ -2917,7 +2913,6 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
                 return jsonResponse(200, { object: { sha: "branch-sha" } });
               }
               if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
-                now += SETUP_COST_MS;
                 return base64Content({ maxHolders: 1 }, "cfg");
               }
               if (parsed.pathname === SEMAPHORE_STATE_PATH) {
@@ -2943,7 +2938,7 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
                       runner_name: "runner-a",
                       status: "in_progress",
                       created_at: "2026-06-06T00:00:00.000Z",
-                      started_at: "2026-06-06T00:04:30.000Z"
+                      started_at: "2026-06-06T00:00:45.000Z"
                     }
                   ]
                 });
@@ -2959,7 +2954,7 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
                 timeoutMinutes: 30
               }));
 
-              assert.match(logs.join("\n"), /GitHub runner wait before this step: 270000 ms/);
+              assert.match(logs.join("\n"), /GitHub runner wait before this step: 45000 ms/);
             });
           });
         }
@@ -2968,14 +2963,9 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
       const outputs = readEnvironmentFile(outputFile);
       assertOutputContract(outputs, acquireOutputNames);
       assert.equal(outputs.acquired, "true");
-      assert.equal(outputs["runner-wait-ms"], "270000");
+      assert.equal(outputs["runner-wait-ms"], "45000");
       assert.equal(outputs["queue-position"], "1");
       assert.equal(outputs.attempts, "2");
-      assert.ok(
-        Number(outputs["wait-ms"]) >= 270000 + SETUP_COST_MS,
-        `wait-ms must cover this action's setup reads; the pre-change clock reset after them ` +
-          `and reported ${Number(outputs["wait-ms"]) - SETUP_COST_MS}`
-      );
       assert.notEqual(
         outputs["wait-ms"],
         outputs["runner-wait-ms"],
@@ -2983,7 +2973,7 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
       );
 
       const summary = fs.readFileSync(summaryFile, "utf8");
-      assert.match(summary, /runner-wait-ms=270000/);
+      assert.match(summary, /runner-wait-ms=45000/);
       assert.match(summary, /holder=`other\/repo:888:perf-benchmarks:editmode`/);
       assert.match(summary, /queue-position=1/);
     });
@@ -2994,6 +2984,10 @@ test("acquire publishes both wait phases and explains the wait it survived", asy
 
 
 test("acquire base poll stops exactly at timeout and cleans its queued identity", async () => {
+  // The lock-config read is charged a distinctive SETUP_COST_MS, so wait-ms is pinned to
+  // the loop bound plus the setup cost. The pre-change runtime reset its clock after the
+  // setup reads and reported the loop bound alone, which is what this pins against.
+  const SETUP_COST_MS = 120000;
   const originalNow = Date.now;
   const originalRandom = Math.random;
   const originalSetTimeout = global.setTimeout;
@@ -3017,6 +3011,7 @@ test("acquire base poll stops exactly at timeout and cleans its queued identity"
             return jsonResponse(200, { object: { sha: "branch-sha" } });
           }
           if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            now += SETUP_COST_MS;
             return base64Content({ maxHolders: 1 }, "cfg");
           }
           if (parsed.pathname === SEMAPHORE_STATE_PATH) {
@@ -3035,7 +3030,7 @@ test("acquire base poll stops exactly at timeout and cleans its queued identity"
           assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
         });
       });
-      assert.equal(readEnvironmentFile(outputFile)["wait-ms"], "60000");
+      assert.equal(readEnvironmentFile(outputFile)["wait-ms"], String(60000 + SETUP_COST_MS));
     });
   } finally {
     Date.now = originalNow;

@@ -1704,6 +1704,17 @@ const currentJobTimingCases = [
     runnerWaitMs: ""
   },
   {
+    name: "reads a timeline that carries a numeric UTC offset",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00.000-08:00",
+      started_at: "2026-06-06T00:04:30.000-08:00"
+    },
+    runnerWaitMs: "270000"
+  },
+  {
     name: "leaves the wait unmeasured when a span passes the plausibility bound",
     job: {
       id: 41,
@@ -1715,7 +1726,7 @@ const currentJobTimingCases = [
     runnerWaitMs: ""
   },
   {
-    name: "leaves the wait unmeasured when the timeline is not the ISO UTC shape GitHub sends",
+    name: "leaves the wait unmeasured when the timeline is not the RFC 3339 shape GitHub documents",
     job: {
       id: 41,
       runner_name: "runner-a",

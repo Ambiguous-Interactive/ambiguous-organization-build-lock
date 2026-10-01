@@ -700,4 +700,8 @@ test("both acquire wait phases stay documented and keep their measured boundarie
   // reads its inputs first.
   assert.doesNotMatch(folded(manifest), /measured from the start of the step/i);
   assert.match(folded(manifest), /Measured from the start of the acquire routine/);
+  // The summary cannot always echo the output: a success that never waited has no
+  // observation to report. The manifest must not promise that it always does.
+  assert.doesNotMatch(folded(manifest), /The job summary reports the same value/);
+  assert.match(folded(readme), /its `queue-position` is the same value the output publishes/);
 });
