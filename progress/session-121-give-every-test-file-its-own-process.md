@@ -15,7 +15,7 @@ rationale comment was removed either.
 | `test/build-lock*.test.js` | 6.0 s | 2.9 s |
 | Windows CI job, `node --test` step | 78.0 s | 35.7 s |
 | Windows CI job, whole | 93 s | 51 s |
-| Linux CI job, whole | 89 s | 78 s |
+| Linux CI job, whole | 89 s | 72 s |
 
 The local rows are on the development container, before and after. The CI rows
 are run 36904676960 for the Windows before and run 36929198410 for the Windows
@@ -156,6 +156,21 @@ so the `node --test test/*.test.js` glob never picks them up.
   every workflow, so the Windows job's changed command is pinned by a test that
   failed until it was updated.
 
+## A Linux-green change that broke Windows
+
+CI caught a real defect the local runs could not. `restoreWindowsFileTimes`
+lives in `test/unity-cleanup-evidence-support.js` and calls `childProcess`, and a
+cleanup pass had dropped the module's `node:child_process` import while removing
+an export it mistook for dead. Every Linux run stayed green, because the two
+Windows-native tests are the only coverage for that helper and they are skipped
+off Windows.
+
+That is a class, not an accident: a file whose only coverage runs on one runner
+has no local check at all. So `ci.sh javascript` now runs `no-undef` over
+`.github/dist`, `tools`, and `test`, with the Node globals listed because the run
+uses `--no-config-lookup`. Removing the import again now fails on Linux. The rule
+costs nothing: eslint already ran.
+
 ## Review rounds, and what each changed
 
 | Finding | Disposition |
@@ -169,6 +184,7 @@ so the `node --test test/*.test.js` glob never picks them up.
 | The new Windows files had duplicated header prose and a stale "tests below" comment | Fixed. |
 | A support module re-exports its runtime whole, which no linter can see through | Accepted. The three modules that do it were read by hand and the export list is the statement multiset check's own input. |
 | `build-lock-support.js` generates an RSA-2048 key at module load, now once per shard | Accepted. Measured at 41 ms. No correctness effect. |
+| A Linux-green change broke the only coverage a Windows-only test has | Fixed. `no-undef` now runs on every JavaScript file, so an unbound reference in a file with no local coverage fails on every runner. |
 | The Linux job only fell from 89 s to 78 s | Accepted. `go test -race` at 17 s and `setup-go` at 12 s are what is left. Moving the race suite to its own job would add a required-check name to the branch ruleset, which this task must not change. |
 
 ## Known limits
