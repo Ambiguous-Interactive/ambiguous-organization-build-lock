@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -249,6 +250,14 @@ func auditUnityAutomationRepository(root string, allowed map[string]bool) ([]fin
 			return nil, relErr
 		}
 		relative = filepath.ToSlash(relative)
+		// Go's regexp decodes UTF-8, and a byte it cannot decode becomes U+FFFD.
+		// The automation pattern is a literal, so the substitution hides the
+		// very automation this audit exists to find. A file the audit cannot
+		// read exactly is not evidence that no automation is present, so refuse
+		// it and name it, the way the YAML reader above refuses such a file.
+		if !utf8.Valid(contents) {
+			return nil, fmt.Errorf("%s is not valid UTF-8, so this audit cannot read it", relative)
+		}
 		if isUnregisteredUnityAutomation(relative, string(contents), allowed) {
 			findings = append(findings, finding{File: relative, Kind: "unity-automation"})
 		}

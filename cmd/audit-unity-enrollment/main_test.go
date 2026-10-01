@@ -62,6 +62,39 @@ func TestRunCanValidatePolicyWithoutRepositoryAccess(t *testing.T) {
 	}
 }
 
+// The audit is a fail-closed gate, and encoding/json replaces a byte it cannot
+// decode with U+FFFD rather than failing. A policy that is not valid UTF-8 must
+// never be reported as valid, and the run must name the encoding.
+func TestRunRefusesAPolicyThatIsNotValidUTF8(t *testing.T) {
+	policy, err := os.ReadFile("../../unity-enrollment-policy.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One raw byte inside the free-text owner a reviewed exception carries, so
+	// the file is still JSON and only a strict decode can refuse it.
+	corrupted := bytes.Replace(
+		policy,
+		[]byte(`"owner": "unity-builder-maintainers"`),
+		append([]byte(`"owner": "unity-builder-`), 0xff, '"'),
+		1,
+	)
+	if bytes.Equal(corrupted, policy) {
+		t.Fatal("exception owner fixture is missing from the reviewed policy")
+	}
+	policyPath := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(policyPath, corrupted, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{"--policy", policyPath, "--validate-policy-only"}, &stdout, &stderr)
+	if exit != 2 || !strings.Contains(stderr.String(), "not valid UTF-8") {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), "policy is valid") {
+		t.Fatalf("a refused policy was reported as valid: %s", stdout.String())
+	}
+}
+
 func TestRunAuditsCompleteExactRepositorySet(t *testing.T) {
 	root := t.TempDir()
 	policyContent, err := os.ReadFile("../../unity-enrollment-policy.json")

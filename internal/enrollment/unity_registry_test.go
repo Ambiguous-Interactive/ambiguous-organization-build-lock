@@ -1,10 +1,12 @@
 package enrollment
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func validUnityRegistry() UnityEnrollmentRegistry {
@@ -523,4 +525,96 @@ func TestUnityEnrollmentRegistryCapsRequiredContexts(t *testing.T) {
 	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err != nil {
 		t.Fatalf("bounded required contexts failed: %v", err)
 	}
+}
+
+// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+// failing, so a policy that is not valid UTF-8 would otherwise be evaluated as
+// a value the repository never wrote. Every reviewed field class is refused by
+// name, so an operator is never sent to fix a spelling the file does not
+// contain.
+func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.Exceptions = []UnityPolicyException{{
+		Repository:     "Ambiguous-Interactive/unity-builder",
+		Path:           ".github/workflows/unity.yml",
+		Classification: UnityInventorySynthetic,
+		Owner:          "unity-builder-maintainers",
+		ExpiresAt:      "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinExceptions = []UnityRepinException{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/workflows/repin-protected.yml",
+		Reason:     "wrapper cannot supply the newest input contract",
+		Owner:      "unity-builder-maintainers",
+		ExpiresAt:  "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinCompanions = []UnityRepinCompanion{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/unity-lock.json",
+		Mode:       "pin-lines",
+	}}
+	for index := range registry.Repositories {
+		registry.Repositories[index].RequiredContexts = []string{"CI Success"}
+	}
+	content := encodeRegistry(t, registry)
+	// parsesAfterSubstitution records what the same file does when the byte is
+	// the three bytes a decoder substitutes for it. No validator inspects the
+	// free-text bytes, so those rows still parse and the audit decides from
+	// text nobody wrote. Every other row has a validator, so the guard there
+	// only names the real cause. Both directions are asserted, so a validator
+	// that later stops rejecting a field cannot make a row quietly wrong.
+	fields := map[string]struct {
+		fragment                string
+		parsesAfterSubstitution bool
+	}{
+		"organization":           {`"organization":"Ambiguous-Interactive"`, false},
+		"repository":             {`"repository":"Ambiguous-Interactive/DoxReloaded"`, false},
+		"default branch":         {`"defaultBranch":"master"`, false},
+		"required context":       {`"requiredContexts":["CI Success"`, false},
+		"approved lock SHA":      {`"approvedLockShas":["` + testSHA + `"`, false},
+		"exception owner":        {`"owner":"unity-builder-maintainers"`, true},
+		"repin exception reason": {`"reason":"wrapper cannot supply the newest input contract"`, true},
+		"companion path":         {`"path":".github/unity-lock.json"`, true},
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			corrupted := oneRawByteIn(t, content, field.fragment)
+			_, err := ParseUnityEnrollmentRegistry(corrupted)
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			_, substitutedErr := ParseUnityEnrollmentRegistry(withSubstitutedByte(corrupted))
+			if field.parsesAfterSubstitution != (substitutedErr == nil) {
+				t.Fatalf("substituted form error = %v, want parse = %t", substitutedErr, field.parsesAfterSubstitution)
+			}
+		})
+	}
+}
+
+// oneRawByteIn splices one 0xFF byte into the last string of a JSON fragment,
+// so the file stays valid JSON and only a strict decode can refuse it.
+func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
+	t.Helper()
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from the encoded registry", fragment)
+	}
+	corrupted := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+"\xff"+`"`),
+		1,
+	)
+	if utf8.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
+	return corrupted
+}
+
+// withSubstitutedByte replaces the one raw byte with the three bytes a decoder
+// substitutes for it.
+func withSubstitutedByte(corrupted []byte) []byte {
+	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }

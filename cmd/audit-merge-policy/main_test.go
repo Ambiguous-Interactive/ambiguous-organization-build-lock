@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const managedRulesetID = 17663217
@@ -429,6 +431,64 @@ func TestRunRejectsExpectationsDriftingFromRegistry(t *testing.T) {
 	)
 	if exit != 2 {
 		t.Fatalf("drifted expectations exit = %d, want 2", exit)
+	}
+}
+
+// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+// failing, so a reviewed file that is not valid UTF-8 would be evaluated as a
+// value the organization never wrote. Both reviewed files are refused by name,
+// so an operator is not sent to fix a spelling the file does not contain.
+func TestRunRefusesEvidenceThatIsNotValidUTF8(t *testing.T) {
+	reviewed := map[string]func(*testing.T, string) string{
+		"policy":       writeRepositoryPolicy,
+		"expectations": func(t *testing.T, directory string) string { return writeExpectations(t, directory) },
+	}
+	for name, write := range reviewed {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			policyPath := writeRepositoryPolicy(t, directory)
+			expectationsPath := writeExpectations(t, directory)
+			corruptOneByte(t, write(t, directory), `"organization": "Ambiguous-Interactive"`)
+			var stderr bytes.Buffer
+			exit := run(
+				[]string{"--policy", policyPath, "--expectations", expectationsPath, "--validate-only"},
+				io.Discard,
+				&stderr,
+				func(string) string { return "" },
+				nil,
+			)
+			if exit != 2 || !strings.Contains(stderr.String(), "not valid UTF-8") {
+				t.Fatalf("exit = %d, want 2\nstderr=%s", exit, stderr.String())
+			}
+		})
+	}
+}
+
+// corruptOneByte splices one 0xFF byte into the last string of a JSON fragment,
+// so the file stays valid JSON and only a strict decode can refuse it.
+func corruptOneByte(t *testing.T, path string, fragment string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from %s", fragment, path)
+	}
+	corrupted := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+"\xff"+`"`),
+		1,
+	)
+	if utf8.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
+	if err := os.WriteFile(path, corrupted, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -904,6 +964,39 @@ func TestRunFlagsStaleAttestationWhenLiveEvidenceIsVisible(t *testing.T) {
 	if !audit.Complete || len(audit.Findings) != 1 ||
 		audit.Findings[0].Code != "merge-policy-attestation-stale" {
 		t.Fatalf("unexpected artifact: %s", content)
+	}
+}
+
+func TestRunFailsClosedWhenAResponseIsNotValidUTF8(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory,
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", ""),
+		expectationBody("IshoBoy", "main", ""),
+		expectationBody("qora-redux", "main", ""),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", ""),
+	)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads["Ambiguous-Interactive/DoxReloaded"] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	// A required check context that carries a byte the decoder cannot read is
+	// ambiguous evidence, not a context name. The audit must not read it as the
+	// reviewed spelling, and must not read it as a different one either.
+	server.rulesetDetailPayloads[managedRulesetID] =
+		detailPayload("Main Protection", "CI Succ\xffess", "")
+	server.activeRulesPayloads["Ambiguous-Interactive/DoxReloaded@main"] =
+		activeRulesJSON("CI Success")
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("unreadable response exit = %d, want 1", exit)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete || len(audit.Findings) != 1 ||
+		audit.Findings[0].Repository != "Ambiguous-Interactive/DoxReloaded" ||
+		audit.Findings[0].Code != "merge-policy-retrieval-incomplete" {
+		t.Fatalf("an unreadable response must fail that repository closed: %s", content)
 	}
 }
 

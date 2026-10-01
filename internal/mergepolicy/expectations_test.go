@@ -1,8 +1,11 @@
 package mergepolicy
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func expectationsContent(body string) string {
@@ -98,4 +101,62 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+// failing, so a reviewed file that is not valid UTF-8 would be evaluated as a
+// value the organization never wrote. The refusal names the encoding, so an
+// operator is not sent to fix a spelling the file does not contain. Every field
+// in this file also has a validator, and both directions are asserted: the
+// substituted form is refused, so no row here decides a verdict on its own and
+// the guard is what names the real cause.
+func TestParseExpectationsRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	content := []byte(expectationsContent(validExpectationBody()))
+	fields := map[string]string{
+		"organization":     `"organization": "Ambiguous-Interactive"`,
+		"repository":       `"repository": "Ambiguous-Interactive/example"`,
+		"default branch":   `"defaultBranch": "main"`,
+		"required context": `"requiredContexts": ["Unity CI Success"`,
+		"bypass actor":     `"actorType": "OrganizationAdmin"`,
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			corrupted := oneRawByteIn(t, content, field)
+			_, err := ParseExpectations(corrupted)
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			if _, substitutedErr := ParseExpectations(withSubstitutedByte(corrupted)); substitutedErr == nil {
+				t.Fatal("the substituted form must be refused, or this row is decided by the encoding rule alone")
+			}
+		})
+	}
+}
+
+// oneRawByteIn splices one 0xFF byte into the last string of a JSON fragment,
+// so the file stays valid JSON and only a strict decode can refuse it.
+func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
+	t.Helper()
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from the reviewed file", fragment)
+	}
+	corrupted := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+"\xff"+`"`),
+		1,
+	)
+	if utf8.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
+	return corrupted
+}
+
+// withSubstitutedByte replaces the one raw byte with the three bytes a decoder
+// substitutes for it.
+func withSubstitutedByte(corrupted []byte) []byte {
+	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }

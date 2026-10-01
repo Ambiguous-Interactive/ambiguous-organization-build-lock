@@ -73,7 +73,11 @@ fails closed after the bounded refresh attempts.
 The audit derives the reader-App token scope, checkout targets, and exact-head
 revalidation set from the validated registry. The required baseline cannot be
 removed, repositories outside `Ambiguous-Interactive` are rejected, and
-duplicate or malformed entries fail closed.
+duplicate or malformed entries fail closed. A policy that is not valid UTF-8
+is refused before it is parsed, because the JSON decoder would replace a byte
+it cannot read with U+FFFD and the audit would then decide from a value the
+repository never wrote. A policy over the 64 KiB bound is refused on its size
+first, whatever else is wrong with it.
 
 Repository additions start with the secretless `Request Unity repository
 onboarding` workflow on `main`. Its trusted-main `workflow_run` consumer rejects
@@ -200,12 +204,24 @@ document, so it replaces the body and keeps only the mark. A byte order mark
 is read as encoding metadata rather than content, so a pin on the first line
 of a file the mark opens moves instead of staying behind a green run.
 
-The release authorization and the repository onboarding both read the
-reviewed policy and write it back, so both refuse a policy that is not valid
-UTF-8. Neither moves a byte order mark, because a mark is invalid JSON and
-Node and all three Go analyzers reject one. The lock runtime refuses a lock
-state file that is not valid UTF-8 for the same reason. A history commit it
-cannot read is a gap in the peer timeline, never a peer that does not exist.
+Every tool that reads the reviewed policy refuses a policy that is not valid
+UTF-8. That covers the release authorization and the repository onboarding,
+which write it back, and the enrollment and merge-policy audits, which only
+read it. Each run makes that refusal before any other step reads the file. The
+shell also reads the file with `jq`, which substitutes a byte it cannot read
+instead of failing, so no step reaches it. The merge-policy expectations file
+and a consumer's published attestation are refused the same way, and each run
+validates them before any later step reads them. None of them moves a byte
+order mark, because a mark is invalid JSON and Node and all three Go analyzers
+reject one. The lock runtime refuses a lock state file that is not valid UTF-8
+for the same reason. A history commit it cannot read is a gap in the peer
+timeline, never a peer that does not exist.
+
+One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
+valid UTF-8 and valid JSON, so the encoding check does not refuse it. The
+decoder substitutes U+FFFD, and the onboarding command writes the substituted
+text back. That is a second door to the same destruction, and it is tracked as
+issue #316.
 
 The LLM harness reports a `.llm` document and a `progress/` record it cannot
 read rather than scanning a lossy copy. A substitution in a copy would break

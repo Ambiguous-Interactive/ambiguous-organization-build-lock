@@ -92,6 +92,47 @@ func TestParseAttestationRejectsContractViolations(t *testing.T) {
 	}
 }
 
+// The published attestation is consumer evidence, and encoding/json replaces a
+// byte it cannot decode with U+FFFD rather than failing. A ruleset name or
+// required context that carries such a byte would otherwise be accepted as
+// evidence the consumer never wrote, and compared with the live ruleset.
+func TestParseAttestationRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	content := []byte(validAttestationContent())
+	// parsesAfterSubstitution records what the same file does when the byte is
+	// the three bytes a decoder substitutes for it. The name and the context
+	// are compared raw and no validator inspects their bytes, so those rows
+	// still parse and the audit compares a value nobody wrote. The repository
+	// row has a validator, so the guard there only names the real cause. Both
+	// directions are asserted, so a validator that later stops rejecting a
+	// field cannot make a row quietly wrong.
+	fields := map[string]struct {
+		fragment                string
+		parsesAfterSubstitution bool
+	}{
+		"repository":       {`"repository": "Ambiguous-Interactive/example"`, false},
+		"ruleset name":     {`"rulesetName": "Required CI (default branch)"`, true},
+		"required context": {`"requiredContexts": ["Unity CI Success"`, true},
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			corrupted := oneRawByteIn(t, content, field.fragment)
+			_, err := ParseAttestation(corrupted, "Ambiguous-Interactive/example")
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			_, substitutedErr := ParseAttestation(
+				withSubstitutedByte(corrupted), "Ambiguous-Interactive/example",
+			)
+			if field.parsesAfterSubstitution != (substitutedErr == nil) {
+				t.Fatalf(
+					"substituted form error = %v, want parse = %t",
+					substitutedErr, field.parsesAfterSubstitution,
+				)
+			}
+		})
+	}
+}
+
 func TestResolveBypassEvidenceKeepsLiveEvidenceAuthoritative(t *testing.T) {
 	live := liveCarrier("Required CI (default branch)", true)
 	resolved, attested, health, complete := ResolveBypassEvidence(

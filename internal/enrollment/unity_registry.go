@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // requiredContextPattern mirrors the reviewed context contract of
@@ -155,9 +156,19 @@ func validRepinCompanionPath(value string) bool {
 // any reviewed additions without accepting unknown JSON fields or trailing
 // values. The audit derives its reader scope, checkouts, and head revalidation
 // directly from this registry.
+//
+// encoding/json replaces a byte it cannot decode with U+FFFD instead of
+// failing, so a policy that is not valid UTF-8 would be evaluated as values the
+// repository never wrote, and a caller that writes the file back would commit
+// the destroyed byte inside a clean commit. One named refusal covers every
+// field, because a field no validator happens to reject is the field that
+// produces the wrong verdict.
 func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, error) {
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
+	}
+	if !utf8.Valid(content) {
+		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy is not valid UTF-8")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()

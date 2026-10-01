@@ -147,10 +147,23 @@ is the one exception: that mode generates the whole document, so it replaces
 the body and keeps only the mark. A NUL byte is valid UTF-8, so it does not
 refuse the file. The byte comes back with the rest of the file.
 
-The release authorization and the repository onboarding both read the
-reviewed policy and write it back, so both refuse a policy that is not valid
-UTF-8. Neither moves a byte order mark. A mark is invalid JSON, and Node and
-all three Go analyzers reject one, so a marked policy fails as it always has.
+Every tool that reads the reviewed policy refuses a policy that is not valid
+UTF-8. That covers the release authorization and the repository onboarding,
+which write it back, and the enrollment and merge-policy audits, which only
+read it. Each run makes that refusal before any other step reads the file. The
+shell also reads the file with `jq`, which substitutes a byte it cannot read
+instead of failing, so no step reaches it. The merge-policy expectations file
+and a consumer's published attestation are refused the same way, and each run
+validates them before any later step reads them. None of them moves a byte
+order mark. A mark is invalid JSON, and Node and all three Go analyzers reject
+one, so a marked policy fails as it always has.
+
+One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
+valid UTF-8 and valid JSON, so the encoding check does not refuse it. The
+decoder substitutes U+FFFD, and the onboarding command writes the substituted
+text back. That is a second door to the same destruction, and it is tracked as
+issue #316.
+
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce
 such a byte, so one means something else changed the state. The runtime also
@@ -549,7 +562,7 @@ edits.
 | `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
 | `release-not-always` | Run the release step with literal `always()`. See item 7. |
 | `repository-analysis-incomplete` | No consumer edit. The audit failed closed while analyzing this repository. Central operators diagnose the run. |
-| `repository-retrieval-incomplete` | No consumer edit. The audit failed closed before reading this repository. Central operators repair the run. |
+| `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also covers a file or path in this repository that is not valid UTF-8. The finding names the repository, not the file, so an operator finds that file in the consumer checkout. #317 owns naming it. |
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
@@ -594,7 +607,10 @@ drift.
 
 The audit reads live rulesets and classic branch protection with a
 per-repository reader token scoped to Administration read and Contents read.
-A failed read is a finding, never a pass. GitHub returns ruleset
+A failed read is a finding, never a pass. A response that is not valid UTF-8
+is a failed read, because the JSON decoder would replace a byte it cannot read
+with U+FFFD and the audit would decide the repository from a value the
+repository never wrote. GitHub returns ruleset
 `bypass_actors` only to callers with write access to the ruleset. The reader
 App stays read-only by reviewed policy (issue #254), so the audit fills that
 one blind spot from the consumer-published attestation file and fails closed

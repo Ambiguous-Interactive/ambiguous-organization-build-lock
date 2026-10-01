@@ -8,6 +8,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -75,6 +76,13 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 		if err != nil || clean != name || strings.Contains(name, ":") {
 			return Snapshot{}, fmt.Errorf("invalid tree path %q", name)
 		}
+		// The path becomes a Go string that reaches the published artifact and
+		// a Git path, and a byte it cannot decode is reported as a spelling
+		// nobody wrote. Git accepts such a name, so refuse the repository
+		// instead of publishing a path the audit cannot read exactly.
+		if !utf8.ValidString(name) {
+			return Snapshot{}, fmt.Errorf("tree path %q at %s is not valid UTF-8", name, sha)
+		}
 	}
 
 	files := make(map[string][]byte, len(policyFiles))
@@ -110,6 +118,15 @@ func LoadGitSnapshot(ctx context.Context, repositoryRoot, repository, sha string
 		}
 		if int64(len(content)) != size {
 			return Snapshot{}, fmt.Errorf("blob size changed for %s at %s", name, sha)
+		}
+		// A checked-in script is scanned by matching literal needles, and
+		// strings.ToLower decodes UTF-8: a byte it cannot decode becomes
+		// U+FFFD, so the needle stops matching the text PowerShell runs. A blob
+		// the audit cannot read exactly is not evidence that the script is
+		// clean, so refuse it. The YAML workflow path needs no such check; its
+		// parser already refuses a file with such a byte.
+		if !utf8.Valid(content) {
+			return Snapshot{}, fmt.Errorf("policy file %s at %s is not valid UTF-8", name, sha)
 		}
 		files[name] = content
 	}
