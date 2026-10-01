@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -127,7 +129,9 @@ func validActorType(actorType string) bool {
 // accepting unknown JSON fields or trailing values. A file that is not valid
 // UTF-8 is refused before it is decoded, because encoding/json replaces a byte
 // it cannot decode with U+FFFD instead of failing, and the audit would then
-// compare values the organization never wrote.
+// compare values the organization never wrote. An escaped lone surrogate is the
+// same substitution through a door the byte check cannot see, so it is refused
+// too.
 func ParseExpectations(content []byte) (Expectations, error) {
 	if len(content) == 0 || len(content) > MaxExpectationsBytes {
 		return Expectations{}, fmt.Errorf("merge policy expectations size is invalid")
@@ -147,6 +151,11 @@ func ParseExpectations(content []byte) (Expectations, error) {
 	}
 	if expectations.SchemaVersion != expectationsSchemaVersion {
 		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 2")
+	}
+	if jsonstrict.UnpairedSurrogateEscape(content) {
+		return Expectations{}, fmt.Errorf(
+			"merge policy expectations contain an escaped lone surrogate, which no JSON decoder can represent",
+		)
 	}
 	if expectations.Organization != Organization {
 		return Expectations{}, fmt.Errorf("merge policy expectations organization is not authorized")

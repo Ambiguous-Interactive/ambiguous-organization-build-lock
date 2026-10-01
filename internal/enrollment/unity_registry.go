@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 // requiredContextPattern mirrors the reviewed context contract of
@@ -163,6 +165,12 @@ func validRepinCompanionPath(value string) bool {
 // the destroyed byte inside a clean commit. One named refusal covers every
 // field, because a field no validator happens to reject is the field that
 // produces the wrong verdict.
+//
+// An escaped lone surrogate is a second door to the same substitution. It is
+// six valid ASCII bytes, so the encoding check above cannot see it, and the
+// decoder has no representation for the code point, so it writes U+FFFD
+// without an error. The guard runs after the decode, so a file that is not
+// well-formed JSON still gets the decoder's own message.
 func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, error) {
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
@@ -182,6 +190,11 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	}
 	if registry.SchemaVersion != 1 {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy schemaVersion must be 1")
+	}
+	if jsonstrict.UnpairedSurrogateEscape(content) {
+		return UnityEnrollmentRegistry{}, fmt.Errorf(
+			"unity enrollment policy contains an escaped lone surrogate, which no JSON decoder can represent; re-save the file without it",
+		)
 	}
 	if registry.Organization != UnityEnrollmentOrganization {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy organization is not authorized")

@@ -4774,7 +4774,8 @@ function releaseAuthorizationHarness(t, {
   declinedPrs = false,
   prCreateStatus = "0",
   unreadablePolicy = false,
-  unreadablePolicyOnMainOnly = false
+  unreadablePolicyOnMainOnly = false,
+  escapedSurrogatePolicy = false
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "release-authorization-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -4807,7 +4808,19 @@ function releaseAuthorizationHarness(t, {
     repositories: [],
     exceptions: []
   };
-  if (!unreadablePolicy) {
+  if (escapedSurrogatePolicy) {
+    // An escaped lone surrogate is valid UTF-8 and valid JSON, and a JavaScript
+    // string can hold it, so this seeds the shape the Go readers refuse and the
+    // Node readers are measured against.
+    const escaped = JSON.stringify(policy).replace(
+      `"repositories":[]`,
+      `"note":"\\ud800","repositories":[]`
+    );
+    if (!escaped.includes("\\ud800")) {
+      throw new Error("escaped-surrogate fixture is missing from the policy");
+    }
+    fs.writeFileSync(path.join(seed, "unity-enrollment-policy.json"), escaped);
+  } else if (!unreadablePolicy) {
     fs.writeFileSync(path.join(seed, "unity-enrollment-policy.json"), JSON.stringify(policy));
   } else {
     // One raw byte inside a string value, so the file is still JSON to a
@@ -5156,4 +5169,37 @@ test("release diagnostics degrade to a warning when their inputs are missing", (
   const noSummaryResult = noSummary.run();
   assert.equal(noSummaryResult.status, 0, noSummaryResult.stderr);
   assert.match(noSummaryResult.stderr, /GITHUB_STEP_SUMMARY is not set/);
+});
+
+// An escaped lone surrogate is valid UTF-8 and valid JSON, so the encoding
+// check in this script cannot see it. A JavaScript string holds the code point,
+// so this script is measured rather than assumed: the assertion is that the
+// escape survives the write-back byte for byte, because a tool that preserved
+// it is not a tool that can destroy it. The Go readers refuse the same file,
+// and their refusal is covered in Go.
+test("release authorization preserves an escaped lone surrogate it can represent", (t) => {
+  const harness = releaseAuthorizationHarness(t, {
+    publishedReleases: defaultPublishedReleases(),
+    authorizedTags: ["v1.14.0"],
+    escapedSurrogatePolicy: true
+  });
+
+  const result = harness.run();
+
+  // Read as bytes. A lossy write-back would replace the six-byte escape with
+  // the three bytes of U+FFFD, and the reviewed policy would then contain a
+  // value no release ever wrote.
+  const written = gitRun(harness.work, "show", "HEAD:unity-enrollment-policy.json");
+  assert.ok(
+    Buffer.from(written, "utf8").includes(Buffer.from("\\ud800", "utf8")),
+    "the written policy keeps the escape exactly"
+  );
+  assert.ok(
+    !Buffer.from(written, "utf8").includes(Buffer.from("�", "utf8")),
+    "the written policy never gains a U+FFFD the repository never had"
+  );
+  // The authorization decision itself must still be right, so the newest
+  // release has to be listed on the branch the script pushed.
+  assert.match(result.stdout, /Authorize|v1\.15\.0|already authorized/);
+  assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /is not valid UTF-8/);
 });

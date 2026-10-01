@@ -618,3 +618,129 @@ func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
 func withSubstitutedByte(corrupted []byte) []byte {
 	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }
+
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. The escape is six valid ASCII bytes.
+// Go has no value for the code point, so the decoder writes U+FFFD and
+// returns no error.
+//
+// The field classes are the ones the byte test covers, because the loss is
+// the same one.
+func TestUnityEnrollmentRegistryRejectsAnEscapedLoneSurrogate(t *testing.T) {
+	content := surrogateRegistryFixture(t)
+	fields := map[string]struct {
+		fragment                string
+		parsesAfterSubstitution bool
+	}{
+		"organization":           {`"organization":"Ambiguous-Interactive"`, false},
+		"repository":             {`"repository":"Ambiguous-Interactive/DoxReloaded"`, false},
+		"default branch":         {`"defaultBranch":"master"`, false},
+		"required context":       {`"requiredContexts":["CI Success"`, false},
+		"approved lock SHA":      {`"approvedLockShas":["` + testSHA + `"`, false},
+		"exception owner":        {`"owner":"unity-builder-maintainers"`, true},
+		"repin exception reason": {`"reason":"wrapper cannot supply the newest input contract"`, true},
+		"companion path":         {`"path":".github/unity-lock.json"`, true},
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			escaped := oneLoneSurrogateEscapeIn(content, field.fragment)
+			_, err := ParseUnityEnrollmentRegistry(escaped)
+			if err == nil || !strings.Contains(err.Error(), "lone surrogate") {
+				t.Fatalf("error = %v, want a named lone-surrogate refusal", err)
+			}
+			// The substituted form is what the decoder produces on its own, so
+			// this row records whether a validator would have caught the loss
+			// by itself. A row that parses is the class this guard closes.
+			_, substitutedErr := ParseUnityEnrollmentRegistry(
+				withSubstitutedEscape(escaped),
+			)
+			if field.parsesAfterSubstitution != (substitutedErr == nil) {
+				t.Fatalf("substituted form error = %v, want parse = %t",
+					substitutedErr, field.parsesAfterSubstitution)
+			}
+		})
+	}
+}
+
+// A registry whose every field class the byte test covers is present, so one
+// splice can target any of them.
+func surrogateRegistryFixture(t *testing.T) []byte {
+	t.Helper()
+	registry := validUnityRegistry()
+	registry.Exceptions = []UnityPolicyException{{
+		Repository:     "Ambiguous-Interactive/unity-builder",
+		Path:           ".github/workflows/unity.yml",
+		Classification: UnityInventorySynthetic,
+		Owner:          "unity-builder-maintainers",
+		ExpiresAt:      "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinExceptions = []UnityRepinException{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/workflows/repin-protected.yml",
+		Reason:     "wrapper cannot supply the newest input contract",
+		Owner:      "unity-builder-maintainers",
+		ExpiresAt:  "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinCompanions = []UnityRepinCompanion{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/unity-lock.json",
+		Mode:       "pin-lines",
+	}}
+	for index := range registry.Repositories {
+		registry.Repositories[index].RequiredContexts = []string{"CI Success"}
+	}
+	content := encodeRegistry(t, registry)
+	if _, err := ParseUnityEnrollmentRegistry(content); err != nil {
+		t.Fatalf("the unescaped fixture must parse: %v", err)
+	}
+	return content
+}
+
+// oneLoneSurrogateEscapeIn rewrites the last string of a JSON fragment as an
+// escaped lone surrogate, so the file stays valid UTF-8 and valid JSON and only
+// a check for the escape can refuse it.
+func oneLoneSurrogateEscapeIn(content []byte, fragment string) []byte {
+	if !bytes.Contains(content, []byte(fragment)) {
+		panic("fixture " + fragment + " is missing from the encoded registry")
+	}
+	escaped := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+`\ud800"`),
+		1,
+	)
+	if !utf8.Valid(escaped) {
+		panic("the escaped fixture is not valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(escaped) {
+		panic("the escaped fixture is not valid JSON, so the test proves nothing")
+	}
+	return escaped
+}
+
+// withSubstitutedEscape replaces the escape with the three bytes the decoder
+// substitutes for the code point.
+func withSubstitutedEscape(escaped []byte) []byte {
+	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
+}
+
+// The escape guard runs after the decode, so a file that is not well-formed
+// JSON still gets the decoder's own message. Without this, a guard placed
+// earlier reports a cause the operator cannot act on, and this suite would not
+// notice: the file is damaged either way, so every other assertion still holds.
+func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
+	content := surrogateRegistryFixture(t)
+	// Truncate the file after a well-formed escaped lone surrogate, so the
+	// document carries the escape the guard looks for and is also truncated.
+	truncated := bytes.Replace(
+		content,
+		[]byte(`"owner":"unity-builder-maintainers"`),
+		[]byte(`"owner":"\ud800"`),
+		1,
+	)
+	truncated = truncated[:len(truncated)-8]
+	if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}

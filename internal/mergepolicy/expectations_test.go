@@ -160,3 +160,74 @@ func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
 func withSubstitutedByte(corrupted []byte) []byte {
 	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }
+
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. The escape is six valid ASCII bytes.
+// Go has no value for the code point, so the decoder writes U+FFFD and
+// returns no error.
+func TestParseExpectationsRejectsAnEscapedLoneSurrogate(t *testing.T) {
+	content := []byte(expectationsContent(validExpectationBody()))
+	fields := map[string]string{
+		"organization":     `"organization": "Ambiguous-Interactive"`,
+		"repository":       `"repository": "Ambiguous-Interactive/example"`,
+		"default branch":   `"defaultBranch": "main"`,
+		"required context": `"requiredContexts": ["Unity CI Success"`,
+		"bypass actor":     `"actorType": "OrganizationAdmin"`,
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			escaped := oneLoneSurrogateEscapeIn(t, content, field)
+			_, err := ParseExpectations(escaped)
+			if err == nil || !strings.Contains(err.Error(), "lone surrogate") {
+				t.Fatalf("error = %v, want a named lone-surrogate refusal", err)
+			}
+			if _, substitutedErr := ParseExpectations(withSubstitutedEscape(escaped)); substitutedErr == nil {
+				t.Fatal("the substituted form must be refused, or this row is decided by the escape rule alone")
+			}
+		})
+	}
+}
+
+// oneLoneSurrogateEscapeIn rewrites the last string of a JSON fragment as an
+// escaped lone surrogate, so the file stays valid UTF-8 and valid JSON and only
+// a check for the escape can refuse it.
+func oneLoneSurrogateEscapeIn(t *testing.T, content []byte, fragment string) []byte {
+	t.Helper()
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from the reviewed file", fragment)
+	}
+	escaped := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+`\ud800"`),
+		1,
+	)
+	if !utf8.Valid(escaped) {
+		t.Fatal("the escaped fixture is not valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(escaped) {
+		t.Fatal("the escaped fixture is not valid JSON, so the test proves nothing")
+	}
+	return escaped
+}
+
+// withSubstitutedEscape replaces the escape with the three bytes the decoder
+// substitutes for the code point.
+func withSubstitutedEscape(escaped []byte) []byte {
+	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
+}
+
+// The escape guard runs after the decode, so a file that is not well-formed
+// JSON still gets the decoder's own message. Every other assertion still holds
+// for a damaged file, so without this the ordering is not pinned.
+func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
+	escaped := oneLoneSurrogateEscapeIn(
+		t, []byte(expectationsContent(validExpectationBody())),
+		`"organization": "Ambiguous-Interactive"`,
+	)
+	truncated := escaped[:len(escaped)-8]
+	if _, err := ParseExpectations(truncated); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}

@@ -1110,3 +1110,90 @@ func TestRunRecordsClassicProtectionWithoutAdminEnforcement(t *testing.T) {
 		t.Fatalf("inventory must record the observed carrier: %s", content)
 	}
 }
+
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. Both reviewed files are refused by
+// name, so an operator is not sent to fix a spelling the file does not contain.
+func TestRunRefusesEvidenceWithAnEscapedLoneSurrogate(t *testing.T) {
+	reviewed := map[string]func(*testing.T, string) string{
+		"policy":       writeRepositoryPolicy,
+		"expectations": func(t *testing.T, directory string) string { return writeExpectations(t, directory) },
+	}
+	for name, write := range reviewed {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			policyPath := writeRepositoryPolicy(t, directory)
+			expectationsPath := writeExpectations(t, directory)
+			escapeOneLoneSurrogate(t, write(t, directory), `"organization": "Ambiguous-Interactive"`)
+			var stderr bytes.Buffer
+			exit := run(
+				[]string{"--policy", policyPath, "--expectations", expectationsPath, "--validate-only"},
+				io.Discard,
+				&stderr,
+				func(string) string { return "" },
+				nil,
+			)
+			if exit != 2 || !strings.Contains(stderr.String(), "lone surrogate") {
+				t.Fatalf("exit = %d, want 2\nstderr=%s", exit, stderr.String())
+			}
+		})
+	}
+}
+
+// escapeOneLoneSurrogate rewrites the last string of a JSON fragment as an
+// escaped lone surrogate, so the file stays valid UTF-8 and valid JSON and only
+// a check for the escape can refuse it.
+func escapeOneLoneSurrogate(t *testing.T, path string, fragment string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from %s", fragment, path)
+	}
+	escaped := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+`\ud800"`),
+		1,
+	)
+	if !utf8.Valid(escaped) {
+		t.Fatal("the escaped fixture is not valid UTF-8, so the test proves nothing")
+	}
+	if !json.Valid(escaped) {
+		t.Fatal("the escaped fixture is not valid JSON, so the test proves nothing")
+	}
+	if err := os.WriteFile(path, escaped, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A live response carrying an escape is the same substitution as an unreadable
+// byte, and this decoder owns the refusal every caller turns into a named
+// retrieval failure. A repository that published one must not be reported as
+// matching the reviewed expectations.
+func TestStrictDecodeRejectsAnEscapedLoneSurrogate(t *testing.T) {
+	type response struct {
+		Rulesets []struct {
+			Name string `json:"name"`
+		} `json:"rulesets"`
+	}
+	var decoded response
+	if err := strictDecode([]byte(`{"rulesets":[{"name":"\ud800"}]}`), &decoded); err == nil ||
+		!strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want a named lone-surrogate refusal", err)
+	}
+	if err := strictDecode([]byte(`{"rulesets":[{"name":"protect main"}]}`), &decoded); err != nil {
+		t.Fatalf("a clean response was refused: %v", err)
+	}
+	// The guard runs after the decode, so a malformed response keeps the
+	// decoder's own message rather than the escape message. The input carries a
+	// well-formed escape and is truncated after it, so the guard would answer if
+	// it ran first. Without the escape this assertion holds at any position and
+	// pins nothing.
+	if err := strictDecode([]byte(`{"rulesets":[{"name":"\ud800"}`), &decoded); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message", err)
+	}
+}

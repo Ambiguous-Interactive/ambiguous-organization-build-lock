@@ -217,11 +217,22 @@ reject one. The lock runtime refuses a lock state file that is not valid UTF-8
 for the same reason. A history commit it cannot read is a gap in the peer
 timeline, never a peer that does not exist.
 
-One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
-valid UTF-8 and valid JSON, so the encoding check does not refuse it. The
-decoder substitutes U+FFFD, and the onboarding command writes the substituted
-text back. That is a second door to the same destruction, and it is tracked as
-issue #316.
+An escaped lone surrogate, such as `"\ud800"`, is a second door to the same
+substitution. The escape is six valid ASCII bytes. The encoding check above
+cannot see it. Go has no value for the code point, so its decoder writes U+FFFD
+and returns no error.
+
+All three Go analyzers refuse such a file by name. So do the merge-policy
+expectations parser and the consumer attestation parser. We measured the other
+readers. A JavaScript string holds a lone surrogate, and `JSON.stringify`
+writes it back as an escape. So the release authorization rewrites the file
+without changing the escape. The consumer repin reads the file and never writes
+it.
+
+`jq` 1.6 stops on an escaped high surrogate and reports a parse error. It does
+not see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow
+that reads the file with `jq` runs a Go refusal first. No `jq` step reaches
+such a file.
 
 The LLM harness reports a `.llm` document and a `progress/` record it cannot
 read rather than scanning a lossy copy. A substitution in a copy would break

@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/mergepolicy"
 )
 
@@ -584,8 +585,9 @@ func hasPagination(headers http.Header) bool {
 // strictDecode reads one bounded JSON response. A response that is not valid
 // UTF-8 is ambiguous evidence: encoding/json replaces a byte it cannot decode
 // with U+FFFD instead of failing, so the audit would compare substituted values
-// against the reviewed expectations. Every caller turns this into a named
-// retrieval failure for the repository it was reading.
+// against the reviewed expectations. An escaped lone surrogate is the same
+// substitution through a door the byte check cannot see. Every caller turns
+// this into a named retrieval failure for the repository it was reading.
 func strictDecode(content []byte, result any) error {
 	if !utf8.Valid(content) {
 		return fmt.Errorf("response is not valid UTF-8")
@@ -597,6 +599,11 @@ func strictDecode(content []byte, result any) error {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fmt.Errorf("response must contain one JSON value")
+	}
+	// The guard runs after the decode, so a malformed response keeps the
+	// decoder's own message.
+	if jsonstrict.UnpairedSurrogateEscape(content) {
+		return fmt.Errorf("response contains an escaped lone surrogate, which no JSON decoder can represent")
 	}
 	return nil
 }
