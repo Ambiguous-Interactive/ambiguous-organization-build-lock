@@ -85,10 +85,11 @@ version of this record repeated it. Measured on each reader:
 | `jq` | `"\ud83d\ude00"` | one code point, correct |
 
 A JavaScript string holds a lone surrogate, and `JSON.stringify` writes it back
-as an escape. So the two Node writers, the release authorization and the
-consumer repin, return the file unchanged. `jq` fails closed on an escaped high
-surrogate and substitutes an escaped low one. Every workflow runs a Go refusal
-before its first `jq`, so no `jq` step reaches such a file.
+as an escape. So the release authorization rewrites the file without changing
+the escape, and the consumer repin reads the file and never writes it. `jq` 1.6
+fails closed on an escaped high surrogate and substitutes an escaped low one.
+Every workflow that reads the file with `jq` runs a Go refusal first, so no
+`jq` step reaches such a file.
 
 The Node result is not a copy of the input. The release authorization runs
 `JSON.parse` and later `JSON.stringify`, so a measurement of the input alone
@@ -154,6 +155,14 @@ policy as bytes.
 | Six more JSON decode sites have no encoding guard at all | Out of scope. Each is fail-closed for a measured reason. Now #321. |
 | The guard sits after the `schemaVersion` check, so a file with an escape and a wrong version names the version | Accepted. Both messages are true, the run fails either way, and the order keeps the schema error first. The documents say "by name", which holds for an otherwise valid file. |
 | The three test helpers are duplicated across packages | Accepted. A shared test package is more scaffolding than the duplication costs. |
+| The oracle counted `\ufffd` even when the backslash was itself escaped | Wrong, and wrong in the direction that hides a broken guard. `\\ufffd` spells no escape. The walk now steps over an escaped backslash first, and two rows pin it. |
+| The generator filtered on `json.Valid` while the oracle decodes with `json.Unmarshal` | Wrong. `json.Valid` accepts an overflowing number that `Unmarshal` refuses, so the oracle would answer "no loss" for a document it never read. Both now use the same check. |
+| The guard had no row past its scan prefix | Fixed. A row places the escape past 5 KB, so a bound anywhere below that fails. |
+| The exported function did not name its precondition | Fixed. It now states that the content must already be well-formed JSON. |
+| A key repeated twice hides its shadowed value from the oracle walk | Accepted and named in the code. A decoder keeps the last value, so a walk cannot see the other. The generator never repeats a key. |
+| This record said the two Node scripts return the file unchanged | Corrected. The release authorization rewrites the file, and only the escape survives. The consumer repin never writes it. |
+| The documents said the encoding check refuses the escape | Wrong, and it contradicted the sentence above it. Corrected in both documents. |
+| The `jq` claim did not name a version | `jq` is not pinned in this image, so the sentence now names the measured version, 1.6. |
 | The escape check needs `encoding/json/v2` | Rejected. That package is behind a build tag. The reference was used to check the guard, never to build it. |
 
 ## What a consumer repository gains

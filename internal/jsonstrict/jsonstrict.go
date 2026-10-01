@@ -24,6 +24,11 @@ package jsonstrict
 // inside a string. A document that is not well-formed JSON therefore
 // reports only a well-formed escape, and the decoder keeps ownership
 // of the syntax error and its message.
+//
+// The content must already be well-formed JSON. A malformed escape
+// makes the answer false rather than an error, because the caller
+// decodes first and returns the decoder's own message. Every caller in
+// this repository does.
 func UnpairedSurrogateEscape(content []byte) bool {
 	inString := false
 	for index := 0; index < len(content); index++ {

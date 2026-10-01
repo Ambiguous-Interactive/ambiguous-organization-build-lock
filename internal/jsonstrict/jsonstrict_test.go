@@ -1,6 +1,9 @@
 package jsonstrict
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The guard reads bytes, so every shape that reaches it has to be decided the
 // same way a decoder would. A valid pair decodes to one code point and is not a
@@ -81,5 +84,19 @@ func TestUnpairedSurrogateEscape(t *testing.T) {
 					test.content, refused, test.refused)
 			}
 		})
+	}
+}
+
+// A guard that stopped after a fixed prefix would pass every row above, because
+// the whole table is small. The escape here sits past 4 KiB, so a bound anywhere
+// below that is caught.
+func TestUnpairedSurrogateEscapePastTheScanPrefix(t *testing.T) {
+	prefix := `{"a":"` + strings.Repeat("p", 5000) + `\ud800"}`
+	if !UnpairedSurrogateEscape([]byte(prefix)) {
+		t.Fatal("an escape past 5 KB of prefix was not refused")
+	}
+	clean := `{"a":"` + strings.Repeat("p", 5000) + `\ud83d\ude00"}`
+	if UnpairedSurrogateEscape([]byte(clean)) {
+		t.Fatal("a well-formed pair past 5 KB of prefix was refused")
 	}
 }

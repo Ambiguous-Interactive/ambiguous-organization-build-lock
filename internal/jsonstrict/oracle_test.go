@@ -39,6 +39,10 @@ func decodedReplacementCount(content []byte) (int, bool) {
 
 // countReplacements walks a decoded value. Every JSON string is either a key or
 // a value, so both are counted. Numbers and booleans cannot hold one.
+//
+// A key that appears twice loses its shadowed value to the decoder, so the walk
+// cannot see it. The generated documents never repeat a key, and
+// TestSubstitutionOracleIsHonest pins the answers that do.
 func countReplacements(value any) int {
 	switch typed := value.(type) {
 	case string:
@@ -63,21 +67,35 @@ func countReplacements(value any) int {
 // spelledReplacements counts the U+FFFD the input carries itself, written
 // either as the three raw bytes or as the escape in any hex case. The digits
 // are lowercased, so no list of spellings can drift out of date.
+//
+// An escape is a backslash plus `u` inside a string. So the walk has to step
+// over an escaped backslash first. Otherwise `\\ufffd` reads as one escape and
+// one literal, and the count is one too high, which hides a real loss.
 func spelledReplacements(content []byte) int {
 	count := strings.Count(string(content), "�")
-	lowered := strings.ToLower(string(content))
-	for offset := 0; ; {
-		found := strings.Index(lowered[offset:], `\u`)
-		if found < 0 {
-			break
-		}
-		start := offset + found + 2
-		offset = start
-		if start+4 > len(lowered) {
-			break
-		}
-		if lowered[start:start+4] == "fffd" {
-			count++
+	inString := false
+	for index := 0; index < len(content); index++ {
+		switch content[index] {
+		case '"':
+			inString = !inString
+		case '\\':
+			if !inString || index+1 >= len(content) {
+				continue
+			}
+			if content[index+1] == '\\' {
+				// The pair is one escaped backslash. Both bytes are data.
+				index++
+				continue
+			}
+			if content[index+1] != 'u' {
+				continue
+			}
+			digits := index + 2
+			if digits+4 <= len(content) &&
+				strings.EqualFold(string(content[digits:digits+4]), "fffd") {
+				count++
+			}
+			index = digits + 3
 		}
 	}
 	return count
@@ -122,7 +140,12 @@ func TestGuardCoversTheDecoderLoss(t *testing.T) {
 		}
 		builder.WriteString(shape[1])
 		document := []byte(builder.String())
-		if !json.Valid(document) {
+		// The oracle decodes with json.Unmarshal, which is stricter than
+		// json.Valid: an overflowing number or a nesting depth past its own
+		// limit is valid JSON that Unmarshal refuses. Skipping on the same
+		// check the oracle uses keeps a shape it cannot decode from being
+		// reported as a document it read exactly.
+		if _, readable := decodedReplacementCount(document); !readable {
 			continue
 		}
 		accepted++
@@ -165,6 +188,10 @@ func TestSubstitutionOracleIsHonest(t *testing.T) {
 		`{"a":"\uFfFd\ud800"}`,
 		// A real U+FFFD in a key must not cancel a loss in a value.
 		`{"\ufffd":"x\ud800"}`,
+		// An escaped backslash is data, so `\\ufffd` spells no escape and
+		// must not raise the spelled count above the real one.
+		`{"a":"\ufffd\\ufffd\ud800"}`,
+		`{"a":"\\ufffd\ud800"}`,
 		// Shapes the first generator never produced.
 		`{"a":["\ud800"]}`,
 		`{"a":{"b":"\ud800"}}`,
@@ -189,6 +216,8 @@ func TestSubstitutionOracleIsHonest(t *testing.T) {
 		`{"a":1,"b":"x"}`,
 		// Two real U+FFFD, one in a key and one in a value, and no escape.
 		`{"\ufffd":"` + "\uFFFD" + `"}`,
+		// The same two beside an escaped backslash, which adds no escape.
+		`{"a":"\ufffd\\` + "\uFFFD" + `"}`,
 	}
 	for _, document := range intact {
 		if substitutionDetected([]byte(document)) {
