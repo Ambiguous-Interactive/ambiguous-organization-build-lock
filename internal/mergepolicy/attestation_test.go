@@ -92,6 +92,27 @@ func TestParseAttestationRejectsContractViolations(t *testing.T) {
 	}
 }
 
+// The published attestation is consumer evidence, and encoding/json replaces a
+// byte it cannot decode with U+FFFD rather than failing. A ruleset name or
+// required context that carries such a byte would otherwise be accepted as
+// evidence the consumer never wrote, and compared against the live ruleset.
+func TestParseAttestationRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	content := []byte(validAttestationContent())
+	fields := map[string]string{
+		"repository":       `"repository": "Ambiguous-Interactive/example"`,
+		"ruleset name":     `"rulesetName": "Required CI (default branch)"`,
+		"required context": `"requiredContexts": ["Unity CI Success"`,
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseAttestation(oneRawByteIn(t, content, field), "Ambiguous-Interactive/example")
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+		})
+	}
+}
+
 func TestResolveBypassEvidenceKeepsLiveEvidenceAuthoritative(t *testing.T) {
 	live := liveCarrier("Required CI (default branch)", true)
 	resolved, attested, health, complete := ResolveBypassEvidence(

@@ -1,10 +1,12 @@
 package enrollment
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func validUnityRegistry() UnityEnrollmentRegistry {
@@ -523,4 +525,65 @@ func TestUnityEnrollmentRegistryCapsRequiredContexts(t *testing.T) {
 	if _, err := ParseUnityEnrollmentRegistry(encodeRegistry(t, registry)); err != nil {
 		t.Fatalf("bounded required contexts failed: %v", err)
 	}
+}
+
+// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+// failing, so a policy that is not valid UTF-8 would otherwise be evaluated as
+// a value the repository never wrote. Every reviewed field class is refused by
+// name, because a field the validators happen to accept silently is the field
+// that produces the wrong verdict.
+func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.Exceptions = []UnityPolicyException{{
+		Repository:     "Ambiguous-Interactive/unity-builder",
+		Path:           ".github/workflows/unity.yml",
+		Classification: UnityInventorySynthetic,
+		Owner:          "unity-builder-maintainers",
+		ExpiresAt:      "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinCompanions = []UnityRepinCompanion{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/unity-lock.json",
+		Mode:       "pin-lines",
+	}}
+	for index := range registry.Repositories {
+		registry.Repositories[index].RequiredContexts = []string{"CI Success"}
+	}
+	content := encodeRegistry(t, registry)
+	fields := map[string]string{
+		"organization":      `"organization":"Ambiguous-Interactive"`,
+		"repository":        `"repository":"Ambiguous-Interactive/DoxReloaded"`,
+		"default branch":    `"defaultBranch":"master"`,
+		"required context":  `"requiredContexts":["CI Success"`,
+		"approved lock SHA": `"approvedLockShas":["` + testSHA + `"`,
+		"exception owner":   `"owner":"unity-builder-maintainers"`,
+		"companion path":    `"path":".github/unity-lock.json"`,
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseUnityEnrollmentRegistry(oneRawByteIn(t, content, field))
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+		})
+	}
+}
+
+// oneRawByteIn splices one 0xFF byte into the last string of a JSON fragment,
+// so the file stays valid JSON and only a strict decode can refuse it.
+func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
+	t.Helper()
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from the encoded registry", fragment)
+	}
+	corrupted := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+"\xff"+`"`),
+		1,
+	)
+	if utf8.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
+	}
+	return corrupted
 }

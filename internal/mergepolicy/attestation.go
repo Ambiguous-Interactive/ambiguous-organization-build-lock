@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"unicode/utf8"
 )
 
 const (
@@ -51,10 +52,17 @@ type Attestation struct {
 }
 
 // ParseAttestation strictly validates one published attestation file
-// without accepting unknown JSON fields or trailing values.
+// without accepting unknown JSON fields or trailing values. A file that is not
+// valid UTF-8 is refused before it is decoded, because encoding/json replaces a
+// byte it cannot decode with U+FFFD instead of failing, and the audit would
+// then accept and compare a ruleset name or required context the consumer
+// never wrote.
 func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	if len(content) == 0 || len(content) > MaxAttestationBytes {
 		return Attestation{}, fmt.Errorf("merge policy attestation size is invalid")
+	}
+	if !utf8.Valid(content) {
+		return Attestation{}, fmt.Errorf("merge policy attestation is not valid UTF-8")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()

@@ -1,8 +1,10 @@
 package mergepolicy
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func expectationsContent(body string) string {
@@ -98,4 +100,46 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+// encoding/json replaces a byte it cannot decode with U+FFFD rather than
+// failing, so a reviewed file that is not valid UTF-8 would be evaluated as a
+// value the organization never wrote. The refusal names the encoding, so an
+// operator is not sent to fix a spelling the file does not contain.
+func TestParseExpectationsRejectsContentThatIsNotValidUTF8(t *testing.T) {
+	content := []byte(expectationsContent(validExpectationBody()))
+	fields := map[string]string{
+		"organization":     `"organization": "Ambiguous-Interactive"`,
+		"repository":       `"repository": "Ambiguous-Interactive/example"`,
+		"default branch":   `"defaultBranch": "main"`,
+		"required context": `"requiredContexts": ["Unity CI Success"`,
+		"bypass actor":     `"actorType": "OrganizationAdmin"`,
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseExpectations(oneRawByteIn(t, content, field))
+			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+		})
+	}
+}
+
+// oneRawByteIn splices one 0xFF byte into the last string of a JSON fragment,
+// so the file stays valid JSON and only a strict decode can refuse it.
+func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
+	t.Helper()
+	if !bytes.Contains(content, []byte(fragment)) {
+		t.Fatalf("fixture %q is missing from the reviewed file", fragment)
+	}
+	corrupted := bytes.Replace(
+		content,
+		[]byte(fragment),
+		[]byte(fragment[:len(fragment)-1]+"\xff"+`"`),
+		1,
+	)
+	if utf8.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
+	}
+	return corrupted
 }

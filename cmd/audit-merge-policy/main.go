@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/mergepolicy"
@@ -580,7 +581,15 @@ func hasPagination(headers http.Header) bool {
 	return false
 }
 
+// strictDecode reads one bounded JSON response. A response that is not valid
+// UTF-8 is ambiguous evidence: encoding/json replaces a byte it cannot decode
+// with U+FFFD instead of failing, so the audit would compare substituted values
+// against the reviewed expectations. Every caller turns this into a named
+// retrieval failure for the repository it was reading.
 func strictDecode(content []byte, result any) error {
+	if !utf8.Valid(content) {
+		return fmt.Errorf("response is not valid UTF-8")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(result); err != nil {
 		return err
