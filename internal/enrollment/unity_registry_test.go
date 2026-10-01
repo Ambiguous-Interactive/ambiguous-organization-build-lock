@@ -724,23 +724,79 @@ func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Without this, a guard placed
-// earlier reports a cause the operator cannot act on, and this suite would not
-// notice: the file is damaged either way, so every other assertion still holds.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Without this, a guard placed earlier reports a
+// cause the operator cannot act on, and this suite would not notice: the file is
+// damaged either way, so every other assertion still holds. Both doors carry a
+// row. A row for the escape alone leaves the encoding arm free to move back
+// above the decode, because a byte the decoder cannot read is a different
+// precondition and no other row would catch it.
 func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	content := surrogateRegistryFixture(t)
-	// Truncate the file after a well-formed escaped lone surrogate, so the
-	// document carries the escape the guard looks for and is also truncated.
-	truncated := bytes.Replace(
-		content,
-		[]byte(`"owner":"unity-builder-maintainers"`),
-		[]byte(`"owner":"\ud800"`),
-		1,
-	)
-	truncated = truncated[:len(truncated)-8]
-	if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
-		strings.Contains(err.Error(), "lone surrogate") {
-		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	// Each row is damaged in one of the two doors and then truncated, so the
+	// document carries what the guard looks for and is also not well-formed.
+	cases := map[string]struct {
+		damage []byte
+		refuse string
+	}{
+		"escaped lone surrogate": {
+			damage: []byte(`"owner":"\ud800"`),
+			refuse: "lone surrogate",
+		},
+		"unreadable byte": {
+			damage: []byte("\"owner\":\"unity-\xffbuilders\""),
+			refuse: "not valid UTF-8",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			truncated := bytes.Replace(
+				content,
+				[]byte(`"owner":"unity-builder-maintainers"`),
+				testCase.damage,
+				1,
+			)
+			truncated = truncated[:len(truncated)-8]
+			if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
+				strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+			}
+		})
+	}
+}
+
+// The guard runs before every content check, so a document nobody can read is
+// refused as unreadable rather than as a schema problem. Session 119 accepted
+// the opposite order and this session changed it. Without a row, moving the
+// guard back below the schemaVersion check keeps this suite green, and the
+// operator gets a version number to fix instead of the byte to fix.
+func TestUnityEnrollmentRegistryNamesTheEncodingBeforeTheSchemaVersion(t *testing.T) {
+	content := surrogateRegistryFixture(t)
+	cases := map[string]struct {
+		damage []byte
+		refuse string
+	}{
+		"escaped lone surrogate": {damage: []byte(`"owner":"\ud800"`), refuse: "lone surrogate"},
+		"unreadable byte":        {damage: []byte("\"owner\":\"unity-\xffbuilders\""), refuse: "not valid UTF-8"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			damaged := bytes.Replace(
+				bytes.Replace(
+					content,
+					[]byte(`"owner":"unity-builder-maintainers"`),
+					testCase.damage,
+					1,
+				),
+				[]byte(`"schemaVersion":1`), []byte(`"schemaVersion":9`), 1,
+			)
+			if bytes.Equal(damaged, content) {
+				t.Fatal("the mutations did not apply, so this row proves nothing")
+			}
+			_, err := ParseUnityEnrollmentRegistry(damaged)
+			if err == nil || !strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the encoding refusal, not the schema refusal", err)
+			}
+		})
 	}
 }

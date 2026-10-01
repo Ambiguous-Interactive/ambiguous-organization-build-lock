@@ -167,6 +167,33 @@ All three Go analyzers refuse such a file by name. So do the merge-policy
 expectations parser and the consumer attestation parser. No step decides from
 a value nobody wrote. The onboarding command writes nothing back.
 
+Every other JSON reader of evidence now refuses the same two doors through the
+same rule. That covers the GitHub issue client, both drift issue readers, the
+build lock incident audit, and the skill metadata reader. Each one names what it
+was reading and what was lost, and each one refuses after the decode so a
+malformed document keeps the message that names its syntax error.
+
+The two audits publish the cause where an operator reads it. A merge-policy
+retrieval finding carries the cause and the read that failed, and a consumer
+attestation the decoder could not represent exactly carries the cause in the
+issue table, because that consumer is the one who has to fix it. A Unity
+enrollment retrieval or analysis finding carries the cause in the retained
+artifact and the run summary, because a cause can name a file in this
+repository. The drift issues hold counts, codes, and reviewed expectation text.
+They never hold a file name a consumer controls.
+
+The cause is sanitized to a fixed ASCII alphabet before it is published, and the
+same rule and the same bound are used by both audits. A character outside that
+alphabet becomes `?`, so a cause can never break a table row or carry text nobody
+in this repository wrote.
+
+A finding with no cause has no row in the run summary, so a row there always
+names a specific read and a specific reason. On this audit a cause can be a
+refused commit, a refused origin, a file nobody can read, or a rule a workflow in
+this repository broke, so read the Reason column before the cause. To fix a file
+the decoder could not read, save it as UTF-8 and remove any `\uXXXX` escape for
+a surrogate code point.
+
 We measured the other readers. A JavaScript string holds a lone surrogate, and
 `JSON.stringify` writes it back as an escape. So the release authorization
 rewrites the file without changing the escape. The consumer repin reads the
@@ -574,8 +601,8 @@ edits.
 | `release-before-classification` | Order the release step after the evidence classifier. See item 7. |
 | `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
 | `release-not-always` | Run the release step with literal `always()`. See item 7. |
-| `repository-analysis-incomplete` | No consumer edit. The audit failed closed while analyzing this repository. Central operators diagnose the run. |
-| `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also covers a file or path in this repository that is not valid UTF-8. The finding names the repository, not the file, so an operator finds that file in the consumer checkout. #317 owns naming it. |
+| `repository-analysis-incomplete` | The audit failed closed while analyzing this repository. The cause names the rule, in the run summary and the retained artifact. Fix the workflow the cause names. |
+| `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also covers a file or path in this repository that is not valid UTF-8. The cause names the file in the run summary and the retained artifact, not in this issue. |
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
@@ -656,10 +683,15 @@ issue.
 - `merge-policy-attestation-stale`: the attestation does not match the live
   ruleset, names a ruleset that carries no reviewed context, or is not valid
   in the reviewed schema. Update the file. When the stale file hides the
-  only bypass evidence, the audit also fails closed.
+  only bypass evidence, the audit also fails closed. When the file is not valid
+  UTF-8 or carries an escaped lone surrogate, the Detail column names that
+  cause, so the publisher knows what to change instead of republishing the same
+  file.
 - `merge-policy-retrieval-incomplete`: the audit could not read this
   repository's live merge settings. No consumer edit. Central operators
-  diagnose the run.
+  diagnose the run. A cause in the Cause column names the read that failed and
+  why it failed, so a run that reports an unreadable response is not sent to the
+  network layer.
 
 A missing file and a central Contents-read permission failure both answer
 404, so both present as `merge-policy-attestation-missing` in every

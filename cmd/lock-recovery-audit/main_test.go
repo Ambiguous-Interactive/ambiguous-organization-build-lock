@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,8 @@ import (
 	"testing"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -118,6 +121,88 @@ func TestClassifyStateSeparatesHealthyIncidentAndAmbiguousEvidence(t *testing.T)
 			}
 			if (got.Incident != nil) != (test.reason == reasonIncidentActive) {
 				t.Fatalf("classifyState() incident presence = %v for reason %q", got.Incident != nil, got.Reason)
+			}
+		})
+	}
+}
+
+// The damage lands in updatedAt, which no rule reads, so without the guard the
+// monitor would publish healthy from a document it could not read. That is the
+// case the guard closes: a substituted value in a field nobody checks is still
+// a document nobody wrote. The clean fixture carries the weight, because a guard
+// that refused every non-ASCII state would pass a table with only refusal rows.
+// The truncated row carries the ordering, because a guard above the decode would
+// report a byte rule and leave Cause empty for a syntax error.
+func TestClassifyStateNamesTheCauseOfLossyEvidence(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+	// damage replaces one timestamp, so the fixture keeps its exact shapes and
+	// only the byte under test changes.
+	damage := func(replacement []byte, withIncident *incident) func() []byte {
+		return func() []byte {
+			return bytes.Replace(
+				stateFixture(t, withIncident),
+				[]byte(`"updatedAt":"2026-07-29T03:06:27Z"`),
+				replacement, 1,
+			)
+		}
+	}
+	cases := []struct {
+		name     string
+		state    func() []byte
+		truncate bool
+		reason   string
+		cause    string
+	}{
+		{
+			name:   "clean state still classifies",
+			state:  func() []byte { return stateFixture(t, nil) },
+			reason: reasonHealthy,
+		},
+		{
+			name:   "escaped lone surrogate",
+			state:  damage([]byte(`"updatedAt":"\ud800"`), nil),
+			reason: reasonStateInvalid,
+			cause:  "lock state " + jsonstrict.ReasonLoneSurrogateEscape,
+		},
+		{
+			name:   "unreadable byte",
+			state:  damage([]byte("\"updatedAt\":\"\xff\""), nil),
+			reason: reasonStateInvalid,
+			cause:  "lock state " + jsonstrict.ReasonNotUTF8,
+		},
+		{
+			// The incident is a slice of these bytes, so the whole-document guard
+			// also covers evidence the incident decode has not read yet.
+			name:   "damage beside an active incident",
+			state:  damage([]byte(`"updatedAt":"\ud800"`), &active),
+			reason: reasonStateInvalid,
+			cause:  "lock state " + jsonstrict.ReasonLoneSurrogateEscape,
+		},
+		{
+			name:     "truncated state keeps no cause",
+			state:    damage([]byte(`"updatedAt":"\ud800"`), nil),
+			truncate: true,
+			reason:   reasonStateInvalid,
+		},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			state := test.state()
+			if test.truncate {
+				state = state[:len(state)-1]
+			}
+			got := classifyState(state, testServerURL, testLock)
+			if got.Reason != test.reason {
+				t.Fatalf("classifyState() reason = %q, want %q", got.Reason, test.reason)
+			}
+			if got.Incident != nil {
+				t.Fatal("refused evidence must never publish an incident")
+			}
+			if got.Cause != test.cause {
+				t.Fatalf("classifyState() cause = %q, want %q", got.Cause, test.cause)
 			}
 		})
 	}

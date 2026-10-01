@@ -81,10 +81,12 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
 	}
-	if !utf8.Valid(content) {
-		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy is not valid UTF-8")
-	}
 	// ... decode
+	// The guard is after the decode, not before it. See the escape section.
+	if err := jsonstrict.Refusal("unity enrollment policy", content); err != nil {
+		return UnityEnrollmentRegistry{}, err
+	}
+	// ... every content check
 }
 ```
 
@@ -204,14 +206,33 @@ is unpaired.
 
 ```go
 // A caller keeps no copy of this rule, so the rule has one home.
-if jsonstrict.UnpairedSurrogateEscape(content) {
-    return Registry{}, fmt.Errorf("... contains an escaped lone surrogate, ...")
+// Refusal names the reader, and the reason travels as an error value
+// so a later step can publish the cause without the message around it.
+if err := jsonstrict.Refusal("unity enrollment policy", content); err != nil {
+    return Registry{}, err
 }
 ```
 
 Run the check after the decode, not before. The decoder owns a
 malformed file and names its syntax error. A check placed earlier
 reports a cause the operator cannot act on.
+
+A refusal nobody can act on is a weak evidence set. When a reader
+knows what it was reading, it puts that name in the refusal, and the
+cause stays recoverable through a wrapping `%w`:
+
+```go
+return nil, fmt.Errorf("read active rules: %w", jsonstrict.Label("active rules response", err))
+
+// Elsewhere, publishing the cause and nothing else:
+cause := jsonstrict.Reason(retrievalErr)
+```
+
+Keep the reason clause inside the alphabet the publishing validator
+accepts. A reason that holds one character outside it makes the whole
+artifact fail validation, and the cause is lost with it. Pin every
+published reason in a test that runs the validator, not only in the
+package that defines it.
 
 Measure the other readers. Do not assume they all lose the value. This
 repository's Go readers substituted the value. Node did not, because a

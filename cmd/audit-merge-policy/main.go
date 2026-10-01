@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
@@ -243,7 +242,7 @@ func (client *apiClient) getContents(ctx context.Context, repository, ref, path 
 	}
 	var payload contentsPayload
 	if err := strictDecode(response.content, &payload); err != nil {
-		return nil, false, fmt.Errorf("decode contents metadata failed")
+		return nil, false, fmt.Errorf("read contents metadata: %w", jsonstrict.Label("contents response", err))
 	}
 	if payload.Content == nil || payload.Encoding != "base64" {
 		return nil, false, fmt.Errorf("unsupported contents encoding")
@@ -330,6 +329,7 @@ func auditRepositories(
 			audit.Findings = append(audit.Findings, mergepolicy.Finding{
 				Repository: expectation.Repository,
 				Code:       mergepolicy.CodeRetrievalIncomplete,
+				Cause:      jsonstrict.Reason(retrievalErr),
 			})
 			continue
 		}
@@ -372,6 +372,7 @@ func loadAttestation(
 		return mergepolicy.Attestation{}, &mergepolicy.Finding{
 			Repository: expectation.Repository,
 			Code:       mergepolicy.CodeRetrievalIncomplete,
+			Cause:      jsonstrict.Reason(err),
 		}
 	}
 	if !found {
@@ -382,12 +383,30 @@ func loadAttestation(
 		return mergepolicy.Attestation{}, &mergepolicy.Finding{
 			Repository: expectation.Repository,
 			Code:       mergepolicy.CodeAttestationStale,
-			Detail: mergepolicy.BoundDetail(
-				"the published merge policy attestation is not valid; republish it from the reviewed schema",
-			),
+			// A file the decoder could not represent exactly gets its cause in
+			// both channels. A consumer who published one cannot tell which of
+			// the many reasons it was refused, so it republishes unchanged and
+			// the alert returns; the Detail column is what that consumer reads.
+			Cause:  jsonstrict.Reason(err),
+			Detail: attestationRefusal(err),
 		}
 	}
 	return attestation, nil
+}
+
+// attestationRefusal names why a published attestation was refused. A file the
+// decoder could not represent exactly carries its own cause, because that
+// consumer is the one who has to change the file, and the generic sentence below
+// would send that consumer back to the same file unchanged. Every other refusal
+// keeps the generic sentence, because its cause names a reviewed rule and not an
+// edit the consumer can make.
+func attestationRefusal(err error) string {
+	if cause := jsonstrict.Reason(err); cause != "" {
+		return cause
+	}
+	return mergepolicy.BoundDetail(
+		"the published merge policy attestation is not valid; republish it from the reviewed schema",
+	)
 }
 
 func observeRepository(
@@ -414,7 +433,7 @@ func observeRepository(
 	}
 	var active activeRulesPayload
 	if err := strictDecode(activeContent, &active); err != nil {
-		return observed, fmt.Errorf("decode active rules failed")
+		return observed, fmt.Errorf("read active rules: %w", jsonstrict.Label("active rules response", err))
 	}
 	for _, rule := range active {
 		if rule.Type != "required_status_checks" {
@@ -440,7 +459,7 @@ func observeRepository(
 	}
 	var list []rulesetSummary
 	if err := strictDecode(listContent, &list); err != nil {
-		return observed, fmt.Errorf("decode ruleset list failed")
+		return observed, fmt.Errorf("read ruleset list: %w", jsonstrict.Label("ruleset list response", err))
 	}
 	if len(list) > maxRulesetsPerRun {
 		return observed, fmt.Errorf("ruleset count exceeded bound")
@@ -453,7 +472,9 @@ func observeRepository(
 		}
 		var detail rulesetDetailPayload
 		if err := strictDecode(detailContent, &detail); err != nil {
-			return observed, fmt.Errorf("decode ruleset %d failed", summary.ID)
+			return observed, fmt.Errorf(
+				"read ruleset %d: %w", summary.ID, jsonstrict.Label(fmt.Sprintf("ruleset %d response", summary.ID), err),
+			)
 		}
 		if detail.ID != summary.ID {
 			return observed, fmt.Errorf("ruleset %d evidence does not match its identity", summary.ID)
@@ -484,7 +505,7 @@ func observeRepository(
 	case err == nil:
 		var payload protectionPayload
 		if err := strictDecode(protectionContent, &payload); err != nil {
-			return observed, fmt.Errorf("decode branch protection failed")
+			return observed, fmt.Errorf("read branch protection: %w", jsonstrict.Label("branch protection response", err))
 		}
 		observed.Protection = mergepolicy.Protection{
 			Present:        true,
@@ -582,16 +603,15 @@ func hasPagination(headers http.Header) bool {
 	return false
 }
 
-// strictDecode reads one bounded JSON response. A response that is not valid
-// UTF-8 is ambiguous evidence: encoding/json replaces a byte it cannot decode
-// with U+FFFD instead of failing, so the audit would compare substituted values
-// against the reviewed expectations. An escaped lone surrogate is the same
-// substitution through a door the byte check cannot see. Every caller turns
-// this into a named retrieval failure for the repository it was reading.
+// strictDecode reads one bounded JSON response. A response the decoder cannot
+// represent exactly is ambiguous evidence: encoding/json replaces a byte it
+// cannot decode with U+FFFD instead of failing, so the audit would compare
+// substituted values against the reviewed expectations, and an escaped lone
+// surrogate reaches the same substitution through a door a byte check cannot
+// see. Every caller turns this into a named retrieval failure for the
+// repository it was reading, and carries the reason with it so an operator
+// learns what the response held instead of guessing from the network layer.
 func strictDecode(content []byte, result any) error {
-	if !utf8.Valid(content) {
-		return fmt.Errorf("response is not valid UTF-8")
-	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(result); err != nil {
 		return err
@@ -601,11 +621,9 @@ func strictDecode(content []byte, result any) error {
 		return fmt.Errorf("response must contain one JSON value")
 	}
 	// The guard runs after the decode, so a malformed response keeps the
-	// decoder's own message.
-	if jsonstrict.UnpairedSurrogateEscape(content) {
-		return fmt.Errorf("response contains an escaped lone surrogate, which no JSON decoder can represent")
-	}
-	return nil
+	// decoder's own message. Every caller labels the bare reason with the read
+	// it was doing, so the cause an operator sees names the read too.
+	return jsonstrict.UnrepresentableErrorf(jsonstrict.Unrepresentable(content))
 }
 
 func sortAudit(audit mergepolicy.Audit) {

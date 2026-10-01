@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 func execute(t *testing.T, yamlText string) response {
@@ -59,6 +62,80 @@ func TestValidateTypesAndUnknownFields(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			if result := execute(t, testCase.yaml); !strings.Contains(result.Error, testCase.want) {
 				t.Fatalf("error %q does not contain %q", result.Error, testCase.want)
+			}
+		})
+	}
+}
+
+// The harness publishes every description as if a person wrote it, so a value the
+// decoder substituted would be skill metadata nobody authored. The clean batch
+// carries the weight: a guard that refused every non-ASCII batch would pass a
+// table with only refusal rows. The truncated row carries the ordering, because a
+// guard above the decode would report a byte rule and hide the syntax error the
+// harness author has to fix. The over-bound row keeps the size door on its own
+// message.
+func TestRunRefusesRequestsTheDecoderCannotRepresent(t *testing.T) {
+	clean, err := json.Marshal([]request{{Path: "skill/SKILL.md", YAML: "name: example\ndescription: valid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := bytes.Replace(clean, []byte("description: valid"), []byte(`description: \ud800`), 1)
+	if bytes.Equal(clean, damaged) {
+		t.Fatal("the batch does not hold the literal this test damages")
+	}
+	unreadable := bytes.Replace(clean, []byte("description: valid"), []byte("description: \xff"), 1)
+
+	cases := []struct {
+		name       string
+		content    []byte
+		want       string
+		wantAbsent string
+	}{
+		{name: "clean batch", content: clean},
+		{
+			name:    "escaped lone surrogate",
+			content: damaged,
+			want:    "requests " + jsonstrict.ReasonLoneSurrogateEscape,
+		},
+		{name: "unreadable byte", content: unreadable, want: "requests " + jsonstrict.ReasonNotUTF8},
+		{
+			name:       "truncated batch keeps the decoder message",
+			content:    damaged[:len(damaged)-1],
+			want:       "decode requests: unexpected end of JSON input",
+			wantAbsent: "lone surrogate",
+		},
+		{
+			name:       "batch over the size bound",
+			content:    append(bytes.Repeat([]byte(" "), maxRequestBytes+1), '['),
+			want:       fmt.Sprintf("requests exceed the %d-byte limit", maxRequestBytes),
+			wantAbsent: "lone surrogate",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			err := run(bytes.NewReader(test.content), &output)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("a clean batch was refused: %v", err)
+				}
+				var results []response
+				if err := json.Unmarshal(output.Bytes(), &results); err != nil {
+					t.Fatal(err)
+				}
+				if len(results) != 1 || results[0].Metadata["name"] != "example" {
+					t.Fatalf("clean batch did not publish its metadata: %#v", results)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("a batch the decoder cannot represent was accepted")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if test.wantAbsent != "" && strings.Contains(err.Error(), test.wantAbsent) {
+				t.Fatalf("error = %v, must not claim %q", err, test.wantAbsent)
 			}
 		})
 	}

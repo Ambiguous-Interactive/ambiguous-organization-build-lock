@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
@@ -167,16 +166,15 @@ func validRepinCompanionPath(value string) bool {
 // produces the wrong verdict.
 //
 // An escaped lone surrogate is a second door to the same substitution. It is
-// six valid ASCII bytes, so the encoding check above cannot see it, and the
-// decoder has no representation for the code point, so it writes U+FFFD
-// without an error. The guard runs after the decode, so a file that is not
-// well-formed JSON still gets the decoder's own message.
+// six valid ASCII bytes, so the encoding check cannot see it, and the decoder
+// has no representation for the code point, so it writes U+FFFD without an
+// error. jsonstrict.Unrepresentable answers both doors, and it runs after the
+// decode: a file that is not well-formed JSON keeps the decoder's own message,
+// and a file the decoder read exactly is refused before any value in it decides
+// a verdict.
 func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, error) {
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
-	}
-	if !utf8.Valid(content) {
-		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy is not valid UTF-8")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -188,13 +186,14 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy must contain one JSON value")
 	}
+	// The guard runs before every content check. A file the decoder could
+	// not represent is refused as unreadable, so no value in it decides a
+	// verdict. The decoder already named its own syntax errors.
+	if err := jsonstrict.Refusal("unity enrollment policy", content); err != nil {
+		return UnityEnrollmentRegistry{}, err
+	}
 	if registry.SchemaVersion != 1 {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy schemaVersion must be 1")
-	}
-	if jsonstrict.UnpairedSurrogateEscape(content) {
-		return UnityEnrollmentRegistry{}, fmt.Errorf(
-			"unity enrollment policy contains an escaped lone surrogate, which no JSON decoder can represent; re-save the file without it",
-		)
 	}
 	if registry.Organization != UnityEnrollmentOrganization {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy organization is not authorized")
@@ -394,12 +393,20 @@ func validRefName(value string) bool {
 
 // UnityAuditFinding adds immutable repository provenance to a source-free
 // analyzer finding.
+//
+// Cause names why a repository could not be read or could not be analyzed. It
+// is sanitized to a fixed ASCII alphabet and never rendered into the drift
+// issue, because it can hold a consumer-controlled file name. The retained
+// artifact and the run summary carry it, so an operator finds the file without
+// an open checkout and without the issue holding text nobody in this
+// repository wrote.
 type UnityAuditFinding struct {
 	Repository string `json:"repository"`
 	SHA        string `json:"sha,omitempty"`
 	Code       string `json:"code"`
 	Path       string `json:"path,omitempty"`
 	Job        string `json:"job,omitempty"`
+	Cause      string `json:"cause,omitempty"`
 }
 
 // UnityAuditedRepository records the exact default-branch object inspected.

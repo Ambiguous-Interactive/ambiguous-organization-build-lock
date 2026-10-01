@@ -223,11 +223,35 @@ cannot see it. Go has no value for the code point, so its decoder writes U+FFFD
 and returns no error.
 
 All three Go analyzers refuse such a file by name. So do the merge-policy
-expectations parser and the consumer attestation parser. We measured the other
-readers. A JavaScript string holds a lone surrogate, and `JSON.stringify`
-writes it back as an escape. So the release authorization rewrites the file
-without changing the escape. The consumer repin reads the file and never writes
-it.
+expectations parser and the consumer attestation parser. Every other JSON reader
+of evidence refuses the same two doors through the same rule: the GitHub issue
+client, both drift issue readers, the build lock incident audit, and the skill
+metadata reader. We measured the other readers. A JavaScript string holds a lone
+surrogate, and `JSON.stringify` writes it back as an escape. So the release
+authorization rewrites the file without changing the escape. The consumer repin
+reads the file and never writes it.
+
+A refusal an operator cannot act on is a weak evidence set. So every refusal the
+decoder could not represent exactly names what was being read and what was lost,
+and both audits publish that cause. A merge-policy retrieval finding carries the
+cause and the read that failed. A consumer attestation the decoder could not
+represent exactly carries the cause in the issue table, because that consumer has
+to fix it. A Unity enrollment retrieval or analysis finding carries the cause in
+the retained artifact and the run summary, because a cause can name a file in a
+consumer repository. The run summary lists at most 20 causes and says how many
+more the artifact holds.
+
+The other refusals carry no cause. A pagination guard, a size bound, a duplicate
+identity, an HTTP status, and every decoder syntax error answer with their own
+reason code and no cause, because the cause is the run log or a rule the reader
+names on its own. A finding with no cause has no row in the run summary, so a
+row there always names a specific read and a specific reason.
+
+A cause is not only an unreadable file. The merge-policy audit publishes one
+only for the two encoding doors. The Unity enrollment audit publishes one for
+every retrieval and every analysis failure, so a cause there can be a refused
+commit, a refused origin, or a rule a consumer workflow broke, and the code
+column says which. Read the code column before the cause.
 
 `jq` 1.6 stops on an escaped high surrogate and reports a parse error. It does
 not see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow

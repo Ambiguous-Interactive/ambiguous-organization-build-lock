@@ -12,9 +12,11 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/mergepolicy"
 )
 
@@ -110,6 +112,12 @@ func readAudit(path string) (mergepolicy.Audit, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return mergepolicy.Audit{}, fmt.Errorf("audit must contain one JSON value")
 	}
+	// The guard runs after the decode, so a malformed artifact keeps the
+	// decoder's own message. A value the decoder substituted would reach
+	// validateAudit as a spelling the audit never wrote.
+	if err := jsonstrict.Refusal("audit artifact", content); err != nil {
+		return mergepolicy.Audit{}, err
+	}
 	if err := validateAudit(audit); err != nil {
 		return mergepolicy.Audit{}, err
 	}
@@ -125,7 +133,10 @@ var (
 	kindPattern        = regexp.MustCompile(`^(ruleset|branch-protection)$`)
 	enforcementPattern = regexp.MustCompile(`^[a-z-]{0,32}$`)
 	detailPattern      = regexp.MustCompile("^[" + mergepolicy.Alphabet + "\";-]{0,256}$")
-	runIDPattern       = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
+	causePattern       = regexp.MustCompile(
+		"^[" + jsonstrict.CauseAlphabet + "]{0," + strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$",
+	)
+	runIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 )
 
 func validateAudit(audit mergepolicy.Audit) error {
@@ -161,7 +172,8 @@ func validateAudit(audit mergepolicy.Audit) error {
 		if !repositoryPattern.MatchString(finding.Repository) ||
 			!codePattern.MatchString(finding.Code) ||
 			!contextPattern.MatchString(finding.Context) ||
-			!detailPattern.MatchString(finding.Detail) {
+			!detailPattern.MatchString(finding.Detail) ||
+			!causePattern.MatchString(finding.Cause) {
 			return fmt.Errorf("invalid finding")
 		}
 	}
@@ -255,7 +267,7 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 	} else {
 		body.WriteString("Retrieval: **incomplete (fail closed)**\n\n")
 	}
-	body.WriteString("This issue contains repository names, branches, ruleset metadata, check contexts, and reason codes only. It never contains credential values.\n\n")
+	body.WriteString("This issue contains repository names, branches, ruleset metadata, check contexts, refusal causes, and reason codes only. It never contains credential values. A cause is a fixed reason the audit could not read its evidence, so it carries no text from a live API or from a consumer file.\n\n")
 	body.WriteString("Every reason code maps to its reviewed fix in the [finding-code contract](docs/consumer-enrollment.md).\n\n")
 	fmt.Fprintf(
 		&body,
@@ -282,8 +294,8 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 	if len(audit.Findings) == 0 {
 		body.WriteString("- None.\n")
 	} else {
-		body.WriteString("| Repository | Context | Detail | Reason |\n")
-		body.WriteString("| --- | --- | --- | --- |\n")
+		body.WriteString("| Repository | Context | Detail | Cause | Reason |\n")
+		body.WriteString("| --- | --- | --- | --- | --- |\n")
 		findings := append([]mergepolicy.Finding(nil), audit.Findings...)
 		sort.Slice(findings, func(i, j int) bool {
 			left, right := findings[i], findings[j]
@@ -293,10 +305,11 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 		for _, finding := range findings[:rendered] {
 			fmt.Fprintf(
 				&body,
-				"| `%s` | %s | %s | `%s` |\n",
+				"| `%s` | %s | %s | %s | `%s` |\n",
 				finding.Repository,
 				valueOrDash(finding.Context),
 				valueOrDash(finding.Detail),
+				valueOrDash(finding.Cause),
 				finding.Code,
 			)
 		}
@@ -354,7 +367,8 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 }
 
 func findingKey(finding mergepolicy.Finding) string {
-	return finding.Repository + "\x00" + finding.Code + "\x00" + finding.Context + "\x00" + finding.Detail
+	return finding.Repository + "\x00" + finding.Code + "\x00" + finding.Context +
+		"\x00" + finding.Detail + "\x00" + finding.Cause
 }
 
 func valueOrDash(value string) string {

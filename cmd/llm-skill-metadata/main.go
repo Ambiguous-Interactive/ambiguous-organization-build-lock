@@ -7,7 +7,13 @@ import (
 	"os"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
+
+// maxRequestBytes bounds one harness request batch. Every SKILL.md frontmatter
+// block in this repository totals far less than this.
+const maxRequestBytes = 4 << 20
 
 var allowedFields = map[string]bool{
 	"name":          true,
@@ -92,9 +98,26 @@ func validate(input request) response {
 }
 
 func run(reader io.Reader, writer io.Writer) error {
+	// The guard needs the whole request as bytes, so the stream is read once
+	// under a bound. A skill batch is a fixed set of frontmatter blocks, so the
+	// bound cannot reject a real harness and it keeps an unbounded stdin from
+	// becoming unbounded memory.
+	content, err := io.ReadAll(io.LimitReader(reader, maxRequestBytes+1))
+	if err != nil {
+		return fmt.Errorf("read requests: %w", err)
+	}
+	if len(content) > maxRequestBytes {
+		return fmt.Errorf("requests exceed the %d-byte limit", maxRequestBytes)
+	}
 	var inputs []request
-	if err := json.NewDecoder(reader).Decode(&inputs); err != nil {
+	if err := json.Unmarshal(content, &inputs); err != nil {
 		return fmt.Errorf("decode requests: %w", err)
+	}
+	// The guard runs after the decode, so a malformed batch keeps the decoder's
+	// own message. A skill description the decoder substituted would be metadata
+	// the harness publishes as if a person wrote it.
+	if err := jsonstrict.Refusal("requests", content); err != nil {
+		return err
 	}
 	results := make([]response, len(inputs))
 	for index, input := range inputs {

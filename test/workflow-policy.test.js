@@ -3426,3 +3426,22 @@ test("enrollment required contexts stay synchronized with merge-policy expectati
     );
   }
 });
+
+// Every Go reader of reviewed evidence now imports internal/jsonstrict. A change
+// confined to the guard must still re-run the audits that depend on it, or a
+// commit that only edits the rule would leave both audits on the old behaviour.
+test("audits that read the shared encoding guard trigger on a change to it", () => {
+  const guardPath = "internal/jsonstrict/**";
+  // The lock recovery audit runs on a schedule only, so it needs no filter.
+  for (const file of [
+    ".github/workflows/merge-policy-audit.yml",
+    ".github/workflows/unity-enrollment-audit.yml"
+  ]) {
+    const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
+    const triggers = source.split(/^  schedule:/m)[0];
+    assert.ok(
+      triggers.split("\n").some((line) => line.trim() === `- "${guardPath}"`),
+      `${file} must trigger on ${guardPath}`
+    );
+  }
+});

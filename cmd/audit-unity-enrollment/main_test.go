@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 func TestRunFailsClosedAndWritesSanitizedArtifactWhenRepositoriesAreMissing(t *testing.T) {
@@ -368,5 +371,199 @@ func TestRunRefusesAPolicyWithAnEscapedLoneSurrogate(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "policy is valid") {
 		t.Fatalf("a refused policy was reported as valid: %s", stdout.String())
+	}
+}
+
+// The snapshot reader names the file it refused to read. A consumer otherwise
+// has to search its own checkout for that file, so the cause must reach the
+// artifact and the run summary.
+//
+// The two damage shapes matter separately. A raw byte in a script body is
+// reported with %s, so the byte reaches the cause raw and the sanitizer has to
+// map it. A raw byte in a tree path is reported with %s too, and git accepts
+// such a name, so a second repository carries that shape. A test with only the
+// first shape passes for a sanitizer that does nothing, because the script body
+// is never named in the message.
+func TestRunCarriesTheRetrievalCauseIntoTheArtifact(t *testing.T) {
+	hostilePath := "scripts/unity/editor-\xff-check.ps1"
+	cases := []struct {
+		name     string
+		damage   func(t *testing.T, repositoryRoot string)
+		expected []string
+	}{
+		{
+			name: "raw byte in a policy script body",
+			damage: func(t *testing.T, repositoryRoot string) {
+				script := filepath.Join(repositoryRoot, "scripts", "unity", "editor-check.ps1")
+				if err := os.MkdirAll(filepath.Dir(script), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(
+					script, []byte("ensure-editor.ps1 -CiManagedOnly\xff\n"), 0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, repositoryRoot, "add", ".")
+				runGit(t, repositoryRoot, "commit", "-m", "unreadable policy script")
+			},
+			expected: []string{
+				"scripts/unity/editor-check.ps1",
+				"is not valid UTF-8",
+			},
+		},
+		{
+			// A gitlink mode is not a regular blob, and the snapshot reader says
+			// so with the raw name. The cause must carry '?' in place of the
+			// byte, not the byte itself.
+			name: "raw byte in a policy tree path",
+			damage: func(t *testing.T, repositoryRoot string) {
+				runGit(
+					t, repositoryRoot, "update-index", "--add", "--cacheinfo",
+					"160000,0000000000000000000000000000000000000001,"+hostilePath,
+				)
+				runGit(t, repositoryRoot, "commit", "-m", "unreadable policy path")
+			},
+			expected: []string{
+				"scripts/unity/editor-?-check.ps1",
+				"is not a regular blob",
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			registry := testRegistry
+			registry.RepinExceptions = nil
+			policyPath := writeRegistryFixture(t, root, registry)
+			outputPath := filepath.Join(root, "audit.json")
+			for _, repository := range registry.Repositories {
+				buildRepositoryFixture(t, root, repository, registry, nil)
+			}
+			damagedRepository := registry.Repositories[0].Repository
+			testCase.damage(t, filepath.Join(root, repositoryName(damagedRepository)))
+
+			var stdout, stderr bytes.Buffer
+			exit := run([]string{
+				"--policy", policyPath,
+				"--repositories-root", root,
+				"--output", outputPath,
+			}, &stdout, &stderr)
+			if exit != 1 {
+				t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+			}
+			content, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var audit enrollment.UnityOrganizationAudit
+			if err := json.Unmarshal(content, &audit); err != nil {
+				t.Fatal(err)
+			}
+			if audit.Complete {
+				t.Fatalf("an unreadable policy file must fail the audit closed: %s", content)
+			}
+			if len(audit.Findings) != 1 {
+				t.Fatalf("want one finding, got %#v", audit.Findings)
+			}
+			finding := audit.Findings[0]
+			if finding.Repository != damagedRepository ||
+				finding.Code != "repository-retrieval-incomplete" {
+				t.Fatalf("unexpected retrieval finding: %#v", finding)
+			}
+			if finding.Cause == "" {
+				t.Fatalf("a retrieval finding without a cause sends the operator hunting: %#v", finding)
+			}
+			for _, expected := range testCase.expected {
+				if !strings.Contains(finding.Cause, expected) {
+					t.Fatalf("cause %q does not name %q", finding.Cause, expected)
+				}
+			}
+			publishable := regexp.MustCompile("^[" + jsonstrict.CauseAlphabet + "]{0," +
+				strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$")
+			if !publishable.MatchString(finding.Cause) {
+				t.Fatalf("cause %q is outside the issue alphabet", finding.Cause)
+			}
+			// The cause replaces the provenance fields for a repository that could
+			// not be read at all, so no field may claim a commit or a file this run
+			// never established.
+			if finding.Path != "" || finding.Job != "" || finding.SHA != "" {
+				t.Fatalf("retrieval finding claims provenance it does not have: %#v", finding)
+			}
+			if !strings.Contains(stderr.String(), finding.Cause) {
+				t.Fatalf("run summary does not carry the cause:\n%s", stderr.String())
+			}
+			// The artifact is the evidence the issue sync reads. A cause the sync
+			// validator would refuse costs the whole artifact, and with it the
+			// alert, so the published form is checked through the shipped alphabet.
+			if jsonstrict.SanitizeCause(finding.Cause) != finding.Cause {
+				t.Fatalf("cause %q is not already sanitized", finding.Cause)
+			}
+		})
+	}
+}
+
+// The analysis cause is built from a consumer workflow's own job name, so it can
+// hold text nobody wrote here. The retrieval cause is pinned by the hostile tree
+// path row above; without a row for this one a sanitizer that did nothing would
+// pass the retrieval test and still let a job name through.
+func TestRunSanitizesTheAnalysisCauseIntoTheArtifact(t *testing.T) {
+	root := t.TempDir()
+	registry := testRegistry
+	registry.RepinExceptions = nil
+	policyPath := writeRegistryFixture(t, root, registry)
+	outputPath := filepath.Join(root, "audit.json")
+	for _, repository := range registry.Repositories {
+		buildRepositoryFixture(t, root, repository, registry, nil)
+	}
+	damagedRepository := registry.Repositories[0].Repository
+	damagedRoot := filepath.Join(root, repositoryName(damagedRepository))
+	// A job name holding a pipe and a backtick, the two bytes that break a
+	// Markdown table row. Both are legal inside a YAML double-quoted scalar, and
+	// the analyzer refuses the job because it defines both uses and steps, so
+	// that refusal quotes the job name back.
+	hostileJob := "build|unity`CR"
+	workflow := filepath.Join(damagedRoot, ".github", "workflows", "unity.yml")
+	if err := os.MkdirAll(filepath.Dir(workflow), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "jobs:\n  \"" + hostileJob + "\":\n    uses: ./.github/workflows/reusable.yml\n    steps: []\n"
+	if err := os.WriteFile(workflow, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, damagedRoot, "add", ".")
+	runGit(t, damagedRoot, "commit", "-m", "hostile job name")
+
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"--policy", policyPath,
+		"--repositories-root", root,
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if exit != 1 {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit enrollment.UnityOrganizationAudit
+	if err := json.Unmarshal(content, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.Findings) != 1 || audit.Findings[0].Code != "repository-analysis-incomplete" {
+		t.Fatalf("want one analysis finding, got %#v", audit.Findings)
+	}
+	cause := audit.Findings[0].Cause
+	if cause == "" {
+		t.Fatalf("an analysis finding without a cause sends the operator hunting: %#v", audit.Findings[0])
+	}
+	if !strings.Contains(cause, "cannot define both uses and steps") {
+		t.Fatalf("cause %q does not name the rule", cause)
+	}
+	if !strings.Contains(cause, "build?unity?CR") {
+		t.Fatalf("cause %q did not map every table break", cause)
+	}
+	if got := jsonstrict.SanitizeCause(cause); got != cause {
+		t.Fatalf("cause %q is not already sanitized", cause)
 	}
 }

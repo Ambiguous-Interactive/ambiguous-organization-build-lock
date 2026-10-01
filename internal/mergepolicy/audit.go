@@ -84,11 +84,16 @@ type Observed struct {
 }
 
 // Finding is one sanitized, source-free merge-policy result.
+//
+// Cause names why a read was refused, over a fixed alphabet that no live value
+// can widen, so it is safe in the run summary and the artifact. Detail is the
+// drift evidence for the finding code and can carry reviewed expectation text.
 type Finding struct {
 	Repository string `json:"repository"`
 	Code       string `json:"code"`
 	Context    string `json:"context,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+	Cause      string `json:"cause,omitempty"`
 }
 
 // InventoryEntry is one observed required check on a default branch. It is

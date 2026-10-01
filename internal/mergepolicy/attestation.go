@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
@@ -54,19 +53,16 @@ type Attestation struct {
 }
 
 // ParseAttestation strictly validates one published attestation file
-// without accepting unknown JSON fields or trailing values. A file that is not
-// valid UTF-8 is refused before it is decoded, because encoding/json replaces a
-// byte it cannot decode with U+FFFD instead of failing, and the audit would
-// then accept and compare a ruleset name or required context the consumer
-// never wrote. An escaped lone surrogate reaches the same substitution through
-// a door the byte check cannot see, and this file comes from a consumer
-// repository rather than a reviewed central file.
+// without accepting unknown JSON fields or trailing values. encoding/json
+// replaces a byte it cannot decode with U+FFFD instead of failing, and an
+// escaped lone surrogate reaches the same substitution through a door a byte
+// check cannot see, so jsonstrict.Unrepresentable refuses both after the
+// decode. This file comes from a consumer repository rather than a reviewed
+// central file, so a value the decoder substituted would be a ruleset name or a
+// required context the consumer never wrote.
 func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	if len(content) == 0 || len(content) > MaxAttestationBytes {
 		return Attestation{}, fmt.Errorf("merge policy attestation size is invalid")
-	}
-	if !utf8.Valid(content) {
-		return Attestation{}, fmt.Errorf("merge policy attestation is not valid UTF-8")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -78,13 +74,14 @@ func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Attestation{}, fmt.Errorf("merge policy attestation must contain one JSON value")
 	}
+	// The guard runs before every content check. A file the decoder could not
+	// represent is refused as unreadable, so no value in it decides a verdict.
+	// The decoder already named its own syntax errors.
+	if err := jsonstrict.Refusal("merge policy attestation", content); err != nil {
+		return Attestation{}, err
+	}
 	if attestation.SchemaVersion != attestationSchemaVersion {
 		return Attestation{}, fmt.Errorf("merge policy attestation schemaVersion must be 1")
-	}
-	if jsonstrict.UnpairedSurrogateEscape(content) {
-		return Attestation{}, fmt.Errorf(
-			"merge policy attestation contains an escaped lone surrogate, which no JSON decoder can represent",
-		)
 	}
 	if attestation.Repository != repository {
 		return Attestation{}, fmt.Errorf("merge policy attestation names another repository")

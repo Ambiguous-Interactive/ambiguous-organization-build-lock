@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -465,6 +467,86 @@ func TestMaximumEscapedIssuePageFitsResponseBound(t *testing.T) {
 			len(encoded),
 			DefaultResponseLimit,
 		)
+	}
+}
+
+// This response is the one document here that no reviewed file in this
+// repository writes, so a value the decoder substitutes would reach the issue
+// contract as text nobody authored. Each row serves a damaged body and names the
+// refusal the guard must return. The clean and substituted rows carry the
+// weight: a guard that refused every non-ASCII response would pass a table with
+// only refusal rows. The truncated row carries the ordering: a guard moved
+// above the decode would answer with its own reason and hide the syntax error
+// an operator has to fix.
+func TestRequestJSONRefusesResponsesTheDecoderCannotRepresent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		content    string
+		want       string
+		wantAbsent string
+	}{
+		{
+			name:    "clean response",
+			content: `[{"number":1,"body":"clean"}]`,
+		},
+		{
+			// The substituted form is real text the repository could have written,
+			// so the guard must stay silent on it.
+			name:    "substituted replacement character",
+			content: `[{"number":1,"body":"` + "\uFFFD" + `"}]`,
+		},
+		{
+			name:    "escaped lone surrogate",
+			content: `[{"number":1,"body":"\ud800"}]`,
+			want:    "GitHub API response " + jsonstrict.ReasonLoneSurrogateEscape,
+		},
+		{
+			name:    "unreadable byte",
+			content: "[{\"number\":1,\"body\":\"" + "\xff" + "\"}]",
+			want:    "GitHub API response " + jsonstrict.ReasonNotUTF8,
+		},
+		{
+			name:       "truncated response keeps the decoder message",
+			content:    `[{"number":1,"body":"\ud800"`,
+			want:       "decode GitHub API response failed",
+			wantAbsent: "lone surrogate",
+		},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				_, _ = writer.Write([]byte(test.content))
+			}))
+			defer server.Close()
+
+			client := testClient(t, server, 2, 2)
+			var issues []Issue
+			_, err := client.RequestJSON(
+				t.Context(),
+				http.MethodGet,
+				client.RepositoryPath("/issues"),
+				nil,
+				&issues,
+			)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("a readable response was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("a response the decoder cannot represent was accepted")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if test.wantAbsent != "" && strings.Contains(err.Error(), test.wantAbsent) {
+				t.Fatalf("error = %v, must not claim %q", err, test.wantAbsent)
+			}
+		})
 	}
 }
 

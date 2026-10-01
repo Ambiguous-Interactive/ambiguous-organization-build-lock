@@ -1,6 +1,7 @@
 package mergepolicy
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -361,9 +362,11 @@ func TestParseAttestationRejectsAnEscapedLoneSurrogate(t *testing.T) {
 	}
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Every other assertion still holds
-// for a damaged file, so without this the ordering is not pinned.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Every other assertion still holds for a
+// damaged file, so without this the ordering is not pinned. Both doors carry a
+// row: a row for the escape alone leaves the encoding arm free to move back
+// above the decode.
 func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	escaped := oneLoneSurrogateEscapeIn(
 		t, []byte(validAttestationContent()),
@@ -373,5 +376,46 @@ func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	if _, err := ParseAttestation(truncated, "Ambiguous-Interactive/example"); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+	unreadable := oneRawByteIn(t, []byte(validAttestationContent()), `"rulesetName": "Required CI (default branch)"`)
+	unreadable = unreadable[:len(unreadable)-8]
+	if _, err := ParseAttestation(unreadable, "Ambiguous-Interactive/example"); err == nil ||
+		strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}
+
+// The guard runs before every content check, so a document nobody can read is
+// refused as unreadable rather than as a schema problem. Session 119 accepted
+// the opposite order and this session changed it. Without a row, moving the
+// guard back below the schemaVersion check keeps this suite green.
+func TestParseAttestationNamesTheEncodingBeforeTheSchemaVersion(t *testing.T) {
+	const fragment = `"rulesetName": "Required CI (default branch)"`
+	cases := map[string]struct {
+		content []byte
+		refuse  string
+	}{
+		"escaped lone surrogate": {
+			content: oneLoneSurrogateEscapeIn(t, []byte(validAttestationContent()), fragment),
+			refuse:  "lone surrogate",
+		},
+		"unreadable byte": {
+			content: oneRawByteIn(t, []byte(validAttestationContent()), fragment),
+			refuse:  "not valid UTF-8",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			damaged := bytes.Replace(
+				testCase.content, []byte(`"schemaVersion": 1`), []byte(`"schemaVersion": 9`), 1,
+			)
+			if bytes.Equal(damaged, testCase.content) {
+				t.Fatal("the schema mutation did not apply, so this row proves nothing")
+			}
+			_, err := ParseAttestation(damaged, "Ambiguous-Interactive/example")
+			if err == nil || !strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the encoding refusal, not the schema refusal", err)
+			}
+		})
 	}
 }

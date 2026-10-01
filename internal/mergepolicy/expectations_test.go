@@ -217,9 +217,11 @@ func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Every other assertion still holds
-// for a damaged file, so without this the ordering is not pinned.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Every other assertion still holds for a
+// damaged file, so without this the ordering is not pinned. Both doors carry a
+// row: a row for the escape alone leaves the encoding arm free to move back
+// above the decode.
 func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	escaped := oneLoneSurrogateEscapeIn(
 		t, []byte(expectationsContent(validExpectationBody())),
@@ -229,5 +231,54 @@ func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	if _, err := ParseExpectations(truncated); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+	unreadable := oneRawByteIn(
+		t, []byte(expectationsContent(validExpectationBody())),
+		`"repository": "Ambiguous-Interactive/example"`,
+	)
+	unreadable = unreadable[:len(unreadable)-8]
+	if _, err := ParseExpectations(unreadable); err == nil ||
+		strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}
+
+// The guard runs before every content check, so a document nobody can read is
+// refused as unreadable rather than as a schema problem. Session 119 accepted
+// the opposite order and this session changed it. Without a row, moving the
+// guard back below the schemaVersion check keeps this suite green.
+func TestParseExpectationsNamesTheEncodingBeforeTheSchemaVersion(t *testing.T) {
+	cases := map[string]struct {
+		content []byte
+		refuse  string
+	}{
+		"escaped lone surrogate": {
+			content: oneLoneSurrogateEscapeIn(
+				t, []byte(expectationsContent(validExpectationBody())),
+				`"organization": "Ambiguous-Interactive"`,
+			),
+			refuse: "lone surrogate",
+		},
+		"unreadable byte": {
+			content: oneRawByteIn(
+				t, []byte(expectationsContent(validExpectationBody())),
+				`"repository": "Ambiguous-Interactive/example"`,
+			),
+			refuse: "not valid UTF-8",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			damaged := bytes.Replace(
+				testCase.content, []byte(`"schemaVersion": 2`), []byte(`"schemaVersion": 9`), 1,
+			)
+			if bytes.Equal(damaged, testCase.content) {
+				t.Fatal("the schema mutation did not apply, so this row proves nothing")
+			}
+			_, err := ParseExpectations(damaged)
+			if err == nil || !strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the encoding refusal, not the schema refusal", err)
+			}
+		})
 	}
 }
