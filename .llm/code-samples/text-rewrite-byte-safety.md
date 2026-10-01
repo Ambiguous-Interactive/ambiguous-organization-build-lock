@@ -12,6 +12,14 @@ This applies to every rewrite in this repository:
 - the lock state and its history,
 - the LLM harness catalog.
 
+It also applies to every reader that decides from evidence:
+
+- the enrollment audit, the merge-policy audit, and the onboarding
+  command all read the reviewed policy through one parser,
+- the merge-policy audit reads its expectations and each consumer's
+  published attestation through one parser each,
+- the merge-policy audit reads GitHub responses through one decoder.
+
 ## The defect
 
 `readFileSync(path, "utf8")` replaces every byte Node cannot decode with
@@ -66,11 +74,21 @@ const queueWrite = (file, content, location) => {
 ```
 
 ```go
-if !utf8.Valid(content) {
-    return errors.New(
-        "cannot read Unity enrollment policy: the file is not valid UTF-8")
+// The parser owns the refusal, so every reader answers the same way.
+func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, error) {
+	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
+		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
+	}
+	if !utf8.Valid(content) {
+		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy is not valid UTF-8")
+	}
+	// ... decode
 }
 ```
+
+A caller keeps no copy of this rule. A second copy is a second answer,
+and the two drift. A caller that needs a different scope owns a
+different function, not a copy of the check.
 
 ## Refuse at the write, not at the read
 
@@ -129,6 +147,32 @@ and does fail closed, but only because its fields are numbers and booleans.
 A read-only path is therefore safe by position, not by rule. A credential
 pattern is a literal, and a substitution breaks it. The `progress/` audit
 decodes strictly for that reason.
+
+Measured in 2026-10 on the same class, one byte inside a reviewed policy:
+
+- the enrollment audit printed "policy is valid" and exited 0,
+- the enrollment registry accepted a corrupted exception `owner`, a
+  corrupted `repinExceptions` `reason`, and a corrupted
+  `repinCompanions` `path`, because no validator inspects those bytes,
+- the merge-policy audit accepted a corrupted ruleset name and required
+  context in a consumer attestation,
+- the merge-policy audit published `complete: true` for a repository
+  whose live check context carried such a byte, with a finding that
+  named the wrong cause.
+
+The refusals now sit in the parsers and in the one response decoder, so
+every reader names the encoding instead of the symptom.
+
+## What a byte check cannot see
+
+A byte check sees bytes. A JSON escape is not a byte the decoder cannot
+read: `"\ud800"` is six valid ASCII bytes, and `utf8.Valid` accepts the
+file. The decoder then substitutes U+FFFD, because it has no
+representation for that code point, and returns no error.
+
+So the byte check is necessary and not sufficient. A value the decoder
+cannot represent is a second door to the same destruction, tracked as
+issue #316. Measure the second door before calling the first one closed.
 
 Related: `testing-and-validation` owns the red result a regression test needs.
 `operations-and-documentation` owns the operational contract that records a

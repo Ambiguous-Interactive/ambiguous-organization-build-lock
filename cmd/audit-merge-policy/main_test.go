@@ -484,6 +484,9 @@ func corruptOneByte(t *testing.T, path string, fragment string) {
 	if utf8.Valid(corrupted) {
 		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
 	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
 	if err := os.WriteFile(path, corrupted, 0o600); err != nil {
 		t.Fatal(err)
 	}

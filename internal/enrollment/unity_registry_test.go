@@ -530,8 +530,8 @@ func TestUnityEnrollmentRegistryCapsRequiredContexts(t *testing.T) {
 // encoding/json replaces a byte it cannot decode with U+FFFD rather than
 // failing, so a policy that is not valid UTF-8 would otherwise be evaluated as
 // a value the repository never wrote. Every reviewed field class is refused by
-// name, because a field the validators happen to accept silently is the field
-// that produces the wrong verdict.
+// name, so an operator is never sent to fix a spelling the file does not
+// contain.
 func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
 	registry := validUnityRegistry()
 	registry.Exceptions = []UnityPolicyException{{
@@ -540,6 +540,13 @@ func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
 		Classification: UnityInventorySynthetic,
 		Owner:          "unity-builder-maintainers",
 		ExpiresAt:      "2099-01-01T00:00:00Z",
+	}}
+	registry.RepinExceptions = []UnityRepinException{{
+		Repository: "Ambiguous-Interactive/unity-builder",
+		Path:       ".github/workflows/repin-protected.yml",
+		Reason:     "wrapper cannot supply the newest input contract",
+		Owner:      "unity-builder-maintainers",
+		ExpiresAt:  "2099-01-01T00:00:00Z",
 	}}
 	registry.RepinCompanions = []UnityRepinCompanion{{
 		Repository: "Ambiguous-Interactive/unity-builder",
@@ -550,20 +557,33 @@ func TestUnityEnrollmentRegistryRejectsContentThatIsNotValidUTF8(t *testing.T) {
 		registry.Repositories[index].RequiredContexts = []string{"CI Success"}
 	}
 	content := encodeRegistry(t, registry)
-	fields := map[string]string{
-		"organization":      `"organization":"Ambiguous-Interactive"`,
-		"repository":        `"repository":"Ambiguous-Interactive/DoxReloaded"`,
-		"default branch":    `"defaultBranch":"master"`,
-		"required context":  `"requiredContexts":["CI Success"`,
-		"approved lock SHA": `"approvedLockShas":["` + testSHA + `"`,
-		"exception owner":   `"owner":"unity-builder-maintainers"`,
-		"companion path":    `"path":".github/unity-lock.json"`,
+	// substitutes marks the rows that carry the wrong verdict on their own. No
+	// field validator inspects those bytes, so with the byte substituted the
+	// policy still parses and the audit decides from text nobody wrote.
+	fields := map[string]struct {
+		fragment    string
+		substitutes bool
+	}{
+		"organization":           {`"organization":"Ambiguous-Interactive"`, false},
+		"repository":             {`"repository":"Ambiguous-Interactive/DoxReloaded"`, false},
+		"default branch":         {`"defaultBranch":"master"`, false},
+		"required context":       {`"requiredContexts":["CI Success"`, false},
+		"approved lock SHA":      {`"approvedLockShas":["` + testSHA + `"`, false},
+		"exception owner":        {`"owner":"unity-builder-maintainers"`, true},
+		"repin exception reason": {`"reason":"wrapper cannot supply the newest input contract"`, true},
+		"companion path":         {`"path":".github/unity-lock.json"`, true},
 	}
 	for name, field := range fields {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseUnityEnrollmentRegistry(oneRawByteIn(t, content, field))
+			corrupted := oneRawByteIn(t, content, field.fragment)
+			_, err := ParseUnityEnrollmentRegistry(corrupted)
 			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			if field.substitutes {
+				if _, err := ParseUnityEnrollmentRegistry(withSubstitutedByte(corrupted)); err != nil {
+					t.Fatalf("the substituted form must parse, or the raw byte is not the only reason: %v", err)
+				}
 			}
 		})
 	}
@@ -585,5 +605,14 @@ func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
 	if utf8.Valid(corrupted) {
 		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
 	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
 	return corrupted
+}
+
+// withSubstitutedByte replaces the one raw byte with the three bytes a decoder
+// substitutes for it.
+func withSubstitutedByte(corrupted []byte) []byte {
+	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }

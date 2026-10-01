@@ -2,6 +2,7 @@ package mergepolicy
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -105,7 +106,9 @@ func TestParseExpectationsRejectsInvalidFiles(t *testing.T) {
 // encoding/json replaces a byte it cannot decode with U+FFFD rather than
 // failing, so a reviewed file that is not valid UTF-8 would be evaluated as a
 // value the organization never wrote. The refusal names the encoding, so an
-// operator is not sent to fix a spelling the file does not contain.
+// operator is not sent to fix a spelling the file does not contain. Every field
+// in this file also has a validator, so no row here decides a verdict on its
+// own; the guard is what names the real cause.
 func TestParseExpectationsRejectsContentThatIsNotValidUTF8(t *testing.T) {
 	content := []byte(expectationsContent(validExpectationBody()))
 	fields := map[string]string{
@@ -141,5 +144,14 @@ func oneRawByteIn(t *testing.T, content []byte, fragment string) []byte {
 	if utf8.Valid(corrupted) {
 		t.Fatal("the corrupted fixture is still valid UTF-8, so the test proves nothing")
 	}
+	if !json.Valid(corrupted) {
+		t.Fatal("the corrupted fixture is not valid JSON, so it proves nothing about the encoding")
+	}
 	return corrupted
+}
+
+// withSubstitutedByte replaces the one raw byte with the three bytes a decoder
+// substitutes for it.
+func withSubstitutedByte(corrupted []byte) []byte {
+	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }

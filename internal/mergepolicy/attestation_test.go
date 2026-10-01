@@ -95,19 +95,33 @@ func TestParseAttestationRejectsContractViolations(t *testing.T) {
 // The published attestation is consumer evidence, and encoding/json replaces a
 // byte it cannot decode with U+FFFD rather than failing. A ruleset name or
 // required context that carries such a byte would otherwise be accepted as
-// evidence the consumer never wrote, and compared against the live ruleset.
+// evidence the consumer never wrote, and compared with the live ruleset.
 func TestParseAttestationRejectsContentThatIsNotValidUTF8(t *testing.T) {
 	content := []byte(validAttestationContent())
-	fields := map[string]string{
-		"repository":       `"repository": "Ambiguous-Interactive/example"`,
-		"ruleset name":     `"rulesetName": "Required CI (default branch)"`,
-		"required context": `"requiredContexts": ["Unity CI Success"`,
+	// substitutes marks the rows that carry that risk on their own. The name
+	// and the context are compared raw, and no validator inspects their bytes,
+	// so with the byte substituted the file still parses.
+	fields := map[string]struct {
+		fragment    string
+		substitutes bool
+	}{
+		"repository":       {`"repository": "Ambiguous-Interactive/example"`, false},
+		"ruleset name":     {`"rulesetName": "Required CI (default branch)"`, true},
+		"required context": {`"requiredContexts": ["Unity CI Success"`, true},
 	}
 	for name, field := range fields {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseAttestation(oneRawByteIn(t, content, field), "Ambiguous-Interactive/example")
+			corrupted := oneRawByteIn(t, content, field.fragment)
+			_, err := ParseAttestation(corrupted, "Ambiguous-Interactive/example")
 			if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 				t.Fatalf("error = %v, want a named UTF-8 refusal", err)
+			}
+			if field.substitutes {
+				if _, err := ParseAttestation(
+					withSubstitutedByte(corrupted), "Ambiguous-Interactive/example",
+				); err != nil {
+					t.Fatalf("the substituted form must parse, or the raw byte is not the only reason: %v", err)
+				}
 			}
 		})
 	}

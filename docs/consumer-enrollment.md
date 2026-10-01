@@ -151,9 +151,16 @@ Every tool that reads the reviewed policy refuses a policy that is not valid
 UTF-8. That covers the release authorization and the repository onboarding,
 which write it back, and the enrollment and merge-policy audits, which only
 read it. The merge-policy expectations file and a consumer's published
-attestation are refused the same way. None of them moves a byte order mark. A
-mark is invalid JSON, and Node and all three Go analyzers reject one, so a
-marked policy fails as it always has.
+attestation are refused the same way, and each run validates them before any
+later step reads them. None of them moves a byte order mark. A mark is invalid
+JSON, and Node and all three Go analyzers reject one, so a marked policy fails
+as it always has.
+
+One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
+valid UTF-8 and valid JSON, so the encoding check does not refuse it. The
+decoder substitutes U+FFFD, and the onboarding command writes the substituted
+text back. That is a second door to the same destruction, and it is tracked as
+issue #316.
 
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce
