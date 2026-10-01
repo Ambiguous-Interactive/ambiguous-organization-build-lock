@@ -165,13 +165,15 @@ func TestRunRefusesAPolicyThatIsNotValidUTF8(t *testing.T) {
 	}
 }
 
-// An escaped lone surrogate destroys the same way an unreadable byte does, and
-// the encoding check cannot see it: the escape is six valid ASCII bytes, so the
-// file is valid UTF-8, and Go has no representation for the code point, so the
-// decoder writes U+FFFD and returns no error. This command then encodes the
-// registry back into the file, so the refusal has to happen before the write.
-// The assertion is on the file, not only on the message: a run that exits 0 has
-// committed the substituted text whatever it printed.
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. The escape is six valid ASCII bytes.
+// Go has no value for the code point, so the decoder writes U+FFFD and
+// returns no error.
+//
+// This command encodes the registry back into the file, so the refusal has
+// to happen before the write. The assertion is on the file, not only on the
+// message. A run that exits 0 has committed the substituted text whatever it
+// printed.
 func TestRunRefusesAPolicyWithAnEscapedLoneSurrogate(t *testing.T) {
 	root := t.TempDir()
 	policyPath := filepath.Join(root, "policy.json")

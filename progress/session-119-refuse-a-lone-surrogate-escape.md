@@ -102,14 +102,21 @@ policy as bytes.
   The end-to-end onboarding test reproduces the reported defect: exit 0, the
   repository reported as added, and the file rewritten.
 - A differential test compares the guard with the decoder over 200000
-  generated documents. The decoder damaged 159408 of them. The guard refused
-  every one, and refused none of the 40592 the decoder read exactly. The
-  oracle is itself pinned in both directions, because an oracle that always
-  returns false would also pass.
-- A first attempt at that oracle was wrong twice, and both faults are worth
-  recording. It compared a re-encoding against the input, which loses the
-  escape; and it tested for the presence of a real U+FFFD rather than counting,
-  so one document that spelled a real U+FFFD hid a lone escape beside it.
+  generated documents. The decoder damaged 156256 of them. The guard refused
+  every one, and refused none of the 43744 the decoder read exactly. Run
+  `go test -v -run TestGuardCoversTheDecoderLoss ./internal/jsonstrict/` to
+  read the counts. The oracle is itself pinned in both directions, because an
+  oracle that always returns false would also pass.
+- The first version of that oracle was wrong four times, and each fault is
+  recorded below. It compared a re-encoding against the input, which loses the
+  escape. It tested for the presence of a real U+FFFD rather than counting, so
+  one document that spelled a real U+FFFD hid a lone escape beside it. It
+  listed five of the sixteen hex spellings of that escape. And it counted
+  values but not keys, so a real U+FFFD in a key cancelled a loss in a value.
+- The generated documents vary in shape as well as content: a value, a key, an
+  array element, a nested object, and a string beside a number. The first
+  version produced one shape only, so the oracle answered "no loss" for every
+  other shape. That is the direction that hides a broken guard.
 - Mutation: a guard that refuses every well-formed pair, and one that refuses
   every `\u` escape, both failed the suite. The first version of the table had
   no row for either class, so both mutations passed it.
@@ -117,7 +124,7 @@ policy as bytes.
   suite. The first version asserted the ordering for one reader only.
 - One mutation survived and is equivalent, not a gap. Returning the partner
   index one byte short resumes the scan on the last hex digit of a consumed
-  pair, and no case matches a hex digit. Both forms agree on all 60000
+  pair, and no case matches a hex digit. Both forms agree on all 200000
   generated documents.
 - The new Node test fails when the release script is given a lossy write-back,
   so it binds the claim it makes.
@@ -129,15 +136,24 @@ policy as bytes.
 | The guard table had no row for a well-formed pair, so refusing every pair passed | Fixed. Four pair rows and an ordinary-escape row, and both mutations now fail. |
 | The guard had no differential proof against the decoder | Fixed. 200000 documents, and the oracle is pinned both ways. |
 | The ordering contract was asserted for one reader | Fixed. Each parser now asserts the decoder's message for a truncated file. |
+| The same contract was still unpinned for `strictDecode` | The malformed input carried no escape, so it held at any position. Fixed: the input now carries one, and moving the guard above the decode fails the suite. |
+| The oracle counted values but not keys | Wrong, and wrong in the direction that hides a broken guard. A real U+FFFD in a key cancelled a loss in a value. Fixed, and pinned. |
+| The oracle listed five of the sixteen hex spellings | Wrong. Eleven spellings reported a loss that did not happen. Fixed by lowercasing, so no list can drift. |
+| The oracle could not read an array, a nested object, or a non-string value | Wrong. It answered "no loss" for every shape it could not decode. Fixed, and the generator now produces seven shapes. |
+| This record said the differential set damaged 159408 documents | Corrected to 156256. The number rose when the generator learned more shapes, and the earlier count covered one shape only. |
 | This record said `jq` refuses such a file | Wrong. It refuses an escaped high surrogate and substitutes an escaped low one. Fixed in both documents and the code sample. |
-| This record named one Node writer | Incomplete. The consumer repin is a second one. Both are now named. |
+| This record named one Node writer | Incomplete. The consumer repin reads the policy. It never writes it, so it is a second reader and not a second writer. Both are now named, and the record said which is which. |
+| This record said "every workflow runs a Go refusal first" | Wrong. `auto-release.yml` runs no Go step. Corrected: every workflow that reads the file with `jq` runs one, which is the claim the ordering supports. |
+| This record said four readers have no guard | Wrong count. Five files and six decode sites. #321 was corrected to the measured enumeration. |
 | This record said "three readers" | Wrong count. Four readers answer, including the consumer attestation. |
 | The `ParseExpectations` guard changes no verdict today | Accepted. Every field in that file already has a validator that rejects U+FFFD, so the guard is defence in depth there. The registry and the attestation each have free-text fields with no such validator, and those are the rows the tests show the guard closing. |
 | The first oracle compared a re-encoding against the input | Wrong. Fixed, and the failure is recorded above. |
 | The oracle tested presence rather than counting | Wrong. One real U+FFFD hid a lone escape. Fixed. |
 | A mutation in the partner index survived | Not a gap. Equivalent, measured over 60000 documents. |
 | The guard's message is discarded by all six `strictDecode` callers | Out of scope. Pre-existing, and now #320. |
-| Four more JSON readers have no encoding guard at all | Out of scope. Each is fail-closed for a measured reason. Now #321. |
+| Six more JSON decode sites have no encoding guard at all | Out of scope. Each is fail-closed for a measured reason. Now #321. |
+| The guard sits after the `schemaVersion` check, so a file with an escape and a wrong version names the version | Accepted. Both messages are true, the run fails either way, and the order keeps the schema error first. The documents say "by name", which holds for an otherwise valid file. |
+| The three test helpers are duplicated across packages | Accepted. A shared test package is more scaffolding than the duplication costs. |
 | The escape check needs `encoding/json/v2` | Rejected. That package is behind a build tag. The reference was used to check the guard, never to build it. |
 
 ## What a consumer repository gains

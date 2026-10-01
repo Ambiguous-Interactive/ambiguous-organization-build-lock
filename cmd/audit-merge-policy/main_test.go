@@ -1188,8 +1188,11 @@ func TestStrictDecodeRejectsAnEscapedLoneSurrogate(t *testing.T) {
 		t.Fatalf("a clean response was refused: %v", err)
 	}
 	// The guard runs after the decode, so a malformed response keeps the
-	// decoder's own message rather than the escape message.
-	if err := strictDecode([]byte(`{"rulesets":`), &decoded); err == nil ||
+	// decoder's own message rather than the escape message. The input carries a
+	// well-formed escape and is truncated after it, so the guard would answer if
+	// it ran first. Without the escape this assertion holds at any position and
+	// pins nothing.
+	if err := strictDecode([]byte(`{"rulesets":[{"name":"\ud800"}`), &decoded); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
 		t.Fatalf("error = %v, want the decoder's own message", err)
 	}

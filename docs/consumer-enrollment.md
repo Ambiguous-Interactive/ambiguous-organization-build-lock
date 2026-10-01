@@ -163,19 +163,20 @@ substitution. The escape is six valid ASCII bytes. The encoding check above
 cannot see it. Go has no value for the code point, so its decoder writes U+FFFD
 and returns no error.
 
-All three Go analyzers refuse such a file by name, beside the encoding check.
-So does the merge-policy expectations parser and the consumer attestation
-parser. No step decides from a value nobody wrote, and the onboarding command
-writes nothing back.
+All three Go analyzers refuse such a file by name, as well as the encoding
+check does. So does the merge-policy expectations parser and the consumer
+attestation parser. No step decides from a value nobody wrote. The onboarding
+command writes nothing back.
 
-We measured the other readers. We did not assume them. A JavaScript string
-holds a lone surrogate, and `JSON.stringify` writes it back as an escape. So
-the release authorization and the consumer repin read and write the file
-unchanged.
+We measured the other readers. A JavaScript string holds a lone surrogate, and
+`JSON.stringify` writes it back as an escape. So the release authorization
+writes the file back unchanged. The consumer repin reads the file and never
+writes it.
 
 `jq` stops on an escaped high surrogate and reports a parse error. It does not
-see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow
-runs a Go refusal first, so no `jq` step reaches such a file.
+see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow that
+reads the file with `jq` runs a Go refusal first. No `jq` step reaches such a
+file.
 
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce

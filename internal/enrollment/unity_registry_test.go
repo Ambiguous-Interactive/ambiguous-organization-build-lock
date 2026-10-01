@@ -619,12 +619,13 @@ func withSubstitutedByte(corrupted []byte) []byte {
 	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }
 
-// An escaped lone surrogate is the same substitution as an unreadable byte,
-// reached through a door the encoding check cannot see: the escape is six valid
-// ASCII bytes, so the file is valid UTF-8, and Go has no representation for the
-// code point, so the decoder writes U+FFFD and returns no error. The reviewed
-// field classes are the same ones the byte test covers, because the loss is the
-// same one.
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. The escape is six valid ASCII bytes.
+// Go has no value for the code point, so the decoder writes U+FFFD and
+// returns no error.
+//
+// The field classes are the ones the byte test covers, because the loss is
+// the same one.
 func TestUnityEnrollmentRegistryRejectsAnEscapedLoneSurrogate(t *testing.T) {
 	content := surrogateRegistryFixture(t)
 	fields := map[string]struct {

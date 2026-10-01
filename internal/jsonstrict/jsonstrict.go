@@ -1,27 +1,29 @@
 // Package jsonstrict refuses JSON evidence a decoder cannot represent exactly.
 //
 // encoding/json decodes a string escape for a surrogate code point into
-// U+FFFD and returns no error, because Go has no representation for a lone
-// surrogate. The escape is six valid ASCII bytes, so the file is valid UTF-8
-// and valid JSON, and a byte-level encoding check accepts it. A reader then
-// decides from a value the repository never wrote, and a caller that writes the
-// file back commits the substituted text inside a clean commit.
+// U+FFFD and returns no error. Go has no value for that code point.
 //
-// The guard belongs here rather than in one caller, so every reader of a
-// reviewed file answers the same way. It is separate from the encoding check
-// because it sees a different door: a byte the decoder can read but has no
-// value for.
+// The escape is six valid ASCII bytes. The file is valid UTF-8 and valid
+// JSON, so a byte-level encoding check accepts it. A reader then decides
+// from a value the repository never wrote. A caller that writes the file
+// back commits the substituted text inside a clean commit.
+//
+// The rule lives here rather than in one caller, so every reader of a
+// reviewed file answers the same way. It is separate from the encoding
+// check because it sees a different door: a byte the decoder can read
+// but has no value for.
 package jsonstrict
 
 // UnpairedSurrogateEscape reports whether content holds a \u escape for a
 // surrogate code point that has no partner.
 //
-// The check reads bytes rather than a decoded value, because a substituted
-// U+FFFD and a real U+FFFD are the same three bytes, so no decoded value can
-// tell them apart. It tracks string context, because a backslash is an escape
-// only inside a string. A document that is not well-formed JSON therefore
-// reports only a well-formed escape, and the decoder keeps ownership of the
-// syntax error and its message.
+// The check reads bytes. A decoded value cannot answer the question. A
+// substituted U+FFFD and a real U+FFFD are the same three bytes.
+//
+// It tracks string context, because a backslash is an escape only
+// inside a string. A document that is not well-formed JSON therefore
+// reports only a well-formed escape, and the decoder keeps ownership
+// of the syntax error and its message.
 func UnpairedSurrogateEscape(content []byte) bool {
 	inString := false
 	for index := 0; index < len(content); index++ {

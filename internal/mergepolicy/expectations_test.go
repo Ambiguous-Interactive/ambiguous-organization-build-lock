@@ -161,9 +161,10 @@ func withSubstitutedByte(corrupted []byte) []byte {
 	return bytes.Replace(corrupted, []byte{0xff}, []byte("�"), 1)
 }
 
-// An escaped lone surrogate substitutes the same way as an unreadable byte,
-// through a door the encoding check cannot see: the escape is six valid ASCII
-// bytes, and Go has no representation for the code point.
+// An escaped lone surrogate substitutes the same way an unreadable byte does,
+// and the encoding check cannot see it. The escape is six valid ASCII bytes.
+// Go has no value for the code point, so the decoder writes U+FFFD and
+// returns no error.
 func TestParseExpectationsRejectsAnEscapedLoneSurrogate(t *testing.T) {
 	content := []byte(expectationsContent(validExpectationBody()))
 	fields := map[string]string{
