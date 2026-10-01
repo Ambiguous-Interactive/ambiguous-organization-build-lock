@@ -20,8 +20,23 @@ case "${1:-}" in
     go -C tools/actionlint mod tidy -diff
     ;;
   javascript)
+    # no-undef is here because a test file that only runs on Windows or macOS has
+    # no local coverage, so a binding it never imports fails only on the runner
+    # that owns the platform. The globals below are the ones this repository's
+    # Node version provides; they are listed rather than configured, because the
+    # run uses --no-config-lookup.
     npx --yes eslint@9.35.0 \
       --no-config-lookup \
+      --rule 'no-undef:["error",{"typeof":false}]' \
+      --global require --global module --global exports --global __dirname --global __filename \
+      --global process --global console --global Buffer --global global --global crypto \
+      --global setTimeout --global clearTimeout --global setImmediate --global clearImmediate \
+      --global queueMicrotask --global structuredClone --global performance \
+      --global URL --global URLSearchParams --global TextEncoder --global TextDecoder \
+      --global fetch --global AbortController --global AbortSignal \
+      --global Headers --global Request --global Response --global FormData \
+      --global DOMException --global ReadableStream --global WritableStream \
+      --global TransformStream --global WebSocket \
       --rule 'no-alert:error' \
       --rule 'no-constant-condition:error' \
       --rule 'no-debugger:error' \
