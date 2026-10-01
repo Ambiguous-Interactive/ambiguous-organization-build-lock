@@ -26,8 +26,7 @@ resolve_scope() {
 #
 # The analyzer sanitizes every cause to an alphabet with no pipe, no backtick,
 # and no newline, so the table needs no escaping. A finding with no cause has no
-# row here: a cause means the audit could not read its evidence, which is a
-# different problem from evidence that failed a rule.
+# row here, so every row names a specific read and a specific reason.
 #
 # The table is bounded; the retained artifact holds the complete set. A jq
 # failure here must not skip the incomplete line below, so it is reported rather

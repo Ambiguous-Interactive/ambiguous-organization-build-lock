@@ -81,7 +81,7 @@ func TestReasonSurvivesWrappingAndIgnoresOtherErrors(t *testing.T) {
 // alone, so a published cause never claims the response content was at fault
 // when the request never arrived.
 func TestLabelNamesTheReadAndLeavesOtherErrorsAlone(t *testing.T) {
-	bare := UnrepresentableError{Reason: ReasonNotUTF8}
+	bare := UnrepresentableErrorf(ReasonNotUTF8)
 	if got := Label("ruleset 42 response", bare).Error(); got != "ruleset 42 response "+ReasonNotUTF8 {
 		t.Fatalf("Label = %q, want the read and the reason", got)
 	}

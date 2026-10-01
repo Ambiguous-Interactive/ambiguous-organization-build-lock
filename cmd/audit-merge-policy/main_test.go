@@ -1386,15 +1386,67 @@ func TestRunPublishesTheRefusalCauseForEveryDamagedRead(t *testing.T) {
 	}
 }
 
-// assertCauseIsPublishable pins the alphabet the issue validator accepts. A
-// cause outside it is not a bad alert row: the validator refuses the whole
-// artifact, so the drift alert never opens at all.
+// assertCauseIsPublishable pins the alphabet the issue validators accept and
+// pins that the published cause is already sanitized. A cause outside either
+// pattern is not a bad alert row: the validator refuses the whole artifact, so
+// the drift alert never opens at all.
+//
+// The patterns are rebuilt the way each validator builds its own, because this
+// package does not own either one. cmd/sync-merge-policy-issue runs the shipped
+// causePattern over the same reasons, and TestTheSharedCauseAlphabet binds the
+// relationship between the two.
 func assertCauseIsPublishable(t *testing.T, cause string) {
 	t.Helper()
-	publishable := regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0," +
-		strconv.Itoa(mergepolicy.MaxDetailBytes) + "}$")
-	if !publishable.MatchString(cause) {
-		t.Fatalf("cause %q is outside the issue alphabet", cause)
+	for name, pattern := range publishedCausePatterns() {
+		if !pattern.MatchString(cause) {
+			t.Fatalf("cause %q is outside %s", cause, name)
+		}
+	}
+	if got := jsonstrict.SanitizeCause(cause); got != cause {
+		t.Fatalf("cause %q is not already sanitized, so SanitizeCause is load bearing", cause)
+	}
+}
+
+// publishedCausePatterns rebuilds the two validators that publish a cause. An
+// attestation refusal writes its cause into the Detail column, so a cause has to
+// satisfy both, and neither may accept a byte that breaks a Markdown table row.
+func publishedCausePatterns() map[string]*regexp.Regexp {
+	return map[string]*regexp.Regexp{
+		"causePattern": regexp.MustCompile("^[" + jsonstrict.CauseAlphabet + "]{0," +
+			strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$"),
+		"detailPattern": regexp.MustCompile("^[" + mergepolicy.Alphabet + "\";-]{0," +
+			strconv.Itoa(mergepolicy.MaxDetailBytes) + "}$"),
+	}
+}
+
+// The shared alphabet and the merge-policy detail alphabet must agree. An edit to
+// either constant that separates them makes the sync refuse an artifact holding
+// an attestation cause, so the relationship is asserted rather than assumed.
+func TestTheSharedCauseAlphabetFitsEveryValidatorThatPublishesIt(t *testing.T) {
+	if jsonstrict.CauseAlphabet != mergepolicy.Alphabet+"\";-" {
+		t.Fatalf(
+			"CauseAlphabet %q is no longer mergepolicy.Alphabet plus \";-",
+			jsonstrict.CauseAlphabet,
+		)
+	}
+	for name, pattern := range publishedCausePatterns() {
+		for _, char := range jsonstrict.CauseAlphabet {
+			// The hyphen is last in the class, so it is a literal, not a range.
+			if char == '-' {
+				continue
+			}
+			if !pattern.MatchString(string(char)) {
+				t.Fatalf("%s rejects %q, which the shared alphabet publishes", name, char)
+			}
+		}
+		for _, tableBreak := range []string{"|", "`", "\n", "\r", "\t"} {
+			if pattern.MatchString(tableBreak) {
+				t.Fatalf("%s accepts %q, which breaks a Markdown table row", name, tableBreak)
+			}
+		}
+		if !pattern.MatchString("-") {
+			t.Fatalf("%s rejects the trailing hyphen, so it reads it as a range", name)
+		}
 	}
 }
 

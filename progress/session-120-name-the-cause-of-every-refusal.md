@@ -94,11 +94,16 @@ rule.
 
 | Finding | Disposition |
 | --- | --- |
-| `ReasonLoneSurrogateEscape` held a comma, so `causePattern` rejected it and the issue sync refused the whole artifact | Fixed. The reason was reworded to a clause the alphabet accepts, and both `TestEveryPublishedCauseIsPublishable` and `TestEveryPublishedEnrollmentCauseIsPublishable` run the shipped validators over every reason a reader can publish. Re-inserting the comma now fails both. |
-| The encoding arm's ordering was unpinned | Fixed. An unreadable-byte row sits beside every escape row, and the `utf8.Valid`-above-the-decode mutation now fails the suite. |
+| `ReasonLoneSurrogateEscape` held a comma, so `causePattern` rejected it and the issue sync refused the whole artifact | Fixed. The reason was reworded to a clause the alphabet accepts. `TestEveryPublishedCauseIsPublishable` runs the shipped `causePattern`, and `TestEveryPublishedEnrollmentCauseIsPublishable` runs the shipped `causePattern` too, over unsanitized strings. Re-inserting the comma fails both. |
+| The encoding arm's ordering was unpinned | Fixed. An unreadable-byte row sits beside every escape row in every parser, the `githubissue` client, both `readAudit` tables, the skill metadata reader, and the lock state reader. The guard-above-the-decode mutation now fails each of them. |
+| The "guard before every content check" half of the order was unpinned | Fixed. One row per parser feeds a damaged document whose `schemaVersion` is also wrong, and asserts the encoding refusal wins. Moving the guard back below the schema check now fails all three. |
+| The enrollment publishability test sanitized first and re-derived the pattern, so it could not fail | Fixed. It runs the shipped `causePattern` over the unsanitized strings, and it asserts a raw hostile path is refused while its sanitized form is accepted, so the sanitizing rule is shown to be load bearing. |
+| `UnrepresentableError` had an exported `Reason` field any caller could set to a published value | Fixed. The field is unexported. The only ways to build the error are `Refusal`, `Label`, and `UnrepresentableErrorf`, and all three build it from the two reason clauses and a reader name. Every reader name is pinned against every publishing validator. |
+| `SanitizeCause` was load bearing only on the enrollment paths, and the merge-policy call sites were unpinned | Corrected. It now runs only where hostile text exists, which is the enrollment retrieval and analysis paths. Both are pinned: a raw byte in a tree name, and a job name holding a pipe and a backtick. Removing either call fails its test. |
+| Six places said a cause always means an unreadable file | Corrected. The Unity enrollment audit publishes a cause for a refused commit, a refused origin, and a rule a consumer workflow broke. Every one of those places now says to read the reason code before the cause, and the `repository-analysis-incomplete` row was updated with the remedy it now reports. |
 | `docs/operations-runbook.md` claimed every refusal names a cause | Fixed. The runbook now names the refusals that carry a cause and lists the ones that do not. |
 | The docs and both shell comments claimed the cause is sanitized. The merge-policy path only truncated | Fixed. `jsonstrict.SanitizeCause` is now the single sanitizing rule, both audits use it, and both validators use its alphabet. The duplicate sanitizer in `internal/enrollment` is gone. |
-| `BoundDetail` only truncates, and `UnrepresentableError` has an exported unvalidated field | Fixed by the single sanitizing rule plus the publishability tests. The exported field stays, because a reader that names itself has to build the error value. |
+| `BoundDetail` only truncates, and the docs claimed a sanitizing rule that did not exist for the merge-policy path | Fixed. `SanitizeCause` now runs where hostile text exists, which is the enrollment retrieval and analysis paths, and the merge-policy type can no longer be built with a value nobody checked. |
 | `ParseUnityEnrollmentRegistry` was still shown with the check above the decode in the byte-safety sample | Fixed. The sample now shows the guard after the decode. |
 | `TestEveryPublishedCauseIsPublishable` re-derived the pattern instead of using the shipped one | Fixed. It uses `causePattern`. The same test in `cmd/audit-merge-policy` cannot, and it says so. |
 | The enrollment end-to-end test damaged a script body, so its alphabet assertion passed for a sanitizer that did nothing | Fixed. A second row commits a git tree entry whose name holds a raw byte and whose mode is not a regular blob. The snapshot reader reports that name with `%s`, so the byte reaches the cause raw. Reverting `SanitizeCause` now fails this test. |
@@ -111,25 +116,28 @@ rule.
 | The `record_causes` table is duplicated in both workflow scripts | Accepted. Every workflow script here is standalone on purpose, and `record_counts` is already duplicated the same way. |
 | `Unrepresentable` could not state that the caller must discard the decoded value | Fixed. It says so. All nine sites do, and a caller that logs past the guard is a fail-open nothing can repair afterwards. |
 | `json.Unmarshal` is stricter than the decoder it replaced in the skill metadata reader | Accepted. It refuses trailing data, which the decoder accepted. The harness never sends trailing data. |
-| The run summary listed a cause only from the merge-policy shape | Fixed. Each script is now fed a cause only its own analyzer can produce. |
-| No cause is published for a transport failure, an HTTP status, a pagination guard, a size bound, or a decoder syntax error | Accepted. Each has a reason code and its own message. The runbook names them. |
+| The run summary listed a cause only from the merge-policy shape | Fixed for the first two runs of each script. The bounded-table run uses one fixed cause for both scripts, so that one block still does not exercise each script's own alphabet. |
+| No cause is published for an HTTP status, a pagination guard, a size bound, a duplicate identity, or a decoder syntax error | Accepted. Each has a reason code and its own message. The runbook names them. |
 
 ## Verification
 
 - `.devcontainer/scripts/verify.sh` exits 0.
 - Every new test was run with the production guard or sanitizing rule reverted.
-  Recorded per site: removing a guard fails its table; moving a guard above the
-  decode fails the ordering row; removing `SanitizeCause` fails the enrollment
-  end-to-end test; re-inserting the comma into a reason fails both
-  publishability tests; removing `internal/jsonstrict/**` from a workflow path
-  filter fails the filter test; removing `record_causes` fails the node test.
-- The 200000-document differential oracle from session 119 still passes against
-  `Unrepresentable`, so the unified rule covers exactly the loss the decoder
-  causes and nothing else.
+  Removing a guard fails its own table. Moving a guard above the decode fails
+  the ordering row at that site. Moving any parser's guard back below its
+  `schemaVersion` check fails that parser's new row. Removing either
+  `SanitizeCause` call fails the enrollment test for that path. Re-inserting the
+  comma into a reason fails both publishability tests. Removing
+  `internal/jsonstrict/**` from a workflow path filter fails the filter test.
+  Removing `record_causes` fails the node test.
+- The 200000-document differential oracle from session 119 still passes. It
+  drives `UnpairedSurrogateEscape`, the escape primitive, so it pins that half of
+  the rule only. The encoding half is a `utf8.Valid` call, which the oracle does
+  not reach.
 
 ## Known limits, named in the documents
 
-The four refusals that carry no cause are listed in the operations runbook. The
+The refusals that carry no cause are listed in the operations runbook. The
 cause field is added to both audit artifacts, so a consumer that pins an older
 `sync-*-issue` binary would refuse an artifact it did not write. Neither
 command is a published action with a version pin; both are run by the central

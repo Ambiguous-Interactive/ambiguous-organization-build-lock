@@ -344,7 +344,9 @@ for (const testCase of causeSummaryCases) {
     );
 
     // Each script is fed a cause only its own analyzer can produce, so a change
-    // to either alphabet is caught by the script that renders it.
+    // to either alphabet is caught by the script that renders it. The bounded
+    // block below uses one cause for both, so it checks the bound and not the
+    // alphabet.
     write(
       [
         {

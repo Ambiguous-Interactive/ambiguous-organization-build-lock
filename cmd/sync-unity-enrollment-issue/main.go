@@ -126,21 +126,27 @@ func readAudit(path string) (enrollment.UnityOrganizationAudit, error) {
 	return audit, nil
 }
 
+// The published patterns are package vars, not locals, so a test can run the
+// shipped one over every value the analyzer can publish. A test that rebuilds the
+// pattern keeps passing after the validator narrows or is removed.
+var (
+	repositoryPattern = regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)
+	codePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
+	pathPattern       = regexp.MustCompile(`^\.github/(?:workflows/)?[A-Za-z0-9_./-]+\.ya?ml$`)
+	jobPattern        = regexp.MustCompile(`^[A-Za-z0-9_. -]{0,128}$`)
+	// The cause is accepted only over the alphabet the analyzer sanitizes to, so
+	// a consumer-controlled file name can never carry text into the artifact
+	// contract. It is not rendered into the issue body.
+	causePattern = regexp.MustCompile(
+		"^[" + jsonstrict.CauseAlphabet + "]{0," + strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$",
+	)
+)
+
 func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 	if len(audit.Repositories) > maxRepositories || len(audit.Inventory) > maxAuditRows ||
 		len(audit.Findings) > maxAuditRows {
 		return fmt.Errorf("audit collection exceeds bound")
 	}
-	repositoryPattern := regexp.MustCompile(`^Ambiguous-Interactive/[A-Za-z0-9_.-]{1,100}$`)
-	codePattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
-	pathPattern := regexp.MustCompile(`^\.github/(?:workflows/)?[A-Za-z0-9_./-]+\.ya?ml$`)
-	jobPattern := regexp.MustCompile(`^[A-Za-z0-9_. -]{0,128}$`)
-	// The cause is accepted only over the alphabet the analyzer sanitizes to,
-	// so a consumer-controlled file name can never carry text into the artifact
-	// contract. It is not rendered into the issue body.
-	causePattern := regexp.MustCompile(
-		"^[" + jsonstrict.CauseAlphabet + "]{0," + strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$",
-	)
 	validateIdentity := func(repository, sha string, shaOptional bool) error {
 		if !repositoryPattern.MatchString(repository) {
 			return fmt.Errorf("invalid repository")

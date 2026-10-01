@@ -1,6 +1,7 @@
 package mergepolicy
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -381,5 +382,40 @@ func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	if _, err := ParseAttestation(unreadable, "Ambiguous-Interactive/example"); err == nil ||
 		strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}
+
+// The guard runs before every content check, so a document nobody can read is
+// refused as unreadable rather than as a schema problem. Session 119 accepted
+// the opposite order and this session changed it. Without a row, moving the
+// guard back below the schemaVersion check keeps this suite green.
+func TestParseAttestationNamesTheEncodingBeforeTheSchemaVersion(t *testing.T) {
+	const fragment = `"rulesetName": "Required CI (default branch)"`
+	cases := map[string]struct {
+		content []byte
+		refuse  string
+	}{
+		"escaped lone surrogate": {
+			content: oneLoneSurrogateEscapeIn(t, []byte(validAttestationContent()), fragment),
+			refuse:  "lone surrogate",
+		},
+		"unreadable byte": {
+			content: oneRawByteIn(t, []byte(validAttestationContent()), fragment),
+			refuse:  "not valid UTF-8",
+		},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			damaged := bytes.Replace(
+				testCase.content, []byte(`"schemaVersion": 1`), []byte(`"schemaVersion": 9`), 1,
+			)
+			if bytes.Equal(damaged, testCase.content) {
+				t.Fatal("the schema mutation did not apply, so this row proves nothing")
+			}
+			_, err := ParseAttestation(damaged, "Ambiguous-Interactive/example")
+			if err == nil || !strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the encoding refusal, not the schema refusal", err)
+			}
+		})
 	}
 }

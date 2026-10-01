@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -507,26 +506,46 @@ func TestReadAuditRefusesACauseOutsideTheSanitizedAlphabet(t *testing.T) {
 	}
 }
 
-// The enrollment cause is a clause from internal/jsonstrict or from
-// enrollment.LoadGitSnapshot behind a file name, and the analyzer sanitizes it.
-// A character the sanitizer cannot map would make the issue sync refuse the
-// whole artifact, so the drift alert never opens and the file name is lost with
-// it. The two reasons and a byte-lost file name are checked here, not one of
-// them.
+// The enrollment cause is a clause from internal/jsonstrict, or a message the
+// snapshot reader builds from a file name nobody wrote. A character the shipped
+// validator rejects makes the issue sync refuse the whole artifact, so the drift
+// alert never opens and the file name is lost with it. A comma in one reason
+// caused exactly that on the merge-policy side.
+//
+// The strings are checked UNSANITIZED, against the shipped pattern. Sanitizing
+// first or rebuilding the pattern here would hide the defect from the test that
+// exists to catch it.
 func TestEveryPublishedEnrollmentCauseIsPublishable(t *testing.T) {
-	publishable := regexp.MustCompile("^[" + jsonstrict.CauseAlphabet + "]{0," +
-		strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$")
-	causes := []string{
-		"load exact snapshot: tree path %q at 0123456789abcdef is not valid UTF-8",
-		"load exact snapshot: policy file scripts/unity/editor\xff-check.ps1 at 0123456789abcdef is not valid UTF-8",
+	// Every message the enrollment audit can publish, before sanitizing.
+	published := []string{
+		"load exact snapshot: tree path \"scripts/unity/editor-check.ps1\" at 0123456789abcdef is not valid UTF-8",
+		"load exact snapshot: resolve exact commit",
+		"load exact snapshot: verify repository origin",
+		".github/workflows/unity.yml:build cannot define both uses and steps",
 	}
 	for _, reason := range []string{jsonstrict.ReasonNotUTF8, jsonstrict.ReasonLoneSurrogateEscape} {
-		causes = append(causes, "lock state "+reason)
-	}
-	for _, cause := range causes {
-		sanitized := jsonstrict.SanitizeCause(cause)
-		if !publishable.MatchString(sanitized) {
-			t.Errorf("cause %q sanitized to %q, which is outside the issue alphabet", cause, sanitized)
+		for _, what := range []string{"lock state", "audit artifact", "requests"} {
+			published = append(published, what+" "+reason)
 		}
+	}
+	for _, cause := range published {
+		if !causePattern.MatchString(cause) {
+			t.Errorf("cause %q is outside the shipped issue alphabet", cause)
+		}
+		if got := jsonstrict.SanitizeCause(cause); got != cause {
+			t.Errorf("SanitizeCause changed %q to %q, so the analyzer publishes it twice", cause, got)
+		}
+	}
+	// A refused path is not valid UTF-8 and the snapshot reader reports it with
+	// %s, so the raw byte reaches the cause. This row is why the analyzer
+	// sanitizes: without it the validator refuses the whole artifact, and with
+	// it the drift alert never opens. Without this row a sanitizer that did
+	// nothing would pass every row above.
+	hostile := "load exact snapshot: policy file scripts/unity/editor-\xff-check.ps1 at 0123456789abcdef is not valid UTF-8"
+	if causePattern.MatchString(hostile) {
+		t.Fatalf("the validator accepts a raw byte, so SanitizeCause is not load bearing")
+	}
+	if got := jsonstrict.SanitizeCause(hostile); !causePattern.MatchString(got) {
+		t.Fatalf("sanitized cause %q is outside the shipped issue alphabet", got)
 	}
 }

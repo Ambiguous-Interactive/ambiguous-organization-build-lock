@@ -187,10 +187,12 @@ same rule and the same bound are used by both audits. A character outside that
 alphabet becomes `?`, so a cause can never break a table row or carry text nobody
 in this repository wrote.
 
-A finding with no cause has no row in the run summary. That is deliberate: a
-cause means the audit could not read its evidence, which is a different problem
-from evidence that failed a rule. To fix a file the decoder could not read, save
-it as UTF-8 and remove any `\uXXXX` escape for a surrogate code point.
+A finding with no cause has no row in the run summary, so a row there always
+names a specific read and a specific reason. On this audit a cause can be a
+refused commit, a refused origin, a file nobody can read, or a rule a workflow in
+this repository broke, so read the Reason column before the cause. To fix a file
+the decoder could not read, save it as UTF-8 and remove any `\uXXXX` escape for
+a surrogate code point.
 
 We measured the other readers. A JavaScript string holds a lone surrogate, and
 `JSON.stringify` writes it back as an escape. So the release authorization
@@ -599,7 +601,7 @@ edits.
 | `release-before-classification` | Order the release step after the evidence classifier. See item 7. |
 | `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
 | `release-not-always` | Run the release step with literal `always()`. See item 7. |
-| `repository-analysis-incomplete` | No consumer edit. The audit failed closed while analyzing this repository. Central operators diagnose the run. |
+| `repository-analysis-incomplete` | The audit failed closed while analyzing this repository. The cause names the rule, in the run summary and the retained artifact. Fix the workflow the cause names. |
 | `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also covers a file or path in this repository that is not valid UTF-8. The cause names the file in the run summary and the retained artifact, not in this issue. |
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |

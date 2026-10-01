@@ -30,8 +30,13 @@ const (
 // CauseAlphabet is the only text a published cause may carry. A cause reaches a
 // retained artifact, a one-line Markdown table row, and a shell-rendered run
 // summary, so it cannot hold a pipe, a backtick, a newline, or a byte nobody
-// can read. It is a regular-expression character-class fragment; consumers
-// append the literal hyphen last so it can never form an accidental range.
+// can read.
+//
+// It is mergepolicy.Alphabet plus three more characters, because an attestation
+// refusal writes its cause into the merge-policy Detail column as well. The
+// hyphen is last so it can never form an accidental range. The relationship is
+// asserted by cmd/audit-merge-policy, so a change to either constant cannot
+// silently separate them.
 const CauseAlphabet = "A-Za-z0-9_.+ /():?\";-"
 
 // MaxCauseBytes bounds one published cause.
@@ -78,11 +83,29 @@ func isCauseRune(char rune) bool {
 // caller wraps this error with %w and publishes only the reason. The rest of a
 // read error can carry a transport message that does not belong in retained
 // evidence.
+//
+// The field is unexported. A published cause reaches a retained artifact, a
+// one-line Markdown table row, and a shell-rendered run summary, so a cause
+// outside CauseAlphabet costs the whole artifact rather than one table row. With
+// no exported field, the only ways to build this error are Refusal, Label, and
+// UnrepresentableErrorf, and all three build it from the two reason clauses and
+// a reader's own name. Those names are pinned against every publishing
+// validator by the issue packages.
 type UnrepresentableError struct {
-	Reason string
+	reason string
 }
 
-func (err UnrepresentableError) Error() string { return err.Reason }
+func (err UnrepresentableError) Error() string { return err.reason }
+
+// UnrepresentableErrorf returns the bare cause a reader returns before it can
+// name the read it was doing. It returns nil for an empty reason, so a caller
+// can pass one through. A reader that has a name uses Refusal.
+func UnrepresentableErrorf(reason string) error {
+	if reason == "" {
+		return nil
+	}
+	return UnrepresentableError{reason: reason}
+}
 
 // Unrepresentable names why content holds a value encoding/json cannot
 // represent exactly, and returns "" when it holds none.
@@ -116,7 +139,7 @@ func Refusal(what string, content []byte) error {
 	if reason == "" {
 		return nil
 	}
-	return UnrepresentableError{Reason: what + " " + reason}
+	return UnrepresentableError{reason: what + " " + reason}
 }
 
 // Label names what was being read when a decoder lost a value, so a published
@@ -126,7 +149,7 @@ func Refusal(what string, content []byte) error {
 func Label(what string, err error) error {
 	var unrepresentable UnrepresentableError
 	if errors.As(err, &unrepresentable) {
-		return UnrepresentableError{Reason: what + " " + unrepresentable.Reason}
+		return UnrepresentableError{reason: what + " " + unrepresentable.reason}
 	}
 	return err
 }
@@ -137,7 +160,7 @@ func Label(what string, err error) error {
 func Reason(err error) string {
 	var unrepresentable UnrepresentableError
 	if errors.As(err, &unrepresentable) {
-		return unrepresentable.Reason
+		return unrepresentable.reason
 	}
 	return ""
 }

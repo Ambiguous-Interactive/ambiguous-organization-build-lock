@@ -501,3 +501,69 @@ func TestRunCarriesTheRetrievalCauseIntoTheArtifact(t *testing.T) {
 		})
 	}
 }
+
+// The analysis cause is built from a consumer workflow's own job name, so it can
+// hold text nobody wrote here. The retrieval cause is pinned by the hostile tree
+// path row above; without a row for this one a sanitizer that did nothing would
+// pass the retrieval test and still let a job name through.
+func TestRunSanitizesTheAnalysisCauseIntoTheArtifact(t *testing.T) {
+	root := t.TempDir()
+	registry := testRegistry
+	registry.RepinExceptions = nil
+	policyPath := writeRegistryFixture(t, root, registry)
+	outputPath := filepath.Join(root, "audit.json")
+	for _, repository := range registry.Repositories {
+		buildRepositoryFixture(t, root, repository, registry, nil)
+	}
+	damagedRepository := registry.Repositories[0].Repository
+	damagedRoot := filepath.Join(root, repositoryName(damagedRepository))
+	// A job name holding a pipe and a backtick, the two bytes that break a
+	// Markdown table row. Both are legal inside a YAML double-quoted scalar, and
+	// the analyzer refuses the job because it defines both uses and steps, so
+	// that refusal quotes the job name back.
+	hostileJob := "build|unity`CR"
+	workflow := filepath.Join(damagedRoot, ".github", "workflows", "unity.yml")
+	if err := os.MkdirAll(filepath.Dir(workflow), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "jobs:\n  \"" + hostileJob + "\":\n    uses: ./.github/workflows/reusable.yml\n    steps: []\n"
+	if err := os.WriteFile(workflow, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, damagedRoot, "add", ".")
+	runGit(t, damagedRoot, "commit", "-m", "hostile job name")
+
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"--policy", policyPath,
+		"--repositories-root", root,
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if exit != 1 {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit enrollment.UnityOrganizationAudit
+	if err := json.Unmarshal(content, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.Findings) != 1 || audit.Findings[0].Code != "repository-analysis-incomplete" {
+		t.Fatalf("want one analysis finding, got %#v", audit.Findings)
+	}
+	cause := audit.Findings[0].Cause
+	if cause == "" {
+		t.Fatalf("an analysis finding without a cause sends the operator hunting: %#v", audit.Findings[0])
+	}
+	if !strings.Contains(cause, "cannot define both uses and steps") {
+		t.Fatalf("cause %q does not name the rule", cause)
+	}
+	if !strings.Contains(cause, "build?unity?CR") {
+		t.Fatalf("cause %q did not map every table break", cause)
+	}
+	if got := jsonstrict.SanitizeCause(cause); got != cause {
+		t.Fatalf("cause %q is not already sanitized", cause)
+	}
+}

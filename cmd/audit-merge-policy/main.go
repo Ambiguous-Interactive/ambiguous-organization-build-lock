@@ -329,7 +329,7 @@ func auditRepositories(
 			audit.Findings = append(audit.Findings, mergepolicy.Finding{
 				Repository: expectation.Repository,
 				Code:       mergepolicy.CodeRetrievalIncomplete,
-				Cause:      jsonstrict.SanitizeCause(jsonstrict.Reason(retrievalErr)),
+				Cause:      jsonstrict.Reason(retrievalErr),
 			})
 			continue
 		}
@@ -372,7 +372,7 @@ func loadAttestation(
 		return mergepolicy.Attestation{}, &mergepolicy.Finding{
 			Repository: expectation.Repository,
 			Code:       mergepolicy.CodeRetrievalIncomplete,
-			Cause:      jsonstrict.SanitizeCause(jsonstrict.Reason(err)),
+			Cause:      jsonstrict.Reason(err),
 		}
 	}
 	if !found {
@@ -387,7 +387,7 @@ func loadAttestation(
 			// both channels. A consumer who published one cannot tell which of
 			// the many reasons it was refused, so it republishes unchanged and
 			// the alert returns; the Detail column is what that consumer reads.
-			Cause:  jsonstrict.SanitizeCause(jsonstrict.Reason(err)),
+			Cause:  jsonstrict.Reason(err),
 			Detail: attestationRefusal(err),
 		}
 	}
@@ -401,7 +401,7 @@ func loadAttestation(
 // keeps the generic sentence, because its cause names a reviewed rule and not an
 // edit the consumer can make.
 func attestationRefusal(err error) string {
-	if cause := jsonstrict.SanitizeCause(jsonstrict.Reason(err)); cause != "" {
+	if cause := jsonstrict.Reason(err); cause != "" {
 		return cause
 	}
 	return mergepolicy.BoundDetail(
@@ -623,10 +623,7 @@ func strictDecode(content []byte, result any) error {
 	// The guard runs after the decode, so a malformed response keeps the
 	// decoder's own message. Every caller labels the bare reason with the read
 	// it was doing, so the cause an operator sees names the read too.
-	if reason := jsonstrict.Unrepresentable(content); reason != "" {
-		return jsonstrict.UnrepresentableError{Reason: reason}
-	}
-	return nil
+	return jsonstrict.UnrepresentableErrorf(jsonstrict.Unrepresentable(content))
 }
 
 func sortAudit(audit mergepolicy.Audit) {

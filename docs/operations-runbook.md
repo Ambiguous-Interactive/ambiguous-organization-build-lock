@@ -241,12 +241,17 @@ the retained artifact and the run summary, because a cause can name a file in a
 consumer repository. The run summary lists at most 20 causes and says how many
 more the artifact holds.
 
-The other refusals carry no cause. A transport failure, an HTTP status, a
-pagination guard, a size bound, a duplicate identity, and every decoder syntax
-error answer with their own reason code and no cause, because their cause is the
-run log or a rule the reader can name on its own. A finding with no cause has no
-row in the run summary, so a cause in that table always means the audit could not
-read its evidence rather than that the evidence failed a rule.
+The other refusals carry no cause. A pagination guard, a size bound, a duplicate
+identity, an HTTP status, and every decoder syntax error answer with their own
+reason code and no cause, because the cause is the run log or a rule the reader
+names on its own. A finding with no cause has no row in the run summary, so a
+row there always names a specific read and a specific reason.
+
+A cause is not only an unreadable file. The merge-policy audit publishes one
+only for the two encoding doors. The Unity enrollment audit publishes one for
+every retrieval and every analysis failure, so a cause there can be a refused
+commit, a refused origin, or a rule a consumer workflow broke, and the code
+column says which. Read the code column before the cause.
 
 `jq` 1.6 stops on an escaped high surrogate and reports a parse error. It does
 not see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow

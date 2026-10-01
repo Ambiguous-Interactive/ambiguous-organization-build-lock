@@ -764,3 +764,39 @@ func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.
 		})
 	}
 }
+
+// The guard runs before every content check, so a document nobody can read is
+// refused as unreadable rather than as a schema problem. Session 119 accepted
+// the opposite order and this session changed it. Without a row, moving the
+// guard back below the schemaVersion check keeps this suite green, and the
+// operator gets a version number to fix instead of the byte to fix.
+func TestUnityEnrollmentRegistryNamesTheEncodingBeforeTheSchemaVersion(t *testing.T) {
+	content := surrogateRegistryFixture(t)
+	cases := map[string]struct {
+		damage []byte
+		refuse string
+	}{
+		"escaped lone surrogate": {damage: []byte(`"owner":"\ud800"`), refuse: "lone surrogate"},
+		"unreadable byte":        {damage: []byte("\"owner\":\"unity-\xffbuilders\""), refuse: "not valid UTF-8"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			damaged := bytes.Replace(
+				bytes.Replace(
+					content,
+					[]byte(`"owner":"unity-builder-maintainers"`),
+					testCase.damage,
+					1,
+				),
+				[]byte(`"schemaVersion":1`), []byte(`"schemaVersion":9`), 1,
+			)
+			if bytes.Equal(damaged, content) {
+				t.Fatal("the mutations did not apply, so this row proves nothing")
+			}
+			_, err := ParseUnityEnrollmentRegistry(damaged)
+			if err == nil || !strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the encoding refusal, not the schema refusal", err)
+			}
+		})
+	}
+}
