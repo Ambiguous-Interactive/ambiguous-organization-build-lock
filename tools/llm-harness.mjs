@@ -186,8 +186,24 @@ function auditProgressRecords(root) {
     return [error.message];
   }
   for (const relativePath of files) {
-    const bytes = fs.readFileSync(path.join(root, relativePath));
-    if (hasCredentialShapedLiteral(bytes.toString("utf8"))) {
+    const relativeFile = path.join(root, relativePath);
+    let text;
+    try {
+      // Decode strictly. `bytes.toString("utf8")` substitutes U+FFFD for every
+      // byte it cannot decode, and the credential patterns below are literal,
+      // so a substitution breaks the pattern that would have matched and
+      // suppresses the finding: one stray byte in a progress record would hide
+      // a credential-shaped literal in it.
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        fs.readFileSync(relativeFile)
+      );
+    } catch {
+      errors.push(
+        `${relativePath}: not valid UTF-8, so its text cannot be audited for credential-shaped literals`
+      );
+      continue;
+    }
+    if (hasCredentialShapedLiteral(text)) {
       errors.push(
         `${relativePath}: credential-shaped literal detected; retain only sanitized evidence`
       );
@@ -231,7 +247,21 @@ function catalog(root) {
       continue;
     }
     if ([INDEX_PATH, ".llm/context.md"].includes(relativePath)) continue;
-    const text = fs.readFileSync(path.join(root, relativePath), "utf8");
+    // Read as bytes and decode strictly. `readFileSync(path, "utf8")` replaces
+    // every byte it cannot decode with U+FFFD, which is three bytes long, so a
+    // lossy read would write the replacement character into the generated
+    // index and the drift check would then pass on it. A file this harness
+    // cannot read exactly is reported by name rather than summarized.
+    // `ignoreBOM` keeps a byte order mark, which the default decoder strips.
+    let text;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        fs.readFileSync(path.join(root, relativePath))
+      );
+    } catch {
+      errors.push(`${relativePath}: not valid UTF-8, so the harness cannot summarize it`);
+      continue;
+    }
     const skillMatch = relativePath.match(SKILL_PATTERN);
     try {
       if (skillMatch) {

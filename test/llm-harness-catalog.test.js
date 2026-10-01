@@ -131,6 +131,27 @@ test("non-Markdown files are discoverable skill resources or rejected", async (t
   );
 });
 
+test("an unreadable Markdown file is reported, not summarized with U+FFFD", async (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { generateIndex, verifyRepository } = await loadHarness();
+  // One raw byte inside an otherwise valid skill document. A lossy decode
+  // would write U+FFFD into the generated index and the drift check would then
+  // pass on the replacement character instead of reporting the source.
+  const skillPath = path.join(root, ".llm", "skills", "example", "SKILL.md");
+  const source = fs.readFileSync(skillPath);
+  fs.writeFileSync(
+    skillPath,
+    Buffer.concat([source, Buffer.from("\ncaf"), Buffer.from([0x89]), Buffer.from("-note\n")])
+  );
+
+  assert.throws(() => generateIndex(root), /\.llm\/skills\/example\/SKILL\.md: not valid UTF-8/);
+  assert.match(
+    verifyRepository(root, { checkPointers: false }).errors.join("\n"),
+    /\.llm\/skills\/example\/SKILL\.md: not valid UTF-8/
+  );
+});
+
 test("nested SKILL.md files remain resources of their top-level skill", async (t) => {
   const root = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -267,6 +288,20 @@ test("progress records reject credential-shaped literals without echoing them", 
   let errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
   assert.match(errors, /credential-shaped literal/, "NUL-containing file");
   assert.ok(!errors.includes(binaryCredential), "binary credential must not be echoed");
+
+  // A byte inside the literal used to suppress the finding: a lossy decode
+  // replaced it with U+FFFD, so the literal pattern no longer matched. The
+  // byte has to sit inside the credential for that to happen, which is why a
+  // stray byte elsewhere in the record was never enough to hide one.
+  fs.writeFileSync(record, Buffer.concat([
+    Buffer.from("# Session 001\n\n"),
+    Buffer.from("-----BEGIN "),
+    Buffer.from([0x89]),
+    Buffer.from("PRIVATE KEY-----\n")
+  ]));
+  errors = verifyRepository(root, { checkPointers: false }).errors.join("\n");
+  assert.match(errors, /credential-shaped literal/, "a stray byte must not hide a credential");
+  assert.ok(!errors.includes("BEGIN"), "the credential must not be echoed");
 
   fs.writeFileSync(record, [
     "# Session 001",

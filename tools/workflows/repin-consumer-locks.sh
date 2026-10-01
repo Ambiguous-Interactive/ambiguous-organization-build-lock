@@ -89,11 +89,59 @@ rewrite_pins() {
   node - "${directory}" "${target_sha}" "${target_version}" "${policy_path}" "${lock_repository_prefix}" "${repository}" <<'EOF'
 const fs = require("node:fs");
 const path = require("node:path");
+const { TextDecoder } = require("node:util");
 const [directory, targetSha, targetVersion, policyPath, lockPrefix, repository] = process.argv.slice(2);
+// A byte sequence this rewrite cannot read is refused by name. Node replaces
+// every byte it cannot decode with U+FFFD, which is three bytes long. Writing
+// such a file back would destroy a byte the pin does not name. It would also
+// report only the pins it moved, so the destruction would hide behind a
+// count. A symlink, a directory and an unreadable parent already get this
+// answer, and a stale pin behind a green run is the outcome this rewrite must
+// never produce.
+const decodeUtf8 = new TextDecoder("utf-8", { fatal: true });
+const refuseUnreadable = (location) =>
+  `${location} is not valid UTF-8, so this rewrite cannot read it. Node replaces every byte it ` +
+  "cannot decode with U+FFFD, so writing the file back would destroy a byte the pin does not " +
+  "name. Re-save the file as UTF-8 and repin again.";
+// The reviewed policy is authorization evidence, and it is read the way its own
+// readers read it. `ignoreBOM` keeps a byte order mark so `JSON.parse` refuses
+// it, as it always has: a mark is invalid JSON, and Node and all three Go
+// analyzers reject one. The file is read outside the guard so a missing or
+// unreadable path still fails with its own error.
+const readPolicy = (policyPath) => {
+  const bytes = fs.readFileSync(policyPath);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error(refuseUnreadable(`The reviewed repin policy ${policyPath}`));
+  }
+  return text;
+};
+// A consumer file is read before the rewrite knows whether it will change it,
+// and only a file that is written can lose a byte. The analysis decode is
+// therefore tolerant and the exact decode happens when the file is queued, so
+// a file the rewrite had no reason to touch cannot block a run. That is the
+// rule the rest of the rewrite already follows: a shape it cannot read stays
+// as the consumer wrote it, with no warning and no red run, and only a shape
+// it would damage fails.
+//
+// A byte order mark is read aside instead of being left in the text. The mark
+// is encoding metadata, not content, so a key pattern must not see it. A pin
+// on the first line of a file the mark opens would match no pattern, the
+// rewrite would report the repository already pinned, and the stale pin would
+// have no evidence against it. The mark is written back beside the text, since
+// dropping it would destroy three bytes the pin does not name.
+const readTextFile = (filePath) => {
+  const bytes = fs.readFileSync(filePath);
+  const text = bytes.toString("utf8");
+  const byteOrderMark = /^\uFEFF+/.exec(text)?.[0] || "";
+  return { bytes, byteOrderMark, text: text.slice(byteOrderMark.length) };
+};
 if (!/^[a-f0-9]{40}$/.test(targetSha)) {
   throw new Error("Repins require a full lowercase 40-character commit SHA.");
 }
-const policy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+const policy = JSON.parse(readPolicy(policyPath));
 const lowered = (values) => new Set((values || []).map((value) => String(value).toLowerCase()));
 // The exact reviewed top-level fields; the registry parser rejects any other
 // field, so the standalone rewrite must refuse it too.
@@ -514,11 +562,12 @@ for (const filePath of files) {
     });
     continue;
   }
-  const lines = fs.readFileSync(filePath, "utf8").split("\n");
+  const source = readTextFile(filePath);
+  const lines = source.text.split("\n");
   // A line inside a block scalar is a sample of a workflow, not a workflow,
   // so it is neither rewritten below nor read as comment-gap evidence.
   const literal = blockScalarLines(lines);
-  sources.push({ filePath, relativePath, lines, literal });
+  sources.push({ filePath, relativePath, lines, literal, bytes: source.bytes, byteOrderMark: source.byteOrderMark });
   for (const [index, line] of lines.entries()) {
     if (literal.has(index)) {
       continue;
@@ -765,6 +814,19 @@ const refLineIndices = (lines, literal) => {
 // that cannot be atomic across files; it leaves the run red with no report, so
 // the caller stages nothing and the clone is discarded.
 const pendingWrites = [];
+// Queuing a write is the last point at which the rewrite knows which files it
+// is about to change, so it is where a file it cannot read exactly is
+// refused. `queueWrite` therefore refuses before anything reaches the flush
+// loop below, which keeps the refusal atomic across every file in the
+// checkout rather than per file.
+const queueWrite = (file, content, location) => {
+  try {
+    decodeUtf8.decode(file.bytes);
+  } catch {
+    throw new Error(refuseUnreadable(location));
+  }
+  pendingWrites.push({ filePath: file.filePath, content });
+};
 for (const source of sources) {
   let fileChanges = 0;
   // The `ref:` scan runs on the original lines, before any `uses:` pin moves,
@@ -789,7 +851,11 @@ for (const source of sources) {
   if (fileChanges === 0) {
     continue;
   }
-  pendingWrites.push({ filePath: source.filePath, content: lines.join("\n") });
+  queueWrite(
+    source,
+    source.byteOrderMark + lines.join("\n"),
+    `${repository} ${source.relativePath}`
+  );
   report.changed += fileChanges;
   // The two mutations are reported apart because the pull request body names
   // which one happened, and a run that moves only a checkout `ref:` moved no
@@ -845,7 +911,8 @@ for (const companion of reviewedCompanions) {
   const { companionPath } = companion;
   let companionChanges = 0;
   if (companion.mode === "pin-lines") {
-    const lines = fs.readFileSync(companionPath, "utf8").split("\n");
+    const companionFile = readTextFile(companionPath);
+    const lines = companionFile.text.split("\n");
     // A companion is its own file with its own formatter, so its own comments
     // are the first evidence for a comment it has to gain. The workflow set is
     // the fallback for a companion that carries no version comment at all.
@@ -865,10 +932,15 @@ for (const companion of reviewedCompanions) {
       return rewrittenLine;
     });
     if (companionChanges > 0) {
-      pendingWrites.push({ filePath: companionPath, content: rewrittenLines.join("\n") });
+      queueWrite(
+        { ...companionFile, filePath: companionPath },
+        companionFile.byteOrderMark + rewrittenLines.join("\n"),
+        `The repin companion ${companion.path}`
+      );
     }
   } else if (companion.mode === "pin-literal") {
-    const original = fs.readFileSync(companionPath, "utf8");
+    const companionFile = readTextFile(companionPath);
+    const original = companionFile.text;
     let updated = original;
     // Standalone tokens only: a SHA embedded in a longer hex constant is a
     // different reviewed value and must survive untouched.
@@ -901,7 +973,11 @@ for (const companion of reviewedCompanions) {
     }
     if (updated !== original) {
       companionChanges = 1;
-      pendingWrites.push({ filePath: companionPath, content: updated });
+      queueWrite(
+        { ...companionFile, filePath: companionPath },
+        companionFile.byteOrderMark + updated,
+        `The repin companion ${companion.path}`
+      );
     }
   } else if (companion.mode === "policy-snapshot") {
     // Mirror the reviewed allowlists exactly: the same content a consumer
@@ -916,11 +992,19 @@ for (const companion of reviewedCompanions) {
         snapshot[key] = value;
       }
     }
-    const original = fs.readFileSync(companionPath, "utf8");
+    const companionFile = readTextFile(companionPath);
+    const original = companionFile.text;
     const updated = `${JSON.stringify(snapshot, null, 2)}\n`;
     if (updated !== original) {
       companionChanges = 1;
-      pendingWrites.push({ filePath: companionPath, content: updated });
+      // The snapshot body is generated, but the mark is not: it belongs to the
+      // file, not to the document, so a file that had one keeps it and a file
+      // that had none does not gain one.
+      queueWrite(
+        { ...companionFile, filePath: companionPath },
+        companionFile.byteOrderMark + updated,
+        `The repin companion ${companion.path}`
+      );
     }
   }
   report.changed += companionChanges;

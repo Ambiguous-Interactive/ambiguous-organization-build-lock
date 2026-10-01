@@ -122,13 +122,38 @@ its own reason cannot license a reviewed witness to change. A
 `repinExceptions` file is never read, so it can neither supply a gap nor fail
 the run. A symlink under `.github` fails closed: a workflow reached through
 one would be written instead of the reviewed checkout, and a symlinked
-directory would hide every pin inside it. Every check fails closed before
-anything is written, so a refused rewrite leaves the whole checkout
-byte-identical, workflows and companions alike, including a file that keeps
-CRLF line endings. A write that fails while the buffered changes are being
-committed is the one case that cannot be undone; it leaves the run red and
-emits no report, so no caller acts on it. Consumer lints own the spacing:
-they must accept the comment form the repository already uses.
+directory would hide every pin inside it. A file the rewrite would
+write and cannot read as UTF-8 fails closed too. Node replaces every byte it
+cannot decode with U+FFFD, three bytes long. Writing such a file back would
+destroy a byte the pin does not name. The error names the file, and the
+remedy is to re-save it as UTF-8. The scope is the files the rewrite would
+change, because only a written file can lose a byte. A file it reads and
+leaves alone stays as the consumer wrote it, with no red run, like any other
+shape it cannot read. Every check fails closed before anything is written,
+so a refused rewrite leaves the whole checkout byte-identical, workflows and
+companions alike, including a file that keeps CRLF line endings. A write that
+fails while the buffered changes are being committed is the one case that
+cannot be undone. It leaves the run red and emits no report, so no caller
+acts on it. Consumer lints own the spacing: they must accept the comment
+form the repository already uses.
+
+A file the rewrite reads with a line rewrite round-trips exactly. The pin
+bytes change. Every other byte comes back as it was, including a multi-byte
+character, a tab, a missing final line feed, and a byte order mark. The mark
+is encoding metadata rather than content, so a key pattern never sees it. A
+pin on the first line of a file the mark opens still moves. The mark is read
+aside and written back, so the file keeps it. A `policy-snapshot` companion
+is the one exception: that mode generates the whole document, so it replaces
+the body and keeps only the mark. A NUL byte is valid UTF-8, so it does not
+refuse the file. The byte comes back with the rest of the file.
+
+The release authorization and the repository onboarding both read the
+reviewed policy and write it back, so both refuse a policy that is not valid
+UTF-8. Neither moves a byte order mark. A mark is invalid JSON, and Node and
+all three Go analyzers reject one, so a marked policy fails as it always has.
+The lock state is read and written back by the lock runtime, so it refuses a
+state file that is not valid UTF-8. Nothing that runtime writes can produce
+such a byte, so one means something else changed the state.
 
 A checkout of this repository is pinned twice: in the `uses:` line of the
 action, and in the `ref:` of the `actions/checkout` step that fetches the

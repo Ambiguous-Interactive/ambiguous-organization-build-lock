@@ -20,10 +20,39 @@ process.stdout.write(String(policy.approvedLockShas.includes(releaseSha)));
 EOF
 }
 
+# Every read of the reviewed policy in this script is a decision made from a
+# file it cannot read, and one of them is a file it writes back. Node replaces
+# every byte it cannot decode with U+FFFD, three bytes long, so a lossy read
+# could both answer wrongly and commit a destroyed byte in the pull request.
+# The check runs twice. The first call guards the authorization decision. The
+# second guards the file the rewrite writes, because the checkout that cuts
+# the branch replaces the working tree.
+# A byte order mark is valid UTF-8, so this check does not care about one.
+# `JSON.parse` rejects it, as it always has. Node and all three Go analyzers
+# reject a marked policy too.
+check_policy_readable() {
+  if node - "${policy_path}" <<'EOF'
+const fs = require("node:fs");
+const { TextDecoder } = require("node:util");
+try {
+  new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(process.argv[2]));
+} catch {
+  process.exit(1);
+}
+EOF
+  then
+    return 0
+  fi
+  echo "::error::${policy_path} is not valid UTF-8; refusing to authorize a release from a policy this script cannot read." >&2
+  exit 1
+}
+
 if [[ ! -f "${policy_path}" ]]; then
   echo "::error::Missing ${policy_path}." >&2
   exit 1
 fi
+
+check_policy_readable
 
 # The step runs on every workflow run, not only when a release was just
 # published. Without an explicit version, authorize the newest published
@@ -107,6 +136,9 @@ git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 # Branch from the live default branch, before any file mutation, so a policy
 # change on main since the release cannot block this retry with a dirty file.
 git checkout -B "${branch}" origin/main
+# The checkout above replaced the working tree, so the policy this script now
+# reads and writes is not the one the earlier check read.
+check_policy_readable
 
 node - "${release_sha}" "${policy_path}" <<'EOF'
 const fs = require("node:fs");

@@ -27,6 +27,7 @@ const {
   postCleanup,
   queueEntryIsFinished,
   readLockConfig,
+  readState,
   readerCredential,
   readerCredentialRequired,
   release,
@@ -11184,4 +11185,70 @@ test("release spends its peer-timeline snapshot budget inside the session window
       });
     });
   });
+});
+
+// The lock state is decoded, reshaped, and encoded again on the next write, so
+// a lossy decode does not report a problem: it repairs a byte it cannot read
+// into U+FFFD and commits that. Nothing this runtime writes can produce such
+// a byte, so one means something else changed the state and admission fails
+// closed on evidence it cannot read exactly.
+test("readState fails closed on a lock state it cannot read as UTF-8", async (t) => {
+  const state = (extra) => `{"lock":"wallstop-organization-builds","schemaVersion":5,"holders":[],"queue":[],"reservations":[],"activeIncident":null,"holder":null${extra}`;
+  const cases = [
+    {
+      name: "a lone Latin-1 byte",
+      bytes: Buffer.concat([
+        Buffer.from(state(',"runUrl":"https://example/')),
+        Buffer.from([0x89]),
+        Buffer.from('"}')
+      ]),
+      expected: /is not valid UTF-8/
+    },
+    {
+      name: "an overlong encoding",
+      bytes: Buffer.concat([
+        Buffer.from(state(',"runUrl":"')),
+        Buffer.from([0xc0, 0x80]),
+        Buffer.from('"}')
+      ]),
+      expected: /is not valid UTF-8/
+    },
+    {
+      // The readable half: a state whose non-ASCII text a strict decoder
+      // accepts must still load, or the refusal above would be a
+      // fail-closed path that also refuses valid state.
+      name: "a multi-byte character in a readable state",
+      bytes: Buffer.from(state(',"runUrl":"https://example/caf\u00e9"}'), "utf8"),
+      expected: null
+    }
+  ];
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withMockedFetch(
+        async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            return jsonResponse(200, {
+              content: testCase.bytes.toString("base64"),
+              sha: "state-sha"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        },
+        async () => {
+          const options = { apiOptions: { maxAttempts: 1 } };
+          if (testCase.expected === null) {
+            const { state, sha } = await readState(semaphoreConfig(), options);
+            assert.equal(sha, "state-sha");
+            assert.equal(state.lock, "wallstop-organization-builds");
+            return;
+          }
+          await assert.rejects(
+            readState(semaphoreConfig(), options),
+            testCase.expected
+          );
+        }
+      );
+    });
+  }
 });
