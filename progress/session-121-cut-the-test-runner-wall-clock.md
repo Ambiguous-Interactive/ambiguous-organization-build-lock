@@ -9,15 +9,17 @@ changes are where a test lives and when it runs.
 
 | Measurement | Before | After |
 | --- | --- | --- |
-| `.devcontainer/scripts/verify.sh` | 34.0 s | 9.9 s |
+| `.devcontainer/scripts/verify.sh` | 34.0 s | 8.0 s |
 | `node --test test/*.test.js` | 21.7 s | 5.0 s |
 | `test/workflow-scripts*.test.js` | 18.4 s | 4.5 s |
 | `test/build-lock*.test.js` | 6.0 s | 2.5 s |
-| Windows CI job, test step | 78 s | 45 s predicted |
-| Windows CI job, whole | 93 s | 60 s predicted |
+| Windows CI job, `node --test` step | 78.0 s | 35.7 s |
+| Windows CI job, whole | 93 s | 51 s |
+| Linux CI job, `node --test` step | 27.4 s | 21.0 s |
+| Linux CI job, whole | 87 s | 78 s |
 
-The Windows row is a prediction from the recorded per-test times, not a
-measurement. Everything else was measured on this machine, before and after.
+The CI rows are from run 36904676960 for the before and run 36929198410 for the
+after. The local rows are on the development container, before and after.
 
 ## Why the suite was slow
 
@@ -60,8 +62,11 @@ the other in the same file. That made the Windows job the slowest job on every
 pull request, at 93 s against 87 s for the Linux job that does six times the
 checking.
 
+Run 36929198410 measured the fix. The two tests report 22.8 s and 34.9 s, which
+overlaps rather than adding up, and the step takes 35.7 s. The job takes 51 s.
+
 They are now in one file each, so each gets a process and they run at the same
-time. The job should take about 60 s.
+time.
 
 The first attempt put both in one new file. The Windows job took 97 s, worse
 than the 93 s before, and the log showed the two tests finishing one after the
@@ -136,12 +141,13 @@ so the `node --test test/*.test.js` glob never picks them up.
 
 ## Known limits
 
-- The Windows job numbers in this record are predicted from per-test times the
-  hosted runner reported. The pull request carries the measured job time.
-- On Linux the `node --test` step fell from 27.4 s to 19.0 s, but the job only
-  fell from 87 s to 84 s, because `go test -race` at 18 s is now the longest
-  step. Moving the race suite to its own job would need a new required-check
-  name in the branch ruleset, which this task must not change.
+- On Linux the `node --test` step fell from 27.4 s to 21.0 s, but the job only
+  fell from 87 s to 78 s, because `go test -race` at 17 s is now the longest
+  step. Moving the race suite to its own job would add a required-check name to
+  the branch ruleset, which this task must not change.
+- `setup-go` at 12 s and `golangci-lint` at 6 s are the next longest Linux
+  steps. Neither has a safe saving: the Go toolchain has to be installed, and
+  the linter is already cached by its action.
 - Six files is a judgement call. Four shards left one shard at 3.4 s and the
   other three near 3.4 s, which is balanced; six was chosen because the split
   points had to land on region boundaries, and eight would have produced two
