@@ -158,11 +158,16 @@ validates them before any later step reads them. None of them moves a byte
 order mark. A mark is invalid JSON, and Node and all three Go analyzers reject
 one, so a marked policy fails as it always has.
 
-One limit is named here. An escaped lone surrogate, such as `"\ud800"`, is
-valid UTF-8 and valid JSON, so the encoding check does not refuse it. The
-decoder substitutes U+FFFD, and the onboarding command writes the substituted
-text back. That is a second door to the same destruction, and it is tracked as
-issue #316.
+An escaped lone surrogate, such as `"\ud800"`, is a second door to the same
+substitution. It is six valid ASCII bytes, so the encoding check above cannot
+see it, and Go has no value for the code point, so the decoder writes U+FFFD
+and returns no error. All three Go analyzers refuse such a file by name, beside
+the encoding check, so no step decides from a value nobody wrote and the
+onboarding command writes nothing back. The other readers were measured, not
+assumed. A JavaScript string holds a lone surrogate, so the release
+authorization reads and writes the escape unchanged. `jq` refuses the whole
+file with a parse error, so no step reaches it. `jq` fails closed on this class
+while it substitutes an undecodable byte.
 
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce

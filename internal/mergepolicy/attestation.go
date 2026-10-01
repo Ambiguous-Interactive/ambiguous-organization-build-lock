@@ -7,6 +7,8 @@ import (
 	"io"
 	"sort"
 	"unicode/utf8"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -56,7 +58,9 @@ type Attestation struct {
 // valid UTF-8 is refused before it is decoded, because encoding/json replaces a
 // byte it cannot decode with U+FFFD instead of failing, and the audit would
 // then accept and compare a ruleset name or required context the consumer
-// never wrote.
+// never wrote. An escaped lone surrogate reaches the same substitution through
+// a door the byte check cannot see, and this file comes from a consumer
+// repository rather than a reviewed central file.
 func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	if len(content) == 0 || len(content) > MaxAttestationBytes {
 		return Attestation{}, fmt.Errorf("merge policy attestation size is invalid")
@@ -76,6 +80,11 @@ func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	}
 	if attestation.SchemaVersion != attestationSchemaVersion {
 		return Attestation{}, fmt.Errorf("merge policy attestation schemaVersion must be 1")
+	}
+	if jsonstrict.UnpairedSurrogateEscape(content) {
+		return Attestation{}, fmt.Errorf(
+			"merge policy attestation contains an escaped lone surrogate, which no JSON decoder can represent",
+		)
 	}
 	if attestation.Repository != repository {
 		return Attestation{}, fmt.Errorf("merge policy attestation names another repository")

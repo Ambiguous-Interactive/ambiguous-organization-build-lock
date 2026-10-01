@@ -187,8 +187,33 @@ file. The decoder then substitutes U+FFFD, because it has no
 representation for that code point, and returns no error.
 
 So the byte check is necessary and not sufficient. A value the decoder
-cannot represent is a second door to the same destruction, tracked as
-issue #316. Measure the second door before calling the first one closed.
+cannot represent is a second door to the same destruction. Measure the
+second door before calling the first one closed.
+
+A second door needs its own check, and it cannot be the check you would
+reach for first. Do not test whether the decoded value round-trips: a
+substituted U+FFFD and a real U+FFFD are the same three bytes, so both
+round-trip and the test passes on the defect. The decision has to read the
+escape in the bytes, where a lone surrogate is a value the decoder has no
+name for. A high surrogate must be followed by its partner; a low one that
+no high surrogate consumed is unpaired.
+
+```go
+// A caller keeps no copy of this rule, so the rule has one home.
+if jsonstrict.UnpairedSurrogateEscape(content) {
+    return Registry{}, fmt.Errorf("... contains an escaped lone surrogate, ...")
+}
+```
+
+Run the check after the decode, not before. The decoder owns a malformed
+file and names its syntax error; a check placed earlier reports a cause
+the operator cannot act on.
+
+Measure the other readers instead of assuming they share a fate. This
+repository's three Go readers substituted the value. Node did not, because
+a JavaScript string holds a lone surrogate, so `JSON.parse` and
+`JSON.stringify` returned the escape unchanged. `jq` refused the whole
+file. One defect, three answers, and only the Go one lost a value.
 
 Related: `testing-and-validation` owns the red result a regression test needs.
 `operations-and-documentation` owns the operational contract that records a

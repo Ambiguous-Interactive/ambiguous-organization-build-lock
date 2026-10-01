@@ -164,3 +164,53 @@ func TestRunRefusesAPolicyThatIsNotValidUTF8(t *testing.T) {
 		t.Fatal("a refused onboarding rewrote the reviewed policy")
 	}
 }
+
+// An escaped lone surrogate destroys the same way an unreadable byte does, and
+// the encoding check cannot see it: the escape is six valid ASCII bytes, so the
+// file is valid UTF-8, and Go has no representation for the code point, so the
+// decoder writes U+FFFD and returns no error. This command then encodes the
+// registry back into the file, so the refusal has to happen before the write.
+// The assertion is on the file, not only on the message: a run that exits 0 has
+// committed the substituted text whatever it printed.
+func TestRunRefusesAPolicyWithAnEscapedLoneSurrogate(t *testing.T) {
+	root := t.TempDir()
+	policyPath := filepath.Join(root, "policy.json")
+	content, err := os.ReadFile("../../unity-enrollment-policy.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	escaped := bytes.Replace(
+		content,
+		[]byte(`"owner": "unity-builder-maintainers"`),
+		[]byte(`"owner": "\ud800"`),
+		1,
+	)
+	if bytes.Equal(escaped, content) {
+		t.Fatal("exception owner fixture is missing from the reviewed policy")
+	}
+	if !utf8.Valid(escaped) {
+		t.Fatal("the escaped policy is not valid UTF-8, so the test proves nothing")
+	}
+	if err := os.WriteFile(policyPath, escaped, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"--policy", policyPath,
+		"--repository", "Ambiguous-Interactive/NewUnityGame",
+		"--default-branch", "main",
+	}, &stdout, &stderr)
+	if exit != 2 || !strings.Contains(stderr.String(), "lone surrogate") {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+	after, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(escaped, after) {
+		t.Fatal("a refused onboarding rewrote the reviewed policy")
+	}
+	if bytes.Contains(after, []byte("�")) {
+		t.Fatal("a refused onboarding committed the substituted value")
+	}
+}

@@ -325,3 +325,38 @@ func TestResolveBypassEvidenceComparesRawContextCharacters(t *testing.T) {
 		t.Fatalf("raw character contexts must attest cleanly: %+v", health)
 	}
 }
+
+// This file comes from a consumer repository, not from a reviewed central file,
+// so an escape the decoder destroys is evidence the audit would compare
+// against a live ruleset. The two field classes asserted here are the ones no
+// validator inspects beyond a pattern, and both directions are checked: the
+// escape is refused by name, and the form the decoder produces on its own is
+// recorded so a future change to a validator cannot make a row quietly wrong.
+func TestParseAttestationRejectsAnEscapedLoneSurrogate(t *testing.T) {
+	fields := map[string]struct {
+		fragment                string
+		parsesAfterSubstitution bool
+	}{
+		"ruleset name":     {`"rulesetName": "Required CI (default branch)"`, true},
+		"required context": {`"requiredContexts": ["Unity CI Success"`, true},
+		"repository":       {`"repository": "Ambiguous-Interactive/example"`, false},
+	}
+	for name, field := range fields {
+		t.Run(name, func(t *testing.T) {
+			escaped := oneLoneSurrogateEscapeIn(
+				t, []byte(validAttestationContent()), field.fragment,
+			)
+			_, err := ParseAttestation(escaped, "Ambiguous-Interactive/example")
+			if err == nil || !strings.Contains(err.Error(), "lone surrogate") {
+				t.Fatalf("error = %v, want a named lone-surrogate refusal", err)
+			}
+			_, substitutedErr := ParseAttestation(
+				withSubstitutedEscape(escaped), "Ambiguous-Interactive/example",
+			)
+			if field.parsesAfterSubstitution != (substitutedErr == nil) {
+				t.Fatalf("substituted form error = %v, want parse = %t",
+					substitutedErr, field.parsesAfterSubstitution)
+			}
+		})
+	}
+}
