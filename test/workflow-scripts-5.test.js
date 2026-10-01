@@ -3,7 +3,6 @@
 const test = require("node:test");
 
 const {
-
   assert,
   childProcess,
   fs,
@@ -16,28 +15,6 @@ const {
   diagnosticHarness,
 } = require("./workflow-scripts-support.js");
 
-test("consumer repin closes a superseded offer buried under newer pull requests", (t) => {
-  // gh returns the newest pull requests first and caps the default page at
-  // 30. The stale offer sorts behind 31 newer foreign pull requests, so the
-  // scan must fetch past the default page to see it.
-  const openOffers = [];
-  for (let index = 0; index < 31; index += 1) {
-    openOffers.push({ number: 900 + index, head: `consumer/feature-${index}` });
-  }
-  openOffers.push({ number: 801, head: "automation/repin-lock-300501e" });
-  const harness = consumerRepinHarness(t, {
-    "unity-helpers": { atTarget: true, openOffers }
-  });
-
-  const result = harness.run();
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("close")), [
-    "close unity-helpers 801"
-  ]);
-  const summary = fs.readFileSync(harness.summaryPath, "utf8");
-  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 1 superseded repin offer\(s\) \|/);
-});
 
 test("consumer repin fails closed when the offer scan page hits its bound", (t) => {
   // The scan proves its list is complete only while the page holds every
@@ -60,6 +37,7 @@ test("consumer repin fails closed when the offer scan page hits its bound", (t) 
   assert.equal(repinEventLog(harness).filter((event) => event.startsWith("close")).length, 0);
 });
 
+
 test("consumer repin fails closed when a superseded offer cannot be closed", (t) => {
   const harness = consumerRepinHarness(t, {
     "unity-helpers": {
@@ -76,6 +54,7 @@ test("consumer repin fails closed when a superseded offer cannot be closed", (t)
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| failed; see the job log \|/);
 });
+
 
 test("release authorization discovery never re-offers a superseded release", (t) => {
   // v1.14.0 is the newest published release and is authorized. v1.12.1 was
@@ -100,6 +79,7 @@ test("release authorization discovery never re-offers a superseded release", (t)
   assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.14.0"), "");
 });
 
+
 test("release authorization offers only the newest unauthorized release", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -123,6 +103,7 @@ test("release authorization offers only the newest unauthorized release", (t) =>
   assert.ok(pushedPolicy.approvedReturnShas.includes(releaseSha));
 });
 
+
 test("release authorization fails closed when the newest release tag cannot be examined", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -137,6 +118,10 @@ test("release authorization fails closed when the newest release tag cannot be e
   assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
 });
 
+
+// The authorization script reads the reviewed policy and writes the same file
+// back, so a byte it cannot decode would be committed as U+FFFD inside a pull
+// request a maintainer merges.
 test("release authorization refuses a policy it cannot read as UTF-8", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -167,6 +152,10 @@ test("release authorization refuses a policy it cannot read as UTF-8", (t) => {
   );
 });
 
+
+// The script checks out `origin/main` before it writes, so the working tree
+// it starts from and the file it writes can be different files. A check that
+// runs only before the checkout reads a policy the rewrite never sees.
 test("release authorization re-checks the policy the checkout replaced", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -189,6 +178,7 @@ test("release authorization re-checks the policy the checkout replaced", (t) => 
   assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
 });
 
+
 test("release authorization never re-offers a declined release", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -204,6 +194,7 @@ test("release authorization never re-offers a declined release", (t) => {
   assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
 });
 
+
 test("release authorization removes its branch when pull request creation fails", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),
@@ -218,6 +209,7 @@ test("release authorization removes its branch when pull request creation fails"
   assert.equal(authorizationBranchOnRemote(harness, "release-authorization/v1.15.0"), "");
 });
 
+
 test("release authorization reports an empty release list without offering anything", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: [],
@@ -230,6 +222,7 @@ test("release authorization reports an empty release list without offering anyth
   assert.match(result.stdout, /No published release exists to authorize\./);
   assert.doesNotMatch(fs.readFileSync(harness.events, "utf8"), /gh pr create/);
 });
+
 
 test("release diagnostics report non-conventional subjects since the newest release", (t) => {
   const harness = diagnosticHarness(t, [
@@ -245,6 +238,7 @@ test("release diagnostics report non-conventional subjects since the newest rele
   assert.match(result.stderr, /::warning::/);
 });
 
+
 test("release diagnostics stay silent for conventional subjects and for no unreleased commits", (t) => {
   const conventional = diagnosticHarness(t, ["fix(release): repair discovery", "docs: record session"]);
   assert.equal(conventional.run().status, 0);
@@ -254,6 +248,7 @@ test("release diagnostics stay silent for conventional subjects and for no unrel
   assert.equal(noCommits.run().status, 0);
   assert.equal(fs.readFileSync(noCommits.summary, "utf8"), "");
 });
+
 
 test("release diagnostics degrade to a warning when their inputs are missing", (t) => {
   const noTag = diagnosticHarness(t, ["Land the Darwin trusted return (#240)"], { withTag: false });
@@ -268,6 +263,13 @@ test("release diagnostics degrade to a warning when their inputs are missing", (
   assert.match(noSummaryResult.stderr, /GITHUB_STEP_SUMMARY is not set/);
 });
 
+
+// An escaped lone surrogate is valid UTF-8 and valid JSON, so the encoding
+// check in this script cannot see it. A JavaScript string holds the code point,
+// so this script is measured rather than assumed: the assertion is that the
+// escape survives the write-back byte for byte, because a tool that preserved
+// it is not a tool that can destroy it. The Go readers refuse the same file,
+// and their refusal is covered in Go.
 test("release authorization preserves an escaped lone surrogate it can represent", (t) => {
   const harness = releaseAuthorizationHarness(t, {
     publishedReleases: defaultPublishedReleases(),

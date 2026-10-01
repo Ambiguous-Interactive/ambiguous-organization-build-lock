@@ -1,14 +1,13 @@
 // Shared fixtures for the workflow shell entrypoints.
 //
-// The 75 top-level tests in this contract used to sit in one file, and
-// `node --test` runs the tests inside a file one after another. That file took
-// eighteen and a half seconds, and it was the longest single step in the whole
-// local verification and in the Linux CI job. Splitting it across six files lets
-// the runner give each file a process, and the six run at the same time.
+// `node --test` runs each file in its own process and those processes at the
+// same time, but it runs the tests inside one file one after another. The 75
+// top-level statements here used to sit in one file, which took eighteen and a
+// half seconds and made it the longest single step in the local verification and
+// in the Linux CI job.
 //
-// Measured on this machine, the same 102 test names: eighteen and a half seconds
-// in one file, four and a half across six. Nothing here is a test. The helpers
-// and the case tables live here so the split moves no assertion.
+// Nothing in this file is a test. The helpers and the case tables live here so
+// the split moves no assertion and no rationale comment.
 "use strict";
 
 const assert = require("node:assert/strict");
@@ -16,7 +15,6 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-
 const repoRoot = path.join(__dirname, "..");
 
 const scriptsRoot = path.join(repoRoot, "tools", "workflows");
@@ -116,6 +114,11 @@ function shellCheckInstallHarness(t, architecture, checksumStatus = "0") {
   };
 }
 
+// A refusal cause reaches an operator through the run summary, because the
+// drift issue holds counts and codes only. A cause with no row in the summary is
+// a cause an operator cannot act on, which is what the cause field was added to
+// prevent. Both summary writers share this table, so one data-driven case covers
+// the merge-policy and the Unity enrollment artifact.
 const causeSummaryCases = [
   {
     script: "merge-policy-audit.sh",
@@ -282,6 +285,7 @@ function readHeadRevalidationEvents(harness) {
   return fs.readFileSync(harness.events, "utf8").split("\n").filter(Boolean);
 }
 
+// Every file under the temporary root, read as bytes.
 function snapshotBytes(root, prefix = "") {
   const snapshot = {};
   for (const entry of fs.readdirSync(path.join(root, prefix), { withFileTypes: true })) {
@@ -298,6 +302,12 @@ function snapshotBytes(root, prefix = "") {
 const repinActionPath =
   "Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/acquire-build-lock";
 
+// Every file the rewrite reads so that it can write one back: the workflow
+// walk and each of the three companion modes. A file it never reads cannot
+// carry a pin it would write back, so it is not in this list. `moves` is the
+// content the rewrite would change, and `stays` the content it would leave
+// alone; the difference between them is the whole contract, so each surface
+// carries both.
 const repinSnapshot = (lockShas) => `${JSON.stringify({
   schemaVersion: 1,
   organization: "Ambiguous-Interactive",
@@ -340,6 +350,10 @@ const repinReadableSurfaces = [
   }
 ];
 
+// A byte sequence Node's UTF-8 decoder cannot read. Each one becomes U+FFFD,
+// which is three bytes, so a rewrite that writes such a file back both
+// destroys the byte and grows the file while the report counts only the pins
+// it moved.
 const undecodableBytes = {
   "a lone Latin-1 byte": [0x89],
   "an overlong encoding": [0xc0, 0x80],
@@ -359,6 +373,10 @@ function gitRun(cwd, ...args) {
   return result.stdout.trim();
 }
 
+// A consumer remote whose default branch pins an older release. An
+// "automation" state adds the repin branch a previous run pushed, and
+// "advanced" moves the default branch forward after that branch existed.
+// "companionFiles" seeds reviewed companion artifacts beside the workflow.
 function createConsumerRemote(root, name, state, releaseSha, branchName) {
   const remotePath = path.join(root, "remote", repinOrganization, `${name}.git`);
   const seed = path.join(root, "seed", name);
@@ -735,6 +753,12 @@ const authorizationScriptPath = path.join(scriptsRoot, "open-release-authorizati
 
 const diagnosticScriptPath = path.join(scriptsRoot, "report-nonconventional-commits.sh");
 
+// A policy repository with release tags v1.12.1, v1.14.0, and v1.15.0. The
+// `publishedReleases` option is the raw GitHub API releases payload the shim
+// serves, so the script's own --jq filter and selection run for real. Set
+// `omitTag` to a release that exists in the payload but not in git, to prove
+// discovery fails closed when the newest release cannot be examined.
+// `authorizedTags` names the release commits the policy lists.
 function releaseAuthorizationHarness(t, {
   publishedReleases,
   authorizedTags,
@@ -943,6 +967,7 @@ function diagnosticHarness(t, subjects, { withTag = true, withSummary = true } =
 }
 
 module.exports = {
+  writeExecutable,
   assert,
   childProcess,
   fs,
@@ -951,10 +976,8 @@ module.exports = {
   repoRoot,
   scriptsRoot,
   runScript,
-  writeExecutable,
   shellCheckInstallHarness,
   causeSummaryCases,
-  revalidateRepositories,
   headRevalidationHarness,
   runHeadRevalidation,
   readHeadRevalidationEvents,
@@ -967,11 +990,8 @@ module.exports = {
   repinTarget,
   repinOrganization,
   gitRun,
-  createConsumerRemote,
   consumerRepinHarness,
   repinEventLog,
-  authorizationScriptPath,
-  diagnosticScriptPath,
   releaseAuthorizationHarness,
   authorizationBranchOnRemote,
   defaultPublishedReleases,

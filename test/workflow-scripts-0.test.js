@@ -3,7 +3,6 @@
 const test = require("node:test");
 
 const {
-
   assert,
   childProcess,
   fs,
@@ -19,6 +18,7 @@ const {
   readHeadRevalidationEvents,
   repinOldSha,
 } = require("./workflow-scripts-support.js");
+
 
 test("workflow shell entrypoints are syntactically valid and strict", () => {
   const scripts = fs.readdirSync(scriptsRoot).filter((name) => name.endsWith(".sh")).sort();
@@ -40,6 +40,7 @@ test("workflow shell entrypoints are syntactically valid and strict", () => {
     assert.equal(childProcess.spawnSync("bash", ["-n", path.join(scriptsRoot, script)]).status, 0);
   }
 });
+
 
 test("ShellCheck installation downloads and verifies the pinned bundle for supported architectures", async (t) => {
   const cases = [
@@ -92,6 +93,7 @@ test("ShellCheck installation downloads and verifies the pinned bundle for suppo
   }
 });
 
+
 test("ShellCheck installation stops before extraction when checksum verification fails", (t) => {
   const harness = shellCheckInstallHarness(t, "x86_64", "1");
   fs.writeFileSync(harness.githubPath, "existing-path\n");
@@ -105,6 +107,7 @@ test("ShellCheck installation stops before extraction when checksum verification
   assert.equal(fs.readFileSync(harness.githubPath, "utf8"), "existing-path\n");
 });
 
+
 test("ShellCheck installation rejects unknown architectures before download", (t) => {
   const harness = shellCheckInstallHarness(t, "riscv64");
   fs.writeFileSync(harness.githubPath, "existing-path\n");
@@ -117,6 +120,7 @@ test("ShellCheck installation rejects unknown architectures before download", (t
   assert.equal(fs.existsSync(harness.events), false);
   assert.equal(fs.readFileSync(harness.githubPath, "utf8"), "existing-path\n");
 });
+
 
 test("request onboarding rejects non-main refs and writes typed inert evidence", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "unity-onboarding-request-"));
@@ -148,6 +152,7 @@ test("request onboarding rejects non-main refs and writes typed inert evidence",
   );
 });
 
+
 test("trusted onboarding rejects mismatched workflow-run identity", () => {
   const baseline = {
     REQUEST_CONCLUSION: "success",
@@ -168,6 +173,7 @@ test("trusted onboarding rejects mismatched workflow-run identity", () => {
     );
   }
 });
+
 
 test("trusted onboarding validates request shape before publishing outputs", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "unity-onboarding-validate-"));
@@ -202,6 +208,7 @@ test("trusted onboarding validates request shape before publishing outputs", (t)
   assert.equal(fs.existsSync(outputPath), false);
 });
 
+
 test("enrollment summary fails closed when retained audit evidence is incomplete", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "unity-enrollment-summary-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
@@ -218,6 +225,7 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
   assert.notEqual(incomplete.status, 0);
   assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
 });
+
 
 for (const testCase of causeSummaryCases) {
   test(`${testCase.script} publishes every refusal cause in the run summary`, (t) => {
@@ -278,6 +286,7 @@ for (const testCase of causeSummaryCases) {
   });
 }
 
+
 test("merge policy summary fails closed when retained audit evidence is incomplete", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "merge-policy-summary-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
@@ -295,6 +304,7 @@ test("merge policy summary fails closed when retained audit evidence is incomple
   assert.match(fs.readFileSync(summaryPath, "utf8"), /merge-gate status is unknown/);
 });
 
+
 test("head revalidation passes without refresh when every head matches", (t) => {
   const harness = headRevalidationHarness(t);
   const result = runHeadRevalidation(harness);
@@ -304,6 +314,7 @@ test("head revalidation passes without refresh when every head matches", (t) => 
   assert.deepEqual(audit.findings, []);
   assert.deepEqual(readHeadRevalidationEvents(harness).filter((event) => /^(clone|analyze)/.test(event)), []);
 });
+
 
 test("head revalidation re-clones and re-analyzes a snapshot whose branch advanced mid-run", (t) => {
   const harness = headRevalidationHarness(t);
@@ -325,6 +336,7 @@ test("head revalidation re-clones and re-analyzes a snapshot whose branch advanc
     "analyze"
   ]);
 });
+
 
 test("head revalidation recovers even when the re-analysis reports consumer findings", (t) => {
   const harness = headRevalidationHarness(t, { analyzeFindings: true });
@@ -348,6 +360,7 @@ test("head revalidation recovers even when the re-analysis reports consumer find
   }]);
 });
 
+
 test("head revalidation fails closed when a branch keeps advancing past every refresh", (t) => {
   const harness = headRevalidationHarness(t, { advance: true });
 
@@ -367,6 +380,7 @@ test("head revalidation fails closed when a branch keeps advancing past every re
   assert.equal(events.filter((event) => event === "analyze").length, 2);
 });
 
+
 test("head revalidation fails closed when the head read keeps failing", (t) => {
   const harness = headRevalidationHarness(t, { apiStatus: 1 });
 
@@ -383,6 +397,7 @@ test("head revalidation fails closed when the head read keeps failing", (t) => {
     ["Ambiguous-Interactive/example-a", "Ambiguous-Interactive/example-b"]
   );
 });
+
 
 test("consumer repin rewrites only lock action references and refuses unauthorized targets", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-consumer-locks-"));
@@ -476,6 +491,7 @@ test("consumer repin rewrites only lock action references and refuses unauthoriz
   assert.equal(malformed.status, 1);
   assert.match(malformed.stderr, /40-character commit SHA/);
 });
+
 
 test("consumer repin moves a uses: pin through every spelling a workflow may write", (t) => {
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-uses-spellings-"));
@@ -623,6 +639,7 @@ for (const line of [
 }
 });
 
+
 test("moved pin comments keep the consumer's own comment spacing", async (t) => {
   // The consumer owns the gap between its pin and a `# vX.Y.Z` comment,
   // because its own formatter owns the file. Enrolled repositories disagree:
@@ -699,6 +716,7 @@ test("moved pin comments keep the consumer's own comment spacing", async (t) => 
     "a fail-closed run leaves the pin untouched"
   );
 });
+
 
 test("consumer repin fails closed when the repository's comment spacing has no single evidence", async (t) => {
   const oldSha = "300501e91c9bec81bb9b5a977c22aa5bb2d9b649";
@@ -792,6 +810,7 @@ test("consumer repin fails closed when the repository's comment spacing has no s
   assert.deepEqual(JSON.parse(skipped.stdout).changed, 0);
 });
 
+
 test("consumer repin refuses a symlink under .github instead of following it", (t) => {
   // A symlink is followed on read and written through, so a workflow reached
   // through one would be edited outside the checkout the offer shows while
@@ -872,6 +891,7 @@ test("consumer repin refuses a symlink under .github instead of following it", (
   }
 });
 
+
 test("a pin-lines companion with no version comment falls back to the workflow gap", (t) => {
   // A companion with no version comment of its own carries no evidence, and an
   // empty Set is truthy, so the fallback has to test the size. Without it the
@@ -925,6 +945,7 @@ test("a pin-lines companion with no version comment falls back to the workflow g
     ].join("\n")
   );
 });
+
 
 test("a protected workflow is neither read nor used as comment spacing evidence", (t) => {
   // A `repinExceptions` file is never rewritten, so it is not a reviewed
@@ -1001,6 +1022,7 @@ test("a protected workflow is neither read nor used as comment spacing evidence"
     );
   }
 });
+
 
 test("a companion that fails closed leaves every rewritten file byte-identical", async (t) => {
   // A fail-closed run must leave the whole checkout untouched, not only the

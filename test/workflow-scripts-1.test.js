@@ -3,7 +3,6 @@
 const test = require("node:test");
 
 const {
-
   assert,
   childProcess,
   fs,
@@ -19,10 +18,8 @@ const {
   repinOldSha,
   repinTarget,
   repinOrganization,
-  gitRun,
-  consumerRepinHarness,
-  repinEventLog,
 } = require("./workflow-scripts-support.js");
+
 
 test("consumer repin fails closed when a companion path cannot be read", (t) => {
   // Only a missing companion means absent. A path whose parent is a file
@@ -64,6 +61,7 @@ test("consumer repin fails closed when a companion path cannot be read", (t) => 
   assert.match(result.stderr, /ENOTDIR/u);
   assert.equal(result.stdout, "", "no report is emitted, so no caller can act on a missing companion");
 });
+
 
 test("a pin-lines companion keeps its own comment spacing", (t) => {
   // A companion is a file the consumer formats on its own terms. A
@@ -120,6 +118,7 @@ test("a pin-lines companion keeps its own comment spacing", (t) => {
   );
 });
 
+
 test("consumer repin moves pins in a CRLF workflow and keeps the line endings", (t) => {
   // `split("\n")` leaves the `\r` on every line and the pin pattern's `$`
   // anchor does not match before it, so a CRLF checkout used to match no pin
@@ -160,6 +159,7 @@ test("consumer repin moves pins in a CRLF workflow and keeps the line endings", 
     ].join("\r\n")
   );
 });
+
 
 test("consumer repin preserves reviewed compatibility exceptions and fails closed on expiry", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-exceptions-"));
@@ -316,6 +316,7 @@ test("consumer repin preserves reviewed compatibility exceptions and fails close
     assert.match(result.stderr, fatalCase.stderr, fatalCase.name);
   }
 });
+
 
 test("consumer repin carries reviewed companion artifacts through mode-bound rewrites", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companions-"));
@@ -585,6 +586,7 @@ test("consumer repin carries reviewed companion artifacts through mode-bound rew
   }
 });
 
+
 test("consumer repin fails closed on a stale pin-literal companion and survives hex witnesses", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companions-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -741,6 +743,7 @@ test("consumer repin fails closed on a stale pin-literal companion and survives 
     "a fail-closed run leaves the companion untouched"
   );
 });
+
 
 test("consumer repin moves a checkout ref: only when its repository is the lock repository", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-"));
@@ -924,6 +927,7 @@ test("consumer repin moves a checkout ref: only when its repository is the lock 
   assert.equal(JSON.parse(rerun.stdout).changed, 0);
 });
 
+
 test("consumer repin carries a .github companion the workflow rewrite does not own", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-github-companion-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -995,6 +999,7 @@ test("consumer repin carries a .github companion the workflow rewrite does not o
     assert.match(refused.stderr, /that is not a \.github YAML file/);
   }
 });
+
 
 test("consumer repin shields samples in a block scalar without shielding real pins", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-shield-"));
@@ -1166,6 +1171,7 @@ test("consumer repin shields samples in a block scalar without shielding real pi
   }
 });
 
+
 test("the repin pull request body lists only the mutations that happened", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-body-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1235,6 +1241,7 @@ test("the repin pull request body lists only the mutations that happened", (t) =
     assert.ok(bullets.every((line) => line.trim().length > 0), "uses=" + uses + " refs=" + refs + ": blank bullet text");
   }
 });
+
 
 test("consumer repin reads a checkout ref: through every spelling a real step uses", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-spellings-"));
@@ -1779,6 +1786,7 @@ test("consumer repin reads a checkout ref: through every spelling a real step us
   assert.equal(JSON.parse(upper.stdout).refs, 0, "an uppercase SHA is not moved");
 });
 
+
 test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-anchor-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1974,6 +1982,7 @@ test("consumer repin moves a checkout ref: only on a checkout step", (t) => {
   assert.equal(JSON.parse(anchored.stdout).refs, 1, "an actions/checkout step moves the ref:");
 });
 
+
 test("consumer repin does not read a comment gap out of a block scalar", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-gap-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2025,6 +2034,7 @@ test("consumer repin does not read a comment gap out of a block scalar", (t) => 
     "a fail-closed run leaves every real pin untouched"
   );
 });
+
 
 test("consumer repin treats a workflow sample inside a block scalar as text", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-scalar-"));
@@ -2109,6 +2119,7 @@ test("consumer repin treats a workflow sample inside a block scalar as text", (t
   assert.equal(JSON.parse(result.stdout).refs, 1);
 });
 
+
 test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-crlf-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2178,6 +2189,7 @@ test("consumer repin moves a checkout ref: in CRLF and wide-indent workflows", (
   assert.equal(rerun.status, 0, rerun.stderr);
   assert.equal(JSON.parse(rerun.stdout).changed, 0);
 });
+
 
 test("consumer repin fails closed on a pin-literal companion a moved ref: cannot account for", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-witness-"));
@@ -2255,6 +2267,7 @@ test("consumer repin fails closed on a pin-literal companion a moved ref: cannot
   assert.equal(JSON.parse(healed.stdout).changed, 1, "only the workflow ref: moved");
 });
 
+
 test("consumer repin carries a companion the moved ref: accounts for", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-ref-companion-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2311,6 +2324,7 @@ test("consumer repin carries a companion the moved ref: accounts for", (t) => {
   ]);
 });
 
+
 test("consumer repin refuses a .github that is not a real directory", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-github-link-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2365,6 +2379,7 @@ test("consumer repin refuses a .github that is not a real directory", (t) => {
   );
 });
 
+
 test("consumer repin refuses a companion that is not a regular file", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-companions-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -2402,6 +2417,15 @@ test("consumer repin refuses a companion that is not a regular file", (t) => {
   assert.equal(fs.readFileSync(outside, "utf8"), "untouched\n", "the write never escapes the checkout");
 });
 
+
+// The refusal is scoped to the files the rewrite would write, and that scope
+// is the point of the test. A file it cannot read but would not change is
+// left exactly as the consumer wrote it, with no red run, because the
+// rewrite's own rule is that a shape it cannot read stays put and only a
+// shape it would damage fails the run. A permanent blocker on every
+// unrelated file would make the nightly automation unrunnable, and the only
+// escape the policy offers, a `repinExceptions` entry, reaches neither a
+// companion nor a workflow outside `.github/workflows`.
 test("consumer repin refuses a file it would write and cannot read as UTF-8", (t) => {
   const cases = [];
   for (const surface of repinReadableSurfaces) {
@@ -2484,6 +2508,7 @@ test("consumer repin refuses a file it would write and cannot read as UTF-8", (t
     }
   }
 });
+
 
 test("consumer repin changes only the pin bytes of a file it can read exactly", (t) => {
   const target = "64bac446903115134dca8235410b332bc5a83547";
@@ -2605,29 +2630,4 @@ test("consumer repin changes only the pin bytes of a file it can read exactly", 
       }
     }
   }
-});
-
-test("consumer repin skips a closed repin pull request and stays green", (t) => {
-  const harness = consumerRepinHarness(t, {
-    "unity-helpers": { automation: true, closedPrs: 1 },
-    "dxmessaging": {}
-  });
-
-  const result = harness.run();
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stderr, /left the closed repin pull request in place/);
-  const summary = fs.readFileSync(harness.summaryPath, "utf8");
-  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` was closed; a closed offer is never re-offered \|/);
-  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
-  assert.equal(
-    repinEventLog(harness).filter((event) => event.startsWith("create")).length,
-    1,
-    "only the fresh consumer opens a pull request"
-  );
-  assert.equal(
-    harness.branches.get("unity-helpers"),
-    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`),
-    "the consumer's repin branch is never updated"
-  );
 });

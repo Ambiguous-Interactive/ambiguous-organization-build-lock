@@ -3,7 +3,6 @@
 const test = require("node:test");
 
 const {
-
   assert,
   fs,
   path,
@@ -11,6 +10,7 @@ const {
   consumerRepinHarness,
   repinEventLog,
 } = require("./workflow-scripts-support.js");
+
 
 test("consumer repin enables auto-merge on every offer it opens", (t) => {
   const harness = consumerRepinHarness(t, {
@@ -39,6 +39,7 @@ test("consumer repin enables auto-merge on every offer it opens", (t) => {
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1\.14\.0` \(1 line\) \|/);
 });
 
+
 test("consumer repin never duplicates an open pull request", (t) => {
   const harness = consumerRepinHarness(t, {
     "unity-helpers": { automation: true, openPrs: 1 }
@@ -58,6 +59,7 @@ test("consumer repin never duplicates an open pull request", (t) => {
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
   );
 });
+
 
 test("consumer repin closes superseded offers when the default branch already pins the target", (t) => {
   const harness = consumerRepinHarness(t, {
@@ -99,6 +101,7 @@ test("consumer repin closes superseded offers when the default branch already pi
   assert.match(comment, new RegExp(harness.releaseSha));
 });
 
+
 test("consumer repin keeps offers open while the default branch still needs the pin", (t) => {
   const harness = consumerRepinHarness(t, {
     "unity-helpers": {
@@ -120,6 +123,7 @@ test("consumer repin keeps offers open while the default branch still needs the 
   );
 });
 
+
 test("consumer repin records an already pinned repository without offers", (t) => {
   const harness = consumerRepinHarness(t, { "unity-helpers": { atTarget: true } });
 
@@ -129,4 +133,28 @@ test("consumer repin records an already pinned repository without offers", (t) =
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0` \|/);
   assert.equal(repinEventLog(harness).filter((event) => !event.startsWith("clone")).length, 0);
+});
+
+
+test("consumer repin closes a superseded offer buried under newer pull requests", (t) => {
+  // gh returns the newest pull requests first and caps the default page at
+  // 30. The stale offer sorts behind 31 newer foreign pull requests, so the
+  // scan must fetch past the default page to see it.
+  const openOffers = [];
+  for (let index = 0; index < 31; index += 1) {
+    openOffers.push({ number: 900 + index, head: `consumer/feature-${index}` });
+  }
+  openOffers.push({ number: 801, head: "automation/repin-lock-300501e" });
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { atTarget: true, openOffers }
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(repinEventLog(harness).filter((event) => event.startsWith("close")), [
+    "close unity-helpers 801"
+  ]);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| already pinned to `v1.14.0`; closed 1 superseded repin offer\(s\) \|/);
 });

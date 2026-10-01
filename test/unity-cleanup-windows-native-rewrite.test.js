@@ -1,19 +1,4 @@
-// The second half of the Windows-native Unity cleanup evidence contract.
-//
-// Each test here spawns the committed PowerShell helper, and Windows PowerShell
-// compiles the helper's C# with Add-Type, which shells out to csc.exe. One spawn
-// costs about fifteen to thirty seconds on a hosted runner.
-//
-// Both halves used to sit in one file, and node --test runs the tests inside one
-// file one after another. That made them seventy-six of the seventy-eight seconds
-// of a Windows CI test step, and the job the slowest one on every pull request.
-// They are in two files of their own so the runner gives each a process.
-//
-// This half restores a rewritten file's metadata and then proves the production
-// helper refuses it, which is why it is the slower of the two.
-//
-// The split moves no assertion. This half keeps its fixture, its skip, and the
-// real helper.
+// Windows-native refusal of a same-size rewrite with restored metadata.
 "use strict";
 
 const test = require("node:test");
@@ -27,6 +12,18 @@ const {
   centralEvidenceFixture,
   centralInputs
 } = require("./unity-cleanup-evidence-support.js");
+
+// Windows PowerShell compiles the committed helper's C# with Add-Type, which
+// shells out to csc.exe. This test spawns it twice: once to restore the
+// rewritten file's metadata, and once for the production helper that must
+// refuse it. It is the slower of the pair.
+//
+// `node --test` runs the tests inside one file one after another. This test and
+// its sibling used to share a file with the rest of the suite and run in
+// sequence. They are in files of their own so each gets a process.
+//
+// The split moves no assertion. This half keeps its fixture, its skip, and the
+// real helper.
 
 test(
   "Windows helper rejects a same-size rewrite with all metadata restored",

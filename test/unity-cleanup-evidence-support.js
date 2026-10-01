@@ -1,19 +1,15 @@
 // Shared fixtures for the Unity cleanup evidence contract.
 //
-// The two Windows-native tests live in their own file so they run in a separate
-// process from each other. Each one spawns Windows PowerShell, whose Add-Type
-// call compiles C# with csc.exe and costs about fifteen seconds per spawn, so
-// running them one after the other made the Windows CI job ninety-three seconds
-// long while the rest of the job took sixteen. Measured on run 36904676960:
-// seventy-six of the seventy-eight seconds of that job's test step were these
-// two tests.
+// `node --test` runs each file in its own process and those processes at the
+// same time, but it runs the tests inside one file one after another. The two
+// Windows-native tests used to sit in this file with the rest, which is what
+// made them run one after the other on a Windows runner.
 //
-// Nothing here is a test. The helpers are shared so the split moves no
-// assertion and no fixture.
+// Nothing in this file is a test. The helpers live here so the split moves no
+// assertion and no rationale comment.
 "use strict";
 
 const assert = require("node:assert/strict");
-const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -160,26 +156,19 @@ function restoreWindowsFileTimes(filePath, stat) {
 }
 
 
-// The two native tests below both need the real runtime entry points, so they
-// are re-exported rather than reached through the classifier helper.
 // The runtime is re-exported whole, so a test that reaches for a symbol keeps
-// reaching the same module it always did.
+// reaching the module it always did.
 module.exports = {
   ...runtime,
   assert,
   centralEvidenceFixture,
   centralEvidenceRemains,
   centralInputs,
-  childProcess,
-  crypto,
   ENTITLEMENT,
   fs,
-  modelIdentityDelete,
-  os,
-  path,
   PROOF,
   restoreWindowsFileTimes,
-  runtimePath,
   runClassifier,
+  runtimePath,
   ULF
 };

@@ -3,7 +3,6 @@
 const test = require("node:test");
 
 const {
-
   assert,
   fs,
   path,
@@ -12,6 +11,7 @@ const {
   consumerRepinHarness,
   repinEventLog,
 } = require("./workflow-scripts-support.js");
+
 
 test("consumer repin keeps the run green when the pull request URL is unreadable", (t) => {
   const harness = consumerRepinHarness(t, {
@@ -32,6 +32,7 @@ test("consumer repin keeps the run green when the pull request URL is unreadable
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer is open; auto-merge was not requested \(see the job log\) \|/);
 });
 
+
 test("consumer repin pushes and opens a pull request when no branch exists", (t) => {
   const harness = consumerRepinHarness(t, { "dxmessaging": {} });
 
@@ -50,6 +51,7 @@ test("consumer repin pushes and opens a pull request when no branch exists", (t)
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
 });
+
 
 test("consumer repin fails closed on a report it cannot read the counts from", (t) => {
   // The pull request body decides which mutations to name from two counts in
@@ -75,6 +77,7 @@ test("consumer repin fails closed on a report it cannot read the counts from", (
     );
   }
 });
+
 
 test("consumer repin names only the mutation it made in the pull request body", (t) => {
   // One consumer per mutation shape. The checkout `ref:` moved in one and no
@@ -109,6 +112,7 @@ test("consumer repin names only the mutation it made in the pull request body", 
   assert.match(pushed, new RegExp(`ref: ${harness.releaseSha}`));
   assert.doesNotMatch(pushed, new RegExp(`return-unity-license@${repinOldSha}`));
 });
+
 
 test("consumer repin commits companion artifacts and lists them in the pull request body", (t) => {
   const harness = consumerRepinHarness(t, {

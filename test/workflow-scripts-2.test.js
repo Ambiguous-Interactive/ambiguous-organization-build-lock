@@ -3,13 +3,39 @@
 const test = require("node:test");
 
 const {
-
   assert,
   fs,
   gitRun,
   consumerRepinHarness,
   repinEventLog,
 } = require("./workflow-scripts-support.js");
+
+
+test("consumer repin skips a closed repin pull request and stays green", (t) => {
+  const harness = consumerRepinHarness(t, {
+    "unity-helpers": { automation: true, closedPrs: 1 },
+    "dxmessaging": {}
+  });
+
+  const result = harness.run();
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /left the closed repin pull request in place/);
+  const summary = fs.readFileSync(harness.summaryPath, "utf8");
+  assert.match(summary, /\| `Ambiguous-Interactive\/unity-helpers` \| repin pull request for `v1.14.0` was closed; a closed offer is never re-offered \|/);
+  assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| opened repin pull request to `v1.14.0` \(1 line\) \|/);
+  assert.equal(
+    repinEventLog(harness).filter((event) => event.startsWith("create")).length,
+    1,
+    "only the fresh consumer opens a pull request"
+  );
+  assert.equal(
+    harness.branches.get("unity-helpers"),
+    gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`),
+    "the consumer's repin branch is never updated"
+  );
+});
+
 
 test("consumer repin reuses an orphaned repin branch with identical content", (t) => {
   const harness = consumerRepinHarness(t, {
@@ -32,6 +58,7 @@ test("consumer repin reuses an orphaned repin branch with identical content", (t
   );
 });
 
+
 test("consumer repin leaves a repin branch with different content untouched", (t) => {
   const harness = consumerRepinHarness(t, {
     "unity-helpers": { automation: true, advanced: true }
@@ -49,6 +76,7 @@ test("consumer repin leaves a repin branch with different content untouched", (t
     gitRun(harness.remotePath("unity-helpers"), "rev-parse", `refs/heads/${harness.branchName}`)
   );
 });
+
 
 test("consumer repin keeps the run green when auto-merge is refused", (t) => {
   const harness = consumerRepinHarness(t, {
@@ -70,6 +98,7 @@ test("consumer repin keeps the run green when auto-merge is refused", (t) => {
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not enabled \(see the job log\) \|/);
 });
 
+
 test("consumer repin records a repository where no merge method allows auto-merge", (t) => {
   const harness = consumerRepinHarness(t, {
     "dxmessaging": { noMergeMethods: true }
@@ -85,6 +114,7 @@ test("consumer repin records a repository where no merge method allows auto-merg
   const summary = fs.readFileSync(harness.summaryPath, "utf8");
   assert.match(summary, /\| `Ambiguous-Interactive\/dxmessaging` \| repin offer #[0-9]+ is open; auto-merge was not requested \(see the job log\) \|/);
 });
+
 
 test("consumer repin picks the single allowed merge method on restricted repositories", async (t) => {
   const cases = [

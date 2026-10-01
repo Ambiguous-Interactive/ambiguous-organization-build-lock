@@ -45,6 +45,7 @@ const {
   semaphoreActionEnv,
 } = require("./build-lock-support.js");
 
+
 test("environment file parser rejects empty names", async () => {
   await withTempFile(async (file) => {
     fs.writeFileSync(file, "=value\n", "utf8");
@@ -55,6 +56,7 @@ test("environment file parser rejects empty names", async () => {
     );
   });
 });
+
 
 test("api retries transient GitHub API failures", async (t) => {
   const cases = [
@@ -98,6 +100,7 @@ test("api retries transient GitHub API failures", async (t) => {
   }
 });
 
+
 test("api retries fetch failures before receiving a response", async () => {
   let calls = 0;
   await withMockedFetch(
@@ -122,6 +125,7 @@ test("api retries fetch failures before receiving a response", async () => {
     }
   );
 });
+
 
 test("api does not retry expected contents CAS conflicts", async (t) => {
   for (const status of [409, 422]) {
@@ -152,6 +156,7 @@ test("api does not retry expected contents CAS conflicts", async (t) => {
     });
   }
 });
+
 
 test("api fails fast for non-retryable auth and configuration responses", async (t) => {
   const cases = [
@@ -190,6 +195,7 @@ test("api fails fast for non-retryable auth and configuration responses", async 
     });
   }
 });
+
 
 test("api retries transient 401 responses before succeeding", async (t) => {
   // GitHub intermittently returns 401 "Bad credentials" for valid tokens (auth replica lag);
@@ -233,6 +239,7 @@ test("api retries transient 401 responses before succeeding", async (t) => {
   }
 });
 
+
 test("api surfaces persistent 401 responses after exhausting retries", async () => {
   let calls = 0;
   await withMockedFetch(
@@ -260,6 +267,7 @@ test("api surfaces persistent 401 responses after exhausting retries", async () 
   );
 });
 
+
 test("GitHub App JWT uses bounded RS256 claims and a valid signature", () => {
   const now = Date.parse("2026-07-11T12:00:00Z");
   const jwt = createAppJwt("12345", testAppKeys.privateKey, now);
@@ -283,6 +291,7 @@ test("GitHub App JWT uses bounded RS256 claims and a valid signature", () => {
     true
   );
 });
+
 
 test("GitHub App auth caches and refreshes installation tokens before expiry", async () => {
   let now = Date.parse("2026-07-11T12:00:00Z");
@@ -329,6 +338,7 @@ test("GitHub App auth caches and refreshes installation tokens before expiry", a
   assert.equal(tokenMints, 2);
 });
 
+
 test("api refreshes GitHub App credentials immediately after a 401", async () => {
   const now = Date.parse("2026-07-11T12:00:00Z");
   let tokenMints = 0;
@@ -369,6 +379,7 @@ test("api refreshes GitHub App credentials immediately after a 401", async () =>
   assert.equal(resourceCalls, 2);
 });
 
+
 test("api performs at most one renewable credential refresh per logical request", async () => {
   let token = "token-1";
   let invalidations = 0;
@@ -402,6 +413,7 @@ test("api performs at most one renewable credential refresh per logical request"
   assert.equal(tokenReads, 4);
 });
 
+
 test("GitHub App installation lookup honors cancellation", async () => {
   const controller = new AbortController();
   const auth = createGitHubAppAuth({
@@ -422,6 +434,7 @@ test("GitHub App installation lookup honors cancellation", async () => {
     );
   });
 });
+
 
 test("sole timed-out GitHub App waiter preserves structured auth retry diagnostics", async () => {
   const controller = new AbortController();
@@ -473,6 +486,7 @@ test("sole timed-out GitHub App waiter preserves structured auth retry diagnosti
   assert.equal(installationCalls, 1);
 });
 
+
 test("concurrent GitHub App token waiters cancel independently", async () => {
   const firstController = new AbortController();
   const secondController = new AbortController();
@@ -508,6 +522,7 @@ test("concurrent GitHub App token waiters cancel independently", async () => {
     assert.equal(await second, "shared-token");
   });
 });
+
 
 test("GitHub App auth re-discovers a replaced installation once", async () => {
   let now = Date.parse("2026-07-11T12:00:00Z");
@@ -550,6 +565,7 @@ test("GitHub App auth re-discovers a replaced installation once", async () => {
   assert.equal(installationReads, 2);
 });
 
+
 test("GitHub App auth rejects malformed installation and token responses", async (t) => {
   const cases = [
     { name: "missing installation id", installation: {}, token: null, error: /installation id/ },
@@ -581,6 +597,7 @@ test("GitHub App auth rejects malformed installation and token responses", async
   }
 });
 
+
 test("credential selection requires complete GitHub App configuration and rejects legacy tokens", async (t) => {
   const cases = [
     { name: "app id only", appId: "123", privateKey: undefined, token: "legacy", error: /provided together/ },
@@ -609,6 +626,7 @@ test("credential selection requires complete GitHub App configuration and reject
     });
   }
 });
+
 
 test("config rejects holder suffixes that fallback cleanup cannot reproduce", async (t) => {
   const cases = [
@@ -646,6 +664,7 @@ test("config rejects holder suffixes that fallback cleanup cannot reproduce", as
     });
   }
 });
+
 
 test("config validates acquire lifecycle requirements", async (t) => {
   const cases = [
@@ -687,6 +706,7 @@ test("config validates acquire lifecycle requirements", async (t) => {
   }
 });
 
+
 test("config parses PR head validation inputs", async () => {
   const expectedHeadSha = "a".repeat(40);
   await withEnvironment(
@@ -712,6 +732,7 @@ test("config parses PR head validation inputs", async () => {
   );
 });
 
+
 test("GitHub App configuration rejects invalid private keys without exposing them", async () => {
   const sentinel = "not-a-private-key-secret";
   await withMockedFetch(async () => jsonResponse(500), async (logs) => {
@@ -728,6 +749,7 @@ test("GitHub App configuration rejects invalid private keys without exposing the
   });
 });
 
+
 test("complete GitHub App credentials select renewable scoped authentication", async () => {
   await withEnvironment(
     {
@@ -741,6 +763,7 @@ test("complete GitHub App credentials select renewable scoped authentication", a
     }
   );
 });
+
 
 test("config rejects unauthorized callers before credential parsing", async (t) => {
   for (const testCase of [
@@ -766,6 +789,7 @@ test("config rejects unauthorized callers before credential parsing", async (t) 
     });
   }
 });
+
 
 test("authorization accepts canonical repositories owned by the organization", async (t) => {
   const repositories = [
@@ -797,6 +821,7 @@ test("authorization accepts canonical repositories owned by the organization", a
     });
   }
 });
+
 
 test("authorization separates lock-repository reaping from consumer lock operations", async () => {
   await withActionEnv({
@@ -839,6 +864,10 @@ test("authorization separates lock-repository reaping from consumer lock operati
   });
 });
 
+
+// Minting runs on a small budget nested inside every call. Its exhaustion must be a
+// failed attempt, not the end of the caller's budget: the credential subsystem is the
+// one dependency every path shares, so it cannot also be the effective ceiling.
 test("a nested credential outage spends the caller's own budget", async (t) => {
   const now = Date.parse("2026-07-11T12:00:00Z");
 
@@ -1070,6 +1099,7 @@ test("a nested credential outage spends the caller's own budget", async (t) => {
   });
 });
 
+
 test("state-writer App tokens are limited to the lock repository and contents write", async () => {
   const requests = [];
   await withMockedFetch(async (url, options = {}) => {
@@ -1095,6 +1125,7 @@ test("state-writer App tokens are limited to the lock repository and contents wr
   });
 });
 
+
 test("reaper reader App token is limited to consumer Actions and Metadata read", async () => {
   const requests = [];
   await withEnvironment({
@@ -1117,6 +1148,7 @@ test("reaper reader App token is limited to consumer Actions and Metadata read",
   assert.equal(Object.hasOwn(requests[1].body, "repositories"), false);
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
+
 
 test("reaper compatibility fallback mints a reader-scoped token from the writer App", async () => {
   const requests = [];
@@ -1144,6 +1176,7 @@ test("reaper compatibility fallback mints a reader-scoped token from the writer 
   assert.equal(Object.hasOwn(requests[1].body.permissions, "contents"), false);
 });
 
+
 test("only stale-state reaping requires the cross-repository reader credential", () => {
   assert.equal(readerCredentialRequired("reap", "reap"), true);
   assert.equal(readerCredentialRequired("reap", "recover"), false);
@@ -1151,6 +1184,7 @@ test("only stale-state reaping requires the cross-repository reader credential",
   assert.equal(readerCredentialRequired("acquire", "reap"), false);
   assert.equal(readerCredentialRequired("release", "reap"), false);
 });
+
 
 test("writeState does not mark a 401-then-conflict sequence as an ambiguous write", async () => {
   // A 401 is rejected before GitHub processes the mutation, so a later CAS conflict
@@ -1181,6 +1215,7 @@ test("writeState does not mark a 401-then-conflict sequence as an ambiguous writ
     });
   });
 });
+
 
 test("api computes bounded retry delays from Retry-After or full jitter", async (t) => {
   const now = Date.parse("2026-07-20T00:00:00Z");
@@ -1279,6 +1314,7 @@ test("api computes bounded retry delays from Retry-After or full jitter", async 
   }
 });
 
+
 test("api preserves the last retryable response when its deadline expires", async () => {
   const controller = new AbortController();
   await withMockedFetch(
@@ -1309,6 +1345,7 @@ test("api preserves the last retryable response when its deadline expires", asyn
     }
   );
 });
+
 
 test("api passes AbortSignal to retry sleep for retryable responses", async () => {
   const controller = new AbortController();
@@ -1341,6 +1378,7 @@ test("api passes AbortSignal to retry sleep for retryable responses", async () =
   );
 });
 
+
 test("api passes AbortSignal to retry sleep for fetch failures", async () => {
   const controller = new AbortController();
   let calls = 0;
@@ -1372,6 +1410,7 @@ test("api passes AbortSignal to retry sleep for fetch failures", async () => {
   );
 });
 
+
 test("api forwards AbortSignal to fetch", async () => {
   const controller = new AbortController();
   await withMockedFetch(
@@ -1384,6 +1423,7 @@ test("api forwards AbortSignal to fetch", async () => {
     }
   );
 });
+
 
 test("api fails fast when signal is already aborted", async () => {
   const controller = new AbortController();
@@ -1417,6 +1457,7 @@ test("api fails fast when signal is already aborted", async () => {
     }
   );
 });
+
 
 test("api fails fast for aborted fetch failures", async (t) => {
   const cases = [
@@ -1473,6 +1514,7 @@ test("api fails fast for aborted fetch failures", async (t) => {
   }
 });
 
+
 test("api fails fast for aborted response body reads", async () => {
   const error = new Error("body read aborted");
   error.name = "AbortError";
@@ -1509,6 +1551,7 @@ test("api fails fast for aborted response body reads", async () => {
   );
 });
 
+
 test("api fails fast when cancellation arrives before a retry delay", async () => {
   const controller = new AbortController();
   let calls = 0;
@@ -1541,6 +1584,7 @@ test("api fails fast when cancellation arrives before a retry delay", async () =
     }
   );
 });
+
 
 test("api normalizes primitive abort reasons while retry sleep is pending", async () => {
   const controller = new AbortController();
@@ -1578,6 +1622,7 @@ test("api normalizes primitive abort reasons while retry sleep is pending", asyn
   );
 });
 
+
 test("api normalizes primitive abort reasons from injected retry sleep", async () => {
   const controller = new AbortController();
   let calls = 0;
@@ -1614,6 +1659,7 @@ test("api normalizes primitive abort reasons from injected retry sleep", async (
   );
 });
 
+
 test("signal cleanup handler marks cancellation and aborts acquire work", () => {
   const previousLog = console.log;
   const initialSigintListeners = process.listenerCount("SIGINT");
@@ -1647,6 +1693,7 @@ test("signal cleanup handler marks cancellation and aborts acquire work", () => 
   }
 });
 
+
 test("repeated pre-cleanup signals update exit code without repeating first-cancel work", () => {
   const previousLog = console.log;
   const logs = [];
@@ -1676,6 +1723,7 @@ test("repeated pre-cleanup signals update exit code without repeating first-canc
     remove();
   }
 });
+
 
 for (const testCase of [
   { firstSignal: "SIGINT", secondSignal: "SIGINT", exitCode: 130 },
@@ -1715,6 +1763,7 @@ for (const testCase of [
   });
 }
 
+
 test("second signal during cancellation cleanup exits with the new signal code", () => {
   const previousExit = process.exit;
   let exitCode = null;
@@ -1740,6 +1789,7 @@ test("second signal during cancellation cleanup exits with the new signal code",
     remove();
   }
 });
+
 
 test("acquire removes signal cleanup listeners when setup fails", async () => {
   const initialSigintListeners = process.listenerCount("SIGINT");
@@ -1786,6 +1836,7 @@ test("acquire removes signal cleanup listeners when setup fails", async () => {
   assert.equal(process.listenerCount("SIGINT"), initialSigintListeners);
   assert.equal(process.listenerCount("SIGTERM"), initialSigtermListeners);
 });
+
 
 test("cancellation cleanup removes this run queue entry with a fresh cleanup path", async () => {
   let state = {
@@ -1860,6 +1911,7 @@ test("cancellation cleanup removes this run queue entry with a fresh cleanup pat
   assert.deepEqual(state.queue, []);
 });
 
+
 test("api treats rate-limited 403 responses as retryable but not ordinary forbidden responses", () => {
   assert.equal(
     isRetryableResponse(jsonResponse(403, { message: "You have exceeded a secondary rate limit." }), {
@@ -1872,6 +1924,7 @@ test("api treats rate-limited 403 responses as retryable but not ordinary forbid
     message: "Resource not accessible by integration"
   }), false);
 });
+
 
 test("api retries GitHub's transient HTML bad-request interstitial", async () => {
   const interstitial =
@@ -1908,6 +1961,7 @@ test("api retries GitHub's transient HTML bad-request interstitial", async () =>
   assert.equal(calls, 2);
 });
 
+
 test("writeState marks CAS conflicts after a retryable mutation failure as ambiguous", async () => {
   let calls = 0;
   await withImmediateTimers(async () => {
@@ -1936,6 +1990,7 @@ test("writeState marks CAS conflicts after a retryable mutation failure as ambig
   });
 });
 
+
 test("writeState preserves unambiguous CAS conflict handling", async () => {
   let calls = 0;
 
@@ -1959,6 +2014,7 @@ test("writeState preserves unambiguous CAS conflict handling", async () => {
     assert.equal(calls, 1);
   });
 });
+
 
 test("writeState does not mark rate-limit rejections as ambiguous writes", async (t) => {
   await withImmediateTimers(async () => {
@@ -2000,6 +2056,7 @@ test("writeState does not mark rate-limit rejections as ambiguous writes", async
     }
   });
 });
+
 
 test("acquire succeeds idempotently when this run already holds the lock", async () => {
   const holder = {
@@ -2090,6 +2147,7 @@ test("acquire succeeds idempotently when this run already holds the lock", async
   );
 });
 
+
 test("acquire recovers when a successful lock write is reported as a transient failure", async () => {
   let holderState = null;
   let putCalls = 0;
@@ -2168,6 +2226,7 @@ test("acquire recovers when a successful lock write is reported as a transient f
   );
 });
 
+
 test("acquire keeps waiting when a lock-state read hits a transient 401 outage", async () => {
   // Regression test for issue #12: ensureStateBranch succeeded and the very next
   // contents read returned HTTP 401 with the same token. The acquire loop must ride
@@ -2243,6 +2302,7 @@ test("acquire keeps waiting when a lock-state read hits a transient 401 outage",
   assert.ok(contentReads >= 2);
 });
 
+
 test("acquire fails once 401 responses persist beyond the auth grace window", async () => {
   const originalNow = Date.now;
   let now = 0;
@@ -2316,6 +2376,7 @@ test("acquire fails once 401 responses persist beyond the auth grace window", as
   assert.ok(contentReads >= 2, `expected the acquire loop to retry within the grace window, saw ${contentReads} reads`);
   assert.equal(wrote, false);
 });
+
 
 test("acquire auth grace sleep stops at the acquire deadline and enters timeout cleanup", async () => {
   const originalNow = Date.now;
@@ -2392,6 +2453,7 @@ test("acquire auth grace sleep stops at the acquire deadline and enters timeout 
   assert.equal(stateReads, 2, "timeout cleanup must make a final exact-state cleanup attempt");
 });
 
+
 test("acquire fails fast on 401 when the auth grace window is disabled", async () => {
   let contentReads = 0;
 
@@ -2439,6 +2501,8 @@ test("acquire fails fast on 401 when the auth grace window is disabled", async (
     }
   );
 });
+
+
 
 test("acquire records post cleanup state only when opt-in cleanup is enabled", async () => {
   let holderState = null;
@@ -2509,6 +2573,7 @@ test("acquire records post cleanup state only when opt-in cleanup is enabled", a
   assert.equal(holderState.holder.holderId, "owner/repo:123:perf-benchmarks:playmode");
 });
 
+
 test("legacy acquire does not record post cleanup state", async () => {
   let holderState = null;
 
@@ -2563,6 +2628,7 @@ test("legacy acquire does not record post cleanup state", async () => {
   });
 });
 
+
 test("opt-in acquire does not record post cleanup state before lock state mutation", async () => {
   await withTempFile(async (stateFile) => {
     await withActionEnv(
@@ -2608,6 +2674,7 @@ test("opt-in acquire does not record post cleanup state before lock state mutati
     assert.deepEqual(readEnvironmentFile(stateFile), {});
   });
 });
+
 
 test("opt-in acquire records post cleanup state when this run is already queued", async () => {
   const originalNow = Date.now;
@@ -2706,6 +2773,7 @@ test("opt-in acquire records post cleanup state when this run is already queued"
   }
 });
 
+
 test("acquire timeout includes holder context and cleans this run queue entry", async () => {
   const originalNow = Date.now;
   let now = 0;
@@ -2803,6 +2871,7 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
   assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
 });
 
+
 test("acquire base poll stops exactly at timeout and cleans its queued identity", async () => {
   const originalNow = Date.now;
   const originalRandom = Math.random;
@@ -2857,6 +2926,11 @@ test("acquire base poll stops exactly at timeout and cleans its queued identity"
   assert.deepEqual(state.queue, []);
   assert.equal(state.holders[0].holderId, "other/repo:999:perf-benchmarks:editmode");
 });
+
+
+
+
+
 
 test("release is idempotent when this run is not the holder", async () => {
   const state = {
@@ -2916,6 +2990,7 @@ test("release is idempotent when this run is not the holder", async () => {
     }
   );
 });
+
 
 test("release reports released when this run holds the lock", async () => {
   const state = {
@@ -2991,6 +3066,7 @@ test("release reports released when this run holds the lock", async () => {
 
   assert.equal(writtenState.holder, null);
 });
+
 
 test("release reports released after an accepted cleanup write returns retryable failure then conflict", async () => {
   let state = {
@@ -3073,6 +3149,7 @@ test("release reports released after an accepted cleanup write returns retryable
   assert.equal(releasePutCalls, 2);
   assert.equal(state.holder, null);
 });
+
 
 test("release preserves fresh holder context after an ambiguous accepted cleanup write", async () => {
   const nextHolder = {
@@ -3171,6 +3248,7 @@ test("release preserves fresh holder context after an ambiguous accepted cleanup
   assert.equal(releasePutCalls, 2);
 });
 
+
 test("release reports queue-cleaned when this run never acquired the lock", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -3260,6 +3338,7 @@ test("release reports queue-cleaned when this run never acquired the lock", asyn
   assert.equal(writtenState.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
   assert.deepEqual(writtenState.queue, []);
 });
+
 
 test("release reports queue-cleaned after an accepted cleanup write returns retryable failure then conflict", async () => {
   let state = {
@@ -3356,6 +3435,7 @@ test("release reports queue-cleaned after an accepted cleanup write returns retr
   assert.deepEqual(state.queue, []);
 });
 
+
 test("release reports noop with holder context when this run has no state to clean", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -3429,6 +3509,13 @@ test("release reports noop with holder context when this run has no state to cle
   assert.equal(wrote, false);
 });
 
+
+// Issue #198: a 503 on the final release write cost a consumer its whole Unity
+// matrix because five attempts of exponential backoff are over in ~15 seconds.
+// A caller that supplies a deadline retries on wall clock instead.
+// Retry knobs can arrive from an organization or repository variable, so the
+// notice that rejects one must not let that value break out of the command it is
+// reported in. A runner only interprets a command that starts a line.
 test("a rejected retry knob cannot inject workflow commands", async () => {
   await withEnvironment(
     { BUILD_LOCK_API_MAX_ATTEMPTS: "3\n::error::spoofed\n%injected" },
@@ -3445,6 +3532,7 @@ test("a rejected retry knob cannot inject workflow commands", async () => {
     }
   );
 });
+
 
 test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", async (t) => {
   const startedAt = 1_800_000_000_000;
@@ -3562,6 +3650,10 @@ test("a time-bounded API retry budget outlasts the attempt-bounded ceiling", asy
   });
 });
 
+
+// A zero backoff under an active deadline would retry without pause for the whole
+// budget, and a ten-minute ceiling would outlast the calling step. The environment
+// channel therefore carries the same ranges as the action inputs.
 test("the retry budget ranges apply to the environment channel too", async (t) => {
   const cases = [
     {
@@ -3621,6 +3713,9 @@ test("the retry budget ranges apply to the environment channel too", async (t) =
   }
 });
 
+
+// Truncating a server-directed wait retries back into the same secondary rate
+// limit. maxDelayMs bounds our own backoff, not GitHub's instruction.
 test("a Retry-After instruction is honored in full whenever a deadline bounds it", async (t) => {
   const startedAt = 1_800_000_000_000;
 
@@ -3914,6 +4009,7 @@ test("a Retry-After instruction is honored in full whenever a deadline bounds it
   });
 });
 
+
 test("release records a holder removal that needs more than the attempt-bounded budget", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -3989,6 +4085,7 @@ test("release records a holder removal that needs more than the attempt-bounded 
 
   assert.equal(writeAttempts, 9);
 });
+
 
 test("release separates an unreachable lock-state write from an unknown lock state", async (t) => {
   const state = {
@@ -4100,6 +4197,7 @@ test("release separates an unreachable lock-state write from an unknown lock sta
   }
 });
 
+
 test("release retry knobs are configurable through action inputs", async (t) => {
   const baseEnvironment = {
     "INPUT_LOCK-NAME": "wallstop-organization-builds",
@@ -4190,6 +4288,10 @@ test("release retry knobs are configurable through action inputs", async (t) => 
   }
 });
 
+
+// The preparatory calls need their own retry budget, because a broad outage hits
+// them first and would otherwise fail the release before the write is attempted.
+// They must not spend the budget that exists to protect the write itself.
 test("release splits its retry budget between preparation and the lock-state write", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -4277,6 +4379,9 @@ test("release splits its retry budget between preparation and the lock-state wri
   assert.equal(writeAttempts, 9, "the write still gets its own time-bounded budget");
 });
 
+
+// Neither preparatory call may red a release before the lock-state write is
+// attempted: an outage broad enough to matter reaches them first.
 test("release degrades unreachable preparatory calls instead of failing on them", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -4372,6 +4477,10 @@ test("release degrades unreachable preparatory calls instead of failing on them"
   );
 });
 
+
+// Every phase here degrades on failure, so a shared deadline lets whichever runs
+// first consume the others' budget. The shares are wall-clock arithmetic that no
+// mocked-timer test can observe, so assert them directly.
 test("the release budget gives every phase a share strictly inside the total", async (t) => {
   const now = 1_800_000_000_000;
 
@@ -4474,6 +4583,10 @@ test("the release budget gives every phase a share strictly inside the total", a
   });
 });
 
+
+// Production releases always mint an App token first, and minting runs inside the
+// call whose budget it should inherit. Every other release test passes a plain
+// string token, so this is the only one that exercises the real credential path.
 test("release mints its App token under the same budget as the call it serves", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -4569,6 +4682,11 @@ test("release mints its App token under the same budget as the call it serves", 
   );
 });
 
+
+// An unreachable lock config must degrade for every last status, not only the ones
+// configReadCanFailClosed enumerates. The transient GitHub HTML 400 interstitial is
+// retryable but not in that list, so an exhausted budget on it used to red the
+// release before the lock-state write was attempted.
 test("release degrades an unreachable lock config whatever its last status was", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -4654,6 +4772,9 @@ test("release degrades an unreachable lock config whatever its last status was",
   );
 });
 
+
+// An out-of-range ceiling is already reported and ignored by the retry budget, so
+// release must not also announce it as a bound that took effect.
 test("release does not report an attempt ceiling the retry budget ignores", async () => {
   const state = emptyState("wallstop-organization-builds");
   let warned = [];

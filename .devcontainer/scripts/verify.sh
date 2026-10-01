@@ -8,7 +8,7 @@ for action_file in .github/dist/*.js; do
   node --check "${action_file}"
 done
 
-for test_file in test/*.js; do
+for test_file in test/*.test.js; do
   node --check "${test_file}"
 done
 

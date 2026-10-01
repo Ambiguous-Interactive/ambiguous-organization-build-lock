@@ -126,8 +126,13 @@ jobs:
       # 31.3 s and 45.0 s out of a 78 s step in a 93 s job, one after the other.
       # A first attempt put them in one shared file and the job still took
       # 97 s, because node --test runs the tests inside one file in sequence.
+      #
+      # The concurrency is pinned. node --test defaults to one process per core
+      # less one, so a two-core runner image would run these four files one after
+      # another and the step would go back to about 78 s with nothing in the
+      # workflow saying why. Four is the file count.
       - name: Run Windows action tests
         shell: pwsh
-        run: node --test test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native-delete.test.js test/unity-cleanup-windows-native-rewrite.test.js test/unity-editor-action.test.js
+        run: node --test --test-concurrency=4 test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native-delete.test.js test/unity-cleanup-windows-native-rewrite.test.js test/unity-editor-action.test.js
         env:
           UNITY_DELETE_TEST_DIAGNOSTICS: "true"

@@ -59,6 +59,10 @@ const {
   timelineSnapshot,
 } = require("./build-lock-support.js");
 
+
+// Degrading the branch check must never become a false success: with the branch
+// unverified, an unreadable lock-state file is indistinguishable from a missing
+// branch, so "nothing to release" is not provable.
 test("release refuses an unprovable noop when the state branch was never verified", async () => {
   await withTempFile(async (outputFile) => {
     await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "2" }, async () => {
@@ -110,6 +114,10 @@ test("release refuses an unprovable noop when the state branch was never verifie
   });
 });
 
+
+// Compare-and-swap exhaustion means reads and writes succeeded but lost a
+// contention race, possibly after an ambiguous accepted write. It is the opposite
+// of an unreachable file, so it must not claim the record is merely missing.
 test("release does not report contention as an unreachable lock-state write", async () => {
   const state = {
     ...emptyState("wallstop-organization-builds"),
@@ -178,6 +186,7 @@ test("release does not report contention as an unreachable lock-state write", as
   });
 });
 
+
 test("reap writes full output contract when no stale state is found", async () => {
   const state = emptyState("wallstop-organization-builds");
   let wrote = false;
@@ -219,6 +228,7 @@ test("reap writes full output contract when no stale state is found", async () =
 
   assert.equal(wrote, false);
 });
+
 
 test("reap writes full output contract when a stale holder is removed", async () => {
   let state = {
@@ -280,6 +290,7 @@ test("reap writes full output contract when a stale holder is removed", async ()
   assert.equal(state.holder, null);
 });
 
+
 test("scheduled reap checkpoints stale-holder recovery before inspecting queued runs", async () => {
   const staleHolder = withRunner(semaphoreHolder("holder/repo", "123", "editmode"), "runner-a");
   const queued = withRunner(semaphoreQueueEntry("queue/repo", "888", "playmode"), "runner-b");
@@ -327,6 +338,7 @@ test("scheduled reap checkpoints stale-holder recovery before inspecting queued 
   assert.deepEqual(state.queue, [queued], "unscanned queue entries remain in their original FIFO order");
 });
 
+
 test("scheduled reap reserves bounded checkpoint time before the workflow timeout", () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, "../.github/workflows/reap-stale-locks.yml"),
@@ -341,6 +353,7 @@ test("scheduled reap reserves bounded checkpoint time before the workflow timeou
   assert.ok(budgets.scanMs < budgets.totalMs, "status scanning must stop before checkpoint writes");
   assert.ok(budgets.totalMs < workflowBudgetMs, "the action must stop before GitHub kills the job");
 });
+
 
 test("scheduled reap checkpoints a proven stale holder before later holder scans", async () => {
   const completed = withRunner(semaphoreHolder("holder/repo", "201", "completed"), "runner-a");
@@ -400,6 +413,7 @@ test("scheduled reap checkpoints a proven stale holder before later holder scans
   assert.equal(state.reservations[0].holderId, completed.holderId);
   assert.deepEqual(state.queue, [queued]);
 });
+
 
 test("scheduled reap checkpoints proven queue entries before reporting an incomplete scan", async () => {
   const completed = withRunner(semaphoreQueueEntry("queue/repo", "101", "completed"), "runner-a");
@@ -467,6 +481,7 @@ test("scheduled reap checkpoints proven queue entries before reporting an incomp
   );
 });
 
+
 test("scheduled reap batches multiple completed queue entries before a live FIFO tail", async () => {
   const completedFirst = withRunner(semaphoreQueueEntry("queue/repo", "111", "first"), "runner-a");
   const completedSecond = withRunner(semaphoreQueueEntry("queue/repo", "112", "second"), "runner-b");
@@ -515,6 +530,7 @@ test("scheduled reap batches multiple completed queue entries before a live FIFO
   assert.deepEqual(operations, ["first-status", "second-status", "tail-status", "write"]);
   assert.deepEqual(state.queue, [liveTail]);
 });
+
 
 test("scheduled reap refreshes a conflicted deadline checkpoint under the live write budget", async () => {
   const completed = withRunner(semaphoreQueueEntry("queue/repo", "301", "completed"), "runner-a");
@@ -595,6 +611,7 @@ test("scheduled reap refreshes a conflicted deadline checkpoint under the live w
   );
 });
 
+
 test("scheduled reap preserves ambiguous evidence from an accepted retry checkpoint", async () => {
   const completed = withRunner(semaphoreQueueEntry("queue/repo", "305", "completed"), "runner-a");
   const concurrent = withRunner(semaphoreQueueEntry("queue/repo", "306", "concurrent"), "runner-b");
@@ -651,6 +668,7 @@ test("scheduled reap preserves ambiguous evidence from an accepted retry checkpo
   assert.deepEqual(state.queue, [concurrent]);
 });
 
+
 test("scheduled reap does not delete a queue entry whose proven version changed after conflict", async () => {
   const completed = withRunner(semaphoreQueueEntry("queue/repo", "304", "completed"), "runner-a");
   const refreshed = { ...completed, queuedAt: "2026-06-06T00:02:00.000Z" };
@@ -696,6 +714,7 @@ test("scheduled reap does not delete a queue entry whose proven version changed 
   assert.deepEqual(operations, ["get", "completed-status", "put", "get"]);
   assert.deepEqual(state.queue, [refreshed]);
 });
+
 
 test("reap reports reaped after an accepted write returns retryable failure then conflict", async () => {
   let state = {
@@ -765,6 +784,7 @@ test("reap reports reaped after an accepted write returns retryable failure then
   assert.equal(state.holder, null);
 });
 
+
 test("scheduled reap auto-recovers a stale quarantine (schema 5, terminal run) to a cooldown", async () => {
   // A quarantine tied to an ephemeral GitHub-hosted runner can never be
   // same-runner-reclaimed (issue #61). At schema 5 -- where a leaked seat's 20111
@@ -822,6 +842,7 @@ test("scheduled reap auto-recovers a stale quarantine (schema 5, terminal run) t
   assert.ok(state.reservations[0].availableAt);
   assert.match(state.reservations[0].reason, /auto-recovered stale quarantine/);
 });
+
 
 test("scheduled reap keeps quarantine when an incident appears during checkpoint conflict", async () => {
   const owner = withRunner(
@@ -891,6 +912,7 @@ test("scheduled reap keeps quarantine when an incident appears during checkpoint
   assert.equal(state.reservations[0].reason, "return-missing-positive-evidence");
 });
 
+
 test("scheduled reap releases a stale quarantine immediately when the cooldown is 0", async () => {
   const owner = withRunner(
     semaphoreHolder("owner/repo", "999", "unitypackage-smoke"),
@@ -942,6 +964,8 @@ test("scheduled reap releases a stale quarantine immediately when the cooldown i
   assert.equal(state.reservations.length, 0);
 });
 
+
+// The reaper must NOT auto-recover a quarantine outside the narrow safe window.
 for (const testCase of [
   { name: "the lock is only schema 4 (no 20111 incident backstop)", schema: 4, createdAt: "2026-06-06T00:01:00.000Z", run: { status: "completed", conclusion: "success" } },
   { name: "the owning run is still active", schema: 5, createdAt: "2026-06-06T00:01:00.000Z", run: { status: "in_progress", conclusion: null } },
@@ -1003,6 +1027,7 @@ for (const testCase of [
   });
 }
 
+
 test("reap writes full output contract when only completed queue entries are removed", async () => {
   let state = {
     ...emptyState("wallstop-organization-builds"),
@@ -1063,6 +1088,7 @@ test("reap writes full output contract when only completed queue entries are rem
   assert.deepEqual(state.queue, []);
 });
 
+
 test("post cleanup noops without saved action state", async () => {
   let calls = 0;
 
@@ -1087,6 +1113,7 @@ test("post cleanup noops without saved action state", async () => {
 
   assert.equal(calls, 0);
 });
+
 
 test("post cleanup warns instead of throwing when cleanup cannot contact lock state", async () => {
   await withActionEnv(
@@ -1123,6 +1150,7 @@ test("post cleanup warns instead of throwing when cleanup cannot contact lock st
     }
   );
 });
+
 
 test("post cleanup reports cleanup after an accepted write returns retryable failure then conflict", async () => {
   let state = {
@@ -1195,6 +1223,7 @@ test("post cleanup reports cleanup after an accepted write returns retryable fai
   assert.equal(state.holder, null);
 });
 
+
 test("post cleanup wrapper exits successfully when saved state exists but token is missing", () => {
   const result = childProcess.spawnSync(process.execPath, [path.join(__dirname, "..", ".github", "dist", "post-cleanup.js")], {
     cwd: path.join(__dirname, ".."),
@@ -1217,6 +1246,7 @@ test("post cleanup wrapper exits successfully when saved state exists but token 
   );
   assert.equal(result.stderr, "");
 });
+
 
 test("stale evaluation fails fast when run status cannot be read due to missing actions permission", async () => {
   const holder = {
@@ -1245,6 +1275,7 @@ test("stale evaluation fails fast when run status cannot be read due to missing 
     );
   });
 });
+
 
 test("stale evaluation keeps lease fallback only for missing workflow runs", async () => {
   const holder = {
@@ -1281,6 +1312,7 @@ test("stale evaluation keeps lease fallback only for missing workflow runs", asy
   assert.deepEqual(calls, ["/repos/owner/repo/actions/runs/123", "/repos/owner/repo"]);
 });
 
+
 test("stale evaluation rejects lease fallback when the repository cannot be read", async () => {
   const holder = {
     holderId: "owner/private-repo:123:perf-benchmarks:playmode",
@@ -1311,6 +1343,7 @@ test("stale evaluation rejects lease fallback when the repository cannot be read
     );
   });
 });
+
 
 test("stale evaluation keeps waiting when the run-status poll returns 401 before lease expiry", async () => {
   const holder = {
@@ -1348,6 +1381,7 @@ test("stale evaluation keeps waiting when the run-status poll returns 401 before
   });
 });
 
+
 test("stale evaluation delegates newer run-attempt reconciliation to the reaper", async () => {
   const holder = {
     holderId: "owner/repo:123:perf-benchmarks:playmode",
@@ -1371,6 +1405,7 @@ test("stale evaluation delegates newer run-attempt reconciliation to the reaper"
     }
   );
 });
+
 
 test("stale evaluation reclaims a completed holder job while sibling matrix jobs keep the run active", async () => {
   const holder = {
@@ -1424,6 +1459,7 @@ test("stale evaluation reclaims a completed holder job while sibling matrix jobs
     });
   });
 });
+
 
 test("stale evaluation does not resolve a live sequential matrix holder to its completed predecessor", async () => {
   const holder = {
@@ -1479,6 +1515,7 @@ test("stale evaluation does not resolve a live sequential matrix holder to its c
   });
 });
 
+
 test("queue cleanup drops a completed waiting job while sibling matrix jobs keep the run active", async () => {
   const entry = {
     holderId: "owner/repo:123:unity-tests:editmode",
@@ -1527,6 +1564,7 @@ test("queue cleanup drops a completed waiting job while sibling matrix jobs keep
   });
 });
 
+
 test("legacy holder-job lookup fails closed without a recorded numeric job ID", async () => {
   const holder = {
     holderId: "owner/repo:123:unity-tests:playmode",
@@ -1559,6 +1597,7 @@ test("legacy holder-job lookup fails closed without a recorded numeric job ID", 
     }
   );
 });
+
 
 test("exact holder-job lookup retains holders and queue entries with missing or unknown statuses", async (t) => {
   const holder = {
@@ -1608,6 +1647,7 @@ test("exact holder-job lookup retains holders and queue entries with missing or 
   }
 });
 
+
 test("current job lookup records the unique active job on the exact runner", async () => {
   const identity = {
     repository: "owner/repo",
@@ -1632,6 +1672,7 @@ test("current job lookup records the unique active job on the exact runner", asy
   });
 });
 
+
 test("current job lookup fails closed when the runner has no unique active job", async () => {
   const identity = {
     repository: "owner/repo",
@@ -1651,6 +1692,7 @@ test("current job lookup fails closed when the runner has no unique active job",
     assert.match(logs.join("\n"), /found 2 active jobs/);
   });
 });
+
 
 test("exact holder-job lookup rejects missing Actions read permission", async () => {
   const holder = {
@@ -1684,6 +1726,7 @@ test("exact holder-job lookup rejects missing Actions read permission", async ()
     );
   });
 });
+
 
 test("acquire fails closed when its loaded config snapshot does not meet lifecycle requirements", async (t) => {
   const cases = [
@@ -1734,6 +1777,7 @@ test("acquire fails closed when its loaded config snapshot does not meet lifecyc
   }
 });
 
+
 test("acquire revalidates lifecycle requirements on the refreshed config snapshot", async () => {
   let configReads = 0;
   let stateReads = 0;
@@ -1780,6 +1824,7 @@ test("acquire revalidates lifecycle requirements on the refreshed config snapsho
   assert.equal(stateReads, 0, "the rejected refreshed snapshot must not be used for state mutation");
 });
 
+
 test("consumer acquire keeps expired holders authoritative without cross-repository status reads", async () => {
   const originalNow = Date.now;
   let now = 0;
@@ -1819,6 +1864,7 @@ test("consumer acquire keeps expired holders authoritative without cross-reposit
   }
   assert.equal(actionsReads, 0);
 });
+
 
 test("committed lock config files are well-formed", () => {
   // An invalid committed config fails closed to one holder at runtime; catch it here
@@ -1860,6 +1906,7 @@ test("committed lock config files are well-formed", () => {
     }
   }
 });
+
 
 test("readLockConfig fails closed to a single holder", async (t) => {
   const cases = [
@@ -1992,6 +2039,7 @@ test("readLockConfig fails closed to a single holder", async (t) => {
   }
 });
 
+
 test("acquire fails closed when the initial lock config read hits an auth outage", async () => {
   let state = semaphoreState([]);
   let configReads = 0;
@@ -2041,6 +2089,7 @@ test("acquire fails closed when the initial lock config read hits an auth outage
   );
 });
 
+
 test("dedupeQueueEntries preserves FIFO order in linear queue cleanup", () => {
   const first = { holderId: "first" };
   const second = { holderId: "second" };
@@ -2048,6 +2097,7 @@ test("dedupeQueueEntries preserves FIFO order in linear queue cleanup", () => {
 
   assert.deepEqual(dedupeQueueEntries([{}, first, duplicate, second, { holderId: "" }]), [first, second]);
 });
+
 
 test("normalizeState migrates legacy single-holder files and dedupes the mirror", () => {
   const holder = semaphoreHolder("other/repo", "999", "editmode");
@@ -2070,6 +2120,7 @@ test("normalizeState migrates legacy single-holder files and dedupes the mirror"
   );
 });
 
+
 test("normalizeState rejects state files written by a newer schema", () => {
   assert.throws(
     () =>
@@ -2080,6 +2131,7 @@ test("normalizeState rejects state files written by a newer schema", () => {
     /unsupported/
   );
 });
+
 
 test("schema 3 preserves physical runner identity", () => {
   const holder = { ...withRunner(semaphoreHolder("other/repo", "999", "editmode"), "unity-runner-a"), jobId: "71" };
@@ -2097,6 +2149,7 @@ test("schema 3 preserves physical runner identity", () => {
   assert.equal(normalized.queue[0].jobId, "72");
 });
 
+
 test("state normalization rejects malformed optional numeric Actions job IDs", () => {
   const holder = { ...semaphoreHolder("other/repo", "999", "editmode"), jobId: "01" };
   assert.throws(
@@ -2104,6 +2157,7 @@ test("state normalization rejects malformed optional numeric Actions job IDs", (
     /invalid numeric Actions job ID/
   );
 });
+
 
 test("idempotent acquire backfills an exact job ID into the holder and legacy mirror", async () => {
   const holder = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
@@ -2148,6 +2202,7 @@ test("idempotent acquire backfills an exact job ID into the holder and legacy mi
   assert.equal(state.holder.jobId, "81");
 });
 
+
 test("idempotent acquire fails closed on a conflicting exact holder job ID", async () => {
   const holder = {
     ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a"),
@@ -2186,6 +2241,7 @@ test("idempotent acquire fails closed on a conflicting exact holder job ID", asy
 
   assert.equal(putCalls, 0);
 });
+
 
 test("same-attempt queue refresh serializes a missing exact job ID", async () => {
   const originalNow = Date.now;
@@ -2240,6 +2296,7 @@ test("same-attempt queue refresh serializes a missing exact job ID", async () =>
   assert.ok(writtenStates.some((candidate) => candidate.queue.some((entry) => entry.jobId === "82")));
 });
 
+
 test("schema 3 rejects entries without physical runner identity", () => {
   assert.throws(
     () =>
@@ -2250,6 +2307,7 @@ test("schema 3 rejects entries without physical runner identity", () => {
     /missing runnerId/
   );
 });
+
 
 test("runner-aware admission skips blocked runners without wasting free slots", async (t) => {
   const a1 = withRunner(semaphoreQueueEntry("queue/repo", "101", "a1"), "runner-a");
@@ -2294,6 +2352,7 @@ test("runner-aware admission skips blocked runners without wasting free slots", 
   }
 });
 
+
 test("runner serialization activation upgrades only an empty schema 2 state", async () => {
   let state = semaphoreState([]);
 
@@ -2327,6 +2386,7 @@ test("runner serialization activation upgrades only an empty schema 2 state", as
   assert.equal(state.schemaVersion, 3);
   assert.equal(state.holders[0].runnerId, "unity-runner-a");
 });
+
 
 test("runner serialization activation fails closed without a runner or with live schema 2 state", async (t) => {
   const cases = [
@@ -2372,6 +2432,7 @@ test("runner serialization activation fails closed without a runner or with live
     });
   }
 });
+
 
 test("schema 3 acquire skips a queued request whose runner already holds a slot", async () => {
   const activeA = withRunner(semaphoreHolder("other/repo", "999", "active"), "runner-a");
@@ -2421,6 +2482,8 @@ test("schema 3 acquire skips a queued request whose runner already holds a slot"
   assert.deepEqual(state.queue.map((entry) => entry.holderId), [queuedA.holderId]);
 });
 
+
+
 test("schema 3 rejects one run attempt reporting conflicting physical runners", async () => {
   const active = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-old");
   const state = { ...semaphoreState([active]), schemaVersion: 3 };
@@ -2456,6 +2519,7 @@ test("schema 3 rejects one run attempt reporting conflicting physical runners", 
   assert.equal(putCalls, 0);
 });
 
+
 test("schema 3 rejects a stale run attempt after a newer rerun owns the holder", async () => {
   const newerAttempt = {
     ...withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-new"),
@@ -2487,6 +2551,7 @@ test("schema 3 rejects a stale run attempt after a newer rerun owns the holder",
     });
   });
 });
+
 
 test("schema 3 queue identity advances monotonically across reruns", async (t) => {
   const cases = [
@@ -2560,6 +2625,7 @@ test("schema 3 queue identity advances monotonically across reruns", async (t) =
   }
 });
 
+
 test("rerun queue refresh records the new attempt timestamp", async () => {
   const originalNow = Date.now;
   let now = Date.parse("2026-06-06T01:00:00.000Z");
@@ -2622,6 +2688,7 @@ test("rerun queue refresh records the new attempt timestamp", async () => {
   assert.ok(Date.parse(refreshedEntry.queuedAt) > Date.parse(queued.queuedAt));
 });
 
+
 test("activated acquire rejects schema downgrade during post-write verification", async () => {
   let stateReads = 0;
   const downgradedHolder = semaphoreHolder("owner/repo", "123", "playmode");
@@ -2655,6 +2722,7 @@ test("activated acquire rejects schema downgrade during post-write verification"
     });
   });
 });
+
 
 test("fresh admission does not succeed when post-write state loses its proven exact job ID", async (t) => {
   for (const testCase of [
@@ -2724,6 +2792,7 @@ test("fresh admission does not succeed when post-write state loses its proven ex
     });
   }
 });
+
 
 test("normalizeState fails closed on malformed schemas and duplicate active runners", async (t) => {
   const holderA = withRunner(semaphoreHolder("other/repo", "999", "a"), "runner-a");
@@ -2805,6 +2874,7 @@ test("normalizeState fails closed on malformed schemas and duplicate active runn
   }
 });
 
+
 test("acquire takes a free slot alongside an active holder when max holders allows", async () => {
   const activeHolder = semaphoreHolder("other/repo", "888", "editmode");
   let state = semaphoreState([activeHolder]);
@@ -2863,6 +2933,7 @@ test("acquire takes a free slot alongside an active holder when max holders allo
   assert.equal(state.holder.holderId, activeHolder.holderId, "legacy mirror must stay the first holder");
   assert.deepEqual(state.queue, []);
 });
+
 
 test("acquire waits when the configured max holders are all active", async () => {
   const originalNow = Date.now;
@@ -2925,6 +2996,7 @@ test("acquire waits when the configured max holders are all active", async () =>
   assert.deepEqual(state.queue, [], "timeout cleanup must remove this run's queue entry");
 });
 
+
 test("acquire admits a second queue entry when two slots are free", async () => {
   let state = semaphoreState([], [semaphoreQueueEntry("other/repo", "888", "editmode")]);
   let putCalls = 0;
@@ -2973,6 +3045,8 @@ test("acquire admits a second queue entry when two slots are free", async () => 
     "the earlier queue entry must keep its place at the queue front"
   );
 });
+
+
 
 test("acquire picks up a raised max-holders limit while waiting", async () => {
   const originalNow = Date.now;
@@ -3035,6 +3109,7 @@ test("acquire picks up a raised max-holders limit while waiting", async () => {
   );
 });
 
+
 test("release preserves schema 3 runner identities while removing only this run's slot", async () => {
   const myHolder = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
   const firstCoHolder = withRunner(semaphoreHolder("other/repo", "888", "editmode"), "runner-b");
@@ -3080,6 +3155,7 @@ test("release preserves schema 3 runner identities while removing only this run'
   assert.equal(state.schemaVersion, 3);
   assert.equal(state.holder.holderId, firstCoHolder.holderId, "legacy mirror must follow the first remaining holder");
 });
+
 
 test("release holder-id targets the original job from a fallback runner", async (t) => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "self-hosted-runner");
@@ -3143,6 +3219,7 @@ test("release holder-id targets the original job from a fallback runner", async 
     });
   }
 });
+
 
 test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", async (t) => {
   const cases = [];
@@ -3261,6 +3338,7 @@ test("schema 3 cleanup uses exact holder id with a monotonic attempt fence", asy
   }
 });
 
+
 test("schema 3 cleanup fails closed without runner-id", async () => {
   const state = { ...semaphoreState([]), schemaVersion: 3 };
   await withActionEnv(semaphoreActionEnv, async () => {
@@ -3278,6 +3356,7 @@ test("schema 3 cleanup fails closed without runner-id", async () => {
     });
   });
 });
+
 
 test("reap preserves schema 3 runner identity while dropping only stale holders", async () => {
   const staleHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
@@ -3324,6 +3403,7 @@ test("reap preserves schema 3 runner identity while dropping only stale holders"
   assert.equal(state.schemaVersion, 3);
 });
 
+
 test("stale evaluation reclaims when the run-status poll returns 401 after lease expiry", async () => {
   const holder = {
     holderId: "owner/repo:123:perf-benchmarks:playmode",
@@ -3358,6 +3438,7 @@ test("stale evaluation reclaims when the run-status poll returns 401 after lease
     );
   });
 });
+
 
 test("schema 4 reservations round-trip and malformed lifecycle state fails closed", async (t) => {
   const holder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
@@ -3402,6 +3483,7 @@ test("schema 4 reservations round-trip and malformed lifecycle state fails close
   }
 });
 
+
 test("acquire polling wakes promptly only for a known earlier cooldown expiry", async (t) => {
   const now = Date.parse("2026-06-06T00:01:00.000Z");
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
@@ -3444,6 +3526,7 @@ test("acquire polling wakes promptly only for a known earlier cooldown expiry", 
     });
   }
 });
+
 
 test("acquire retry delays never exceed their governing deadline", async (t) => {
   const now = Date.parse("2026-06-06T00:01:00.000Z");
@@ -3492,6 +3575,7 @@ test("acquire retry delays never exceed their governing deadline", async (t) => 
     });
   }
 });
+
 
 test("schema 4 release transitions ownership to cooldown or quarantine", async (t) => {
   for (const testCase of [
@@ -3558,6 +3642,7 @@ test("schema 4 release transitions ownership to cooldown or quarantine", async (
   }
 });
 
+
 test("ambiguous schema 4 release reports the reservation persisted by a concurrent cleanup", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
   const concurrentReservation = lifecycleReservation(held, { reservationId: "concurrent-quarantine" });
@@ -3605,6 +3690,7 @@ test("ambiguous schema 4 release reports the reservation persisted by a concurre
   assert.equal(putCalls, 2);
 });
 
+
 test("ambiguous schema 4 release remains released when its cooldown expires before reconciliation", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
   const expiredCooldown = lifecycleReservation(held, {
@@ -3649,6 +3735,7 @@ test("ambiguous schema 4 release remains released when its cooldown expires befo
   assert.deepEqual(state.reservations, []);
 });
 
+
 test("schema 4 quarantine can be reclaimed only on the same runner", async () => {
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
   let state = lifecycleState([], [], [lifecycleReservation(prior)]);
@@ -3681,6 +3768,7 @@ test("schema 4 quarantine can be reclaimed only on the same runner", async () =>
   assert.equal(state.reservations.length, 0);
   assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-a"]);
 });
+
 
 test("same-runner quarantine recovery waits while a reduced limit leaves state over capacity", async () => {
   const originalNow = Date.now;
@@ -3727,6 +3815,7 @@ test("same-runner quarantine recovery waits while a reduced limit leaves state o
   assert.deepEqual(state.reservations.map((reservation) => reservation.runnerId), ["runner-a"]);
 });
 
+
 test("schema 4 quarantine never expires or admits a different runner during config outage", async () => {
   const originalNow = Date.now;
   let now = Date.parse("2026-06-06T00:01:00.000Z");
@@ -3767,6 +3856,7 @@ test("schema 4 quarantine never expires or admits a different runner during conf
   assert.equal(state.reservations[0].state, "quarantine");
   assert.deepEqual(state.queue, []);
 });
+
 
 test("schema 4 cooldown blocks cross-runner admission until it expires", async () => {
   const originalNow = Date.now;
@@ -3815,6 +3905,7 @@ test("schema 4 cooldown blocks cross-runner admission until it expires", async (
   assert.deepEqual(state.holders.map((holder) => holder.runnerId), ["runner-b"]);
 });
 
+
 test("manual confirmed recovery moves an exact quarantine into cooldown", async () => {
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
   let state = lifecycleState([], [], [lifecycleReservation(prior)]);
@@ -3838,6 +3929,7 @@ test("manual confirmed recovery moves an exact quarantine into cooldown", async 
   assert.equal(state.reservations[0].state, "cooldown");
   assert.ok(Date.parse(state.reservations[0].availableAt) > Date.now());
 });
+
 
 test("manual recovery accepts an ambiguous write when the reservation disappears", async () => {
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
@@ -3873,6 +3965,7 @@ test("manual recovery accepts an ambiguous write when the reservation disappears
   });
   assert.equal(putCalls, 2);
 });
+
 
 test("manual recovery rejects missing proof and non-active reservation IDs", async (t) => {
   const prior = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
@@ -3912,6 +4005,7 @@ test("manual recovery rejects missing proof and non-active reservation IDs", asy
     });
   }
 });
+
 
 test("resource lifecycle activation upgrades only drained schema 3 state", async (t) => {
   const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
@@ -3961,6 +4055,7 @@ test("resource lifecycle activation upgrades only drained schema 3 state", async
   }
 });
 
+
 test("schema 4 scheduled reaping quarantines stale holders", async () => {
   const stale = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-a");
   let state = lifecycleState([stale]);
@@ -3983,6 +4078,7 @@ test("schema 4 scheduled reaping quarantines stale holders", async () => {
   assert.equal(state.reservations[0].runnerId, "runner-a");
 });
 
+
 test("schema 4 post cleanup quarantines held ownership", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
   let state = lifecycleState([held]);
@@ -4004,6 +4100,7 @@ test("schema 4 post cleanup quarantines held ownership", async () => {
   assert.equal(state.reservations[0].state, "quarantine");
   assert.match(state.reservations[0].reason, /post-action cleanup/);
 });
+
 
 test("release report compatibility mapping rejects contradictory old and new inputs", () => {
   assert.deepEqual(parseReleaseReport({ resourceSafe: "true" }), {
@@ -4030,6 +4127,7 @@ test("release report compatibility mapping rejects contradictory old and new inp
     /reserved for confirmed.*20111/
   );
 });
+
 
 test("invalid release reports degrade to one safe quarantine report with stable error codes", async (t) => {
   const cases = [
@@ -4105,6 +4203,7 @@ test("invalid release reports degrade to one safe quarantine report with stable 
   }
 });
 
+
 test("the committed release entrypoint resolves an invalid report before state cleanup", () => {
   const runtimePath = path.join(__dirname, "..", ".github", "dist", "build-lock.js");
   const script = `
@@ -4146,6 +4245,7 @@ test("the committed release entrypoint resolves an invalid report before state c
   });
   assert.equal(result.stderr.includes("sentinel-invalid-reason"), false);
 });
+
 
 test("a contradictory confirmed 20111 report quarantines only exact schema 5 ownership before release fails", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
@@ -4220,6 +4320,7 @@ test("a contradictory confirmed 20111 report quarantines only exact schema 5 own
   assert.equal(state.activeIncident, null);
 });
 
+
 test("degraded queue-only and noop releases report exact outcomes without claiming quarantine", async (t) => {
   const resolution = resolveReleaseReport({
     cleanupStatus: "unknown",
@@ -4288,6 +4389,7 @@ test("degraded queue-only and noop releases report exact outcomes without claimi
   }
 });
 
+
 test("schema 5 global incidents round-trip and require immutable evidence provenance", () => {
   const incident = accountIncident();
   const normalized = normalizeState(accountHealthState([], [], [], incident), "wallstop-organization-builds");
@@ -4320,6 +4422,7 @@ test("schema 5 global incidents round-trip and require immutable evidence proven
     );
   }
 });
+
 
 test("schema 5 blocked release creates one immutable global incident", async () => {
   const held = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
@@ -4365,6 +4468,7 @@ test("schema 5 blocked release creates one immutable global incident", async () 
   assert.equal(state.reservations.length, 0);
   assert.equal(state.activeIncident.reason, "unity-account-limit-20111");
 });
+
 
 test("schema 5 clean releases preserve local evidence while reporting a pre-existing incident", async (t) => {
   const incident = accountIncident({
@@ -4442,6 +4546,7 @@ test("schema 5 clean releases preserve local evidence while reporting a pre-exis
   }
 });
 
+
 test("schema 5 uncertainty reasons remain runner-local and never create account incidents", async (t) => {
   for (const reason of [
     "unity-return-400006",
@@ -4481,6 +4586,7 @@ test("schema 5 uncertainty reasons remain runner-local and never create account 
     });
   }
 });
+
 
 test("schema 5 global incident blocks acquire immediately without growing the queue", async () => {
   const incident = accountIncident();
@@ -4525,6 +4631,7 @@ test("schema 5 global incident blocks acquire immediately without growing the qu
   assert.deepEqual(store.state().queue, []);
 });
 
+
 test("schema 5 immediate incident cleans only the caller's exact queued identity", async () => {
   const incident = accountIncident({ runnerId: "runner-c" });
   const unrelatedHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
@@ -4552,6 +4659,7 @@ test("schema 5 immediate incident cleans only the caller's exact queued identity
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
+
 test("schema 5 incident appearing during a wait removes the caller's exact queue identity", async () => {
   const unrelatedHolder = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
   const incident = accountIncident({ runnerId: unrelatedHolder.runnerId });
@@ -4578,6 +4686,7 @@ test("schema 5 incident appearing during a wait removes the caller's exact queue
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
+
 test("schema 5 incident published after admission is retracted before activation", async () => {
   const incident = accountIncident({ runnerId: "runner-b" });
   const store = accountHealthFetchStore(accountHealthState(), {
@@ -4602,6 +4711,7 @@ test("schema 5 incident published after admission is retracted before activation
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
+
 test("schema 5 incident after quarantine admission restores the exact quarantine", async () => {
   const incident = accountIncident({ runnerId: "runner-b" });
   const caller = withRunner(semaphoreHolder("owner/repo", "123", "playmode"), "runner-a");
@@ -4621,6 +4731,7 @@ test("schema 5 incident after quarantine admission restores the exact quarantine
   assert.deepEqual(store.state().reservations, [quarantine]);
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
+
 
 test("schema 5 incident cleanup failure reports a typed fail-closed result", async () => {
   const incident = accountIncident({ runnerId: "runner-c" });
@@ -4665,6 +4776,7 @@ test("schema 5 incident cleanup failure reports a typed fail-closed result", asy
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
+
 test("schema 5 post-admission cleanup failure forbids incident recovery until caller removal", async () => {
   const incident = accountIncident({ runnerId: "runner-b" });
   const store = accountHealthFetchStore(accountHealthState(), {
@@ -4705,6 +4817,7 @@ test("schema 5 post-admission cleanup failure forbids incident recovery until ca
   assert.equal(store.state().activeIncident.incidentId, incident.incidentId);
 });
 
+
 test("schema 5 incident recovery requires exact ID and portal proof then enters cooldown", async () => {
   const incident = accountIncident();
   let state = accountHealthState([], [], [], incident);
@@ -4731,6 +4844,7 @@ test("schema 5 incident recovery requires exact ID and portal proof then enters 
   assert.match(state.reservations[0].reason, new RegExp(incident.incidentId));
 });
 
+
 test("schema 5 incident recovery binds an omitted ID to the single active incident", async () => {
   const incident = accountIncident();
   let state = accountHealthState([], [], [], incident);
@@ -4755,6 +4869,7 @@ test("schema 5 incident recovery binds an omitted ID to the single active incide
   assert.match(state.reservations[0].reason, new RegExp(incident.incidentId));
 });
 
+
 test("schema 5 incident recovery rejects an omitted ID without an active incident", async () => {
   let writes = 0;
   await withMockedFetch(async (url, options = {}) => {
@@ -4773,6 +4888,7 @@ test("schema 5 incident recovery rejects an omitted ID without an active inciden
   });
   assert.equal(writes, 0);
 });
+
 
 test("schema 5 incident recovery freezes an omitted ID across CAS retries", async () => {
   const firstIncident = accountIncident({ runnerId: "runner-a" });
@@ -4799,6 +4915,7 @@ test("schema 5 incident recovery freezes an omitted ID across CAS retries", asyn
   });
   assert.equal(writes, 1);
 });
+
 
 test("schema 5 incident recovery rejects missing proof and mismatched incident IDs", async (t) => {
   const incident = accountIncident();
@@ -4830,6 +4947,7 @@ test("schema 5 incident recovery rejects missing proof and mismatched incident I
     });
   }
 });
+
 
 test("account health activation is a drained one-way schema 5 migration", async (t) => {
   const active = withRunner(semaphoreHolder("other/repo", "999", "editmode"), "runner-b");
@@ -4873,6 +4991,7 @@ test("account health activation is a drained one-way schema 5 migration", async 
     });
   }
 });
+
 
 test("peer timeline reducer derives peer, reservation, and incident events from state snapshots", () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
@@ -5053,6 +5172,7 @@ test("peer timeline reducer derives peer, reservation, and incident events from 
   }
 });
 
+
 test("peer timeline reducer truncates at its event ceiling and reports it", () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
   const holders = [self];
@@ -5067,6 +5187,7 @@ test("peer timeline reducer truncates at its event ceiling and reports it", () =
   assert.equal(events.length, 100);
   assert.equal(truncated, true);
 });
+
 
 test("release publishes a redacted peer timeline for its session window", async () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
@@ -5161,6 +5282,7 @@ test("release publishes a redacted peer timeline for its session window", async 
   assert.deepEqual(state.holders, []);
 });
 
+
 test("release keeps its outcome when peer timeline history cannot be read", async () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
   const state = lifecycleState([self]);
@@ -5201,6 +5323,7 @@ test("release keeps its outcome when peer timeline history cannot be read", asyn
   });
 });
 
+
 test("release reports a not-applicable peer timeline when it never held a session", async () => {
   const other = timelineHolder("other/repo", "999", "2026-06-06T00:00:00.000Z");
   const state = lifecycleState([other]);
@@ -5235,6 +5358,7 @@ test("release reports a not-applicable peer timeline when it never held a sessio
     });
   });
 });
+
 
 test("release marks the peer timeline partial when a history snapshot cannot be parsed", async () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
@@ -5295,6 +5419,7 @@ test("release marks the peer timeline partial when a history snapshot cannot be 
     });
   });
 });
+
 
 test("release spends its peer-timeline snapshot budget inside the session window", async () => {
   const self = timelineHolder("owner/repo", "123", "2026-06-06T00:00:00.000Z");
@@ -5379,6 +5504,12 @@ test("release spends its peer-timeline snapshot budget inside the session window
   });
 });
 
+
+// The lock state is decoded, reshaped, and encoded again on the next write, so
+// a lossy decode does not report a problem: it repairs a byte it cannot read
+// into U+FFFD and commits that. Nothing this runtime writes can produce such
+// a byte, so one means something else changed the state and admission fails
+// closed on evidence it cannot read exactly.
 test("readState fails closed on a lock state it cannot read as UTF-8", async (t) => {
   const state = (extra) => `{"lock":"wallstop-organization-builds","schemaVersion":5,"holders":[],"queue":[],"reservations":[],"activeIncident":null,"holder":null${extra}`;
   const cases = [
@@ -5440,6 +5571,11 @@ test("readState fails closed on a lock state it cannot read as UTF-8", async (t)
   }
 });
 
+
+// The peer timeline reads historical commits of the same lock state file. A
+// lossy decode there turns one undecodable byte in a holder id into U+FFFD and
+// reports a peer that does not exist, with no error and no gap. A commit the
+// runtime cannot read exactly is evidence it does not have, so it is a gap.
 test("the peer timeline reports a gap for a state commit it cannot read", async (t) => {
   // No `holders` array: `peerTimelineSnapshot` prefers that array when it is
   // present, so an empty one would hide the `holder` object this test writes.

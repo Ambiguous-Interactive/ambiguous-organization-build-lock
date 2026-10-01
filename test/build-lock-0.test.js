@@ -25,12 +25,14 @@ const {
   semaphoreActionEnv,
 } = require("./build-lock-support.js");
 
+
 test("workflow error commands escape percent sequences and collapse line breaks", () => {
   assert.equal(
     workflowCommandData("source%0Ainjected\r\n::error::second"),
     "source%250Ainjected ::error::second"
   );
 });
+
 
 test("environment file parser fails closed on malformed output lines", async () => {
   await withTempFile(async (file) => {
@@ -42,6 +44,7 @@ test("environment file parser fails closed on malformed output lines", async () 
     );
   });
 });
+
 
 test("acquire removes its queued request when the PR is superseded during the FIFO wait", async () => {
   const expectedHead = "a".repeat(40);
@@ -109,6 +112,7 @@ test("acquire removes its queued request when the PR is superseded during the FI
   assert.deepEqual(state.holders, []);
   assert.deepEqual(state.queue, []);
 });
+
 
 test("acquire periodically removes a superseded PR while capacity remains occupied", async () => {
   const originalNow = Date.now;
@@ -178,6 +182,7 @@ test("acquire periodically removes a superseded PR while capacity remains occupi
   assert.deepEqual(state.queue, []);
 });
 
+
 test("periodic PR authorization failure is terminal and cleans FIFO without lock-auth grace", async () => {
   const originalNow = Date.now;
   const expectedHead = "7".repeat(40);
@@ -235,6 +240,7 @@ test("periodic PR authorization failure is terminal and cleans FIFO without lock
   assert.equal(stateWrites, 2);
   assert.deepEqual(state.queue, []);
 });
+
 
 test("acquire reports a distinct terminal failure when supersession cleanup cannot be confirmed", async () => {
   const originalNow = Date.now;
@@ -311,6 +317,7 @@ test("acquire reports a distinct terminal failure when supersession cleanup cann
   assert.equal(state.queue.length, 1, "unconfirmed cleanup must not be reported as queue removal");
 });
 
+
 test("acquire retracts a just-admitted stale PR without creating a lifecycle reservation", async () => {
   const expectedHead = "c".repeat(40);
   const newerHead = "d".repeat(40);
@@ -378,6 +385,7 @@ test("acquire retracts a just-admitted stale PR without creating a lifecycle res
   assert.deepEqual(state.reservations, [], "known pre-activation retraction must not reduce capacity");
 });
 
+
 test("PR identity lookup failure happens before lock-state access", async () => {
   let lockStateAccesses = 0;
   await withTempFile(async (outputFile) => {
@@ -410,6 +418,7 @@ test("PR identity lookup failure happens before lock-state access", async () => 
   });
   assert.equal(lockStateAccesses, 0);
 });
+
 
 test("PR lookup timeout is terminal validation failure, not acquire cancellation", async () => {
   let lockStateAccesses = 0;
@@ -448,6 +457,7 @@ test("PR lookup timeout is terminal validation failure, not acquire cancellation
   }
   assert.equal(lockStateAccesses, 0);
 });
+
 
 test("stale PR cleanup preserves admission provenance", async (t) => {
   const expectedHead = "5".repeat(40);
@@ -532,6 +542,7 @@ test("stale PR cleanup preserves admission provenance", async (t) => {
   }
 });
 
+
 test("clean recovery CAS conflict cannot leak quarantine provenance into a later admission", async () => {
   const expectedHead = "8".repeat(40);
   const newerHead = "9".repeat(40);
@@ -591,6 +602,7 @@ test("clean recovery CAS conflict cannot leak quarantine provenance into a later
   assert.deepEqual(state.reservations, [], "the unrelated conflicted quarantine must not be resurrected");
 });
 
+
 test("PR lookup cancellation uses normal acquire cleanup without PR-failure outputs", async () => {
   const originalExit = process.exit;
   let exitCode = null;
@@ -644,6 +656,7 @@ test("PR lookup cancellation uses normal acquire cleanup without PR-failure outp
   assert.ok(stateReads >= 2, "normal cancellation cleanup must use its fresh cleanup signal");
   assert.deepEqual(state.queue, []);
 });
+
 
 test("PR cleanup cancellation uses normal acquire cleanup without PR-failure outputs", async (t) => {
   for (const testCase of [

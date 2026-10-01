@@ -53,7 +53,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/ci.sh tidy-modules",
       "go run ./cmd/workflow-credential-audit .",
       "node --test test/unity-darwin-requirement.test.js test/unity-license-return.test.js",
-      "node --test test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native-delete.test.js test/unity-cleanup-windows-native-rewrite.test.js test/unity-editor-action.test.js"
+      "node --test --test-concurrency=4 test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native-delete.test.js test/unity-cleanup-windows-native-rewrite.test.js test/unity-editor-action.test.js"
     ]
   ],
   [

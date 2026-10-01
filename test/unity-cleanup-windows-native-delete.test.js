@@ -1,24 +1,4 @@
-// The Windows-native half of the Unity cleanup evidence contract.
-//
-// One half of the Windows-native Unity cleanup evidence contract.
-//
-// Each test here spawns the committed PowerShell helper, and Windows PowerShell
-// compiles the helper's C# with Add-Type, which shells out to csc.exe. One spawn
-// costs about fifteen to thirty seconds on a hosted runner.
-//
-// Both halves used to sit in one file, and node --test runs the tests inside one
-// file one after another. That made them seventy-six of the seventy-eight seconds
-// of a Windows CI test step, and the job the slowest one on every pull request.
-//
-// They are in two files of their own so the runner gives each a process. A
-// first attempt put them in one shared file and the job still took ninety-seven
-// seconds; the log showed both tests finishing one after the other.
-//
-// The split moves no assertion. This half keeps its fixture, its skip, and the
-// real helper.
-//
-// The split moves no assertion. Both tests keep their fixture, their skip, and
-// the real helper.
+// Windows-native deletion of real claimed central evidence.
 "use strict";
 
 const test = require("node:test");
@@ -30,6 +10,18 @@ const {
   centralEvidenceFixture,
   centralInputs
 } = require("./unity-cleanup-evidence-support.js");
+
+// Windows PowerShell compiles the committed helper's C# with Add-Type, which
+// shells out to csc.exe, so one spawn costs about fifteen to thirty seconds on
+// a hosted runner. This test spawns it once.
+//
+// `node --test` runs the tests inside one file one after another, so this test
+// and its sibling used to run in sequence and take seventy-six of the
+// seventy-eight seconds of the Windows CI test step. They are in files of their
+// own so each gets a process.
+//
+// The split moves no assertion. This half keeps its fixture, its skip, and the
+// real helper.
 
 test(
   "Windows helper deletes real claimed central evidence by native handle",

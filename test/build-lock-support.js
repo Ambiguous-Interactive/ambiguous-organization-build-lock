@@ -1,13 +1,13 @@
 // Shared fixtures for the build lock contract.
 //
-// The 216 top-level tests in this contract used to sit in one file, and
-// `node --test` runs the tests inside a file one after another. That file took
-// about six seconds, which made it the slowest file in the suite once the
-// workflow shell contract was split. Splitting it across three files lets the
-// runner give each file a process.
+// `node --test` runs each file in its own process and those processes at the
+// same time, but it runs the tests inside one file one after another. The 216
+// top-level statements here used to sit in one file, which took about six
+// seconds and made it the slowest file in the suite once the workflow shell
+// contract was split.
 //
-// Nothing here is a test. The bindings, helpers, and fixture tables live here so
-// the split moves no assertion.
+// Nothing in this file is a test. The bindings, the helpers, and the fixture
+// tables live here so the split moves no assertion and no rationale comment.
 "use strict";
 
 const assert = require("node:assert/strict");
@@ -57,6 +57,8 @@ const testAppKeys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
 
 const testAppPrivateKey = testAppKeys.privateKey.export({ type: "pkcs8", format: "pem" });
 
+// Older unit fixtures exercise the supported schema-1 singleton shape. New schema-2
+// and schema-3 behavior uses the explicit semaphoreState helper below.
 function emptyState(lockName) {
   return productionEmptyState(lockName, 1);
 }
@@ -241,6 +243,12 @@ async function withMockedFetch(fetchImplementation, callback) {
     console.log = previousLog;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Configurable parallelism (issue #13): the lock acts as a counting semaphore.
+// locks/<lock-name>.config.json on the lock repository's default branch sets
+// {"maxHolders": N}; missing or invalid config fails closed to a single holder.
+// ---------------------------------------------------------------------------
 
 const SEMAPHORE_STATE_PATH = "/repos/o/r/contents/locks/wallstop-organization-builds.json";
 
@@ -431,6 +439,12 @@ function accountHealthFetchStore(initialState, options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Peer timeline (issue #269): the release publishes redacted lock activity for
+// the held session window so a consumer can correlate a session-phase casualty
+// with peer holder activity without reading any raw log.
+// ---------------------------------------------------------------------------
+
 function timelineHolder(repository, runId, acquiredAt) {
   return {
     holderId: `${repository}:${runId}:perf-benchmarks:editmode`,
@@ -456,7 +470,6 @@ module.exports = {
   childProcess,
   crypto,
   fs,
-  os,
   path,
   acquire,
   acquirePollDelayMs,
@@ -469,7 +482,6 @@ module.exports = {
   createGitHubAppAuth,
   credential,
   dedupeQueueEntries,
-  productionEmptyState,
   evaluateStale,
   installAcquireSignalCleanup,
   isRetryableResponse,
@@ -497,7 +509,6 @@ module.exports = {
   emptyState,
   jsonResponse,
   htmlResponse,
-  actionEnvNames,
   authorizedConsumerEnv,
   acquireOutputNames,
   releaseOutputNames,
