@@ -38,13 +38,14 @@ by reverting only the five production files and running the new tests.
 | `audit-merge-policy --validate-only`, both files | Exit 2, with a message that named the wrong cause. |
 | `audit-merge-policy` live ruleset detail | Published `complete: true`, with one finding that named the wrong cause. |
 
-Seven of those rows were the wrong verdict, and they are the two places where a
+Seven of those rows were the wrong verdict. They are the three places where a
 gate certified or published evidence it could not read: the enrollment audit
 certified a corrupted policy as valid, the registry and the attestation accepted
 values no validator inspects, and the live response decoder published
-`complete: true`. The last two rows were already refused, by an ASCII pattern, so
-the guard only names the real cause. The tests record which is which, so a
-future reader does not have to measure it again.
+`complete: true`. The other two rows name a field an ASCII pattern already
+validates, so they were refused and the guard only names the real cause. The
+tests record which is which, so a future reader does not have to measure it
+again.
 
 ## Where the refusal belongs
 
@@ -68,8 +69,9 @@ real.
 Checked, with the reason each one is already safe:
 
 - The YAML decoder refuses invalid UTF-8 itself, for the enrollment analyzer
-  and for the credential-literal audit. Measured:
-  `invalid leading UTF-8 octet (value: 255)`.
+  and for the credential-literal audit's credential mode. Measured:
+  `invalid leading UTF-8 octet (value: 255)`. The automation mode does not use
+  it, and is listed below.
 - `cmd/lock-recovery-audit` validates the lock name, the run identity, and the
   provenance text, then compares a digest it recomputes. A substitution breaks
   the digest comparison, so it fails closed.
@@ -176,3 +178,7 @@ input flipped from refused to accepted.
 The credential-literal audit in its `unity-automation` mode is not described in
 `docs/`, so its new refusal is recorded here and in the byte-safety sample
 instead of a new section.
+
+A refusal that lands on a consumer file names the repository and not the file,
+so the finding-code row sends an operator to the consumer checkout. Naming the
+file is #317.

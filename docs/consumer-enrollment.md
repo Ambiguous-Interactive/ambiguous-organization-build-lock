@@ -562,7 +562,7 @@ edits.
 | `release-inputs-not-typed` | Bind the release inputs to the exact acquire step outputs. See item 7. |
 | `release-not-always` | Run the release step with literal `always()`. See item 7. |
 | `repository-analysis-incomplete` | No consumer edit. The audit failed closed while analyzing this repository. Central operators diagnose the run. |
-| `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also names a file the audit cannot read exactly. Re-save that file as UTF-8. |
+| `repository-retrieval-incomplete` | Usually no consumer edit: the audit failed closed before reading this repository, and central operators repair the run. It also covers a file or path in this repository that is not valid UTF-8. The finding names the repository, not the file, so an operator finds that file in the consumer checkout. #317 owns naming it. |
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
