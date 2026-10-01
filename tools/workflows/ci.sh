@@ -7,7 +7,10 @@ case "${1:-}" in
     for action_file in .github/dist/*.js; do
       node --check "${action_file}"
     done
-    for test_file in test/*.test.js; do
+    # Every JavaScript file under test/, not only the *.test.js ones. A shard is
+    # small enough that a support module can hold a declaration no shard
+    # reaches, and node --check has to see that file on its own.
+    for test_file in test/*.js; do
       node --check "${test_file}"
     done
     ;;

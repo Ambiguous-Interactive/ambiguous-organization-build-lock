@@ -119,8 +119,14 @@ jobs:
         with:
           node-version: "24"
 
+      # The native cleanup tests are in a file of their own so `node --test`
+      # gives each one a process. Windows PowerShell compiles the committed
+      # helper's C# with Add-Type, which costs about fifteen to thirty seconds
+      # per spawn, so running them one after the other made this job the slowest
+      # one on every pull request. Run 36904676960 measured seventy-six of the
+      # ninety-three seconds here.
       - name: Run Windows action tests
         shell: pwsh
-        run: node --test test/unity-cleanup-evidence.test.js test/unity-editor-action.test.js
+        run: node --test test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native.test.js test/unity-editor-action.test.js
         env:
           UNITY_DELETE_TEST_DIAGNOSTICS: "true"

@@ -1,166 +1,37 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const runtimePath = path.join(
-  __dirname,
-  "..",
-  ".github",
-  "dist",
-  "classify-unity-cleanup-evidence.js"
-);
+const support = require("./unity-cleanup-evidence-support.js");
 const {
-  MAX_EVIDENCE_FILES,
-  MAX_EVIDENCE_TOTAL_BYTES,
-  MAX_VISITED_ENTRIES,
   claimConsumedReturnEvidence,
+  deleteClaimedReturnEvidence,
   classifyEvidence,
   collectEvidence,
-  deleteClaimedReturnEvidence,
   environmentInputs,
   identityBoundDeleteWindows,
   inspectReturnEvidenceTarget,
   parseInputs,
   resolveReturnEvidenceTarget,
-  run
-} = require(runtimePath);
+  runtimePath,
+  ENTITLEMENT,
+  ULF,
+  PROOF,
+  runClassifier,
+  centralEvidenceFixture,
+  centralEvidenceRemains,
+  centralInputs,
+  MAX_EVIDENCE_FILES,
+  MAX_EVIDENCE_TOTAL_BYTES,
+  MAX_VISITED_ENTRIES
+} = support;
 
-const ENTITLEMENT = "[Licensing::Module] Successfully returned the entitlement license";
-const ULF = "[Licensing::Client] Successfully returned ULF license with serial number : SC-REDACTED";
-const PROOF = `${ENTITLEMENT}\n${ULF}\n`;
 const SKIP = "[Licensing::Module] Error: Serial number unavailable for ULF return; skipping operation";
-
-function centralEvidenceFixture(t, prefix = "unity-cleanup-action-") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const runnerTemp = path.join(root, "runner-temp");
-  const evidenceDirectory = path.join(runnerTemp, "unity-return-12345-2-qora");
-  const returnLog = path.join(evidenceDirectory, "return-license.log");
-  const outputPath = path.join(root, "output.txt");
-  const environment = {
-    GITHUB_RUN_ATTEMPT: "2",
-    GITHUB_RUN_ID: "12345",
-    RUNNER_TEMP: runnerTemp
-  };
-  fs.mkdirSync(evidenceDirectory, { recursive: true });
-  fs.writeFileSync(returnLog, PROOF);
-  return { environment, evidenceDirectory, outputPath, returnLog, root, runnerTemp };
-}
-
-function centralInputs(item) {
-  return {
-    "return-log-path": item.returnLog,
-    "return-command-completed": "true",
-    "return-exit-code": "0",
-    "evidence-capture-complete": "true",
-    "return-log-digest": crypto
-      .createHash("sha256")
-      .update(fs.readFileSync(item.returnLog))
-      .digest("hex"),
-    "supplemental-evidence-paths": ""
-  };
-}
-
-function centralEvidenceRemains(item) {
-  if (fs.existsSync(item.returnLog)) {
-    return true;
-  }
-  return fs.readdirSync(item.runnerTemp).some((name) =>
-    name.startsWith(`${path.basename(item.evidenceDirectory)}.consuming-`)
-    && fs.existsSync(path.join(item.runnerTemp, name, "return-license.log"))
-  );
-}
-
-function modelIdentityDelete(claimedTarget, claimedIdentity, io = fs, pathImpl = path) {
-  const observed = inspectReturnEvidenceTarget(claimedTarget, io, pathImpl);
-  for (const name of ["evidenceDirectoryStat", "returnLogStat"]) {
-    assert.equal(observed[name].dev, claimedIdentity[name].dev);
-    assert.equal(observed[name].ino, claimedIdentity[name].ino);
-    assert.equal(observed[name].birthtimeNs, claimedIdentity[name].birthtimeNs);
-  }
-  io.unlinkSync(claimedTarget.returnLogPath);
-  io.rmdirSync(claimedTarget.evidenceDirectory);
-}
-
-function runClassifier(options) {
-  const io = options.io || fs;
-  const pathImpl = options.pathImpl || path;
-  return run({
-    ...options,
-    deleteByIdentity: options.deleteByIdentity || (
-      (claimedTarget, claimedIdentity) =>
-        modelIdentityDelete(claimedTarget, claimedIdentity, io, pathImpl)
-    )
-  });
-}
-
-function restoreWindowsFileTimes(filePath, stat) {
-  const toFileTime = (nanoseconds) =>
-    (nanoseconds / 100n + 116444736000000000n).toString();
-  const source = [
-    "using System;",
-    "using System.ComponentModel;",
-    "using System.Runtime.InteropServices;",
-    "using Microsoft.Win32.SafeHandles;",
-    "public static class RestoreBasicFileInformation {",
-    "  [StructLayout(LayoutKind.Sequential)]",
-    "  private struct Basic {",
-    "    public long CreationTime;",
-    "    public long LastAccessTime;",
-    "    public long LastWriteTime;",
-    "    public long ChangeTime;",
-    "    public uint Attributes;",
-    "  }",
-    "  [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode, SetLastError=true)]",
-    "  private static extern SafeFileHandle CreateFile(string p, uint a, uint s, IntPtr x, uint d, uint f, IntPtr t);",
-    "  [DllImport(\"kernel32.dll\", SetLastError=true)]",
-    "  [return: MarshalAs(UnmanagedType.Bool)]",
-    "  private static extern bool SetFileInformationByHandle(SafeFileHandle h, int c, ref Basic i, uint n);",
-    "  public static void Restore(string path, long creation, long access, long write, long change) {",
-    "    using (SafeFileHandle h = CreateFile(path, 0x100, 7, IntPtr.Zero, 3, 0x200000, IntPtr.Zero)) {",
-    "      if (h.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());",
-    "      Basic i = new Basic { CreationTime=creation, LastAccessTime=access, LastWriteTime=write, ChangeTime=change, Attributes=0 };",
-    "      if (!SetFileInformationByHandle(h, 0, ref i, (uint)Marshal.SizeOf(typeof(Basic))))",
-    "        throw new Win32Exception(Marshal.GetLastWin32Error());",
-    "    }",
-    "  }",
-    "}"
-  ].join("\n");
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -TypeDefinition $env:RESTORE_SOURCE -Language CSharp",
-    "[RestoreBasicFileInformation]::Restore(",
-    "  $env:TARGET_PATH,",
-    "  [long]$env:TARGET_BIRTHTIME,",
-    "  [long]$env:TARGET_ATIME,",
-    "  [long]$env:TARGET_MTIME,",
-    "  [long]$env:TARGET_CTIME",
-    ")"
-  ].join("\n");
-  childProcess.execFileSync(
-    "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    {
-      env: {
-        RESTORE_SOURCE: source,
-        SystemRoot: "C:\\Windows",
-        TARGET_ATIME: toFileTime(stat.atimeNs),
-        TARGET_BIRTHTIME: toFileTime(stat.birthtimeNs),
-        TARGET_CTIME: toFileTime(stat.ctimeNs),
-        TARGET_MTIME: toFileTime(stat.mtimeNs),
-        TARGET_PATH: filePath
-      },
-      stdio: "ignore",
-      windowsHide: true
-    }
-  );
-}
 
 const LICENSING_CODES_CHECKED = "20111,20113,400006";
 
@@ -886,61 +757,6 @@ test("Windows identity deletion invokes the private handle-based helper with exa
     /requires Windows/
   );
 });
-
-test(
-  "Windows helper deletes real claimed central evidence by native handle",
-  { skip: process.platform !== "win32" },
-  (t) => {
-    const item = centralEvidenceFixture(t, "unity-cleanup-windows-native-");
-    const result = run({
-      inputs: centralInputs(item),
-      outputPath: item.outputPath,
-      environment: item.environment,
-      log: () => {}
-    });
-    assert.equal(result.classificationComplete, true);
-    assert.equal(fs.existsSync(item.returnLog), false);
-    assert.equal(fs.existsSync(item.evidenceDirectory), false);
-  }
-);
-
-test(
-  "Windows helper rejects a same-size rewrite with all metadata restored",
-  { skip: process.platform !== "win32" },
-  (t) => {
-    const item = centralEvidenceFixture(t, "unity-cleanup-windows-change-time-");
-    const inputs = centralInputs(item);
-    let mutatedPath;
-    assert.throws(() => run({
-      inputs,
-      outputPath: item.outputPath,
-      environment: item.environment,
-      deleteByIdentity(claimedTarget, claimedIdentity) {
-        mutatedPath = claimedTarget.returnLogPath;
-        const expected = claimedIdentity.returnLogStat;
-        fs.writeFileSync(mutatedPath, Buffer.alloc(Number(expected.size), 88));
-        restoreWindowsFileTimes(mutatedPath, expected);
-        const restored = fs.lstatSync(mutatedPath, { bigint: true });
-        assert.equal(restored.dev, expected.dev);
-        assert.equal(restored.ino, expected.ino);
-        assert.equal(restored.size, expected.size);
-        assert.equal(restored.birthtimeNs, expected.birthtimeNs);
-        assert.equal(restored.mtimeNs, expected.mtimeNs);
-        assert.equal(restored.ctimeNs, expected.ctimeNs);
-        identityBoundDeleteWindows(
-          claimedTarget,
-          claimedIdentity,
-          inputs["return-log-digest"]
-        );
-      },
-      log: () => {}
-    }), /Identity-bound return evidence deletion failed/);
-    assert.equal(fs.existsSync(mutatedPath), true);
-    const outputs = fs.readFileSync(item.outputPath, "utf8");
-    assert.match(outputs, /^classification-complete=false$/m);
-    assert.doesNotMatch(outputs, /^classification-complete=true$/m);
-  }
-);
 
 test("unsafe deletion shapes fail closed before completed outputs", async (t) => {
   await t.test("symbolic-link ancestry", { skip: process.platform === "win32" }, () => {
