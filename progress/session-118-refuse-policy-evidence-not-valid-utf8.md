@@ -38,10 +38,13 @@ by reverting only the five production files and running the new tests.
 | `audit-merge-policy --validate-only`, both files | Exit 2, with a message that named the wrong cause. |
 | `audit-merge-policy` live ruleset detail | Published `complete: true`, with one finding that named the wrong cause. |
 
-Three of those rows are the wrong verdict, and they are the fields no
-validator inspects. The rest were already refused, by an ASCII pattern, so the
-guard only names the real cause. The tests record which is which, so a future
-reader does not have to measure it again.
+Seven of those rows were the wrong verdict, and they are the two places where a
+gate certified or published evidence it could not read: the enrollment audit
+certified a corrupted policy as valid, the registry and the attestation accepted
+values no validator inspects, and the live response decoder published
+`complete: true`. The last two rows were already refused, by an ASCII pattern, so
+the guard only names the real cause. The tests record which is which, so a
+future reader does not have to measure it again.
 
 ## Where the refusal belongs
 
@@ -57,9 +60,10 @@ reading, so the guard adds no new failure path.
 
 ## The sweep, and the two places it was wrong
 
-Eight other Go read paths were checked. Five needed no change, and the first
-version of this record got two of them wrong, and missed one. All three were
-found by review rounds, and two were real.
+Eight read paths were checked, in the entries below. The YAML entry covers two
+tools. Five needed no change, the first version of this record got two of them
+wrong, and it missed one. All three were found by review rounds, and two were
+real.
 
 Checked, with the reason each one is already safe:
 
@@ -157,6 +161,7 @@ as before.
 | A table row that depends on a validator was not pinned, so a weakened validator kept the test green | Fixed. Both directions are asserted, and the weakening was measured. |
 | This record said four commands read the reviewed policy | Wrong. Three commands and one library re-parse. Fixed. |
 | This record counted 15 table rows, and the sweep list did not match its own count | Wrong. Fixed here. |
+| This record said three of the nine measured rows were the wrong verdict | Wrong. Seven were. The sentence named the free-text fields and missed the two gates that certified or published unreadable evidence. |
 | The 15 mutated inputs in the sentence below were measured by a review round, not by this session | Corrected. The claim is attributed where it belongs. |
 | A policy over the size bound and also not valid UTF-8 is refused on its size only | Accepted. Both refusals exit 2 and write nothing, so the bound is checked first, and the runbook now says so. |
 
