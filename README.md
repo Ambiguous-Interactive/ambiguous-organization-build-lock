@@ -298,6 +298,21 @@ explicit release, post-action, or scheduled-reaper fallback, then confirm the
 caller is absent before rerunning. Empty PR inputs on push and dispatch do not
 perform PR API calls.
 
+A slow acquire has two possible causes, and acquire publishes each one separately
+so an operator can tell them apart without reading logs (issue #53 item 6):
+
+| Output | Meaning |
+| --- | --- |
+| `runner-wait-ms` | Time the job waited for a GitHub runner before the step could start. Measured from the exact job's own Actions timeline. Empty when GitHub records no provable timeline; never `0` for an unmeasured wait. |
+| `wait-ms` | Time this acquire step spent before its outcome. It covers the organization FIFO wait and the action's own setup reads, and it excludes the runner wait above. |
+| `queue-position` | 1-based FIFO position at the final poll. `0` when the caller never queued, because it already held the lock or admission was refused before the queue. |
+| `attempts` | Poll-loop iterations. A value above `1` means the caller queued at least once. |
+
+Every outcome path reports the same two phases in the job summary. A caller that
+polled more than once also gets the last observation that actually withheld the
+lock, naming the blocking holder or reservation. The phases carry only elapsed
+milliseconds and a queue position; no credential data is published.
+
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The return wrapper
 owns command invocation and bounded raw-log capture; it must not classify its own

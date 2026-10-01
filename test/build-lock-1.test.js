@@ -6,6 +6,7 @@ const {
   assert,
   crypto,
   fs,
+  path,
   acquire,
   api,
   authorizeCaller,
@@ -2079,6 +2080,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
   let calls = [];
 
   await withTempFile(async (outputFile) => {
+    const summaryFile = path.join(path.dirname(outputFile), "step-summary");
+    fs.writeFileSync(summaryFile, "", "utf8");
     await withActionEnv(
       {
         GITHUB_REPOSITORY: "owner/repo",
@@ -2086,7 +2089,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
         GITHUB_RUN_ATTEMPT: "2",
         GITHUB_WORKFLOW: "Perf",
         GITHUB_JOB: "perf-benchmarks",
-        GITHUB_OUTPUT: outputFile
+        GITHUB_OUTPUT: outputFile,
+        GITHUB_STEP_SUMMARY: summaryFile
       },
       async () => {
         await withMockedFetch(async (url, options = {}) => {
@@ -2135,6 +2139,13 @@ test("acquire succeeds idempotently when this run already holds the lock", async
     assert.equal(outputs["state-sha"], "state-sha");
     assert.equal(outputs.attempts, "1");
     assert.equal(outputs["stale-recovered"], "false");
+    // This caller never queued, so it has no queue position, and no github-token means
+    // its runner wait could not be measured. Neither may be reported as a measured zero.
+    assert.equal(outputs["queue-position"], "0");
+    assert.equal(outputs["runner-wait-ms"], "");
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    assert.match(summary, /github-runner-wait-ms=unmeasured\./);
+    assert.doesNotMatch(summary, /queue-position/);
   });
 
   assert.deepEqual(
@@ -2869,6 +2880,101 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
 
   assert.deepEqual(state.queue, []);
   assert.equal(state.holder.holderId, "other/repo:999:perf-benchmarks:editmode");
+});
+
+
+// Issue #53 item 6: an operator must be able to tell a GitHub-runner wait from an
+// organization FIFO wait, and a wait that was survived has to be explained on the
+// success path too, not only on timeout.
+test("acquire publishes both wait phases and explains the wait it survived", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  let peerReleased = false;
+  let releaseOnNextRead = false;
+  let state = semaphoreState([semaphoreHolder("other/repo", "888", "editmode")]);
+
+  Date.now = () => {
+    now += 30000;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      const summaryFile = path.join(path.dirname(outputFile), "step-summary");
+      fs.writeFileSync(summaryFile, "", "utf8");
+      await withActionEnv(
+        { ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile, GITHUB_STEP_SUMMARY: summaryFile },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                return base64Content({ maxHolders: 1 }, "cfg");
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  releaseOnNextRead = true;
+                  return jsonResponse(200, { content: { sha: "state-after-write" } });
+                }
+                if (releaseOnNextRead && !peerReleased) {
+                  // The peer releases its slot but leaves this caller's queue entry.
+                  peerReleased = true;
+                  state = { ...semaphoreState([]), queue: state.queue };
+                }
+                return base64Content(state, "state-sha");
+              }
+              if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+                return jsonResponse(200, {
+                  total_count: 1,
+                  jobs: [
+                    {
+                      id: 77,
+                      runner_name: "runner-a",
+                      status: "in_progress",
+                      created_at: "2026-06-06T00:00:00.000Z",
+                      started_at: "2026-06-06T00:04:30.000Z"
+                    }
+                  ]
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+                return jsonResponse(200, { status: "in_progress", conclusion: null });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await acquire(semaphoreConfig({
+                githubToken: "gh-token",
+                runnerId: "runner-a",
+                timeoutMinutes: 30
+              }));
+
+              assert.match(logs.join("\n"), /GitHub runner wait before this step: 270000 ms/);
+            });
+          });
+        }
+      );
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "true");
+      assert.equal(outputs["runner-wait-ms"], "270000");
+      assert.equal(outputs["queue-position"], "1");
+      assert.equal(outputs.attempts, "2");
+      assert.ok(Number(outputs["wait-ms"]) > 0, "an acquire that polled twice must report its own wait");
+
+      const summary = fs.readFileSync(summaryFile, "utf8");
+      assert.match(summary, /github-runner-wait-ms=270000/);
+      assert.match(summary, /holder=other\/repo:888:perf-benchmarks:editmode/);
+      assert.match(summary, /queue-position=1/);
+    });
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 

@@ -61,7 +61,22 @@ outputs:
   state-sha:
     description: Lock-state file SHA after acquire.
   wait-ms:
-    description: Milliseconds waited before acquiring.
+    description: >-
+      Milliseconds this acquire step spent before its outcome, measured from the start
+      of the step. It covers the organization FIFO wait and this action's own setup
+      reads, and it excludes the time before the job reached a runner, which
+      runner-wait-ms reports.
+  runner-wait-ms:
+    description: >-
+      Milliseconds the job waited for a GitHub runner before this step could start,
+      measured from the exact job's own Actions timeline. Empty when GitHub records no
+      provable job timeline. Never zero for an unmeasured wait, because zero would
+      read as no runner wait.
+  queue-position:
+    description: >-
+      1-based organization FIFO position of this caller at its final poll, and 0 when
+      the caller never queued because it already held the lock or admission was
+      refused before the queue.
   attempts:
     description: CAS attempts.
   stale-recovered:

@@ -32,6 +32,8 @@ const acquireOutputKeys = [
   "holder-id",
   "state-sha",
   "wait-ms",
+  "runner-wait-ms",
+  "queue-position",
   "attempts",
   "stale-recovered",
   "quarantine-recovered",
