@@ -210,10 +210,11 @@ file and names its syntax error; a check placed earlier reports a cause
 the operator cannot act on.
 
 Measure the other readers instead of assuming they share a fate. This
-repository's three Go readers substituted the value. Node did not, because
-a JavaScript string holds a lone surrogate, so `JSON.parse` and
-`JSON.stringify` returned the escape unchanged. `jq` refused the whole
-file. One defect, three answers, and only the Go one lost a value.
+repository's Go readers substituted the value. Node did not, because a
+JavaScript string holds a lone surrogate and `JSON.stringify` writes it
+back as an escape. `jq` stopped on an escaped high surrogate but
+substituted an escaped low surrogate. One defect, three answers, and the
+readers disagreed on half of it.
 
 Related: `testing-and-validation` owns the red result a regression test needs.
 `operations-and-documentation` owns the operational contract that records a

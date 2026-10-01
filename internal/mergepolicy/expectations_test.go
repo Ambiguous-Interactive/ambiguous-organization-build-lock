@@ -215,3 +215,18 @@ func oneLoneSurrogateEscapeIn(t *testing.T, content []byte, fragment string) []b
 func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
+
+// The escape guard runs after the decode, so a file that is not well-formed
+// JSON still gets the decoder's own message. Every other assertion still holds
+// for a damaged file, so without this the ordering is not pinned.
+func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
+	escaped := oneLoneSurrogateEscapeIn(
+		t, []byte(expectationsContent(validExpectationBody())),
+		`"organization": "Ambiguous-Interactive"`,
+	)
+	truncated := escaped[:len(escaped)-8]
+	if _, err := ParseExpectations(truncated); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}

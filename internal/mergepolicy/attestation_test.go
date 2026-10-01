@@ -360,3 +360,18 @@ func TestParseAttestationRejectsAnEscapedLoneSurrogate(t *testing.T) {
 		})
 	}
 }
+
+// The escape guard runs after the decode, so a file that is not well-formed
+// JSON still gets the decoder's own message. Every other assertion still holds
+// for a damaged file, so without this the ordering is not pinned.
+func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
+	escaped := oneLoneSurrogateEscapeIn(
+		t, []byte(validAttestationContent()),
+		`"rulesetName": "Required CI (default branch)"`,
+	)
+	truncated := escaped[:len(escaped)-8]
+	if _, err := ParseAttestation(truncated, "Ambiguous-Interactive/example"); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}

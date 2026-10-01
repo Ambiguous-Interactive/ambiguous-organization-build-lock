@@ -722,3 +722,24 @@ func oneLoneSurrogateEscapeIn(content []byte, fragment string) []byte {
 func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
+
+// The escape guard runs after the decode, so a file that is not well-formed
+// JSON still gets the decoder's own message. Without this, a guard placed
+// earlier reports a cause the operator cannot act on, and this suite would not
+// notice: the file is damaged either way, so every other assertion still holds.
+func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
+	content := surrogateRegistryFixture(t)
+	// Truncate the file after a well-formed escaped lone surrogate, so the
+	// document carries the escape the guard looks for and is also truncated.
+	truncated := bytes.Replace(
+		content,
+		[]byte(`"owner":"unity-builder-maintainers"`),
+		[]byte(`"owner":"\ud800"`),
+		1,
+	)
+	truncated = truncated[:len(truncated)-8]
+	if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
+		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}
