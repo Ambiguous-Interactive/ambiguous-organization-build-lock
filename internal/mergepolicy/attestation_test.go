@@ -361,9 +361,11 @@ func TestParseAttestationRejectsAnEscapedLoneSurrogate(t *testing.T) {
 	}
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Every other assertion still holds
-// for a damaged file, so without this the ordering is not pinned.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Every other assertion still holds for a
+// damaged file, so without this the ordering is not pinned. Both doors carry a
+// row: a row for the escape alone leaves the encoding arm free to move back
+// above the decode.
 func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	escaped := oneLoneSurrogateEscapeIn(
 		t, []byte(validAttestationContent()),
@@ -372,6 +374,12 @@ func TestParseAttestationNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	truncated := escaped[:len(escaped)-8]
 	if _, err := ParseAttestation(truncated, "Ambiguous-Interactive/example"); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+	unreadable := oneRawByteIn(t, []byte(validAttestationContent()), `"rulesetName": "Required CI (default branch)"`)
+	unreadable = unreadable[:len(unreadable)-8]
+	if _, err := ParseAttestation(unreadable, "Ambiguous-Interactive/example"); err == nil ||
+		strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
 	}
 }

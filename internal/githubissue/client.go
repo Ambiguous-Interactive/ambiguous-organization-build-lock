@@ -249,7 +249,10 @@ func (client *Client) RequestJSON(
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(result); err != nil {
-		return nil, fmt.Errorf("decode GitHub API response failed: %w", err)
+		// The message stays fixed. A JSON syntax error quotes a byte from the
+		// response, and this is the one reader of a response nobody here
+		// controls.
+		return nil, errors.New("decode GitHub API response failed")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {

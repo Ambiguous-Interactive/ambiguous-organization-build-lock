@@ -24,46 +24,7 @@ const maxRequiredContextsPerRepository = 32
 const (
 	MaxUnityEnrollmentPolicyBytes = 64 * 1024
 	UnityEnrollmentOrganization   = "Ambiguous-Interactive"
-
-	// MaxFindingCauseBytes bounds one refusal cause in the artifact and the run
-	// summary.
-	MaxFindingCauseBytes = 256
-	// FindingCauseAlphabet is the only text a refusal cause may carry. It is a
-	// regular-expression character-class fragment; consumers append the literal
-	// hyphen last so it can never form an accidental range.
-	FindingCauseAlphabet = "A-Za-z0-9_.+ /():?\";-"
 )
-
-// SanitizeFindingCause bounds one refusal cause and maps every rune outside
-// FindingCauseAlphabet to '?', so a cause built from a consumer-controlled path
-// always satisfies the issue contract. A path the audit refused to read is not
-// valid UTF-8, so a rune walk replaces each unreadable byte rather than
-// publishing a spelling nobody wrote.
-func SanitizeFindingCause(value string) string {
-	if len(value) > MaxFindingCauseBytes {
-		value = value[:MaxFindingCauseBytes]
-	}
-	var sanitized strings.Builder
-	for _, char := range value {
-		if isFindingCauseRune(char) {
-			sanitized.WriteRune(char)
-			continue
-		}
-		sanitized.WriteByte('?')
-	}
-	return sanitized.String()
-}
-
-func isFindingCauseRune(char rune) bool {
-	switch {
-	case char >= 'A' && char <= 'Z',
-		char >= 'a' && char <= 'z',
-		char >= '0' && char <= '9':
-		return true
-	default:
-		return strings.ContainsRune("_.+ /():?\";-", char)
-	}
-}
 
 var minimumUnityEnrollmentRepositories = map[string]bool{
 	"Ambiguous-Interactive/DoxReloaded":   false,
@@ -225,6 +186,9 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy must contain one JSON value")
 	}
+	// The guard runs before every content check. A file the decoder could
+	// not represent is refused as unreadable, so no value in it decides a
+	// verdict. The decoder already named its own syntax errors.
 	if err := jsonstrict.Refusal("unity enrollment policy", content); err != nil {
 		return UnityEnrollmentRegistry{}, err
 	}

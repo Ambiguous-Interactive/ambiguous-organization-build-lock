@@ -475,14 +475,14 @@ func TestReadAuditRefusesACauseOutsideTheSanitizedAlphabet(t *testing.T) {
 		"no cause":    "",
 		"reason":      "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
 		"with quotes": `policy file ".github/workflows/unity.yml" is not valid UTF-8`,
-		"longest":     strings.Repeat("a", enrollment.MaxFindingCauseBytes),
+		"longest":     strings.Repeat("a", jsonstrict.MaxCauseBytes),
 	}
 	refused := map[string]string{
 		"newline":     "load exact snapshot failed\ncredential=value",
 		"backtick":    "load exact snapshot `failed`",
 		"pipe":        "load exact snapshot | failed",
 		"non ascii":   "load exact snapshot failed: naïve ✨",
-		"oversized":   strings.Repeat("a", enrollment.MaxFindingCauseBytes+1),
+		"oversized":   strings.Repeat("a", jsonstrict.MaxCauseBytes+1),
 		"empty table": "load exact snapshot ()\tfailed",
 	}
 	for name, cause := range accepted {
@@ -514,8 +514,8 @@ func TestReadAuditRefusesACauseOutsideTheSanitizedAlphabet(t *testing.T) {
 // it. The two reasons and a byte-lost file name are checked here, not one of
 // them.
 func TestEveryPublishedEnrollmentCauseIsPublishable(t *testing.T) {
-	publishable := regexp.MustCompile("^[" + enrollment.FindingCauseAlphabet + "]{0," +
-		strconv.Itoa(enrollment.MaxFindingCauseBytes) + "}$")
+	publishable := regexp.MustCompile("^[" + jsonstrict.CauseAlphabet + "]{0," +
+		strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$")
 	causes := []string{
 		"load exact snapshot: tree path %q at 0123456789abcdef is not valid UTF-8",
 		"load exact snapshot: policy file scripts/unity/editor\xff-check.ps1 at 0123456789abcdef is not valid UTF-8",
@@ -524,7 +524,7 @@ func TestEveryPublishedEnrollmentCauseIsPublishable(t *testing.T) {
 		causes = append(causes, "lock state "+reason)
 	}
 	for _, cause := range causes {
-		sanitized := enrollment.SanitizeFindingCause(cause)
+		sanitized := jsonstrict.SanitizeCause(cause)
 		if !publishable.MatchString(sanitized) {
 			t.Errorf("cause %q sanitized to %q, which is outside the issue alphabet", cause, sanitized)
 		}

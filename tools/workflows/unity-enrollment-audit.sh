@@ -145,10 +145,17 @@ revalidate_heads() {
 
 # record_causes publishes every finding that names a refusal cause, so an
 # operator reads the file or the reason in the run summary instead of opening a
-# consumer checkout. The drift issue keeps counts and codes only, because a
-# cause can name a consumer-controlled file. The cause is sanitized to an
-# alphabet with no pipe and no newline, so the table needs no escaping. The
-# table is bounded; the retained artifact holds the complete set.
+# consumer checkout. The drift issue keeps counts, codes, and reviewed
+# expectation text, because a cause can name a consumer-controlled file.
+#
+# The analyzer sanitizes every cause to an alphabet with no pipe, no backtick,
+# and no newline, so the table needs no escaping. A finding with no cause has no
+# row here: a cause means the audit could not read its evidence, which is a
+# different problem from evidence that failed a rule.
+#
+# The table is bounded; the retained artifact holds the complete set. A jq
+# failure here must not skip the incomplete line below, so it is reported rather
+# than aborting the step.
 record_causes() {
   jq -r '
     [ .findings[] | select(((.cause // "") | length) > 0) ] as $causes
@@ -159,7 +166,8 @@ record_causes() {
         + (if $total > 20 then "\n_... and \($total - 20) more in the retained artifact._" else "" end)
         + "\n"
       end
-  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}" ||
+    echo "Refusal causes could not be read from the retained artifact." >> "${GITHUB_STEP_SUMMARY}"
 }
 
 record_counts() {

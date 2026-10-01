@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -726,81 +724,42 @@ func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Without this, a guard placed
-// earlier reports a cause the operator cannot act on, and this suite would not
-// notice: the file is damaged either way, so every other assertion still holds.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Without this, a guard placed earlier reports a
+// cause the operator cannot act on, and this suite would not notice: the file is
+// damaged either way, so every other assertion still holds. Both doors carry a
+// row. A row for the escape alone leaves the encoding arm free to move back
+// above the decode, because a byte the decoder cannot read is a different
+// precondition and no other row would catch it.
 func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	content := surrogateRegistryFixture(t)
-	// Truncate the file after a well-formed escaped lone surrogate, so the
-	// document carries the escape the guard looks for and is also truncated.
-	truncated := bytes.Replace(
-		content,
-		[]byte(`"owner":"unity-builder-maintainers"`),
-		[]byte(`"owner":"\ud800"`),
-		1,
-	)
-	truncated = truncated[:len(truncated)-8]
-	if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
-		strings.Contains(err.Error(), "lone surrogate") {
-		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
-	}
-}
-
-// The cause is built from a consumer-controlled path and reaches a retained
-// artifact and a run summary. Every rune outside FindingCauseAlphabet has to
-// become '?', and the length has to stay inside MaxFindingCauseBytes, or the
-// issue validator refuses the whole artifact and the alert never opens. The
-// alphabet row is the control: it shows the test would also accept a value the
-// sanitizer damaged when it should not have.
-func TestSanitizeFindingCauseMapsEveryHostileInputIntoTheAlphabet(t *testing.T) {
-	publishable := regexp.MustCompile("^[" + FindingCauseAlphabet + "]{0," +
-		strconv.Itoa(MaxFindingCauseBytes) + "}$")
-	cases := []struct {
-		name  string
-		value string
-		want  string
+	// Each row is damaged in one of the two doors and then truncated, so the
+	// document carries what the guard looks for and is also not well-formed.
+	cases := map[string]struct {
+		damage []byte
+		refuse string
 	}{
-		{
-			name:  "reviewed reason",
-			value: "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
-			want:  "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+		"escaped lone surrogate": {
+			damage: []byte(`"owner":"\ud800"`),
+			refuse: "lone surrogate",
 		},
-		{
-			name:  "unreadable byte",
-			value: "policy file unity-\xffbuild.yml",
-			want:  "policy file unity-?build.yml",
-		},
-		{name: "pipe", value: "policy file | unity", want: "policy file ? unity"},
-		{name: "backtick", value: "policy file `unity`", want: "policy file ?unity?"},
-		{name: "newline", value: "policy file\ncredential=value", want: "policy file?credential?value"},
-		{name: "angle bracket", value: "policy file <unity>", want: "policy file ?unity?"},
-		{name: "tab", value: "policy file\tunity", want: "policy file?unity"},
-		{name: "non ascii", value: "policy file naïve", want: "policy file na?ve"},
-		{
-			name:  "oversized",
-			value: strings.Repeat("a", MaxFindingCauseBytes+50),
-			want:  strings.Repeat("a", MaxFindingCauseBytes),
-		},
-		{
-			// The cut is a byte cut, so a multi-byte rune never reaches the
-			// output half written.
-			name:  "oversized non ascii",
-			value: strings.Repeat("é", 200),
-			want:  strings.Repeat("?", 128),
+		"unreadable byte": {
+			damage: []byte("\"owner\":\"unity-\xffbuilders\""),
+			refuse: "not valid UTF-8",
 		},
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			got := SanitizeFindingCause(testCase.value)
-			if got != testCase.want {
-				t.Fatalf("SanitizeFindingCause(%q) = %q, want %q", testCase.value, got, testCase.want)
-			}
-			if len(got) > MaxFindingCauseBytes {
-				t.Fatalf("cause is %d bytes, want at most %d", len(got), MaxFindingCauseBytes)
-			}
-			if !publishable.MatchString(got) {
-				t.Fatalf("cause %q is outside the issue alphabet", got)
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			truncated := bytes.Replace(
+				content,
+				[]byte(`"owner":"unity-builder-maintainers"`),
+				testCase.damage,
+				1,
+			)
+			truncated = truncated[:len(truncated)-8]
+			if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
+				strings.Contains(err.Error(), testCase.refuse) {
+				t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
 			}
 		})
 	}

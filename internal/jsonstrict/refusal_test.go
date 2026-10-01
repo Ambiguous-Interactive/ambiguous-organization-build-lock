@@ -3,6 +3,8 @@ package jsonstrict
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -106,5 +108,64 @@ func TestReasonsAreSingleLinePublishableClauses(t *testing.T) {
 				t.Fatalf("reason %q holds a non-printable or non-ASCII byte", reason)
 			}
 		}
+	}
+}
+
+// A cause is built from a file name nobody wrote and reaches a retained
+// artifact, a one-line Markdown table row, and a shell-rendered run summary.
+// Every rune outside CauseAlphabet has to become '?', and the length has to
+// stay inside MaxCauseBytes, or a validator refuses the whole artifact and the
+// alert never opens at all. The first row is the control: it shows the test
+// would also accept a value the sanitizer damaged when it should not have.
+func TestSanitizeCauseMapsEveryHostileInputIntoTheAlphabet(t *testing.T) {
+	publishable := regexp.MustCompile("^[" + CauseAlphabet + "]{0," +
+		strconv.Itoa(MaxCauseBytes) + "}$")
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{
+			name:  "reviewed reason",
+			value: "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+			want:  "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+		},
+		{
+			name:  "unreadable byte",
+			value: "policy file unity-\xffbuild.yml",
+			want:  "policy file unity-?build.yml",
+		},
+		{name: "pipe", value: "policy file | unity", want: "policy file ? unity"},
+		{name: "backtick", value: "policy file `unity`", want: "policy file ?unity?"},
+		{name: "newline", value: "policy file\ncredential=value", want: "policy file?credential?value"},
+		{name: "angle bracket", value: "policy file <unity>", want: "policy file ?unity?"},
+		{name: "tab", value: "policy file\tunity", want: "policy file?unity"},
+		{name: "non ascii", value: "policy file naïve", want: "policy file na?ve"},
+		{
+			name:  "oversized",
+			value: strings.Repeat("a", MaxCauseBytes+50),
+			want:  strings.Repeat("a", MaxCauseBytes),
+		},
+		{
+			// The cut is a byte cut, so a multi-byte rune never reaches the
+			// output half written.
+			name:  "oversized non ascii",
+			value: strings.Repeat("é", 200),
+			want:  strings.Repeat("?", 128),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := SanitizeCause(testCase.value)
+			if got != testCase.want {
+				t.Fatalf("SanitizeCause(%q) = %q, want %q", testCase.value, got, testCase.want)
+			}
+			if len(got) > MaxCauseBytes {
+				t.Fatalf("cause is %d bytes, want at most %d", len(got), MaxCauseBytes)
+			}
+			if !publishable.MatchString(got) {
+				t.Fatalf("cause %q is outside the issue alphabet", got)
+			}
+		})
 	}
 }

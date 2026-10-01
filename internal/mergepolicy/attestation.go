@@ -74,11 +74,14 @@ func ParseAttestation(content []byte, repository string) (Attestation, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Attestation{}, fmt.Errorf("merge policy attestation must contain one JSON value")
 	}
-	if attestation.SchemaVersion != attestationSchemaVersion {
-		return Attestation{}, fmt.Errorf("merge policy attestation schemaVersion must be 1")
-	}
+	// The guard runs before every content check. A file the decoder could not
+	// represent is refused as unreadable, so no value in it decides a verdict.
+	// The decoder already named its own syntax errors.
 	if err := jsonstrict.Refusal("merge policy attestation", content); err != nil {
 		return Attestation{}, err
+	}
+	if attestation.SchemaVersion != attestationSchemaVersion {
+		return Attestation{}, fmt.Errorf("merge policy attestation schemaVersion must be 1")
 	}
 	if attestation.Repository != repository {
 		return Attestation{}, fmt.Errorf("merge policy attestation names another repository")

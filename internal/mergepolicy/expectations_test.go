@@ -217,9 +217,11 @@ func withSubstitutedEscape(escaped []byte) []byte {
 	return bytes.Replace(escaped, []byte(`\ud800`), []byte("�"), 1)
 }
 
-// The escape guard runs after the decode, so a file that is not well-formed
-// JSON still gets the decoder's own message. Every other assertion still holds
-// for a damaged file, so without this the ordering is not pinned.
+// The guard runs after the decode, so a file that is not well-formed JSON still
+// gets the decoder's own message. Every other assertion still holds for a
+// damaged file, so without this the ordering is not pinned. Both doors carry a
+// row: a row for the escape alone leaves the encoding arm free to move back
+// above the decode.
 func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	escaped := oneLoneSurrogateEscapeIn(
 		t, []byte(expectationsContent(validExpectationBody())),
@@ -228,6 +230,15 @@ func TestParseExpectationsNamesTheSyntaxErrorForAMalformedFile(t *testing.T) {
 	truncated := escaped[:len(escaped)-8]
 	if _, err := ParseExpectations(truncated); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
+		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+	unreadable := oneRawByteIn(
+		t, []byte(expectationsContent(validExpectationBody())),
+		`"repository": "Ambiguous-Interactive/example"`,
+	)
+	unreadable = unreadable[:len(unreadable)-8]
+	if _, err := ParseExpectations(unreadable); err == nil ||
+		strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
 	}
 }

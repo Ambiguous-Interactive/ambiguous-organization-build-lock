@@ -139,8 +139,7 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 	// so a consumer-controlled file name can never carry text into the artifact
 	// contract. It is not rendered into the issue body.
 	causePattern := regexp.MustCompile(
-		"^[" + enrollment.FindingCauseAlphabet + "]{0," +
-			strconv.Itoa(enrollment.MaxFindingCauseBytes) + "}$",
+		"^[" + jsonstrict.CauseAlphabet + "]{0," + strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$",
 	)
 	validateIdentity := func(repository, sha string, shaOptional bool) error {
 		if !repositoryPattern.MatchString(repository) {

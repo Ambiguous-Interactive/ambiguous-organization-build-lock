@@ -16,19 +16,60 @@ package jsonstrict
 
 import (
 	"errors"
+	"strings"
 	"unicode/utf8"
 )
 
 // The reasons Unrepresentable names. Each is a clause a caller puts in its own
 // sentence, so the wording stays here and every reader answers the same way.
-// Both clauses stay inside the alphabet the issue validators accept, because a
-// cause reaches a retained artifact and a one-line Markdown table. A comma here
-// would refuse the whole artifact at the issue sync, and the finding would never
-// be published.
 const (
 	ReasonNotUTF8             = "is not valid UTF-8"
 	ReasonLoneSurrogateEscape = "is an escaped lone surrogate which no JSON decoder can represent"
 )
+
+// CauseAlphabet is the only text a published cause may carry. A cause reaches a
+// retained artifact, a one-line Markdown table row, and a shell-rendered run
+// summary, so it cannot hold a pipe, a backtick, a newline, or a byte nobody
+// can read. It is a regular-expression character-class fragment; consumers
+// append the literal hyphen last so it can never form an accidental range.
+const CauseAlphabet = "A-Za-z0-9_.+ /():?\";-"
+
+// MaxCauseBytes bounds one published cause.
+const MaxCauseBytes = 256
+
+// SanitizeCause bounds one cause and maps every rune outside CauseAlphabet to
+// '?', so a cause built from a file name nobody wrote still satisfies every
+// validator that publishes it. A refused path is not valid UTF-8, and a rune walk
+// replaces each unreadable byte rather than publishing a spelling nobody wrote.
+//
+// This is the only sanitizing a published cause needs, because Unrepresentable
+// only ever returns one of the two reason clauses. It stays here so a second
+// caller cannot reach a published cause without it.
+func SanitizeCause(cause string) string {
+	if len(cause) > MaxCauseBytes {
+		cause = cause[:MaxCauseBytes]
+	}
+	var sanitized strings.Builder
+	for _, char := range cause {
+		if isCauseRune(char) {
+			sanitized.WriteRune(char)
+			continue
+		}
+		sanitized.WriteByte('?')
+	}
+	return sanitized.String()
+}
+
+func isCauseRune(char rune) bool {
+	switch {
+	case char >= 'A' && char <= 'Z',
+		char >= 'a' && char <= 'z',
+		char >= '0' && char <= '9':
+		return true
+	default:
+		return strings.ContainsRune(CauseAlphabet, char)
+	}
+}
 
 // UnrepresentableError reports that content holds a value encoding/json cannot
 // represent exactly.
@@ -52,6 +93,10 @@ func (err UnrepresentableError) Error() string { return err.Reason }
 // Call it after a successful decode. A malformed document keeps the decoder's
 // own message, which names a cause an operator can act on, and this speaks
 // only when the decoder succeeded and still lost something.
+//
+// The caller must discard the value it decoded and return. The loss already
+// happened inside the decoder, so a value that reaches a comparison is a value
+// nobody wrote. There is nothing this can repair afterwards.
 func Unrepresentable(content []byte) string {
 	if !utf8.Valid(content) {
 		return ReasonNotUTF8
@@ -98,7 +143,8 @@ func Reason(err error) string {
 }
 
 // UnpairedSurrogateEscape reports whether content holds a \u escape for a
-// surrogate code point that has no partner.
+// surrogate code point that has no partner. Callers outside this package use
+// Unrepresentable, which answers this and the encoding rule together.
 //
 // The check reads bytes. A decoded value cannot answer the question. A
 // substituted U+FFFD and a real U+FFFD are the same three bytes.

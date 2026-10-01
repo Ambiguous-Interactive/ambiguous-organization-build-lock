@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
@@ -132,8 +133,10 @@ var (
 	kindPattern        = regexp.MustCompile(`^(ruleset|branch-protection)$`)
 	enforcementPattern = regexp.MustCompile(`^[a-z-]{0,32}$`)
 	detailPattern      = regexp.MustCompile("^[" + mergepolicy.Alphabet + "\";-]{0,256}$")
-	causePattern       = regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0,256}$")
-	runIDPattern       = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
+	causePattern       = regexp.MustCompile(
+		"^[" + jsonstrict.CauseAlphabet + "]{0," + strconv.Itoa(jsonstrict.MaxCauseBytes) + "}$",
+	)
+	runIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 )
 
 func validateAudit(audit mergepolicy.Audit) error {
@@ -264,7 +267,7 @@ func renderIssueBody(audit mergepolicy.Audit, evidenceURL string) string {
 	} else {
 		body.WriteString("Retrieval: **incomplete (fail closed)**\n\n")
 	}
-	body.WriteString("This issue contains repository names, branches, ruleset metadata, check contexts, and reason codes only. It never contains credential values.\n\n")
+	body.WriteString("This issue contains repository names, branches, ruleset metadata, check contexts, refusal causes, and reason codes only. It never contains credential values. A cause is a fixed reason the audit could not read its evidence, so it carries no text from a live API or from a consumer file.\n\n")
 	body.WriteString("Every reason code maps to its reviewed fix in the [finding-code contract](docs/consumer-enrollment.md).\n\n")
 	fmt.Fprintf(
 		&body,

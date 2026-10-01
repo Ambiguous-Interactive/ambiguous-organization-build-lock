@@ -182,9 +182,15 @@ artifact and the run summary, because a cause can name a file in this
 repository. The drift issues hold counts, codes, and reviewed expectation text.
 They never hold a file name a consumer controls.
 
-The cause is sanitized to a fixed ASCII alphabet before it is published. A
-character outside that alphabet becomes `?`, so a cause can never break a table
-row or carry text nobody in this repository wrote.
+The cause is sanitized to a fixed ASCII alphabet before it is published, and the
+same rule and the same bound are used by both audits. A character outside that
+alphabet becomes `?`, so a cause can never break a table row or carry text nobody
+in this repository wrote.
+
+A finding with no cause has no row in the run summary. That is deliberate: a
+cause means the audit could not read its evidence, which is a different problem
+from evidence that failed a rule. To fix a file the decoder could not read, save
+it as UTF-8 and remove any `\uXXXX` escape for a surrogate code point.
 
 We measured the other readers. A JavaScript string holds a lone surrogate, and
 `JSON.stringify` writes it back as an escape. So the release authorization

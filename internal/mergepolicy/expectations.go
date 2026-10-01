@@ -144,11 +144,14 @@ func ParseExpectations(content []byte) (Expectations, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Expectations{}, fmt.Errorf("merge policy expectations must contain one JSON value")
 	}
-	if expectations.SchemaVersion != expectationsSchemaVersion {
-		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 2")
-	}
+	// The guard runs before every content check. A file the decoder could not
+	// represent is refused as unreadable, so no value in it decides a verdict.
+	// The decoder already named its own syntax errors.
 	if err := jsonstrict.Refusal("merge policy expectations", content); err != nil {
 		return Expectations{}, err
+	}
+	if expectations.SchemaVersion != expectationsSchemaVersion {
+		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 2")
 	}
 	if expectations.Organization != Organization {
 		return Expectations{}, fmt.Errorf("merge policy expectations organization is not authorized")

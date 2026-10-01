@@ -81,10 +81,12 @@ func ParseUnityEnrollmentRegistry(content []byte) (UnityEnrollmentRegistry, erro
 	if len(content) == 0 || len(content) > MaxUnityEnrollmentPolicyBytes {
 		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy size is invalid")
 	}
-	if !utf8.Valid(content) {
-		return UnityEnrollmentRegistry{}, fmt.Errorf("unity enrollment policy is not valid UTF-8")
-	}
 	// ... decode
+	// The guard is after the decode, not before it. See the escape section.
+	if err := jsonstrict.Refusal("unity enrollment policy", content); err != nil {
+		return UnityEnrollmentRegistry{}, err
+	}
+	// ... every content check
 }
 ```
 

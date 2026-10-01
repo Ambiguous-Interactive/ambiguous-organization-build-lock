@@ -231,15 +231,22 @@ surrogate, and `JSON.stringify` writes it back as an escape. So the release
 authorization rewrites the file without changing the escape. The consumer repin
 reads the file and never writes it.
 
-A refusal an operator cannot act on is a weak evidence set. Every refusal
-therefore names what was being read and what was lost, and both audits publish
-that cause. A merge-policy retrieval finding carries the cause and the read that
-failed. A consumer attestation the decoder could not represent exactly carries
-the cause in the issue table, because that consumer has to fix it. A Unity
-enrollment retrieval or analysis finding carries the cause in the retained
-artifact and the run summary, because a cause can name a file in a consumer
-repository. The run summary lists at most 20 causes and says how many more the
-artifact holds.
+A refusal an operator cannot act on is a weak evidence set. So every refusal the
+decoder could not represent exactly names what was being read and what was lost,
+and both audits publish that cause. A merge-policy retrieval finding carries the
+cause and the read that failed. A consumer attestation the decoder could not
+represent exactly carries the cause in the issue table, because that consumer has
+to fix it. A Unity enrollment retrieval or analysis finding carries the cause in
+the retained artifact and the run summary, because a cause can name a file in a
+consumer repository. The run summary lists at most 20 causes and says how many
+more the artifact holds.
+
+The other refusals carry no cause. A transport failure, an HTTP status, a
+pagination guard, a size bound, a duplicate identity, and every decoder syntax
+error answer with their own reason code and no cause, because their cause is the
+run log or a rule the reader can name on its own. A finding with no cause has no
+row in the run summary, so a cause in that table always means the audit could not
+read its evidence rather than that the evidence failed a rule.
 
 `jq` 1.6 stops on an escaped high surrogate and reports a parse error. It does
 not see an escaped low surrogate. It writes U+FFFD and exits 0. Every workflow

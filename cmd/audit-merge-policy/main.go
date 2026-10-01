@@ -329,7 +329,7 @@ func auditRepositories(
 			audit.Findings = append(audit.Findings, mergepolicy.Finding{
 				Repository: expectation.Repository,
 				Code:       mergepolicy.CodeRetrievalIncomplete,
-				Cause:      mergepolicy.BoundDetail(jsonstrict.Reason(retrievalErr)),
+				Cause:      jsonstrict.SanitizeCause(jsonstrict.Reason(retrievalErr)),
 			})
 			continue
 		}
@@ -372,7 +372,7 @@ func loadAttestation(
 		return mergepolicy.Attestation{}, &mergepolicy.Finding{
 			Repository: expectation.Repository,
 			Code:       mergepolicy.CodeRetrievalIncomplete,
-			Cause:      mergepolicy.BoundDetail(jsonstrict.Reason(err)),
+			Cause:      jsonstrict.SanitizeCause(jsonstrict.Reason(err)),
 		}
 	}
 	if !found {
@@ -387,24 +387,26 @@ func loadAttestation(
 			// both channels. A consumer who published one cannot tell which of
 			// the many reasons it was refused, so it republishes unchanged and
 			// the alert returns; the Detail column is what that consumer reads.
-			Cause: mergepolicy.BoundDetail(jsonstrict.Reason(err)),
-			Detail: mergepolicy.BoundDetail(firstNonEmpty(
-				jsonstrict.Reason(err),
-				"the published merge policy attestation is not valid; republish it from the reviewed schema",
-			)),
+			Cause:  jsonstrict.SanitizeCause(jsonstrict.Reason(err)),
+			Detail: attestationRefusal(err),
 		}
 	}
 	return attestation, nil
 }
 
-// firstNonEmpty returns the first value that is not empty.
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
+// attestationRefusal names why a published attestation was refused. A file the
+// decoder could not represent exactly carries its own cause, because that
+// consumer is the one who has to change the file, and the generic sentence below
+// would send that consumer back to the same file unchanged. Every other refusal
+// keeps the generic sentence, because its cause names a reviewed rule and not an
+// edit the consumer can make.
+func attestationRefusal(err error) string {
+	if cause := jsonstrict.SanitizeCause(jsonstrict.Reason(err)); cause != "" {
+		return cause
 	}
-	return ""
+	return mergepolicy.BoundDetail(
+		"the published merge policy attestation is not valid; republish it from the reviewed schema",
+	)
 }
 
 func observeRepository(

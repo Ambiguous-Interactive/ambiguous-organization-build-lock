@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -359,13 +357,17 @@ func TestReadAuditRefusesACauseOutsideThePublishableAlphabet(t *testing.T) {
 		"hyphenated id":       "ruleset 17663217 response is not valid UTF-8",
 		"attestation reason":  "merge policy attestation is not valid UTF-8",
 		"reason with numbers": "contents response is not valid UTF-8 (id 17663217)",
+		// A refused path is quoted, and a quote is safe inside a backticked
+		// cell. detailPattern has always accepted one for the same renderer.
+		"quoted file name": `tree path "scripts/unity/editor-check.ps1" is not valid UTF-8`,
 	}
 	refused := map[string]string{
-		"newline":   "active rules response is not valid UTF-8\ncredential=value",
-		"backtick":  "active rules response `not valid UTF-8",
-		"pipe":      "active rules response | not valid valid UTF-8",
-		"quote":     `active rules response "is not valid UTF-8`,
-		"oversized": strings.Repeat("a", 257),
+		"newline":         "active rules response is not valid UTF-8\ncredential=value",
+		"carriage return": "active rules response is not valid UTF-8\rmore",
+		"backtick":        "active rules response `not valid UTF-8",
+		"pipe":            "active rules response | not valid valid UTF-8",
+		"non ascii":       "active rules response is not valid UTF-8 naïve",
+		"oversized":       strings.Repeat("a", 257),
 	}
 	write := func(t *testing.T, cause string) {
 		t.Helper()
@@ -409,8 +411,6 @@ func TestReadAuditRefusesACauseOutsideThePublishableAlphabet(t *testing.T) {
 // cause is lost with it. A comma in the lone-surrogate reason did exactly that,
 // so every reason a reader can publish is checked here, not just one of them.
 func TestEveryPublishedCauseIsPublishable(t *testing.T) {
-	publishable := regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0," +
-		strconv.Itoa(mergepolicy.MaxDetailBytes) + "}$")
 	for _, reason := range []string{
 		jsonstrict.ReasonNotUTF8,
 		jsonstrict.ReasonLoneSurrogateEscape,
@@ -424,8 +424,10 @@ func TestEveryPublishedCauseIsPublishable(t *testing.T) {
 			"merge policy attestation",
 		} {
 			cause := what + " " + reason
-			if !publishable.MatchString(cause) {
-				t.Errorf("cause %q is outside the issue alphabet", cause)
+			// The shipped validator, not a copy of it. A copy would keep
+			// passing after causePattern narrowed or was removed.
+			if !causePattern.MatchString(cause) {
+				t.Errorf("cause %q is outside the shipped issue alphabet", cause)
 			}
 		}
 	}

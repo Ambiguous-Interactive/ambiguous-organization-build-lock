@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 func main() {
@@ -72,11 +73,11 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				// operator has to find that file in the consumer checkout otherwise,
 				// so the cause travels to the artifact and the run summary. It is
 				// sanitized because a refused path can be bytes nobody wrote.
-				Cause: enrollment.SanitizeFindingCause(loadErr.Error()),
+				Cause: jsonstrict.SanitizeCause(loadErr.Error()),
 			})
 			_, _ = fmt.Fprintf(
 				stderr, "Unity enrollment retrieval failed for %s: %s\n",
-				repository.Repository, enrollment.SanitizeFindingCause(loadErr.Error()),
+				repository.Repository, jsonstrict.SanitizeCause(loadErr.Error()),
 			)
 			continue
 		}
@@ -101,11 +102,11 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				Repository: repository.Repository,
 				SHA:        sha,
 				Code:       "repository-analysis-incomplete",
-				Cause:      enrollment.SanitizeFindingCause(analyzeErr.Error()),
+				Cause:      jsonstrict.SanitizeCause(analyzeErr.Error()),
 			})
 			_, _ = fmt.Fprintf(
 				stderr, "Unity enrollment analysis failed for %s: %s\n",
-				repository.Repository, enrollment.SanitizeFindingCause(analyzeErr.Error()),
+				repository.Repository, jsonstrict.SanitizeCause(analyzeErr.Error()),
 			)
 			continue
 		}

@@ -308,8 +308,18 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
 // prevent. Both summary writers share this table, so one data-driven case covers
 // the merge-policy and the Unity enrollment artifact.
 const causeSummaryCases = [
-  { script: "merge-policy-audit.sh", complete: false, incomplete: "merge-gate status is unknown" },
-  { script: "unity-enrollment-audit.sh", complete: false, incomplete: "policy status is unknown" }
+  {
+    script: "merge-policy-audit.sh",
+    code: "merge-policy-retrieval-incomplete",
+    cause: "ruleset 17663217 response is not valid UTF-8",
+    fileNeedle: /ruleset 17663217 response is not valid UTF-8/
+  },
+  {
+    script: "unity-enrollment-audit.sh",
+    code: "repository-retrieval-incomplete",
+    cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8",
+    fileNeedle: /scripts\/unity\/editor-check\.ps1 at 0123456789abcdef is not valid UTF-8/
+  }
 ];
 
 for (const testCase of causeSummaryCases) {
@@ -333,21 +343,23 @@ for (const testCase of causeSummaryCases) {
       "an audit with no cause must not publish an empty cause table"
     );
 
+    // Each script is fed a cause only its own analyzer can produce, so a change
+    // to either alphabet is caught by the script that renders it.
     write(
       [
         {
           repository: "Ambiguous-Interactive/DoxReloaded",
-          code: "repository-retrieval-incomplete",
-          cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8"
+          code: testCase.code,
+          cause: testCase.cause
         },
-        { repository: "Ambiguous-Interactive/qora-redux", code: "merge-policy-retrieval-incomplete" }
+        { repository: "Ambiguous-Interactive/qora-redux", code: testCase.code }
       ],
-      testCase.complete
+      false
     );
     assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
     const summary = fs.readFileSync(summaryPath, "utf8");
     assert.match(summary, /Refused evidence/);
-    assert.match(summary, /scripts\/unity\/editor-check\.ps1 at 0123456789abcdef is not valid UTF-8/);
+    assert.match(summary, testCase.fileNeedle);
     assert.match(summary, /Ambiguous-Interactive\/DoxReloaded/);
     assert.doesNotMatch(summary, /qora-redux/, "a finding with no cause must not publish a blank row");
 
