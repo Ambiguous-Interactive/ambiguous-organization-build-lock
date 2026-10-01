@@ -54,6 +54,7 @@ func TestGuardCoversTheDecoderLoss(t *testing.T) {
 	}
 	random := rand.New(rand.NewSource(20261001))
 	accepted, damaged, refused := 0, 0, 0
+	var falsePositives []string
 	for iteration := 0; iteration < 200000; iteration++ {
 		var builder strings.Builder
 		builder.WriteString(`{"a":"`)
@@ -75,12 +76,17 @@ func TestGuardCoversTheDecoderLoss(t *testing.T) {
 					string(document))
 			}
 		} else if blocked {
+			// Counted, then reported after the loop, so the summary states
+			// the false-positive total even when it is zero.
 			refused++
-			t.Fatalf("the guard refused a document the decoder read exactly: %q",
-				string(document))
+			falsePositives = append(falsePositives, string(document))
 		}
 	}
-	t.Logf("accepted %d documents, %d damaged, all refused, %d clean documents refused",
+	if len(falsePositives) > 0 {
+		t.Fatalf("the guard refused %d documents the decoder read exactly, first %q",
+			len(falsePositives), falsePositives[0])
+	}
+	t.Logf("accepted %d documents, %d damaged and all refused, %d clean documents refused",
 		accepted, damaged, refused)
 	if accepted == 0 || damaged == 0 {
 		t.Fatal("the generated set proved nothing")
