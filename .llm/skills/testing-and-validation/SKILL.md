@@ -55,6 +55,14 @@ where mechanically expressible, the narrowest central invariant or validator
 that rejects the entire unsafe shape or class. Avoid example-only coverage when
 one tripwire can prevent all equivalent forms.
 
+A new regression test needs a red result on the commit that introduced the
+defect. Copy that commit's version of the one production file onto a scratch
+tree and run the test there. A test that passes before the fix covers nothing.
+
+Place the fault where the defect needs it. A check that matches a literal
+token survives a bad byte elsewhere in the file. A fixture that puts the byte
+on its own line then passes on the code it must catch.
+
 ## Retry instruction decision order
 
 Keep a raw external retry instruction available until the caller has completed

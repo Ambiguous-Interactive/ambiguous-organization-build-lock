@@ -153,7 +153,9 @@ UTF-8. Neither moves a byte order mark. A mark is invalid JSON, and Node and
 all three Go analyzers reject one, so a marked policy fails as it always has.
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce
-such a byte, so one means something else changed the state.
+such a byte, so one means something else changed the state. The runtime also
+reads the state history for the peer timeline. A commit it cannot read is a
+gap in that timeline, not a peer.
 
 A checkout of this repository is pinned twice: in the `uses:` line of the
 action, and in the `ref:` of the `actions/checkout` step that fetches the

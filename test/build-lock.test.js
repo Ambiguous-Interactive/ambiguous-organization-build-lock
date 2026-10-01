@@ -12,6 +12,7 @@ const {
   api,
   authorizeCaller,
   boundedRetryDelayMs,
+  collectPeerTimeline,
   config,
   createAppJwt,
   createGitHubAppAuth,
@@ -11247,6 +11248,77 @@ test("readState fails closed on a lock state it cannot read as UTF-8", async (t)
             readState(semaphoreConfig(), options),
             testCase.expected
           );
+        }
+      );
+    });
+  }
+});
+
+// The peer timeline reads historical commits of the same lock state file. A
+// lossy decode there turns one undecodable byte in a holder id into U+FFFD and
+// reports a peer that does not exist, with no error and no gap. A commit the
+// runtime cannot read exactly is evidence it does not have, so it is a gap.
+test("the peer timeline reports a gap for a state commit it cannot read", async (t) => {
+  // No `holders` array: `peerTimelineSnapshot` prefers that array when it is
+  // present, so an empty one would hide the `holder` object this test writes.
+  const state = (extra) =>
+    `{"lock":"wallstop-organization-builds","queue":[]${extra}`;
+  const sessionStart = new Date("2026-09-30T10:00:00Z").toISOString();
+  const commit = {
+    sha: "state-commit",
+    commit: { author: { date: "2026-09-30T10:05:00Z" } }
+  };
+  const cases = [
+    {
+      name: "an undecodable byte in a holder id",
+      bytes: Buffer.concat([
+        Buffer.from(state(',"holder":{"holderId":"win-')),
+        Buffer.from([0x89]),
+        Buffer.from('"}}')
+      ]),
+      expected: "partial"
+    },
+    {
+      name: "an overlong encoding in a holder id",
+      bytes: Buffer.concat([
+        Buffer.from(state(',"holder":{"holderId":"win-')),
+        Buffer.from([0xc0, 0x80]),
+        Buffer.from('"}}')
+      ]),
+      expected: "partial"
+    },
+    {
+      // The readable half: a commit the strict decoder accepts must still be
+      // observed, or the guard would turn every historical window into a gap.
+      name: "a multi-byte character in a readable holder id",
+      bytes: Buffer.from(state(',"holder":{"holderId":"win-café"}}'), "utf8"),
+      expected: "ok"
+    }
+  ];
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      await withMockedFetch(
+        async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname === "/repos/o/r/commits") {
+            return jsonResponse(200, [commit]);
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            return jsonResponse(200, {
+              content: testCase.bytes.toString("base64"),
+              sha: "blob-sha"
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        },
+        async () => {
+          const timeline = await collectPeerTimeline(
+            semaphoreConfig(),
+            { holderId: "self-holder" },
+            sessionStart
+          );
+          assert.equal(timeline.status, testCase.expected);
+          assert.equal(Boolean(timeline.truncated), testCase.expected === "partial");
         }
       );
     });

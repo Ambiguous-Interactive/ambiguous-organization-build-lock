@@ -62,7 +62,7 @@ loop, so a refusal is still atomic across the whole checkout.
 
 Two facts about `TextDecoder` decide this, and both were measured:
 
-- the default strips a leading U+FFFD, so a naive strict decoder trades one
+- the default strips a leading U+FEFF, so a naive strict decoder trades one
   destroyed byte for another;
 - `readFileSync` does not strip it, so a pin on the first line of a file the
   mark opens matches no pattern, the rewrite reports the repository already

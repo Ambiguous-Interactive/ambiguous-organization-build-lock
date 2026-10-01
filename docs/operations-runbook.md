@@ -204,7 +204,8 @@ The release authorization and the repository onboarding both read the
 reviewed policy and write it back, so both refuse a policy that is not valid
 UTF-8. Neither moves a byte order mark, because a mark is invalid JSON and
 Node and all three Go analyzers reject one. The lock runtime refuses a lock
-state file that is not valid UTF-8 for the same reason.
+state file that is not valid UTF-8 for the same reason. A history commit it
+cannot read is a gap in the peer timeline, never a peer that does not exist.
 
 The LLM harness reports a `.llm` document and a `progress/` record it cannot
 read rather than scanning a lossy copy. A substitution in a copy would break
