@@ -1,18 +1,19 @@
-// The Windows-native half of the Unity cleanup evidence contract.
+// The second half of the Windows-native Unity cleanup evidence contract.
 //
-// Each test here spawns the committed PowerShell helper once per assertion, and
-// Windows PowerShell compiles the helper's C# with Add-Type, which shells out to
-// csc.exe. One spawn costs about fifteen to thirty seconds on a hosted runner.
-// These two tests used to sit in one file and run one after the other, which
-// made them seventy-six seconds of the ninety-three second Windows CI job, and
-// they made it the slowest job on every pull request.
+// Each test here spawns the committed PowerShell helper, and Windows PowerShell
+// compiles the helper's C# with Add-Type, which shells out to csc.exe. One spawn
+// costs about fifteen to thirty seconds on a hosted runner.
 //
-// They are here, in a file of their own, so `node --test` gives each one a
-// process and runs them at the same time. Measured on the pull request that
-// follows this change, the job drops to about sixty seconds.
+// Both halves used to sit in one file, and node --test runs the tests inside one
+// file one after another. That made them seventy-six of the seventy-eight seconds
+// of a Windows CI test step, and the job the slowest one on every pull request.
+// They are in two files of their own so the runner gives each a process.
 //
-// The split moves no assertion. Both tests keep their fixture, their skip, and
-// the real helper.
+// This half restores a rewritten file's metadata and then proves the production
+// helper refuses it, which is why it is the slower of the two.
+//
+// The split moves no assertion. This half keeps its fixture, its skip, and the
+// real helper.
 "use strict";
 
 const test = require("node:test");
@@ -26,23 +27,6 @@ const {
   centralEvidenceFixture,
   centralInputs
 } = require("./unity-cleanup-evidence-support.js");
-
-test(
-  "Windows helper deletes real claimed central evidence by native handle",
-  { skip: process.platform !== "win32" },
-  (t) => {
-    const item = centralEvidenceFixture(t, "unity-cleanup-windows-native-");
-    const result = run({
-      inputs: centralInputs(item),
-      outputPath: item.outputPath,
-      environment: item.environment,
-      log: () => {}
-    });
-    assert.equal(result.classificationComplete, true);
-    assert.equal(fs.existsSync(item.returnLog), false);
-    assert.equal(fs.existsSync(item.evidenceDirectory), false);
-  }
-);
 
 test(
   "Windows helper rejects a same-size rewrite with all metadata restored",

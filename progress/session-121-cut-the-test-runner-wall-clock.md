@@ -60,8 +60,14 @@ the other in the same file. That made the Windows job the slowest job on every
 pull request, at 93 s against 87 s for the Linux job that does six times the
 checking.
 
-They are now in `test/unity-cleanup-windows-native.test.js`, so each gets a
-process and they run at the same time. The job should take about 60 s.
+They are now in one file each, so each gets a process and they run at the same
+time. The job should take about 60 s.
+
+The first attempt put both in one new file. The Windows job took 97 s, worse
+than the 93 s before, and the log showed the two tests finishing one after the
+other at 31.9 s and 46.9 s: `node --test` runs the tests inside one file in
+sequence, so moving them into a file together changed nothing. One test per
+file is the fix.
 
 ### Two options rejected
 
@@ -110,7 +116,8 @@ document, and keep correct. Not taken.
 | `test/workflow-scripts-support.js` | shared | Every helper and case table |
 | `test/build-lock-0..2.test.js` | three shards | The 216 tests |
 | `test/build-lock-support.js` | shared | The runtime bindings and fixture tables |
-| `test/unity-cleanup-windows-native.test.js` | two tests | One `Add-Type` each, run at the same time |
+| `test/unity-cleanup-windows-native-delete.test.js` | one test | Its own `Add-Type`, its own process |
+| `test/unity-cleanup-windows-native-rewrite.test.js` | one test | Its own `Add-Type`, its own process |
 | `test/unity-cleanup-evidence-support.js` | shared | The Windows fixture helpers |
 
 `ci.sh syntax` and `verify.sh` now walk `test/*.js` rather than `test/*.test.js`,
@@ -131,6 +138,10 @@ so the `node --test test/*.test.js` glob never picks them up.
 
 - The Windows job numbers in this record are predicted from per-test times the
   hosted runner reported. The pull request carries the measured job time.
+- On Linux the `node --test` step fell from 27.4 s to 19.0 s, but the job only
+  fell from 87 s to 84 s, because `go test -race` at 18 s is now the longest
+  step. Moving the race suite to its own job would need a new required-check
+  name in the branch ruleset, which this task must not change.
 - Six files is a judgement call. Four shards left one shard at 3.4 s and the
   other three near 3.4 s, which is balanced; six was chosen because the split
   points had to land on region boundaries, and eight would have produced two

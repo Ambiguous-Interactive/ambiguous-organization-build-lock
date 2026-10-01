@@ -119,14 +119,15 @@ jobs:
         with:
           node-version: "24"
 
-      # The native cleanup tests are in a file of their own so `node --test`
+      # The two native cleanup tests are in files of their own so `node --test`
       # gives each one a process. Windows PowerShell compiles the committed
-      # helper's C# with Add-Type, which costs about fifteen to thirty seconds
-      # per spawn, so running them one after the other made this job the slowest
-      # one on every pull request. Run 36904676960 measured seventy-six of the
-      # ninety-three seconds here.
+      # helper's C# with Add-Type, which shells out to csc.exe, so one spawn
+      # costs about fifteen to thirty seconds. Run 36904676960 measured them at
+      # 31.3 s and 45.0 s out of a 78 s step in a 93 s job, one after the other.
+      # A first attempt put them in one shared file and the job still took
+      # 97 s, because node --test runs the tests inside one file in sequence.
       - name: Run Windows action tests
         shell: pwsh
-        run: node --test test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native.test.js test/unity-editor-action.test.js
+        run: node --test test/unity-cleanup-evidence.test.js test/unity-cleanup-windows-native-delete.test.js test/unity-cleanup-windows-native-rewrite.test.js test/unity-editor-action.test.js
         env:
           UNITY_DELETE_TEST_DIAGNOSTICS: "true"
