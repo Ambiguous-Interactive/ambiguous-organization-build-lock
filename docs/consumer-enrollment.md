@@ -147,10 +147,14 @@ is the one exception: that mode generates the whole document, so it replaces
 the body and keeps only the mark. A NUL byte is valid UTF-8, so it does not
 refuse the file. The byte comes back with the rest of the file.
 
-The release authorization and the repository onboarding both read the
-reviewed policy and write it back, so both refuse a policy that is not valid
-UTF-8. Neither moves a byte order mark. A mark is invalid JSON, and Node and
-all three Go analyzers reject one, so a marked policy fails as it always has.
+Every tool that reads the reviewed policy refuses a policy that is not valid
+UTF-8. That covers the release authorization and the repository onboarding,
+which write it back, and the enrollment and merge-policy audits, which only
+read it. The merge-policy expectations file and a consumer's published
+attestation are refused the same way. None of them moves a byte order mark. A
+mark is invalid JSON, and Node and all three Go analyzers reject one, so a
+marked policy fails as it always has.
+
 The lock state is read and written back by the lock runtime, so it refuses a
 state file that is not valid UTF-8. Nothing that runtime writes can produce
 such a byte, so one means something else changed the state. The runtime also
@@ -594,7 +598,10 @@ drift.
 
 The audit reads live rulesets and classic branch protection with a
 per-repository reader token scoped to Administration read and Contents read.
-A failed read is a finding, never a pass. GitHub returns ruleset
+A failed read is a finding, never a pass. A response that is not valid UTF-8
+is a failed read, because the JSON decoder would replace a byte it cannot read
+with U+FFFD and the audit would decide the repository from a value the
+repository never wrote. GitHub returns ruleset
 `bypass_actors` only to callers with write access to the ruleset. The reader
 App stays read-only by reviewed policy (issue #254), so the audit fills that
 one blind spot from the consumer-published attestation file and fails closed
