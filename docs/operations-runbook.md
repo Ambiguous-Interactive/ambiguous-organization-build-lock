@@ -187,23 +187,28 @@ surfaces as the raw filesystem error rather than a named one. Only a write that
 fails while the buffered changes are being committed cannot be undone, and it
 emits no report, so nothing is staged or pushed.
 
-The rewrite writes a file only when it changes one, so a file it cannot read
-as UTF-8 is refused by name at that point. The reason is that Node replaces
-every byte it cannot decode with U+FFFD, which is three bytes long: writing
-such a file back would destroy a byte the pin does not name, grow the file,
-and report only the pins it moved. Re-save the file as UTF-8 and let the next
-run open a new offer. A file the rewrite reads and leaves alone is not
-refused, because it cannot lose a byte; it stays exactly as the consumer
-wrote it. What is changed is changed exactly: multi-byte characters, tabs, a
-missing final line feed, and a byte order mark all come back as they were. A
-byte order mark is read as encoding metadata rather than content, so a pin on
-the first line of the file still moves instead of staying behind a green
-run. The two rewrites of the reviewed central policy refuse a policy that is
-not valid UTF-8, because both read that file and write it back, and neither
-moves a byte order mark: every reader of the policy rejects one. The LLM
-harness reports a `.llm` document and a `progress/` record it cannot read
-rather than scanning a lossy copy of it, because a substitution there would
-break the credential pattern the record is audited for.
+The rewrite writes a file only when it changes one, so a file it cannot
+read as UTF-8 is refused at that point. Node replaces every byte it cannot
+decode with U+FFFD, three bytes long, so writing such a file back would
+destroy a byte the pin does not name. Re-save the file as UTF-8 and let the
+next run open a new offer. A file the rewrite reads and leaves alone is not
+refused, because it cannot lose a byte. It stays as the consumer wrote it.
+A changed file changes exactly. A multi-byte character, a tab, a missing
+final line feed, and a byte order mark all come back as they were. A
+`policy-snapshot` companion is the exception: that mode generates the whole
+document, so it replaces the body and keeps only the mark. A byte order mark
+is read as encoding metadata rather than content, so a pin on the first line
+of a file the mark opens moves instead of staying behind a green run.
+
+The release authorization and the repository onboarding both read the
+reviewed policy and write it back, so both refuse a policy that is not valid
+UTF-8. Neither moves a byte order mark, because a mark is invalid JSON and
+Node and all three Go analyzers reject one. The lock runtime refuses a lock
+state file that is not valid UTF-8 for the same reason.
+
+The LLM harness reports a `.llm` document and a `progress/` record it cannot
+read rather than scanning a lossy copy. A substitution in a copy would break
+the credential pattern the record is audited for, and would hide the finding.
 
 Dependabot reads a SHA pin only through its `# vX.Y.Z` comment, so the
 rewrite gives every moved pin one and pins stay Dependabot-visible

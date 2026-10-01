@@ -93,27 +93,29 @@ const { TextDecoder } = require("node:util");
 const [directory, targetSha, targetVersion, policyPath, lockPrefix, repository] = process.argv.slice(2);
 // A byte sequence this rewrite cannot read is refused by name. Node replaces
 // every byte it cannot decode with U+FFFD, which is three bytes long, so a
-// rewrite that read such a file and wrote it back would destroy a byte the pin
-// does not name, grow the file, and report only the pins it moved. That is the
-// outcome this rewrite must never produce, so it is the answer the rewrite
-// already gives a symlink, a directory and an unreadable parent.
-//
-// `ignoreBOM` keeps a byte order mark, which the default decoder strips: a
-// strip destroys the same three bytes.
-const decodeUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+// rewrite that wrote such a file back would destroy a byte the pin does not
+// name, grow the file, and report only the pins it moved. That is the outcome
+// this rewrite must never produce, so it is the answer the rewrite already
+// gives a symlink, a directory and an unreadable parent.
+const decodeUtf8 = new TextDecoder("utf-8", { fatal: true });
 const refuseUnreadable = (location) =>
   `${location} is not valid UTF-8, so this rewrite cannot read it. Node replaces every byte it ` +
   "cannot decode with U+FFFD, so writing the file back would destroy a byte the pin does not " +
   "name. Re-save the file as UTF-8 and repin again.";
 // The reviewed policy is authorization evidence, and it is read the way its own
-// readers read it. Every one of them rejects a byte order mark, so a marked
-// policy fails here exactly as it always has. No rewrite decides otherwise.
+// readers read it. `ignoreBOM` keeps a byte order mark so `JSON.parse` refuses
+// it, as it always has: a mark is invalid JSON, and Node and all three Go
+// analyzers reject one. The file is read outside the guard so a missing or
+// unreadable path still fails with its own error.
 const readPolicy = (policyPath) => {
+  const bytes = fs.readFileSync(policyPath);
+  let text;
   try {
-    return decodeUtf8.decode(fs.readFileSync(policyPath));
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     throw new Error(refuseUnreadable(`The reviewed repin policy ${policyPath}`));
   }
+  return text;
 };
 // A consumer file is read before the rewrite knows whether it will change it,
 // and only a file that is written can lose a byte. The analysis decode is

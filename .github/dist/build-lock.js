@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const crypto = require("crypto");
+const { TextDecoder } = require("node:util");
 const { requireCurrentPrHead } = require("./require-current-pr-head.js");
 
 const API_ROOT = process.env.GITHUB_API_URL || "https://api.github.com";
@@ -848,6 +849,24 @@ function base64Decode(text) {
   return Buffer.from(text || "", "base64").toString("utf8");
 }
 
+// The lock state is decoded here, reshaped, and encoded again on the next
+// write. A lossy decode replaces every byte it cannot read with U+FFFD, three
+// bytes long, so a state file holding one would be repaired into corruption
+// and committed without a word. Nothing this runtime writes can produce such a
+// byte: `writeState` encodes `JSON.stringify` output, which is always valid
+// UTF-8. One therefore means something else changed the state, and admission
+// fails closed on evidence it cannot read exactly.
+function base64DecodeState(text, statePath) {
+  const bytes = Buffer.from(text || "", "base64");
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new Error(
+      `Lock state at ${statePath} is not valid UTF-8; refusing to rewrite bytes this runtime cannot read.`
+    );
+  }
+}
+
 function writeOutput(name, value) {
   const outputPath = process.env.GITHUB_OUTPUT;
   if (!outputPath) {
@@ -1686,7 +1705,7 @@ async function readState(config, options = {}) {
       config.token,
       options.apiOptions
     );
-    const text = base64Decode(data.content);
+    const text = base64DecodeState(data.content, config.statePath);
     let parsed;
     try {
       parsed = JSON.parse(text);

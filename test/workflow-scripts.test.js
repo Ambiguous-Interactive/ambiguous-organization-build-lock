@@ -3852,21 +3852,36 @@ test("consumer repin changes only the pin bytes of a file it can read exactly", 
       name: "a second pin line in the same file",
       surfaces: ["a pin-lines companion", "a workflow file"],
       render: (sha, version) => `# pins\n${pinLine("  ", sha, version)}\n${pinLine("  ", sha, version)}\n`
+    },
+    {
+      // The one surface where the base rewrite lost bytes through the mark
+      // alone: the mode generates the document, so the mark has to be carried
+      // aside and back on, or every run drops it. One mark and two both.
+      name: "a byte order mark in front of a policy-snapshot companion",
+      surfaces: ["a policy-snapshot companion"],
+      render: (sha, version, marks) =>
+        `${marks || ""}` +
+        repinSnapshot(version === "v1.13.0" ? [repinOldSha] : [repinOldSha, repinTarget]),
+      marks: ["\uFEFF", "\uFEFF\uFEFF"]
     }
   ];
   const surfaces = {
     "a pin-lines companion": { path: "docs/pins.md", mode: "pin-lines" },
-    "a workflow file": { path: ".github/workflows/unity.yml", mode: null }
+    "a workflow file": { path: ".github/workflows/unity.yml", mode: null },
+    "a policy-snapshot companion": { path: "docs/policy-snapshot.json", mode: "policy-snapshot" }
   };
   for (const fixture of fixtures) {
+    for (const marks of fixture.marks || [null]) {
     for (const surfaceName of fixture.surfaces) {
       const surface = surfaces[surfaceName];
-      const label = `${surfaceName} with ${fixture.name}`;
+      const markCount = marks === null ? 0 : [...marks].length;
+      const label = `${surfaceName} with ${fixture.name}` +
+        (markCount === 0 ? "" : ` and ${markCount} mark(s)`);
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "repin-utf8-round-trip-"));
       t.after(() => fs.rmSync(root, { recursive: true, force: true }));
       fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
       fs.mkdirSync(path.dirname(path.join(root, surface.path)), { recursive: true });
-      fs.writeFileSync(path.join(root, surface.path), fixture.render(repinOldSha, "v1.13.0"));
+      fs.writeFileSync(path.join(root, surface.path), fixture.render(repinOldSha, "v1.13.0", marks));
       fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({
         schemaVersion: 1,
         organization: "Ambiguous-Interactive",
@@ -3888,21 +3903,21 @@ test("consumer repin changes only the pin bytes of a file it can read exactly", 
       assert.equal(result.status, 0, `${label}: ${result.stderr}`);
       assert.equal(
         fs.readFileSync(path.join(root, surface.path), "utf8"),
-        fixture.render(target, "v1.14.0"),
+        fixture.render(target, "v1.14.0", marks),
         `${label}: the rewrite must change the pin bytes and nothing else`
       );
-      // A byte order mark is encoding metadata rather than content, so it is
-      // read as no content and written back as no content. A decoder that
-      // strips it instead of carrying it would drop it from every file the
-      // rewrite touches.
-      const byteOrderMark = Buffer.from([0xef, 0xbb, 0xbf]);
-      const startsWithMark = (bytes) => bytes.subarray(0, 3).equals(byteOrderMark);
-      const after = fs.readFileSync(path.join(root, surface.path));
+      // The mark is read as no content and written back as no content. A
+      // decoder that stripped it instead of carrying it would drop it from
+      // every file the rewrite touches, which is what the base did to a
+      // `policy-snapshot` companion: the mode generates the body, so the mark
+      // has to survive outside it.
+      const leadingMarks = (bytes) => /^\uFEFF*/.exec(bytes.toString("utf8"))[0];
       assert.equal(
-        startsWithMark(after),
-        startsWithMark(Buffer.from(fixture.render(repinOldSha, "v1.13.0"), "utf8")),
+        leadingMarks(fs.readFileSync(path.join(root, surface.path))),
+        leadingMarks(Buffer.from(fixture.render(repinOldSha, "v1.13.0", marks), "utf8")),
         `${label}: the byte order mark must survive a rewrite`
       );
+    }
     }
   }
 });
