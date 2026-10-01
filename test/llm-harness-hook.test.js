@@ -19,6 +19,9 @@ function repositoryHarnessFixture() {
     ".llm",
     ".githooks",
     "cmd/llm-skill-metadata",
+    // The metadata reader imports the shared encoding guard, so the fixture has
+    // to carry it. A missing package fails `go run` and looks like a harness bug.
+    "internal/jsonstrict",
     "go.mod",
     "go.sum",
     "tools/llm-harness.mjs"

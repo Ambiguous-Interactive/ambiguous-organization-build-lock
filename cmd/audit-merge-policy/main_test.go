@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/mergepolicy"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -344,6 +346,17 @@ func runAudit(
 	return exit, string(content)
 }
 
+// artifactFinding is one finding as the artifact carries it. The cause is read
+// here because a refusal cause reaches the artifact next to the detail, and a
+// decoder that cannot see it would let a missing cause pass unnoticed.
+type artifactFinding struct {
+	Repository string `json:"repository"`
+	Code       string `json:"code"`
+	Context    string `json:"context"`
+	Detail     string `json:"detail"`
+	Cause      string `json:"cause"`
+}
+
 func decodeArtifact(t *testing.T, content string) struct {
 	Complete     bool `json:"complete"`
 	Repositories []struct {
@@ -357,12 +370,7 @@ func decodeArtifact(t *testing.T, content string) struct {
 		Enforcement   string `json:"enforcement"`
 		IntegrationID int64  `json:"integrationId"`
 	} `json:"inventory"`
-	Findings []struct {
-		Repository string `json:"repository"`
-		Code       string `json:"code"`
-		Context    string `json:"context"`
-		Detail     string `json:"detail"`
-	} `json:"findings"`
+	Findings []artifactFinding `json:"findings"`
 } {
 	t.Helper()
 	var audit struct {
@@ -378,17 +386,24 @@ func decodeArtifact(t *testing.T, content string) struct {
 			Enforcement   string `json:"enforcement"`
 			IntegrationID int64  `json:"integrationId"`
 		} `json:"inventory"`
-		Findings []struct {
-			Repository string `json:"repository"`
-			Code       string `json:"code"`
-			Context    string `json:"context"`
-			Detail     string `json:"detail"`
-		} `json:"findings"`
+		Findings []artifactFinding `json:"findings"`
 	}
 	if err := json.Unmarshal([]byte(content), &audit); err != nil {
 		t.Fatalf("decode artifact: %v", err)
 	}
 	return audit
+}
+
+// repositoryFindings returns every finding one repository carries, so a test
+// can pin the count instead of only the presence of a code.
+func repositoryFindings(findings []artifactFinding, repository string) []artifactFinding {
+	matching := make([]artifactFinding, 0, len(findings))
+	for _, finding := range findings {
+		if finding.Repository == repository {
+			matching = append(matching, finding)
+		}
+	}
+	return matching
 }
 
 func findingCodes(t *testing.T, content string) []string {
@@ -1196,4 +1211,256 @@ func TestStrictDecodeRejectsAnEscapedLoneSurrogate(t *testing.T) {
 		strings.Contains(err.Error(), "lone surrogate") {
 		t.Fatalf("error = %v, want the decoder's own message", err)
 	}
+}
+
+// auditedRepository is the one repository this test damages. Every other
+// repository keeps its drift findings, so the assertions count the findings of
+// this repository alone.
+const auditedRepository = "Ambiguous-Interactive/DoxReloaded"
+
+// damagedRead is one live read the audit makes for a repository: the payload it
+// returns and the server state the audit must already hold to reach it.
+type damagedRead struct {
+	name    string
+	label   string
+	payload func(inserted string) string
+	arrange func(server *rulesetServer, payload string)
+}
+
+// damagedReads returns every response the audit decodes for one repository. A
+// read that is damaged must be the first read that fails, so each row holds
+// every other read of that repository clean.
+func damagedReads() []damagedRead {
+	cleanRulesets := func(server *rulesetServer) {
+		server.rulesetListPayloads[auditedRepository] =
+			fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+		server.rulesetDetailPayloads[managedRulesetID] = detailPayload("Main Protection", "CI Success", "")
+		server.activeRulesPayloads[auditedRepository+"@main"] = activeRulesJSON("CI Success")
+	}
+	return []damagedRead{
+		{
+			name:  "active rules",
+			label: "active rules response",
+			payload: func(inserted string) string {
+				return damageInsideJSONString(activeRulesJSON("CI Success"), `"context": "CI Success`, inserted)
+			},
+			arrange: func(server *rulesetServer, payload string) {
+				server.activeRulesPayloads[auditedRepository+"@main"] = payload
+			},
+		},
+		{
+			name:  "ruleset list",
+			label: "ruleset list response",
+			payload: func(inserted string) string {
+				return damageInsideJSONString(
+					fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID),
+					`"name": "Main Protection`, inserted,
+				)
+			},
+			arrange: func(server *rulesetServer, payload string) {
+				// The detail read follows the list read, so it must be clean.
+				cleanRulesets(server)
+				server.rulesetListPayloads[auditedRepository] = payload
+			},
+		},
+		{
+			name:  "ruleset detail",
+			label: fmt.Sprintf("ruleset %d response", managedRulesetID),
+			payload: func(inserted string) string {
+				return damageInsideJSONString(
+					detailPayload("Main Protection", "CI Success", ""), `"context": "CI Success`, inserted,
+				)
+			},
+			arrange: func(server *rulesetServer, payload string) {
+				cleanRulesets(server)
+				server.rulesetDetailPayloads[managedRulesetID] = payload
+			},
+		},
+		{
+			name:  "branch protection",
+			label: "branch protection response",
+			payload: func(inserted string) string {
+				return damageInsideJSONString(protectionJSON("CI Success", true), `"context": "CI Success`, inserted)
+			},
+			arrange: func(server *rulesetServer, payload string) {
+				server.protectionPayloads[auditedRepository+"/branches/main"] = payload
+			},
+		},
+		{
+			name:  "contents",
+			label: "contents response",
+			// The contents envelope carries the damage in a key the audit does
+			// not read. The base64 text cannot hold it, because a substituted
+			// byte there would fail the base64 decode for an unrelated reason.
+			payload: func(inserted string) string {
+				return strings.Replace(
+					contentsEnvelope(attestationBody()), `{"content": "`, `{"sha": "`+inserted+`", "content": "`, 1,
+				)
+			},
+			arrange: func(server *rulesetServer, payload string) {
+				cleanRulesets(server)
+				server.contentsPayloads[auditedRepository] = payload
+			},
+		},
+	}
+}
+
+// damageInsideJSONString inserts one byte sequence at the end of the named
+// string, so the payload stays valid JSON and only a strict decode can see the
+// damage. Without that, a decoder error would prove the guard nothing.
+func damageInsideJSONString(payload, marker, inserted string) string {
+	if !strings.Contains(payload, marker) {
+		panic("fixture " + marker + " is missing from " + payload)
+	}
+	damaged := strings.Replace(payload, marker, marker+inserted, 1)
+	if !json.Valid([]byte(damaged)) {
+		panic("the damaged payload is not valid JSON, so it proves nothing")
+	}
+	return damaged
+}
+
+// causeExpectationBodies reviews the same contexts the damaged fixtures carry,
+// so a finding count cannot grow because the expectation set changed.
+func causeExpectationBodies() []string {
+	return []string{
+		expectationBody("DoxReloaded", "main", "CI Success"),
+		expectationBody("DxMessaging", "master", "Unity CI Success"),
+		expectationBody("IshoBoy", "main", "Unity CI Success"),
+		expectationBody("qora-redux", "main", "Unity CI"),
+		expectationBody("unity-builder", "main", ""),
+		expectationBody("unity-helpers", "main", "Unity CI Success"),
+	}
+}
+
+// A refused response is only actionable when the artifact says which read
+// refused and why. Both doors of the decoder guard have to reach the artifact
+// with the name of the read attached, so an operator does not search five
+// endpoints for the one that failed.
+func TestRunPublishesTheRefusalCauseForEveryDamagedRead(t *testing.T) {
+	doors := []struct {
+		name     string
+		inserted string
+		reason   string
+	}{
+		{name: "invalid UTF-8 byte", inserted: "\xff", reason: jsonstrict.ReasonNotUTF8},
+		{name: "escaped lone surrogate", inserted: `\ud800`, reason: jsonstrict.ReasonLoneSurrogateEscape},
+	}
+	for _, read := range damagedReads() {
+		t.Run(read.name, func(t *testing.T) {
+			for _, door := range doors {
+				t.Run(door.name, func(t *testing.T) {
+					directory := t.TempDir()
+					policyPath := writeRepositoryPolicy(t, directory)
+					expectationsPath := writeExpectations(t, directory, causeExpectationBodies()...)
+					server, client := newRulesetServer(t)
+					read.arrange(server, read.payload(door.inserted))
+					exit, content := runAudit(
+						t, directory, server.URL, client, policyPath, expectationsPath, "reader-token",
+					)
+					if exit != 1 {
+						t.Fatalf("damaged %s exit = %d, want 1; artifact: %s", read.name, exit, content)
+					}
+					audit := decodeArtifact(t, content)
+					if audit.Complete {
+						t.Fatalf("a damaged %s must fail the audit closed: %s", read.name, content)
+					}
+					findings := repositoryFindings(audit.Findings, auditedRepository)
+					if len(findings) != 1 ||
+						findings[0].Code != mergepolicy.CodeRetrievalIncomplete {
+						t.Fatalf("want one %s finding for %s, got %#v in %s",
+							mergepolicy.CodeRetrievalIncomplete, auditedRepository, findings, content)
+					}
+					finding := findings[0]
+					if finding.Cause != read.label+" "+door.reason {
+						t.Fatalf("cause = %q, want %q", finding.Cause, read.label+" "+door.reason)
+					}
+					if finding.Detail != "" {
+						// A retrieval finding has no drift evidence. A cause copied
+						// into the detail would make the alert read as drift.
+						t.Fatalf("retrieval finding carries a detail: %#v", finding)
+					}
+					assertCauseIsPublishable(t, finding.Cause)
+				})
+			}
+		})
+	}
+}
+
+// assertCauseIsPublishable pins the alphabet the issue validator accepts. A
+// cause outside it is not a bad alert row: the validator refuses the whole
+// artifact, so the drift alert never opens at all.
+func assertCauseIsPublishable(t *testing.T, cause string) {
+	t.Helper()
+	publishable := regexp.MustCompile("^[" + mergepolicy.Alphabet + "-]{0," +
+		strconv.Itoa(mergepolicy.MaxDetailBytes) + "}$")
+	if !publishable.MatchString(cause) {
+		t.Fatalf("cause %q is outside the issue alphabet", cause)
+	}
+}
+
+// The substituted form of the same damage is a value the decoder can read, so
+// only the guard can refuse it. If a substituted payload is also refused, the
+// test would pass for the wrong reason.
+func TestRunAcceptsTheSubstitutedFormOfEveryDamagedRead(t *testing.T) {
+	for _, read := range damagedReads() {
+		t.Run(read.name, func(t *testing.T) {
+			directory := t.TempDir()
+			policyPath := writeRepositoryPolicy(t, directory)
+			expectationsPath := writeExpectations(t, directory, causeExpectationBodies()...)
+			server, client := newRulesetServer(t)
+			read.arrange(server, read.payload("\uFFFD"))
+			_, content := runAudit(
+				t, directory, server.URL, client, policyPath, expectationsPath, "reader-token",
+			)
+			audit := decodeArtifact(t, content)
+			for _, finding := range repositoryFindings(audit.Findings, auditedRepository) {
+				if finding.Code == mergepolicy.CodeRetrievalIncomplete {
+					t.Fatalf("a substituted %s was refused: %s", read.name, content)
+				}
+			}
+			if !audit.Complete {
+				t.Fatalf("a substituted %s must stay complete evidence: %s", read.name, content)
+			}
+		})
+	}
+}
+
+// A consumer that published a file the decoder cannot represent cannot tell
+// which of the many reasons it was refused, so it republishes the same file and
+// the alert returns. The cause therefore has to be in both channels: the cause
+// is the machine-readable reason, the detail is what the consumer reads.
+func TestRunCarriesTheAttestationCauseInBothChannels(t *testing.T) {
+	directory := t.TempDir()
+	policyPath := writeRepositoryPolicy(t, directory)
+	expectationsPath := writeExpectations(t, directory, causeExpectationBodies()...)
+	server, client := newRulesetServer(t)
+	server.rulesetListPayloads[auditedRepository] =
+		fmt.Sprintf(`[{"id": %d, "name": "Main Protection", "enforcement": "active"}]`, managedRulesetID)
+	server.rulesetDetailPayloads[managedRulesetID] = detailPayload("Main Protection", "CI Success", "")
+	server.activeRulesPayloads[auditedRepository+"@main"] = activeRulesJSON("CI Success")
+	server.contentsPayloads[auditedRepository] = contentsEnvelope(damageInsideJSONString(
+		attestationBody(), `"repository": "Ambiguous-Interactive/DoxReloaded`, "\xff",
+	))
+	exit, content := runAudit(t, directory, server.URL, client, policyPath, expectationsPath, "reader-token")
+	if exit != 1 {
+		t.Fatalf("damaged attestation exit = %d, want 1; artifact: %s", exit, content)
+	}
+	audit := decodeArtifact(t, content)
+	if audit.Complete {
+		t.Fatalf("an unreadable published file must fail the audit closed: %s", content)
+	}
+	findings := repositoryFindings(audit.Findings, auditedRepository)
+	if len(findings) != 1 || findings[0].Code != mergepolicy.CodeAttestationStale {
+		t.Fatalf("want one %s finding for %s, got %#v in %s",
+			mergepolicy.CodeAttestationStale, auditedRepository, findings, content)
+	}
+	finding := findings[0]
+	want := "merge policy attestation " + jsonstrict.ReasonNotUTF8
+	if finding.Cause != want {
+		t.Fatalf("cause = %q, want %q", finding.Cause, want)
+	}
+	if finding.Detail != finding.Cause {
+		t.Fatalf("detail = %q, want the same cause %q", finding.Detail, finding.Cause)
+	}
+	assertCauseIsPublishable(t, finding.Cause)
 }

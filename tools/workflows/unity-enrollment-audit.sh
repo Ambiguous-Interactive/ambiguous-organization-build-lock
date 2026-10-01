@@ -143,6 +143,25 @@ revalidate_heads() {
   done
 }
 
+# record_causes publishes every finding that names a refusal cause, so an
+# operator reads the file or the reason in the run summary instead of opening a
+# consumer checkout. The drift issue keeps counts and codes only, because a
+# cause can name a consumer-controlled file. The cause is sanitized to an
+# alphabet with no pipe and no newline, so the table needs no escaping. The
+# table is bounded; the retained artifact holds the complete set.
+record_causes() {
+  jq -r '
+    [ .findings[] | select(((.cause // "") | length) > 0) ] as $causes
+    | ($causes | length) as $total
+    | if $total == 0 then empty
+      else "### Refused evidence\n\n| Repository | Reason | Cause |\n| --- | --- | --- |\n"
+        + ($causes[0:20] | map("| `\(.repository)` | `\(.code)` | \(.cause) |") | join("\n"))
+        + (if $total > 20 then "\n_... and \($total - 20) more in the retained artifact._" else "" end)
+        + "\n"
+      end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+}
+
 record_counts() {
   if [ ! -f "${AUDIT_PATH:?AUDIT_PATH is required}" ]; then
     echo "Unity enrollment audit artifact unavailable." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
@@ -152,6 +171,7 @@ record_counts() {
   jq -r --arg expected "${expected_repositories}" \
     '"Repositories: \(.repositories | length)/\($expected)\nActive jobs: \(.inventory | length)\nFindings: \(.findings | length)\nComplete: \(.complete)"' \
     "${AUDIT_PATH}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+  record_causes
   if [ "$(jq -r '.complete' "${AUDIT_PATH}")" != "true" ]; then
     echo "The organization audit is incomplete; policy status is unknown." >> "${GITHUB_STEP_SUMMARY}"
     exit 1

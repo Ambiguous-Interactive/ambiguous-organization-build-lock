@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -742,5 +744,64 @@ func TestUnityEnrollmentRegistryNamesTheSyntaxErrorForAMalformedFile(t *testing.
 	if _, err := ParseUnityEnrollmentRegistry(truncated); err == nil ||
 		strings.Contains(err.Error(), "lone surrogate") {
 		t.Fatalf("error = %v, want the decoder's own message for a truncated file", err)
+	}
+}
+
+// The cause is built from a consumer-controlled path and reaches a retained
+// artifact and a run summary. Every rune outside FindingCauseAlphabet has to
+// become '?', and the length has to stay inside MaxFindingCauseBytes, or the
+// issue validator refuses the whole artifact and the alert never opens. The
+// alphabet row is the control: it shows the test would also accept a value the
+// sanitizer damaged when it should not have.
+func TestSanitizeFindingCauseMapsEveryHostileInputIntoTheAlphabet(t *testing.T) {
+	publishable := regexp.MustCompile("^[" + FindingCauseAlphabet + "]{0," +
+		strconv.Itoa(MaxFindingCauseBytes) + "}$")
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{
+			name:  "reviewed reason",
+			value: "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+			want:  "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+		},
+		{
+			name:  "unreadable byte",
+			value: "policy file unity-\xffbuild.yml",
+			want:  "policy file unity-?build.yml",
+		},
+		{name: "pipe", value: "policy file | unity", want: "policy file ? unity"},
+		{name: "backtick", value: "policy file `unity`", want: "policy file ?unity?"},
+		{name: "newline", value: "policy file\ncredential=value", want: "policy file?credential?value"},
+		{name: "angle bracket", value: "policy file <unity>", want: "policy file ?unity?"},
+		{name: "tab", value: "policy file\tunity", want: "policy file?unity"},
+		{name: "non ascii", value: "policy file naïve", want: "policy file na?ve"},
+		{
+			name:  "oversized",
+			value: strings.Repeat("a", MaxFindingCauseBytes+50),
+			want:  strings.Repeat("a", MaxFindingCauseBytes),
+		},
+		{
+			// The cut is a byte cut, so a multi-byte rune never reaches the
+			// output half written.
+			name:  "oversized non ascii",
+			value: strings.Repeat("é", 200),
+			want:  strings.Repeat("?", 128),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := SanitizeFindingCause(testCase.value)
+			if got != testCase.want {
+				t.Fatalf("SanitizeFindingCause(%q) = %q, want %q", testCase.value, got, testCase.want)
+			}
+			if len(got) > MaxFindingCauseBytes {
+				t.Fatalf("cause is %d bytes, want at most %d", len(got), MaxFindingCauseBytes)
+			}
+			if !publishable.MatchString(got) {
+				t.Fatalf("cause %q is outside the issue alphabet", got)
+			}
+		})
 	}
 }

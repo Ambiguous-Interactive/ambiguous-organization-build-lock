@@ -12,10 +12,12 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -112,6 +114,12 @@ func readAudit(path string) (enrollment.UnityOrganizationAudit, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return enrollment.UnityOrganizationAudit{}, fmt.Errorf("audit must contain one JSON value")
 	}
+	// The guard runs after the decode, so a malformed artifact keeps the
+	// decoder's own message. A value the decoder substituted would reach
+	// validateAudit as a spelling the audit never wrote.
+	if err := jsonstrict.Refusal("audit artifact", content); err != nil {
+		return enrollment.UnityOrganizationAudit{}, err
+	}
 	if err := validateAudit(audit); err != nil {
 		return enrollment.UnityOrganizationAudit{}, err
 	}
@@ -127,6 +135,13 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 	codePattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
 	pathPattern := regexp.MustCompile(`^\.github/(?:workflows/)?[A-Za-z0-9_./-]+\.ya?ml$`)
 	jobPattern := regexp.MustCompile(`^[A-Za-z0-9_. -]{0,128}$`)
+	// The cause is accepted only over the alphabet the analyzer sanitizes to,
+	// so a consumer-controlled file name can never carry text into the artifact
+	// contract. It is not rendered into the issue body.
+	causePattern := regexp.MustCompile(
+		"^[" + enrollment.FindingCauseAlphabet + "]{0," +
+			strconv.Itoa(enrollment.MaxFindingCauseBytes) + "}$",
+	)
 	validateIdentity := func(repository, sha string, shaOptional bool) error {
 		if !repositoryPattern.MatchString(repository) {
 			return fmt.Errorf("invalid repository")
@@ -161,7 +176,8 @@ func validateAudit(audit enrollment.UnityOrganizationAudit) error {
 		}
 		if !codePattern.MatchString(finding.Code) ||
 			(finding.Path != "" && (len(finding.Path) > 256 || !pathPattern.MatchString(finding.Path))) ||
-			!jobPattern.MatchString(finding.Job) {
+			!jobPattern.MatchString(finding.Job) ||
+			!causePattern.MatchString(finding.Cause) {
 			return fmt.Errorf("invalid finding")
 		}
 	}

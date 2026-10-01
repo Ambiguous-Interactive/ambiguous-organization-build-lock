@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const testArtifactURL = "https://github.com/Ambiguous-Interactive/lock/actions/runs/123/artifacts/456"
@@ -244,6 +246,65 @@ func TestReadAuditRejectsUnknownFieldsAndHostileValues(t *testing.T) {
 	}
 }
 
+// The audit is written by an artifact this repository does not review as text,
+// so an escaped lone surrogate would reach validateAudit as U+FFFD, a spelling
+// the analyzer never wrote. The clean row carries the weight: a guard that
+// refused every non-ASCII artifact would pass a table with only refusal rows. The
+// truncated row carries the ordering, because a guard above the decode would
+// report a byte rule and hide the syntax error an operator has to fix.
+func TestReadAuditRefusesWhatTheDecoderCannotRepresent(t *testing.T) {
+	clean, err := json.Marshal(sampleAudit())
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := bytes.Replace(clean, []byte(`"job":"unity"`), []byte(`"job":"\ud800"`), 1)
+	if bytes.Equal(clean, damaged) {
+		t.Fatal("the fixture does not hold the literal this test damages")
+	}
+	unreadable := bytes.Replace(clean, []byte(`"job":"unity"`), []byte("\"job\":\"\xff\""), 1)
+
+	cases := []struct {
+		name       string
+		content    []byte
+		want       string
+		wantAbsent string
+	}{
+		{name: "clean artifact", content: clean},
+		{name: "escaped lone surrogate", content: damaged, want: "audit artifact " + jsonstrict.ReasonLoneSurrogateEscape},
+		{name: "unreadable byte", content: unreadable, want: "audit artifact " + jsonstrict.ReasonNotUTF8},
+		{
+			name:       "truncated artifact keeps the decoder message",
+			content:    damaged[:len(damaged)-1],
+			want:       "unexpected EOF",
+			wantAbsent: "lone surrogate",
+		},
+	}
+	path := filepath.Join(t.TempDir(), "audit.json")
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.WriteFile(path, test.content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readAudit(path)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("a clean audit was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("an audit the decoder cannot represent was accepted")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+			if test.wantAbsent != "" && strings.Contains(err.Error(), test.wantAbsent) {
+				t.Fatalf("error = %v, must not claim %q", err, test.wantAbsent)
+			}
+		})
+	}
+}
+
 func TestValidateAuditAcceptsEveryInventoryClassification(t *testing.T) {
 	for _, classification := range []string{
 		enrollment.UnityInventoryPaidSerial,
@@ -383,5 +444,89 @@ func TestValidatedArtifactURLRejectsMaliciousRunIdentity(t *testing.T) {
 				t.Fatal("malicious artifact identity passed")
 			}
 		})
+	}
+}
+
+// The analyzer builds the cause from a consumer-controlled path, so the value
+// reaches a retained artifact. readAudit is the only door, and it must refuse a
+// cause outside the alphabet the analyzer sanitizes to, or a hostile file name
+// becomes retained evidence. The empty cause is the control: it shares every
+// other field with the hostile rows.
+func TestReadAuditRefusesACauseOutsideTheSanitizedAlphabet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.json")
+	write := func(t *testing.T, cause string) {
+		t.Helper()
+		audit := sampleAudit()
+		audit.Findings = []enrollment.UnityAuditFinding{{
+			Repository: "Ambiguous-Interactive/DoxReloaded",
+			SHA:        strings.Repeat("a", 40),
+			Code:       "repository-retrieval-incomplete",
+			Cause:      cause,
+		}}
+		content, err := json.Marshal(audit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accepted := map[string]string{
+		"no cause":    "",
+		"reason":      "load exact snapshot: policy file scripts/unity/editor-check.ps1 is not valid UTF-8",
+		"with quotes": `policy file ".github/workflows/unity.yml" is not valid UTF-8`,
+		"longest":     strings.Repeat("a", enrollment.MaxFindingCauseBytes),
+	}
+	refused := map[string]string{
+		"newline":     "load exact snapshot failed\ncredential=value",
+		"backtick":    "load exact snapshot `failed`",
+		"pipe":        "load exact snapshot | failed",
+		"non ascii":   "load exact snapshot failed: naïve ✨",
+		"oversized":   strings.Repeat("a", enrollment.MaxFindingCauseBytes+1),
+		"empty table": "load exact snapshot ()\tfailed",
+	}
+	for name, cause := range accepted {
+		t.Run(name, func(t *testing.T) {
+			write(t, cause)
+			if _, err := readAudit(path); err != nil {
+				t.Fatalf("cause %q was refused: %v", cause, err)
+			}
+		})
+	}
+	for name, cause := range refused {
+		t.Run(name, func(t *testing.T) {
+			write(t, cause)
+			_, err := readAudit(path)
+			if err == nil {
+				t.Fatalf("cause %q reached the retained artifact", cause)
+			}
+			if !strings.Contains(err.Error(), "invalid finding") {
+				t.Fatalf("error = %v, want the finding validator to refuse it", err)
+			}
+		})
+	}
+}
+
+// The enrollment cause is a clause from internal/jsonstrict or from
+// enrollment.LoadGitSnapshot behind a file name, and the analyzer sanitizes it.
+// A character the sanitizer cannot map would make the issue sync refuse the
+// whole artifact, so the drift alert never opens and the file name is lost with
+// it. The two reasons and a byte-lost file name are checked here, not one of
+// them.
+func TestEveryPublishedEnrollmentCauseIsPublishable(t *testing.T) {
+	publishable := regexp.MustCompile("^[" + enrollment.FindingCauseAlphabet + "]{0," +
+		strconv.Itoa(enrollment.MaxFindingCauseBytes) + "}$")
+	causes := []string{
+		"load exact snapshot: tree path %q at 0123456789abcdef is not valid UTF-8",
+		"load exact snapshot: policy file scripts/unity/editor\xff-check.ps1 at 0123456789abcdef is not valid UTF-8",
+	}
+	for _, reason := range []string{jsonstrict.ReasonNotUTF8, jsonstrict.ReasonLoneSurrogateEscape} {
+		causes = append(causes, "lock state "+reason)
+	}
+	for _, cause := range causes {
+		sanitized := enrollment.SanitizeFindingCause(cause)
+		if !publishable.MatchString(sanitized) {
+			t.Errorf("cause %q sanitized to %q, which is outside the issue alphabet", cause, sanitized)
+		}
 	}
 }

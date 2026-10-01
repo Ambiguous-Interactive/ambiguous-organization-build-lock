@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -368,5 +370,94 @@ func TestRunRefusesAPolicyWithAnEscapedLoneSurrogate(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "policy is valid") {
 		t.Fatalf("a refused policy was reported as valid: %s", stdout.String())
+	}
+}
+
+// The snapshot reader names the file it refused to read. A consumer otherwise
+// has to search its own checkout for that file, so the cause must reach the
+// artifact and the run summary. The cause is built from a consumer-controlled
+// path, so it must also stay inside the alphabet the issue validator accepts.
+func TestRunCarriesTheRetrievalCauseIntoTheArtifact(t *testing.T) {
+	root := t.TempDir()
+	registry := testRegistry
+	registry.RepinExceptions = nil
+	policyPath := writeRegistryFixture(t, root, registry)
+	outputPath := filepath.Join(root, "audit.json")
+	for _, repository := range registry.Repositories {
+		buildRepositoryFixture(t, root, repository, registry, nil)
+	}
+
+	// One raw byte inside a checked-in policy script. The needle matcher cannot
+	// decode it, so the snapshot refuses the repository rather than reporting a
+	// clean script, and the cause is the only place the file name can appear.
+	damagedRepository := "Ambiguous-Interactive/unity-helpers"
+	damagedRoot := filepath.Join(root, repositoryName(damagedRepository))
+	damagedScript := filepath.Join(damagedRoot, "scripts", "unity", "editor-check.ps1")
+	if err := os.MkdirAll(filepath.Dir(damagedScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		damagedScript, []byte("ensure-editor.ps1 -CiManagedOnly\xff\n"), 0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, damagedRoot, "add", ".")
+	runGit(t, damagedRoot, "commit", "-m", "unreadable policy script")
+
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"--policy", policyPath,
+		"--repositories-root", root,
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if exit != 1 {
+		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit enrollment.UnityOrganizationAudit
+	if err := json.Unmarshal(content, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit.Complete {
+		t.Fatalf("an unreadable policy file must fail the audit closed: %s", content)
+	}
+	if len(audit.Findings) != 1 {
+		t.Fatalf("want one finding, got %#v", audit.Findings)
+	}
+	finding := audit.Findings[0]
+	if finding.Repository != damagedRepository ||
+		finding.Code != "repository-retrieval-incomplete" {
+		t.Fatalf("unexpected retrieval finding: %#v", finding)
+	}
+	if finding.Cause == "" {
+		t.Fatalf("a retrieval finding without a cause sends the operator hunting: %#v", finding)
+	}
+	for _, expected := range []string{
+		"scripts/unity/editor-check.ps1",
+		"is not valid UTF-8",
+	} {
+		if !strings.Contains(finding.Cause, expected) {
+			t.Fatalf("cause %q does not name %q", finding.Cause, expected)
+		}
+	}
+	publishable := regexp.MustCompile("^[" + enrollment.FindingCauseAlphabet + "]{0," +
+		strconv.Itoa(enrollment.MaxFindingCauseBytes) + "}$")
+	if !publishable.MatchString(finding.Cause) {
+		t.Fatalf("cause %q is outside the issue alphabet", finding.Cause)
+	}
+	// The cause replaces the provenance fields for a repository that could not
+	// be read at all, so no field may claim a commit or a file this run never
+	// established.
+	if finding.Path != "" || finding.Job != "" || finding.SHA != "" {
+		t.Fatalf("retrieval finding claims provenance it does not have: %#v", finding)
+	}
+	if !strings.Contains(stderr.String(), finding.Cause) {
+		t.Fatalf("run summary does not carry the cause:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), damagedRepository) {
+		t.Fatalf("run summary does not name the repository:\n%s", stderr.String())
 	}
 }

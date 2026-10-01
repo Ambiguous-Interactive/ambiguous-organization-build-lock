@@ -14,6 +14,89 @@
 // but has no value for.
 package jsonstrict
 
+import (
+	"errors"
+	"unicode/utf8"
+)
+
+// The reasons Unrepresentable names. Each is a clause a caller puts in its own
+// sentence, so the wording stays here and every reader answers the same way.
+// Both clauses stay inside the alphabet the issue validators accept, because a
+// cause reaches a retained artifact and a one-line Markdown table. A comma here
+// would refuse the whole artifact at the issue sync, and the finding would never
+// be published.
+const (
+	ReasonNotUTF8             = "is not valid UTF-8"
+	ReasonLoneSurrogateEscape = "is an escaped lone surrogate which no JSON decoder can represent"
+)
+
+// UnrepresentableError reports that content holds a value encoding/json cannot
+// represent exactly.
+//
+// The reason travels as an error value rather than as message text, because a
+// caller wraps this error with %w and publishes only the reason. The rest of a
+// read error can carry a transport message that does not belong in retained
+// evidence.
+type UnrepresentableError struct {
+	Reason string
+}
+
+func (err UnrepresentableError) Error() string { return err.Reason }
+
+// Unrepresentable names why content holds a value encoding/json cannot
+// represent exactly, and returns "" when it holds none.
+//
+// It answers both doors in one place, so a reader does not have to remember
+// that one check is a byte rule and the other is an escape rule.
+//
+// Call it after a successful decode. A malformed document keeps the decoder's
+// own message, which names a cause an operator can act on, and this speaks
+// only when the decoder succeeded and still lost something.
+func Unrepresentable(content []byte) string {
+	if !utf8.Valid(content) {
+		return ReasonNotUTF8
+	}
+	if UnpairedSurrogateEscape(content) {
+		return ReasonLoneSurrogateEscape
+	}
+	return ""
+}
+
+// Refusal returns the error a reader returns when Unrepresentable refuses
+// content, and nil when it does not. The reader's own name leads the sentence,
+// so the cause says which read failed as well as why. It always wants a name:
+// a reader that cannot name itself yet labels the bare reason with Label.
+func Refusal(what string, content []byte) error {
+	reason := Unrepresentable(content)
+	if reason == "" {
+		return nil
+	}
+	return UnrepresentableError{Reason: what + " " + reason}
+}
+
+// Label names what was being read when a decoder lost a value, so a published
+// cause says which read failed as well as why. Every other error is returned
+// unchanged, so a transport failure is never restated as a claim about the
+// response content.
+func Label(what string, err error) error {
+	var unrepresentable UnrepresentableError
+	if errors.As(err, &unrepresentable) {
+		return UnrepresentableError{Reason: what + " " + unrepresentable.Reason}
+	}
+	return err
+}
+
+// Reason returns the publishable cause an error carries, or "" when it carries
+// none. It never returns a transport message, so a caller can put the result in
+// a retained artifact without publishing what the response held.
+func Reason(err error) string {
+	var unrepresentable UnrepresentableError
+	if errors.As(err, &unrepresentable) {
+		return unrepresentable.Reason
+	}
+	return ""
+}
+
 // UnpairedSurrogateEscape reports whether content holds a \u escape for a
 // surrogate code point that has no partner.
 //

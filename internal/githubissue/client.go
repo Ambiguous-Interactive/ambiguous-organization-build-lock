@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -247,11 +249,18 @@ func (client *Client) RequestJSON(
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(result); err != nil {
-		return nil, errors.New("decode GitHub API response failed")
+		return nil, fmt.Errorf("decode GitHub API response failed: %w", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("GitHub API response contained trailing data")
+	}
+	// This is the one reader in the repository that reads a response nobody
+	// here controls, so it names the cause instead of failing with a fixed
+	// sentence. A monitor that turns this into a reason code can keep the cause
+	// without publishing what the response held.
+	if err := jsonstrict.Refusal("GitHub API response", content); err != nil {
+		return nil, err
 	}
 	return header, nil
 }

@@ -10,7 +10,6 @@ import (
 	"io"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
@@ -126,18 +125,14 @@ func validActorType(actorType string) bool {
 }
 
 // ParseExpectations strictly validates the reviewed expectation file without
-// accepting unknown JSON fields or trailing values. A file that is not valid
-// UTF-8 is refused before it is decoded, because encoding/json replaces a byte
-// it cannot decode with U+FFFD instead of failing, and the audit would then
-// compare values the organization never wrote. An escaped lone surrogate is the
-// same substitution through a door the byte check cannot see, so it is refused
-// too.
+// accepting unknown JSON fields or trailing values. encoding/json replaces a
+// byte it cannot decode with U+FFFD instead of failing, and an escaped lone
+// surrogate reaches the same substitution through a door a byte check cannot
+// see, so jsonstrict.Unrepresentable refuses both after the decode. A file
+// that is not well-formed JSON keeps the decoder's own message.
 func ParseExpectations(content []byte) (Expectations, error) {
 	if len(content) == 0 || len(content) > MaxExpectationsBytes {
 		return Expectations{}, fmt.Errorf("merge policy expectations size is invalid")
-	}
-	if !utf8.Valid(content) {
-		return Expectations{}, fmt.Errorf("merge policy expectations are not valid UTF-8")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -152,10 +147,8 @@ func ParseExpectations(content []byte) (Expectations, error) {
 	if expectations.SchemaVersion != expectationsSchemaVersion {
 		return Expectations{}, fmt.Errorf("merge policy expectations schemaVersion must be 2")
 	}
-	if jsonstrict.UnpairedSurrogateEscape(content) {
-		return Expectations{}, fmt.Errorf(
-			"merge policy expectations contain an escaped lone surrogate, which no JSON decoder can represent",
-		)
+	if err := jsonstrict.Refusal("merge policy expectations", content); err != nil {
+		return Expectations{}, err
 	}
 	if expectations.Organization != Organization {
 		return Expectations{}, fmt.Errorf("merge policy expectations organization is not authorized")

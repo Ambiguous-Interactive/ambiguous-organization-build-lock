@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 )
 
 const (
@@ -94,8 +95,13 @@ type digestPayload struct {
 	Reason     string `json:"reason"`
 }
 
+// observation is one classification of the lock state. Cause names why a state
+// was refused, and is empty for a state that classified. It is never published:
+// the alert body is rendered from the incident alone, so a cause that came from
+// state bytes cannot reach a retained issue.
 type observation struct {
 	Reason   string
+	Cause    string
 	Lock     string
 	Incident *incident
 }
@@ -149,7 +155,13 @@ func run(
 	result.Lock = settings.Lock
 	if result.Reason == reasonStateInvalid {
 		// Ambiguous state can neither prove an incident nor prove recovery, so it
-		// must never open, edit, or close the alert.
+		// must never open, edit, or close the alert. The cause is named when one
+		// is known, so an operator does not read a fail-closed code with nothing
+		// to act on.
+		if result.Cause != "" {
+			_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateInvalid, result.Cause)
+			return 1
+		}
 		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
 		return 1
 	}
@@ -216,6 +228,14 @@ func classifyState(raw []byte, serverURL, lock string) observation {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return invalid
+	}
+	// The guard runs after the decode, so a truncated document keeps the
+	// decoder's own refusal. It guards the whole document, which also covers the
+	// active-incident decode below: an incident is a slice of these bytes. Every
+	// field below is compared against an exact expected value, so a value the
+	// decoder substituted must not reach the comparison.
+	if reason := jsonstrict.Unrepresentable(raw); reason != "" {
+		return observation{Reason: reasonStateInvalid, Cause: "lock state " + reason}
 	}
 	if declared, ok := fields["lock"]; ok {
 		var name string

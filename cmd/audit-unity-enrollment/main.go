@@ -68,8 +68,16 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			audit.Findings = append(audit.Findings, enrollment.UnityAuditFinding{
 				Repository: repository.Repository,
 				Code:       "repository-retrieval-incomplete",
+				// The snapshot reader already names the file it could not read. An
+				// operator has to find that file in the consumer checkout otherwise,
+				// so the cause travels to the artifact and the run summary. It is
+				// sanitized because a refused path can be bytes nobody wrote.
+				Cause: enrollment.SanitizeFindingCause(loadErr.Error()),
 			})
-			_, _ = fmt.Fprintf(stderr, "Unity enrollment retrieval failed for %s\n", repository.Repository)
+			_, _ = fmt.Fprintf(
+				stderr, "Unity enrollment retrieval failed for %s: %s\n",
+				repository.Repository, enrollment.SanitizeFindingCause(loadErr.Error()),
+			)
 			continue
 		}
 		audit.Repositories = append(audit.Repositories, enrollment.UnityAuditedRepository{
@@ -93,8 +101,12 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 				Repository: repository.Repository,
 				SHA:        sha,
 				Code:       "repository-analysis-incomplete",
+				Cause:      enrollment.SanitizeFindingCause(analyzeErr.Error()),
 			})
-			_, _ = fmt.Fprintf(stderr, "Unity enrollment analysis failed for %s\n", repository.Repository)
+			_, _ = fmt.Fprintf(
+				stderr, "Unity enrollment analysis failed for %s: %s\n",
+				repository.Repository, enrollment.SanitizeFindingCause(analyzeErr.Error()),
+			)
 			continue
 		}
 		audit.Inventory = append(audit.Inventory, result.Inventory...)
@@ -142,7 +154,9 @@ func loadExactSnapshot(
 	}
 	snapshot, err := enrollment.LoadGitSnapshot(context.Background(), root, repository.Repository, sha)
 	if err != nil {
-		return "", enrollment.Snapshot{}, fmt.Errorf("load exact snapshot")
+		// The snapshot reader names the file and the reason it could not be read,
+		// so its error is kept. The caller sanitizes it into the finding detail.
+		return "", enrollment.Snapshot{}, fmt.Errorf("load exact snapshot: %w", err)
 	}
 	return sha, snapshot, nil
 }

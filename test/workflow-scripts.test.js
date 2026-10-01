@@ -302,6 +302,71 @@ test("enrollment summary fails closed when retained audit evidence is incomplete
   assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
 });
 
+// A refusal cause reaches an operator through the run summary, because the
+// drift issue holds counts and codes only. A cause with no row in the summary is
+// a cause an operator cannot act on, which is what the cause field was added to
+// prevent. Both summary writers share this table, so one data-driven case covers
+// the merge-policy and the Unity enrollment artifact.
+const causeSummaryCases = [
+  { script: "merge-policy-audit.sh", complete: false, incomplete: "merge-gate status is unknown" },
+  { script: "unity-enrollment-audit.sh", complete: false, incomplete: "policy status is unknown" }
+];
+
+for (const testCase of causeSummaryCases) {
+  test(`${testCase.script} publishes every refusal cause in the run summary`, (t) => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "refusal-cause-summary-"));
+    t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+    const auditPath = path.join(temporary, "audit.json");
+    const summaryPath = path.join(temporary, "summary.md");
+    const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
+    const write = (findings, complete) =>
+      fs.writeFileSync(
+        auditPath,
+        JSON.stringify({ repositories: [], inventory: [], findings, complete })
+      );
+
+    write([], true);
+    assert.equal(runScript(testCase.script, "record-counts", environment).status, 0);
+    assert.doesNotMatch(
+      fs.readFileSync(summaryPath, "utf8"),
+      /Refused evidence/,
+      "an audit with no cause must not publish an empty cause table"
+    );
+
+    write(
+      [
+        {
+          repository: "Ambiguous-Interactive/DoxReloaded",
+          code: "repository-retrieval-incomplete",
+          cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8"
+        },
+        { repository: "Ambiguous-Interactive/qora-redux", code: "merge-policy-retrieval-incomplete" }
+      ],
+      testCase.complete
+    );
+    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
+    const summary = fs.readFileSync(summaryPath, "utf8");
+    assert.match(summary, /Refused evidence/);
+    assert.match(summary, /scripts\/unity\/editor-check\.ps1 at 0123456789abcdef is not valid UTF-8/);
+    assert.match(summary, /Ambiguous-Interactive\/DoxReloaded/);
+    assert.doesNotMatch(summary, /qora-redux/, "a finding with no cause must not publish a blank row");
+
+    // The table is bounded, so a long list cannot push a summary past its limit.
+    write(
+      Array.from({ length: 25 }, (_, index) => ({
+        repository: `Ambiguous-Interactive/repo-${index}`,
+        code: "repository-retrieval-incomplete",
+        cause: "lock state is not valid UTF-8"
+      })),
+      false
+    );
+    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
+    const bounded = fs.readFileSync(summaryPath, "utf8");
+    assert.match(bounded, /and 5 more in the retained artifact/);
+    assert.doesNotMatch(bounded, /repo-24/, "the bounded table must stop before the last cause");
+  });
+}
+
 test("merge policy summary fails closed when retained audit evidence is incomplete", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "merge-policy-summary-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
