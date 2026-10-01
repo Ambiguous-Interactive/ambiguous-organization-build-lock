@@ -9,6 +9,7 @@ Read only the files relevant to the current task.
 | File | When to read |
 | --- | --- |
 | [.llm/code-samples/consumer-safety-shape.md](./code-samples/consumer-safety-shape.md) | Minimal structural example for safe licensed consumer workflow review. |
+| [.llm/code-samples/text-rewrite-byte-safety.md](./code-samples/text-rewrite-byte-safety.md) | Byte-safe pattern for a tool that reads a file and writes it back. |
 
 ## Harness
 
