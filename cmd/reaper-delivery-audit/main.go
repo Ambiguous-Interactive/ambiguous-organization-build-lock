@@ -319,8 +319,8 @@ func run(
 // concluded. A reason code alone leaves an operator to guess the consequence,
 // which is the log-only condition #326 records.
 var monitorMeanings = map[string]string{
-	reasonHealthy:         "The latest scheduled reaper delivery is on time and its run succeeded.",
-	reasonRunMissing:      "No scheduled reaper delivery can be proven, so stale build locks are not being reaped.",
+	reasonHealthy:         "The latest scheduled reaper delivery is on time, and its run either succeeded or is still inside the run-duration threshold.",
+	reasonRunMissing:      "No scheduled reaper delivery can be proven, so stale build locks may not be reaped on schedule.",
 	reasonRunOverdue:      "The latest scheduled reaper delivery is later than the delivery threshold, so reaping is late.",
 	reasonRunStalled:      "The latest scheduled reaper run is still active past the run-duration threshold, so reaping is stalled.",
 	reasonRunUnsuccessful: "The latest scheduled reaper run did not succeed, so stale build locks may not have been reaped.",

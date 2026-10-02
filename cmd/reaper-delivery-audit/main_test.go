@@ -384,7 +384,7 @@ func TestRunSucceedsAfterSynchronizingKnownAlert(t *testing.T) {
 	// #326: a green run that names its condition only in a step log is the gap
 	// this closes, so the annotation and the summary now carry the reason, and
 	// stderr carries nothing else.
-	wantSummary := "No scheduled reaper delivery can be proven, so stale build locks are not being reaped. " +
+	wantSummary := "No scheduled reaper delivery can be proven, so stale build locks may not be reaped on schedule. " +
 		"Reason: `scheduled-run-missing`. Delivery threshold: `30m0s`. Run-duration threshold: `15m0s`. " +
 		"Alert issue: \"ops: scheduled reaper delivery outside SLO\".\n"
 	if !issueCreated ||
@@ -395,8 +395,9 @@ func TestRunSucceedsAfterSynchronizingKnownAlert(t *testing.T) {
 			issueCreated, stdout.String(), summary,
 		)
 	}
-	wantStderr := "::warning::No scheduled reaper delivery can be proven, so stale build locks are not " +
-		"being reaped. Reason: scheduled-run-missing. Delivery threshold: 30m0s. Run-duration threshold: " +
+	wantStderr := "::warning::No scheduled reaper delivery can be proven, so stale build locks may not " +
+		"be reaped on schedule. Reason: scheduled-run-missing. Delivery threshold: 30m0s. Run-duration " +
+		"threshold: " +
 		"15m0s. Alert issue: \"ops: scheduled reaper delivery outside SLO\".\n"
 	if stderr.String() != wantStderr {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
@@ -688,13 +689,13 @@ func TestRunPublishesEveryConclusionToTheRunSummary(t *testing.T) {
 			"healthy",
 			scheduledRuns(recent),
 			0,
-			"The latest scheduled reaper delivery is on time and its run succeeded. Reason: `healthy`.",
+			"The latest scheduled reaper delivery is on time, and its run either succeeded or is still inside the run-duration threshold. Reason: `healthy`.",
 		},
 		{
 			"delivery missing",
 			scheduledRuns(),
 			0,
-			"No scheduled reaper delivery can be proven, so stale build locks are not being reaped. " +
+			"No scheduled reaper delivery can be proven, so stale build locks may not be reaped on schedule. " +
 				"Reason: `scheduled-run-missing`. " + thresholds,
 		},
 		{

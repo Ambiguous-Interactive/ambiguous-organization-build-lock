@@ -69,6 +69,9 @@ Three commits on `fix/326-monitors-state-their-conclusion`.
   already follow.
 - `README.md` and `docs/operations-runbook.md` state where a conclusion is
   published. A test pins both claims in both documents.
+- Every meaning states only what the classification proved. A healthy reaper
+  means the delivery is on time and its run either succeeded or is still inside
+  the run-duration threshold.
 - `.llm/skills/operations-and-documentation` item 7 records that a summary line
   and an annotation are operator-visible surfaces.
 
@@ -140,9 +143,9 @@ reaper test that matched whatever `reaperHandle` returned.
 
 ## Review rounds, and what each changed
 
-Two independent adversarial reviews. The first reviewed the code. The second
-reviewed the class, the documents, the progress requirements, and two of the
-first review's claims.
+Two independent adversarial reviews, then the Cursor Bugbot pull-request
+review. The first reviewed the code. The second reviewed the class, the
+documents, the progress requirements, and two of the first review's claims.
 
 | Finding | Severity | Disposition |
 | --- | --- | --- |
@@ -166,6 +169,8 @@ first review's claims.
 | `summaryFileMode` was unasserted. | minor | The create test asserts the mode. |
 | `runnotice` silently skipped the annotation when the stream was absent. | minor | An absent stream is now a refusal when a warning exists. |
 | `plan.md` claimed this session with no record behind it. | blocker | This record. |
+| The reaper's healthy meaning claimed "its run succeeded", but `classifyRuns` also returns healthy for a run still inside the run-duration threshold. Cursor Bugbot, on pull request 331. | should-fix | The meaning now says the run either succeeded or is still inside the threshold. |
+| The reaper's missing-delivery meaning claimed stale build locks "are not being reaped". A manual reap is evidence too. | minor | It now says they may not be reaped on schedule, which matches the unsuccessful meaning. |
 
 Two dispositions are recorded as declined with reasons rather than fixed:
 
