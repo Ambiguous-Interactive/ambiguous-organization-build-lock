@@ -800,7 +800,12 @@ cron `*/5 * * * *`; GitHub schedule delivery is best effort, not a guaranteed
 five-minute recovery cadence. The independent `Reaper delivery audit` requests
 checks every ten minutes and synchronizes one deduplicated operational issue
 when the latest scheduled reaper delivery is older than 30 minutes, or when a
-run is unsuccessful or remains active beyond 15 minutes. Scheduled/manual
+run is unsuccessful or remains active beyond 15 minutes. Every classified
+outcome states its conclusion in the job summary, and every classified reason
+code says what the conclusion means; a conclusion the run cannot publish fails
+the run instead. The reason that keeps the run green also reaches the
+annotations tab as one warning naming the reason code, the thresholds, the alert
+issue, and the scheduled run when it has one. Scheduled/manual
 reaping uses a stable group with `cancel-in-progress: false`; proof-bearing
 recovery uses a separate workflow with no automatic concurrency cancellation.
 A new schedule cannot cancel running or pending recovery; concurrent state
@@ -854,9 +859,12 @@ Operators do not have to read `lock-state` to find that ID. The independent
 `Build lock incident recovery audit` reads committed lock state every ten
 minutes with the workflow token only, and synchronizes one deduplicated alert
 issue carrying the exact incident ID, the declared `recover-incident` inputs,
-and sanitized run/runner provenance. Its body is deterministic, so an unchanged
-incident does not churn the issue, and a recovered lock closes the alert without
-rewriting it, leaving the incident record readable. Unavailable, malformed,
+and sanitized run/runner provenance. Its job summary states what the run
+concluded, so a green run cannot hide an active incident: the summary says that
+every new admission is blocked and names the incident ID. Its body is
+deterministic, so an unchanged incident does not churn the issue, and a
+recovered lock closes the alert without rewriting it, leaving the incident
+record readable. Unavailable, malformed,
 wrong-lock, unsupported-schema, or digest-inconsistent evidence fails the run red
 and leaves any existing alert untouched. The alert is identified by its marker
 plus this automation's own authorship rather than its title, so a foreign

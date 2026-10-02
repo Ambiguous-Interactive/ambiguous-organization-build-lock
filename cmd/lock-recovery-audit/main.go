@@ -29,6 +29,7 @@ import (
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/runnotice"
 )
 
 const (
@@ -48,6 +49,9 @@ const (
 	reasonStateInvalid     = "lock-state-invalid"
 	reasonStateUnavailable = "lock-state-unavailable"
 	reasonSyncFailed       = "alert-sync-failed"
+	// reasonRunNoticeUnpublished reports that this run could not state what it
+	// proved. It is the run's own outcome, not a property of the lock state.
+	reasonRunNoticeUnpublished = "run-notice-unpublished"
 
 	maxStateBytes     = 1 << 20
 	maxResponseBytes  = githubissue.DefaultResponseLimit
@@ -107,12 +111,13 @@ type observation struct {
 }
 
 type config struct {
-	Lock       string
-	StateRef   string
-	Repository string
-	APIURL     string
-	ServerURL  string
-	Token      string
+	Lock        string
+	StateRef    string
+	Repository  string
+	APIURL      string
+	ServerURL   string
+	Token       string
+	SummaryPath string
 }
 
 type githubClient struct {
@@ -141,6 +146,10 @@ func run(
 	httpClient *http.Client,
 	stdout, stderr io.Writer,
 ) int {
+	// The summary and the annotations are where an operator looks first. A
+	// conclusion this run cannot publish is evidence it did not read, so every
+	// classified outcome is published and a refusal fails the run.
+	reporter := runnotice.New(settings.SummaryPath, stderr)
 	client, err := newGitHubClient(settings.APIURL, settings.Repository, settings.Token, httpClient)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "Build lock incident audit failed: invalid configuration.")
@@ -148,8 +157,10 @@ func run(
 	}
 	state, err := client.lockState(ctx, settings.Lock, settings.StateRef)
 	if err != nil {
+		// The classified reason is stated first, so a publication refusal never
+		// hides the cause this run actually proved.
 		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateUnavailable, err)
-		return 1
+		return conclude(stderr, reporter, reasonStateUnavailable, "", 1)
 	}
 	result := classifyState(state, settings.ServerURL, settings.Lock)
 	result.Lock = settings.Lock
@@ -160,21 +171,69 @@ func run(
 		// to act on.
 		if result.Cause != "" {
 			_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateInvalid, result.Cause)
-			return 1
+		} else {
+			_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
 		}
-		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
-		return 1
+		return conclude(stderr, reporter, reasonStateInvalid, "", 1)
 	}
 	if err := client.syncAlert(ctx, result, settings.ServerURL); err != nil {
 		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonSyncFailed, err)
-		return 1
+		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
 	}
 	if result.Reason == reasonIncidentActive {
+		if code := conclude(stderr, reporter, reasonIncidentActive, incidentHandle(*result.Incident), 0); code != 0 {
+			return code
+		}
 		_, _ = fmt.Fprintf(stdout, "Build lock incident alert synchronized: %s.\n", result.Incident.IncidentID)
 		return 0
 	}
+	if code := conclude(stderr, reporter, reasonHealthy, "", 0); code != 0 {
+		return code
+	}
 	_, _ = fmt.Fprintln(stdout, "Build lock incident audit passed: no active global incident.")
 	return 0
+}
+
+// monitorMeanings states, for each reason this audit returns, what the run
+// concluded. A reason code alone leaves an operator to guess the consequence,
+// which is the log-only condition #326 records.
+var monitorMeanings = map[string]string{
+	reasonHealthy: "No global Unity account incident is active, so every new admission is allowed.",
+	reasonIncidentActive: "A global Unity account incident is active, so every new admission is blocked " +
+		"until an operator recovers it.",
+	reasonStateInvalid:     "The lock state was refused, so incident status is unknown.",
+	reasonStateUnavailable: "The lock state could not be read, so incident status is unknown.",
+	reasonSyncFailed:       "The alert issue could not be synchronized, so recovery evidence is unknown.",
+}
+
+// incidentHandle names the exact inputs an operator needs: the incident
+// identifier recovery requires, and the alert issue that carries the dispatch
+// form.
+func incidentHandle(active incident) string {
+	return fmt.Sprintf("Incident: `%s`. Alert issue: %q.", active.IncidentID, alertTitle)
+}
+
+// conclude publishes one conclusion and returns the exit code the run should
+// use. A handle is what makes a conclusion alerting, so an alerting conclusion
+// can never be published without naming what the operator acts on. A refusal is
+// always a failed run, because a run that cannot state what it proved proves
+// nothing.
+func conclude(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string, exit int) int {
+	err := reporter.Publish(runnotice.Notice{
+		Meaning: monitorMeanings[reason],
+		Reason:  reason,
+		Handle:  handle,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(
+			stderr,
+			"Build lock incident audit failed: %s (%s).\n",
+			reasonRunNoticeUnpublished,
+			err,
+		)
+		return 1
+	}
+	return exit
 }
 
 func parseConfig(arguments []string, getenv func(string) string) (config, error) {
@@ -192,6 +251,7 @@ func parseConfig(arguments []string, getenv func(string) string) (config, error)
 	settings.Repository = getenv("GITHUB_REPOSITORY")
 	settings.APIURL = getenv("GITHUB_API_URL")
 	settings.Token = getenv("GITHUB_TOKEN")
+	settings.SummaryPath = getenv("GITHUB_STEP_SUMMARY")
 	serverURL, err := origin(getenv("GITHUB_SERVER_URL"))
 	if err != nil {
 		return config{}, err

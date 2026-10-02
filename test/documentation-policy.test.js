@@ -228,6 +228,37 @@ test("every document that describes the central audits states what a green run m
   }
 });
 
+test("every document that describes a central monitor states where its conclusion is published", () => {
+  // #326: both monitors used to name a known condition in one step-log line and
+  // nowhere else. `README.md` and the runbook are the two documents that
+  // describe them, so both must carry the rule. Fold whitespace so the
+  // assertion does not depend on how the prose wraps.
+  const claims = [
+    "states its conclusion in the job summary",
+    "reaches the annotations tab as one warning"
+  ];
+  for (const file of [activeDocumentation[0], operationsPath]) {
+    const text = read(file).replace(/\s+/g, " ");
+    for (const claim of claims) {
+      assert.ok(
+        text.includes(claim),
+        `${path.relative(repoRoot, file)} must state "${claim}"`
+      );
+    }
+  }
+});
+
+test("the runbook's monitor habit points forward to the publication rule", () => {
+  // #326 superseded the habit without replacing it. A reader who stops at the
+  // habit must still be sent to the rule that now publishes the condition.
+  assert.ok(
+    read(operationsPath).replace(/\s+/g, " ").includes(
+      "Both monitors also state the condition in the run itself, as the next paragraph describes."
+    ),
+    "operations-runbook.md must point forward from the monitor habit to the publication rule"
+  );
+});
+
 test("rollout history cannot be mistaken for the active runbook", () => {
   const history = read(historyPath);
 

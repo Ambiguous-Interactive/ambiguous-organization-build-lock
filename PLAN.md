@@ -4,8 +4,13 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-09-26, session 098)
+## Current state (2026-10-02, session 124)
 
+- Session 124 reviewed all 13 open issues and found no open pull requests in this
+  repository. It selected #326, the two monitors that named a known condition in a
+  step log only. Both now state their conclusion and its reason code in the job
+  summary, and the condition that keeps the run green also reaches the
+  annotations tab. No licensed Unity job spends a cycle on it.
 - Session 098 reviewed all 14 open issues and found no open pull requests in
   this repository. It selected #283, the current repin YAML comment defect,
   for its direct consumer CI impact and zero licensed Unity job changes.
