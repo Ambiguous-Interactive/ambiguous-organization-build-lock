@@ -2868,6 +2868,9 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
               assert.equal(outputs["holder-id"], "owner/repo:123:perf-benchmarks:playmode");
               assert.equal(outputs["state-sha"], "");
               assert.equal(outputs.attempts, "1");
+              // The timeout output and its summary must publish the same position. This
+              // is the one path where they are two separate expressions, so pin it.
+              assert.equal(outputs["queue-position"], "1");
               assert.equal(outputs["stale-recovered"], "false");
             });
           });

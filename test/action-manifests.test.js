@@ -708,4 +708,6 @@ test("both acquire wait phases stay documented and keep their measured boundarie
   // promise that every summary echoes it.
   assert.match(folded(manifest), /A timed out run reports its last observed poll/);
   assert.doesNotMatch(folded(readme), /Every summary the action writes/);
+  // The run-level failure block repeats the error alone and carries neither phase.
+  assert.match(folded(readme), /The run-level failure block repeats the error alone/);
 });

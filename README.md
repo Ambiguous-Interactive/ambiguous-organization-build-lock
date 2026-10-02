@@ -308,13 +308,14 @@ operator can tell them apart without reading logs (issue #53 item 6):
 | `queue-position` | 1-based FIFO position where this caller waited, and 0 when no holder or reservation ever withheld it. |
 | `attempts` | Poll iterations in the acquire wait loop. |
 
-Every acquire outcome summary reports `runner-wait-ms` under the same name. An
-acquired run also reports the last observation that withheld the lock. That
-observation names the blocking holder or reservation, and its `queue-position`
-is the value the output publishes. A timed out summary reports the same number.
+Every acquire outcome summary reports `runner-wait-ms` under the same name. The
+run-level failure block repeats the error alone, so read the outputs on a
+failing acquire. An acquired run also reports the last observation that
+withheld the lock. That observation names the blocking holder or reservation,
+and its `queue-position` is the value the output publishes. A timed out summary
+reports the same number.
 The phases carry only elapsed milliseconds and a queue position, so they publish
 no credential data. An empty `runner-wait-ms` means unproven, not zero.
-
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;
 mutable major tags are not permitted in protected consumers. The return wrapper

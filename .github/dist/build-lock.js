@@ -2074,7 +2074,7 @@ async function getRunAttemptJobs(identity, authToken, options = {}) {
 // documents is accepted. GitHub sends a Z suffix today and documents date-time, which
 // also permits a numeric offset, so both are read. A span past the bound is a corrupt
 // record, not a measurement. The bound is a year because a self-hosted runner can be
-// offline for days, and a real wait must never be discarded.
+// offline for days, so no plausible wait is discarded.
 const RFC_3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const RUNNER_WAIT_MAX_MS = 365 * 24 * 60 * 60 * 1000;
 

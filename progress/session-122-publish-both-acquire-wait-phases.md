@@ -14,7 +14,7 @@ actionlint module is unchanged. No dependency change was made.
 | P0, merge-policy source binding | #255, #44 | Four rulesets leave the required Unity aggregate unbound, so any App could satisfy it. The central audit already detects it. The fix is a live ruleset edit through the authorized owner path, which this task must not make. |
 | P0, owner security action | #51 | App installation and org-secret visibility. Owner authority required. |
 | P0, licensed-seat proof | #83 | Independent two-seat capacity and portal reconciliation. Owner and Unity portal evidence required. |
-| P1, queue diagnostics | #53 | Items 1 and 6 are in-repository. The admission-protocol redesign needs live two-runner load. **Selected.** |
+| P1, queue diagnostics | #53 | Item 6 and two of item 1's timestamps are in-repository. The admission-protocol redesign needs live two-runner load. **Selected.** |
 | P1, platform cleanup | #153, #229, #231, #249 | Native and container canaries plus an immutable release authorization. Hardware and owner acts by design. |
 | P1, lifecycle evidence | #29 | Hard-stop, account-block, third-runner, and seven-day monitoring canaries. Live operations. |
 | P1, consumer evidence | #278 | Lock admission and release were clean. The first test log and consumer retry details are still missing. |
@@ -49,12 +49,12 @@ The record does carry `created_at` and `started_at`. Confirmed.
 
 ## Change
 
-Three commits on `issue-53-acquire-wait-phase-diagnostics`.
+A commit series on `issue-53-acquire-wait-phase-diagnostics`.
 
 - Publish `runner-wait-ms`, measured from the exact job's Actions timeline.
 - Publish `queue-position`. It was computed and discarded into a log line.
-- Report both phases in every summary the action writes, under the output
-  names.
+- Report both phases in every acquire outcome summary, under the output names.
+  The run-level failure block repeats the error alone.
 - Report the last observation that withheld the lock on an acquired run.
 - Use one clock for `wait-ms` on every outcome path.
 - Stop reporting a queue position for a caller that already holds the lock.
@@ -66,8 +66,8 @@ Three commits on `issue-53-acquire-wait-phase-diagnostics`.
 
 The change unified `wait-ms` because two code paths reported one name with
 different windows. The same class of defect, a diagnostic that misdescribes
-the situation, exists in two other outputs. Both are in the same runtime and
-each is one line, so both are fixed here.
+the situation, exists in two other outputs. Both are in the same runtime and each
+is a short change, so both are fixed here.
 
 | Site | Symptom | Fix |
 | --- | --- | --- |
@@ -81,6 +81,7 @@ each is one line, so both are fixed here.
 | `current job lookup` cases | 2 | 9, as a data-driven table plus one fail-closed case |
 | `acquire publishes both wait phases` | absent | 1 |
 | `queue-position` on the superseded path | not asserted | asserted `1` |
+| `queue-position` on the timeout path | not asserted | asserted `1` |
 | Acquire wait-phase documentation | no test | 1 test, whitespace-folded |
 | `node --test test/*.test.js` | 978 | 987 |
 
@@ -113,9 +114,9 @@ Two independent adversarial reviews, then a verification pass on the fixes.
 | The manifest and README disagreed on `attempts` | should-fix | Both now say poll iterations. `CAS attempts` was already wrong. |
 | `wait-ms` unification had no test | should-fix | The timeout fixture now charges the lock-config read a distinctive cost, so `wait-ms` is pinned to the loop bound plus that cost. The pre-change clock reported the loop bound alone. The first attempt at this assertion compared against a value from an unrelated measurement path and had no headroom; it was replaced. |
 | Nothing enforced the new documentation | minor | One test, whitespace-folded so it does not depend on line wrapping. |
-| The README claimed the summary always reports `runner-wait-ms` | minor | Now scoped to the summaries the action writes, and a test refuses the stronger claim. |
+| The README claimed the summary always reports `runner-wait-ms` | minor | Now scoped to the acquire outcome summaries. A test refuses the stronger claim. |
 | A dead first `deadline` store | minor | Removed, and the wait budget is now one named `const`. |
-| `queuePosition` parameter shadowed the `queuePosition` function | minor | The parameter is gone; one `queuePositionAt` helper decides the value. |
+| The `queuePosition` parameter shadowed the `queuePosition` function | minor | The default now calls `queuePositionAt`, so the name reads as derived rather than as an accidental shadow. |
 | Repeated issue citations and long sentences | minor | One citation kept where the rule is non-obvious. Sentences shortened. |
 
 ## Known limits
@@ -125,6 +126,13 @@ Two independent adversarial reviews, then a verification pass on the fixes.
 - GitHub records a job's timeline at one-second resolution, so a proven wait
   below one second reports `0`. The manifests say this, so `0` means measured
   and empty means unproven.
+- An admission write that loses the state CAS continues past the point that
+  records the blocking observation. A caller admitted on a later poll therefore
+  publishes `queue-position` 0 and no blocker, even though a holder did
+  withhold it earlier. The manifests scope 0 to "no holder or reservation ever
+  withheld it", which this path reaches.
+- The run-level failure block repeats the error alone. It carries neither wait
+  phase, so read the action outputs on a failing acquire.
 - `summaryCell` escapes pipes for a GFM table. The acquire summary is a
   paragraph, where GFM does not process that escape, so a peer reason
   containing a pipe renders a visible backslash. Only the peer timeline builds
