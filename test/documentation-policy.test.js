@@ -214,6 +214,20 @@ test("active enrollment guidance uses the central editor action without a helper
   assert.match(enrollment, /listed in\s+`approvedDarwinReturnShas`/);
 });
 
+test("every document that describes the central audits states what a green run means", () => {
+  // A central audit keeps its run green when it finds drift. These three
+  // documents used to say different things about that, and #325 records the
+  // result. `locks/README.md` is not one of them: it describes lock state. Fold
+  // whitespace so the assertion does not depend on how the prose wraps.
+  const claim = "A green run means the audit read every repository";
+  for (const file of [activeDocumentation[0], activeDocumentation[1], operationsPath]) {
+    assert.ok(
+      read(file).replace(/\s+/g, " ").includes(claim),
+      `${path.relative(repoRoot, file)} must state what a green audit run means`
+    );
+  }
+});
+
 test("rollout history cannot be mistaken for the active runbook", () => {
   const history = read(historyPath);
 

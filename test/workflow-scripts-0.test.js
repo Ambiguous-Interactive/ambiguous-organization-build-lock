@@ -239,7 +239,7 @@ for (const testCase of auditSummaryCases) {
     assert.ok(clean.summary.includes(testCase.cleanLine), clean.summary);
     assert.doesNotMatch(clean.summary, /### Open drift/);
     assert.doesNotMatch(clean.summary, /### Refused evidence/);
-    assert.equal(clean.result.stdout, "", "a clean audit must publish no annotation");
+    assert.equal(clean.result.stderr, "", "a clean audit must publish no annotation");
 
     // The case issue #325 records: retrieval succeeded, so the run is green, and
     // the drift issue was the only signal. Every drifted repository and every
@@ -269,8 +269,18 @@ for (const testCase of auditSummaryCases) {
       drift.summary
     );
     assert.ok(drift.summary.includes(testCase.cause), drift.summary);
+    // The cause table filters to cause-bearing findings before it renders. Without
+    // that filter it publishes a `null` cell for every drift finding. Only the
+    // repository that carries the cause may reach that section.
+    const driftCauseSection = drift.summary.split("### Open drift")[0];
+    assert.match(driftCauseSection, /qora-redux/);
+    assert.doesNotMatch(
+      driftCauseSection,
+      /DoxReloaded|\| null \|/,
+      "a finding with no cause must not publish a row in the cause table"
+    );
     assert.match(
-      drift.result.stdout,
+      drift.result.stderr,
       new RegExp(
         `^::warning::3 open ${testCase.label} findings across 2 repositories: ` +
         `${testCase.retrievalCode} x1, ${testCase.driftCode} x2\\. ` +
@@ -289,7 +299,7 @@ for (const testCase of auditSummaryCases) {
     assert.ok(incomplete.summary.includes(testCase.incompleteLine), incomplete.summary);
     assert.ok(incomplete.summary.includes(testCase.cause), incomplete.summary);
     assert.equal(
-      incomplete.result.stdout,
+      incomplete.result.stderr,
       "",
       "a failing run must not also publish a green verdict"
     );
@@ -316,11 +326,11 @@ for (const testCase of auditSummaryCases) {
       "the drift table must name every drifted repository"
     );
     assert.ok(
-      bounded.result.stdout.includes(
+      bounded.result.stderr.includes(
         `::warning::25 open ${testCase.label} findings across 25 repositories: ` +
         `${testCase.retrievalCode} x25.`
       ),
-      bounded.result.stdout
+      bounded.result.stderr
     );
   });
 
@@ -338,10 +348,12 @@ for (const testCase of auditSummaryCases) {
         GITHUB_STEP_SUMMARY: summaryPath
       });
 
-      assert.notEqual(result.status, 0, result.stdout);
-      assert.equal(result.stdout, "", "a refused artifact must publish no verdict");
+      assert.notEqual(result.status, 0, result.stderr);
+      // jq reports its own parse error on stderr, which is the operator's reason.
+      // What must never appear is a verdict, because none was established.
+      assert.doesNotMatch(result.stderr, /^::warning::/m, "a refused artifact must publish no verdict");
       assert.ok(
-        fs.readFileSync(summaryPath, "utf8").includes(testCase.unreadableLine)
+        fs.readFileSync(summaryPath, "utf8").includes(testCase.unreadableNotice)
       );
     });
   }

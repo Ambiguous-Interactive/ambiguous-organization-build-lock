@@ -24,6 +24,12 @@ I selected #325. A drift state that nothing inside the run names is the
 failure mode this repository refuses everywhere else. No licensed Unity job
 spends a cycle on it, and it changes no safety invariant.
 
+Neither audit workflow is a required check on `main`. The only required context
+is `Validate lock action files`, from ruleset `main-pr-ci` (id 18823716), checked
+2026-10-02. So the cost of the chosen option is operator attention, not a blocked
+merge. A daily run that cannot go green would hide the incomplete-audit failure
+that an operator can act on from here.
+
 ## Baseline
 
 - `.devcontainer/scripts/verify.sh` exits 0 in 9.3 s. 987 JavaScript tests,
@@ -85,6 +91,7 @@ monitor outcome. Both print their reason to the run log, so neither matches the
 | Counts block asserted | `Complete: true` only | The whole four-line block, per script |
 | `::warning::` annotation asserted | none | Whole line, including both guidance sentences |
 | `record_drift` rows | absent | Repository, count, and sorted reason codes asserted |
+| Cause table blank cell | asserted | asserted, scoped to the cause section |
 | Clean run publishes no annotation | absent | Asserted per script |
 | Incomplete run publishes no verdict | absent | Asserted per script |
 | `node --test test/*.test.js` | 987 | 1001 |
@@ -98,10 +105,11 @@ findings key.
 - `.devcontainer/scripts/verify.sh` exits 0. 1001 tests, 995 pass, 0 fail,
   6 skipped by platform gate.
 - `shellcheck -S warning` clean on both scripts.
-- Six mutations of the two scripts were each caught by the new tests: dropping
+- Nine mutations of the two scripts were each caught by the new tests: dropping
   `record_drift`, clamping the annotation total, dropping the refusal gate,
   moving the verdict above the completeness gate, deleting the annotation
-  guidance, and deleting the counts block.
+  guidance, deleting the counts block, dropping the cause filter, and dropping
+  the reason code rule.
 - No credential, personal data, or live lock state appears in this record.
 
 ## Review rounds, and what each changed
@@ -122,6 +130,15 @@ Two independent adversarial reviews, one for the code and one for the class.
 | Three names for two audits in operator-facing copy. | minor | The enrollment script now says "Unity enrollment audit" in all four lines. |
 | The workflow test asserted `printf '::warning::%s open `, which pins a spelling. | minor | It asserts `::warning::` instead. The script test proves the message. |
 | Nine new comments and doc sentences ran past 20 words, and three used "red" as a verb. | minor | Split. The scripts and docs use "keeps the run green" and "fails the run". |
+| `README.md` still published the superseded contract, so two of the three documents that state it were corrected and one was not. | blocker | Corrected, and a test now pins the shared sentence in all three. |
+| `record_drift` had no fallback, so a jq failure there skipped the incomplete line that `record_causes` protects. | should-fix | It fails the run with its own line instead. Degrading would leave a green run with no repository in it. |
+| Nothing stopped `record_causes` from publishing a blank cause cell after the old assertion was deleted. | should-fix | Asserted again, scoped to the cause section so the drift table may still name a causeless repository. |
+| The gate comment claimed it matched the drift readers' rule for every field. It does not. | should-fix | The comment now says the rule covers the reason code, and names where the repository and the cause are bounded. |
+| The refusal fixtures claimed all eight can reach the step. Four cannot, because Go refuses to decode them. | should-fix | The comment now says which three can, and why the rest stay. |
+| `test/workflow-policy.test.js` read the whole script, so the assertion did not prove the job runs it. | minor | It now reads the scripts the job invokes. |
+| The annotation went to stdout while every other emitter in this repository uses stderr. | minor | Switched, with the assertions. |
+| `merge-policy-audit.sh` lost its final newline. | minor | Restored. |
+| `GITHUB_STEP_SUMMARY` guards were inconsistent between neighbouring functions. | minor | Every new line uses the guarded form. |
 | `progress/session-120` documents `record_causes`, which still exists, and calls the two scripts a duplication to accept. | minor | Both statements still hold. This record adds the drift table. |
 
 ## Known limits
@@ -131,6 +148,13 @@ Two independent adversarial reviews, one for the code and one for the class.
 - The annotation is the headline. The summary and the drift issue hold the
   detail. The required check context and the finding detail stay in the drift
   issue, as before.
+- `require_readable_findings` applies the reason code rule that both drift issue
+  readers already apply. It does not re-check the repository name or the cause.
+  Both are bounded where the analyzer produces them: one is a validated registry
+  entry, the other is a sanitized reason.
+- The cause table still degrades to a note, because a cause is extra evidence and
+  the run is already red without it. The drift table fails the run instead,
+  because it is the only place a green run names the drifted repositories.
 - An incomplete audit still fails the run, and it publishes its cause before it
   does. That is unchanged.
 - A clean audit says so in one summary line and emits no annotation.

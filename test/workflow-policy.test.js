@@ -1485,9 +1485,10 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
 
   assert.equal(audit.if, "${{ always() }}");
   // The swallowed exit code is safe only because the last step names the drift.
-  // The script test proves what it names; this pins that it is in the run.
+  // The script test proves what it names. This pins that the job runs a script
+  // that emits the annotation, so the drift reaches the run and not the file.
   assert.equal(audit["continue-on-error"], "true");
-  assert.match(automation, /::warning::/);
+  assert.match(workflowJobLogic(job.text), /::warning::/);
   assert.equal(revalidate.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
   assert.equal(evidence.if, "${{ always() }}");
   assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
@@ -1543,9 +1544,10 @@ test("organization merge-policy audit is exact, read-only, and fail closed", () 
   assert.equal(token.with.repositories, "${{ steps.merge-policy-scope.outputs.repositories }}");
   assert.equal(audit.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
   // The swallowed exit code is safe only because the last step names the drift.
-  // The script test proves what it names; this pins that it is in the run.
+  // The script test proves what it names. This pins that the job runs a script
+  // that emits the annotation, so the drift reaches the run and not the file.
   assert.equal(audit["continue-on-error"], "true");
-  assert.match(automation, /::warning::/);
+  assert.match(workflowJobLogic(job.text), /::warning::/);
   assert.equal(audit.env.READER_AUTHORIZATION, "${{ steps.reader-token.outputs.token }}");
   assert.equal(evidence.if, "${{ always() }}");
   assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);

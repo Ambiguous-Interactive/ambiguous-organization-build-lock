@@ -617,9 +617,13 @@ audit` launcher. The reader credential is available only to the resulting
 cannot be dispatched directly at a selected feature-branch ref.
 
 The command exits nonzero on drift. In the scheduled workflow, a complete scan
-is green only after its drift issue has synchronized; the issue remains the
-operational-red signal. Incomplete retrieval, analysis, head revalidation, or
-issue synchronization keeps the workflow itself red.
+stays green: a consumer's merge policy is not this repository's to change, and a
+daily run that cannot go green would hide the failure that is. The run says what
+its conclusion means. A green run means the audit read every repository. Its
+summary lists every repository that carries a finding, and a warning annotation
+counts every reason code. Incomplete retrieval, analysis, head revalidation, or
+issue synchronization keeps the workflow itself red. The drift issue remains the
+state an operator acts on, and the run names the same drift.
 
 ## Transient Auth Failures
 

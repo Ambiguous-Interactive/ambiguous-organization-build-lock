@@ -123,12 +123,12 @@ trustworthy policy result was established. The standalone audit command returns
 nonzero for both drift and incomplete evidence.
 
 A green run means the audit read every repository. It does not mean the policy
-matched. The open drift issue is the state an operator acts on. The run names
-the same drift. Its summary lists every repository that carries a finding, with
-the finding count and the reason codes for that repository. A warning annotation
-counts every reason code with its full count. A clean run says so in its
-summary. The `Organization merge-policy audit` reports drift the same way. Every
-reason code maps to its reviewed fix in
+matched. The open drift issue is the state an operator acts on. The run names the
+same drift. Its summary lists every repository that carries a finding, with the
+finding count and the reason codes for that repository. A warning annotation
+counts every reason code with its full count. A clean run says so in its summary.
+The `Organization merge-policy audit` reports drift the same way. Every reason
+code maps to its reviewed fix in
 [Consumer Enrollment](consumer-enrollment.md).
 
 Synthetic or deliberately disabled Unity-shaped workflows require an explicit

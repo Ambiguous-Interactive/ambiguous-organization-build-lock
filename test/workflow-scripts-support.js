@@ -127,7 +127,7 @@ const auditSummaryCases = [
     inventoryLabel: "Observed required checks",
     cleanLine: "The merge policy audit is complete and clean. No drift is open.",
     incompleteLine: "The merge policy audit is incomplete; merge-gate status is unknown.",
-    unreadableLine: "Merge policy audit findings could not be published; the run proves nothing about drift.",
+    unreadableNotice: "could not be published; the run proves nothing about drift.",
     driftCode: "unexpected-required-check-source",
     retrievalCode: "merge-policy-retrieval-incomplete",
     cause: "ruleset 17663217 response is not valid UTF-8"
@@ -138,7 +138,7 @@ const auditSummaryCases = [
     inventoryLabel: "Active jobs",
     cleanLine: "The Unity enrollment audit is complete and clean. No drift is open.",
     incompleteLine: "The Unity enrollment audit is incomplete; policy status is unknown.",
-    unreadableLine: "Unity enrollment audit findings could not be published; the run proves nothing about drift.",
+    unreadableNotice: "could not be published; the run proves nothing about drift.",
     driftCode: "unapproved-lock-ref",
     retrievalCode: "repository-retrieval-incomplete",
     cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8"
@@ -146,9 +146,13 @@ const auditSummaryCases = [
 ];
 
 // An artifact the summary step cannot publish is evidence it did not read. No
-// green run may claim a verdict from it. Every fixture below decodes to a JSON
-// value a Go `json.Unmarshal` into the audit struct would accept. So each one can
-// reach the step in a green run.
+// green run may claim a verdict from it. Two different lines report that, one for
+// the shape gate and one for the drift table, so the assertion is the phrase they
+// share. Only some of these fixtures can reach
+// the step from a shipped analyzer: a null `findings` key, a finding with no
+// repository, and a reason code with a line break. The rest cannot, because Go
+// refuses to decode them. They stay as defence in depth against a reader that
+// becomes more permissive than the writers are.
 const unreadableAudits = [
   { name: "no findings key", audit: { repositories: [], inventory: [], complete: true } },
   { name: "a null findings key", audit: { repositories: [], inventory: [], findings: null, complete: true } },
