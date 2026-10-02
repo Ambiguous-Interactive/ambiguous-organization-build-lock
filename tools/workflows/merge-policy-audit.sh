@@ -19,51 +19,95 @@ resolve_scope() {
   echo "repositories=${repositories}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 }
 
-# record_findings publishes every finding the audit wrote, so an operator reads
-# the run instead of opening the drift issue. Every value in the table is bounded
-# where it is produced: the repository name is a reviewed registry entry, the
-# reason code is an analyzer constant, and the analyzer sanitizes the cause to an
-# alphabet with no pipe, no backtick, and no newline. So the table needs no
-# escaping. The required check context and the detail stay in the drift issue,
-# which keeps reviewed expectation text.
-#
-# The table is bounded; the annotation in record_verdict carries the full count
-# of every reason code, so a bounded table still names every finding. A jq
-# failure means this step read a finding it cannot render, which no green run may
-# hide, so it fails closed instead of reporting a note and exiting zero.
-record_findings() {
-  if ! jq -r '
-    .findings as $findings
-    | ($findings | length) as $total
-    | if $total == 0 then empty
-      else "\n### Open drift\n\n| Repository | Reason | Cause |\n| --- | --- | --- |\n"
-        + ($findings[0:20] | map(
-            "| `\(.repository)` | `\(.code)` | \(if ((.cause // "") | length) > 0 then .cause else "-" end) |"
-          ) | join("\n"))
-        + (if $total > 20 then "\n_... and \($total - 20) more in the retained artifact._" else "" end)
-        + "\n"
-      end
-  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"; then
-    echo "Merge policy audit findings could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY}"
+# require_readable_findings refuses an artifact whose findings cannot be
+# published below. Every finding must name a repository and a reason code, and
+# the reason code also reaches a workflow command. A finding that carries neither
+# is evidence this step did not read, so the run fails closed. The shape matches
+# the rule both drift issue readers already apply to the same field.
+require_readable_findings() {
+  if ! jq -e '(.findings | type) == "array" and all(.findings[];
+    (.repository | type) == "string" and
+    (.code | type) == "string" and
+    (.code | test("^[a-z0-9][a-z0-9-]{0,79}$")) and
+    ((.cause // "") | type) == "string"
+  )' "${AUDIT_PATH:?AUDIT_PATH is required}" >/dev/null; then
+    echo "Merge policy audit findings could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     exit 1
   fi
 }
 
-# record_verdict states what the run's conclusion means. Consumer drift must not
-# red a run this repository owns: a daily run that is red until every consumer
-# fixes its ruleset teaches operators to ignore it, and it collides with the
-# incomplete-audit red that does mean the audit failed. So a complete audit with
-# findings keeps the run green and reports the drift in the run instead.
+# record_causes publishes every finding that names a refusal cause, so an
+# operator reads the file or the reason in the run summary instead of opening a
+# consumer checkout. The drift issue keeps counts, codes, and reviewed
+# expectation text, because a cause can name a consumer-controlled file.
+#
+# The analyzer sanitizes every cause to an alphabet with no pipe, no backtick,
+# and no newline, so the table needs no escaping. A finding with no cause has no
+# row here, so every row names a specific read and a specific reason.
+#
+# The table is bounded; the retained artifact holds the complete set. A jq
+# failure here must not skip the incomplete line below, so it is reported rather
+# than aborting the step.
+record_causes() {
+  jq -r '
+    [ .findings[] | select(((.cause // "") | length) > 0) ] as $causes
+    | ($causes | length) as $total
+    | if $total == 0 then empty
+      else "### Refused evidence\n\n| Repository | Reason | Cause |\n| --- | --- | --- |\n"
+        + ($causes[0:20] | map("| `\(.repository)` | `\(.code)` | \(.cause) |") | join("\n"))
+        + (if $total > 20 then "\n_... and \($total - 20) more in the retained artifact._" else "" end)
+        + "\n"
+      end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}" ||
+    echo "Refusal causes could not be read from the retained artifact." >> "${GITHUB_STEP_SUMMARY}"
+}
+
+# record_drift names every repository that carries a finding. The table above
+# publishes the reads that failed. This one publishes the repositories that
+# drifted, which is the rest of what an operator needs. One row per repository,
+# so its length is the number of drifted repositories and not the number of
+# findings. A repository can carry many findings.
+record_drift() {
+  jq -r '
+    if (.findings | length) == 0 then empty
+    else
+      [ .findings[] ]
+      | group_by(.repository)
+      | map("| `\(.[0].repository)` | \(length) | \(map(.code) | unique | map("`\(.)`") | join(", ")) |")
+      | "### Open drift\n\n| Repository | Findings | Reasons |\n| --- | --- | --- |\n"
+        + (join("\n"))
+        + "\n"
+    end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+}
+
+# record_verdict states what a green run means. A complete audit with findings
+# keeps the run green. The counts, the two tables, and the annotation below name
+# every repository and every reason code. The drift issue is not the only
+# signal. A complete audit with no findings says so, so a clean run cannot be
+# read as a silent one.
+#
+# Consumer drift stays green on purpose. This repository does not own a
+# consumer's merge policy. A daily run that keeps failing teaches operators to
+# ignore it. That failure would also hide an incomplete audit, which is the
+# failure that does matter.
 record_verdict() {
-  local total reasons
-  total="$(jq -r '.findings | length' "${AUDIT_PATH}")"
-  if [ "${total}" -eq 0 ]; then
+  local summary
+  summary="$(jq -r '
+    [ .findings[] ] as $findings
+    | ($findings | group_by(.repository) | length) as $repositories
+    | ($findings | map(.code) | group_by(.) | map("\(.[0]) x\(length)") | join(", ")) as $reasons
+    | if $findings | length == 0
+      then "clean"
+      else "\($findings | length) open merge policy findings across \($repositories) repositories: \($reasons)"
+      end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}")"
+  if [ "${summary}" = "clean" ]; then
     echo "The merge policy audit is complete and clean. No drift is open." >> "${GITHUB_STEP_SUMMARY}"
     return 0
   fi
-  reasons="$(jq -r '[.findings[].code] | group_by(.) | map("\(.[0]) x\(length)") | join(", ")' "${AUDIT_PATH}")"
-  printf '::warning::%s open merge policy findings: %s. A green run means the audit read every repository. Read the drift issue for the detail.\n' \
-    "${total}" "${reasons}"
+  printf '::warning::%s. A green run means the audit read every repository. Read the drift issue for the detail.\n' \
+    "${summary}"
 }
 
 record_counts() {
@@ -71,11 +115,13 @@ record_counts() {
     echo "Merge policy audit artifact unavailable." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     exit 1
   fi
+  require_readable_findings
   expected_repositories="$(jq -r '.repositories | length' merge-policy-expectations.json)"
   jq -r --arg expected "${expected_repositories}" \
     '"Repositories: \(.repositories | length)/\($expected)\nObserved required checks: \(.inventory | length)\nFindings: \(.findings | length)\nComplete: \(.complete)"' \
     "${AUDIT_PATH}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
-  record_findings
+  record_causes
+  record_drift
   if [ "$(jq -r '.complete' "${AUDIT_PATH}")" != "true" ]; then
     echo "The merge policy audit is incomplete; merge-gate status is unknown." >> "${GITHUB_STEP_SUMMARY}"
     exit 1

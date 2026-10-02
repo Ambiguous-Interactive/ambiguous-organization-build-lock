@@ -1484,11 +1484,10 @@ test("organization Unity enrollment audit is exact, read-only, and fail closed",
   assert.match(automation, /\.repositories\[\] \| \[\.repository, \.defaultBranch\] \| @tsv/);
 
   assert.equal(audit.if, "${{ always() }}");
-  // The swallowed exit code is safe only because the summary step publishes the
-  // drift it hides. Issue #325 records a green run whose only drift signal was
-  // the issue, so the annotation is what this contract now rests on.
+  // The swallowed exit code is safe only because the last step names the drift.
+  // The script test proves what it names; this pins that it is in the run.
   assert.equal(audit["continue-on-error"], "true");
-  assert.match(automation, /printf '::warning::%s open /);
+  assert.match(automation, /::warning::/);
   assert.equal(revalidate.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
   assert.equal(evidence.if, "${{ always() }}");
   assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
@@ -1543,11 +1542,10 @@ test("organization merge-policy audit is exact, read-only, and fail closed", () 
   assert.equal(token.with["permission-contents"], "read");
   assert.equal(token.with.repositories, "${{ steps.merge-policy-scope.outputs.repositories }}");
   assert.equal(audit.if, "${{ always() && steps.reader-token.outcome == 'success' }}");
-  // The swallowed exit code is safe only because the summary step publishes the
-  // drift it hides. Issue #325 records a green run whose only drift signal was
-  // the issue, so the annotation is what this contract now rests on.
+  // The swallowed exit code is safe only because the last step names the drift.
+  // The script test proves what it names; this pins that it is in the run.
   assert.equal(audit["continue-on-error"], "true");
-  assert.match(automation, /printf '::warning::%s open /);
+  assert.match(automation, /::warning::/);
   assert.equal(audit.env.READER_AUTHORIZATION, "${{ steps.reader-token.outputs.token }}");
   assert.equal(evidence.if, "${{ always() }}");
   assert.match(evidence.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
