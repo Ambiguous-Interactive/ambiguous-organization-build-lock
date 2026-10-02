@@ -835,37 +835,17 @@ func TestRunFailsClosedWhenItCannotPublishItsConclusion(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			code, _, stderr, _ := runAuditUnpublishable(t, auditConfig(), test.runs, testNow)
+			code, stdout, stderr, _ := runAuditUnpublishable(t, auditConfig(), test.runs, testNow)
 			if code != 1 {
 				t.Fatalf("run() = %d, want 1", code)
 			}
 			if !strings.Contains(stderr, reasonRunNoticeUnpublished) {
 				t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr)
 			}
+			if stdout != "" {
+				t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout)
+			}
 		})
-	}
-}
-
-func TestRunPublishesNoStdoutVerdictWhenItCannotPublish(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if strings.Contains(request.URL.Path, "/actions/workflows/") {
-			_, _ = fmt.Fprint(writer, scheduledRuns())
-			return
-		}
-		_, _ = fmt.Fprint(writer, `[]`)
-	}))
-	t.Cleanup(server.Close)
-
-	config := auditConfig()
-	config.APIURL = server.URL
-	config.SummaryPath = filepath.Join(t.TempDir(), "absent", "summary.md")
-	var stdout, stderr strings.Builder
-	if code := run(context.Background(), config, testNow, server.Client(), &stdout, &stderr); code != 1 {
-		t.Fatalf("run() = %d, want 1", code)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout.String())
 	}
 }
 

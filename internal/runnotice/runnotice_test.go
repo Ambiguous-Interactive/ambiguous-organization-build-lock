@@ -236,9 +236,10 @@ func TestPublishFailsClosedWhenTheAnnotationStreamRejects(t *testing.T) {
 	}
 }
 
-// The runner does not decode escapes inside a command message, so a percent sign
-// is literal text and must not be doubled.
-func TestPublishLeavesAPercentSignLiteral(t *testing.T) {
+// The runner decodes %0D, %0A, and %25 inside a command message, so the
+// annotation escapes them the way the committed JavaScript runtimes do. The
+// summary is Markdown and takes the raw form.
+func TestPublishEscapesTheAnnotationAndLeavesTheSummaryRaw(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "summary.md")
 	var annotations bytes.Buffer
@@ -246,7 +247,7 @@ func TestPublishLeavesAPercentSignLiteral(t *testing.T) {
 	if err := New(path, &annotations).Publish(Notice{
 		Meaning: "Half the seats are in use, 50% of capacity.",
 		Reason:  "healthy",
-		Handle:  "Latest scheduled run: `9`.",
+		Handle:  "Latest scheduled run: `9`. ::error::forged 100%0A::error::",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -254,11 +255,21 @@ func TestPublishLeavesAPercentSignLiteral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(summary), "50% of capacity") {
-		t.Fatalf("summary = %q", summary)
+	if !strings.Contains(string(summary), "50% of capacity") ||
+		!strings.Contains(string(summary), "100%0A::error::") {
+		t.Fatalf("the summary must keep its raw text, got %q", summary)
 	}
-	if strings.Contains(annotations.String(), "%25") || !strings.Contains(annotations.String(), "50%") {
-		t.Fatalf("annotation = %q", annotations.String())
+	// One annotation, one line, and the encoded form the runner would decode.
+	if strings.Count(annotations.String(), "\n") != 1 || strings.Count(annotations.String(), "\r") != 0 {
+		t.Fatalf("the annotation must be one line, got %q", annotations.String())
+	}
+	for _, want := range []string{"50%25 of capacity", "100%250A::error::"} {
+		if !strings.Contains(annotations.String(), want) {
+			t.Fatalf("annotation = %q, want it to contain %q", annotations.String(), want)
+		}
+	}
+	if strings.Contains(annotations.String(), "%250") && strings.Contains(annotations.String(), "%2525") {
+		t.Fatalf("the escape was applied twice: %q", annotations.String())
 	}
 }
 

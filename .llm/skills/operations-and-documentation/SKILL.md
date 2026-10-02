@@ -20,6 +20,10 @@ When behavior or configuration changes:
 6. When a reviewed policy entry type can expire, give it a scheduled audit
    staleness finding in the same change. Registry rejection and a runtime
    fail-closed gate are not operator-visible surfaces.
+7. A job summary line and a workflow annotation are operator-visible surfaces
+   too. A monitor that keeps a known condition a successful run outcome must
+   state the condition and its reason code in both, not only in a step log. See
+   `internal/runnotice`.
 
 Do not infer successful external cleanup from exit zero, incomplete logs, or
 absence of an error. Operational guidance must distinguish proof, uncertainty,

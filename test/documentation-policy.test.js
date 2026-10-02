@@ -248,6 +248,17 @@ test("every document that describes a central monitor states where its conclusio
   }
 });
 
+test("the runbook's monitor habit points forward to the publication rule", () => {
+  // #326 superseded the habit without replacing it. A reader who stops at the
+  // habit must still be sent to the rule that now publishes the condition.
+  assert.ok(
+    read(operationsPath).replace(/\s+/g, " ").includes(
+      "Both monitors also state the condition in the run itself, as the next paragraph describes."
+    ),
+    "operations-runbook.md must point forward from the monitor habit to the publication rule"
+  );
+});
+
 test("rollout history cannot be mistaken for the active runbook", () => {
   const history = read(historyPath);
 

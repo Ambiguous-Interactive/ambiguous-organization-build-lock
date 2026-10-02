@@ -65,10 +65,14 @@ func New(summaryPath string, annotations io.Writer) *Reporter {
 //
 // The summary carries the meaning, the reason code, and the handle. The
 // annotation repeats that line without its Markdown, so the two channels cannot
-// drift apart. Both texts are single lines: the summary is Markdown, but the
-// annotation is a workflow command, and one line break inside it would end the
-// command and forge the next one. A percent sign needs no escaping here because
-// the runner does not decode escapes in a command message.
+// drift apart. Both texts are one line: the summary is Markdown, but the
+// annotation is a workflow command.
+//
+// The annotation escapes the way the committed JavaScript runtimes escape
+// (`.github/dist/build-lock.js`, `workflowCommandData`). The runner decodes
+// `%0D`, `%0A`, and `%25` inside a command message, so an unescaped value could
+// carry an encoded line break into the message and end the command early. The
+// summary takes the raw form because it is Markdown.
 func (reporter *Reporter) Publish(notice Notice) error {
 	if strings.TrimSpace(notice.Meaning) == "" {
 		return ErrUnstatedReason
@@ -106,7 +110,7 @@ func (reporter *Reporter) Publish(notice Notice) error {
 	if reporter.annotations == nil {
 		return errAnnotations
 	}
-	if _, err := fmt.Fprintf(reporter.annotations, "::warning::%s\n", warning); err != nil {
+	if _, err := fmt.Fprintf(reporter.annotations, "::warning::%s\n", escapeCommandData(warning)); err != nil {
 		return fmt.Errorf("%w: %w", errAnnotations, err)
 	}
 	return nil
@@ -116,4 +120,12 @@ func (reporter *Reporter) Publish(notice Notice) error {
 // against its own text.
 func singleLine(value string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
+}
+
+// escapeCommandData escapes the percent sign in a workflow command. The runner
+// decodes %0D, %0A, and %25 inside a command message, so this also neutralises
+// the two encoded forms: a value cannot carry a real line break past the refusal
+// above, so escaping the percent sign alone covers all three.
+func escapeCommandData(value string) string {
+	return strings.ReplaceAll(value, "%", "%25")
 }
