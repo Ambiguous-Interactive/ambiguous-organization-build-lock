@@ -153,15 +153,15 @@ refuse_publish() {
 }
 
 # require_readable_findings refuses an artifact whose findings cannot be
-# published below. Every finding must name a repository and a reason code, and
-# the reason code also reaches a workflow command. A finding that carries neither
-# is evidence this step did not read, so the run fails closed. The reason code
+# published below. Every finding must name a non-empty repository and a reason
+# code, and the reason code also reaches a workflow command. A finding that names
+# neither is evidence this step did not read, so the run fails closed. The reason code
 # shape is the rule both drift issue readers already apply to that field. The
 # repository and the cause are bounded where the analyzer produces them: one is a
 # validated registry entry, the other is a sanitized reason.
 require_readable_findings() {
   if ! jq -e '(.findings | type) == "array" and all(.findings[];
-    (.repository | type) == "string" and
+    (.repository | type) == "string" and (.repository | length) > 0 and
     (.code | type) == "string" and
     (.code | test("^[a-z0-9][a-z0-9-]{0,79}$")) and
     ((.cause // "") | type) == "string"

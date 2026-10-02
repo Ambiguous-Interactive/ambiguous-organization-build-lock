@@ -87,14 +87,14 @@ monitor outcome. Both print their reason to the run log, so neither matches the
 
 | Check | Before | After |
 | --- | --- | --- |
-| `record-counts` cases | 4, duplicated per script | 2 clean runs, 8 refused artifacts, 1 summary contract, per script |
+| `record-counts` cases | 4, duplicated per script | 1 summary contract and 9 refused artifacts, per script |
 | Counts block asserted | `Complete: true` only | The whole four-line block, per script |
 | `::warning::` annotation asserted | none | Whole line, including both guidance sentences |
 | `record_drift` rows | absent | Repository, count, and sorted reason codes asserted |
 | Cause table blank cell | asserted | asserted, scoped to the cause section |
 | Clean run publishes no annotation | absent | Asserted per script |
 | Incomplete run publishes no verdict | absent | Asserted per script |
-| `node --test test/*.test.js` | 987 | 1001 |
+| `node --test test/*.test.js` | 987 | 1004 |
 
 Red states observed before each implementation step: no clean line, no drifted
 repository row, no annotation, and a green run for an artifact with a null
@@ -102,14 +102,16 @@ findings key.
 
 ## Verification
 
-- `.devcontainer/scripts/verify.sh` exits 0. 1001 tests, 995 pass, 0 fail,
+- `.devcontainer/scripts/verify.sh` exits 0. 1004 tests, 998 pass, 0 fail,
   6 skipped by platform gate.
 - `shellcheck -S warning` clean on both scripts.
-- Nine mutations of the two scripts were each caught by the new tests: dropping
-  `record_drift`, clamping the annotation total, dropping the refusal gate,
-  moving the verdict above the completeness gate, deleting the annotation
-  guidance, deleting the counts block, dropping the cause filter, and dropping
-  the reason code rule.
+- Twelve mutations of the two scripts, of `README.md`, and of the helper were
+  each caught by the tests: dropping `record_drift`, clamping the annotation
+  total, dropping the refusal gate, moving the verdict above the completeness
+  gate, deleting the annotation guidance, deleting the counts block, dropping the
+  cause filter, dropping the reason code rule, dropping the non-empty repository
+  rule, dropping `exit 1` from `refuse_publish`, removing the sentence from
+  `README.md`, and renaming an audit.
 - No credential, personal data, or live lock state appears in this record.
 
 ## Review rounds, and what each changed
@@ -134,7 +136,8 @@ Two independent adversarial reviews, one for the code and one for the class.
 | `record_drift` had no fallback, so a jq failure there skipped the incomplete line that `record_causes` protects. | should-fix | It fails the run with its own line instead. Degrading would leave a green run with no repository in it. |
 | Nothing stopped `record_causes` from publishing a blank cause cell after the old assertion was deleted. | should-fix | Asserted again, scoped to the cause section so the drift table may still name a causeless repository. |
 | The gate comment claimed it matched the drift readers' rule for every field. It does not. | should-fix | The comment now says the rule covers the reason code, and names where the repository and the cause are bounded. |
-| The refusal fixtures claimed all eight can reach the step. Four cannot, because Go refuses to decode them. | should-fix | The comment now says which three can, and why the rest stay. |
+| The refusal fixtures claimed all eight can reach the step. They cannot, because the shipped writers always emit a non-null findings array and JSON strings for the repository and the reason code. | should-fix | The comment now says that no fixture can reach the step, and why they stay. |
+| The gate accepted an empty repository name, so the drift table could name nothing. | minor | The gate requires a non-empty name, and a ninth fixture covers it. |
 | `test/workflow-policy.test.js` read the whole script, so the assertion did not prove the job runs it. | minor | It now reads the scripts the job invokes. |
 | The annotation went to stdout while every other emitter in this repository uses stderr. | minor | Switched, with the assertions. |
 | `merge-policy-audit.sh` lost its final newline. | minor | Restored. |

@@ -148,17 +148,27 @@ const auditSummaryCases = [
 // An artifact the summary step cannot publish is evidence it did not read. No
 // green run may claim a verdict from it. Two different lines report that, one for
 // the shape gate and one for the drift table, so the assertion is the phrase they
-// share. Only some of these fixtures can reach
-// the step from a shipped analyzer: a null `findings` key, a finding with no
-// repository, and a reason code with a line break. The rest cannot, because Go
-// refuses to decode them. They stay as defence in depth against a reader that
-// becomes more permissive than the writers are.
+// share.
+//
+// No fixture below can reach the step from a shipped writer. Both writers always
+// emit `findings` as a non-null array, and both always emit a repository and a
+// reason code as JSON strings. These stay as defence in depth, against a reader
+// that becomes more permissive than the writers are, or a writer that changes.
 const unreadableAudits = [
   { name: "no findings key", audit: { repositories: [], inventory: [], complete: true } },
   { name: "a null findings key", audit: { repositories: [], inventory: [], findings: null, complete: true } },
   { name: "a findings key that is not an array", audit: { repositories: [], inventory: [], findings: {}, complete: true } },
   { name: "a finding that is not an object", audit: { repositories: [], inventory: [], findings: ["nope"], complete: true } },
   { name: "a finding without a repository", audit: { repositories: [], inventory: [], findings: [{ code: "unapproved-lock-ref" }], complete: true } },
+  {
+    name: "a finding with an empty repository name",
+    audit: {
+      repositories: [],
+      inventory: [],
+      findings: [{ repository: "", code: "unapproved-lock-ref" }],
+      complete: true
+    }
+  },
   {
     // A reason code reaches a workflow command, so one carrying a line break
     // could forge a second command.
