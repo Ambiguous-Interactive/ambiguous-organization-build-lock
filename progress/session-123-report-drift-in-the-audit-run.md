@@ -139,6 +139,7 @@ Two independent adversarial reviews, one for the code and one for the class.
 | The annotation went to stdout while every other emitter in this repository uses stderr. | minor | Switched, with the assertions. |
 | `merge-policy-audit.sh` lost its final newline. | minor | Restored. |
 | `GITHUB_STEP_SUMMARY` guards were inconsistent between neighbouring functions. | minor | Every new line uses the guarded form. |
+| The three publish sites repeated one failure line each. | minor | `refuse_publish` holds it once, and the subject names what could not be published. |
 | `progress/session-120` documents `record_causes`, which still exists, and calls the two scripts a duplication to accept. | minor | Both statements still hold. This record adds the drift table. |
 
 ## Known limits

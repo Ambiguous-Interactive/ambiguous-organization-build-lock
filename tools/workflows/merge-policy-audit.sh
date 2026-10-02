@@ -19,6 +19,15 @@ resolve_scope() {
   echo "repositories=${repositories}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 }
 
+# refuse_publish reports that this step cannot publish what the audit wrote, and
+# fails the run. No green run may claim a verdict it did not read. The subject
+# names what could not be published: the findings, the drift table, or the
+# verdict.
+refuse_publish() {
+  echo "${1} could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+  exit 1
+}
+
 # require_readable_findings refuses an artifact whose findings cannot be
 # published below. Every finding must name a repository and a reason code, and
 # the reason code also reaches a workflow command. A finding that carries neither
@@ -33,8 +42,7 @@ require_readable_findings() {
     (.code | test("^[a-z0-9][a-z0-9-]{0,79}$")) and
     ((.cause // "") | type) == "string"
   )' "${AUDIT_PATH:?AUDIT_PATH is required}" >/dev/null; then
-    echo "Merge policy audit findings could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
-    exit 1
+    refuse_publish "Merge policy audit findings"
   fi
 }
 
@@ -85,8 +93,7 @@ record_drift() {
         + "\n"
     end
   ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"; then
-    echo "Merge policy audit drift could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY}"
-    exit 1
+    refuse_publish "Merge policy audit drift"
   fi
 }
 
@@ -102,7 +109,7 @@ record_drift() {
 # failure that does matter.
 record_verdict() {
   local summary
-  summary="$(jq -r '
+  if ! summary="$(jq -r '
     [ .findings[] ] as $findings
     | ($findings | group_by(.repository) | length) as $repositories
     | ($findings | map(.code) | group_by(.) | map("\(.[0]) x\(length)") | join(", ")) as $reasons
@@ -110,7 +117,9 @@ record_verdict() {
       then "clean"
       else "\($findings | length) open merge policy findings across \($repositories) repositories: \($reasons)"
       end
-  ' "${AUDIT_PATH:?AUDIT_PATH is required}")"
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}")"; then
+    refuse_publish "Merge policy audit verdict"
+  fi
   if [ "${summary}" = "clean" ]; then
     echo "The merge policy audit is complete and clean. No drift is open." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     return 0
