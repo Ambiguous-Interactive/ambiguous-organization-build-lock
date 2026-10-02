@@ -12,7 +12,8 @@ const {
   scriptsRoot,
   runScript,
   shellCheckInstallHarness,
-  causeSummaryCases,
+  auditSummaryCases,
+  unreadableAudits,
   headRevalidationHarness,
   runHeadRevalidation,
   readHeadRevalidationEvents,
@@ -209,100 +210,156 @@ test("trusted onboarding validates request shape before publishing outputs", (t)
 });
 
 
-test("enrollment summary fails closed when retained audit evidence is incomplete", (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "unity-enrollment-summary-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const auditPath = path.join(temporary, "audit.json");
-  const summaryPath = path.join(temporary, "summary.md");
-  const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: true }));
-  assert.equal(runScript("unity-enrollment-audit.sh", "record-counts", environment).status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /Complete: true/);
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: false }));
-  const incomplete = runScript("unity-enrollment-audit.sh", "record-counts", environment);
-  assert.notEqual(incomplete.status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
-});
-
-
-for (const testCase of causeSummaryCases) {
-  test(`${testCase.script} publishes every refusal cause in the run summary`, (t) => {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "refusal-cause-summary-"));
+for (const testCase of auditSummaryCases) {
+  test(`${testCase.script} never lets a green run hide a finding`, (t) => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "audit-summary-"));
     t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
     const auditPath = path.join(temporary, "audit.json");
     const summaryPath = path.join(temporary, "summary.md");
     const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-    const write = (findings, complete) =>
+    const record = (findings, complete = true) => {
+      fs.writeFileSync(summaryPath, "");
       fs.writeFileSync(
         auditPath,
         JSON.stringify({ repositories: [], inventory: [], findings, complete })
       );
+      const result = runScript(testCase.script, "record-counts", environment);
+      const summary = fs.readFileSync(summaryPath, "utf8");
+      const counts = `Repositories: 0/6\n${testCase.inventoryLabel}: 0\nFindings: ${findings.length}\nComplete: ${complete}\n`;
+      assert.ok(summary.startsWith(counts), `counts block:\n${summary}`);
+      return { result, summary };
+    };
+    const finding = (repository, code, cause) => ({ repository, code, ...(cause ? { cause } : {}) });
 
-    write([], true);
-    assert.equal(runScript(testCase.script, "record-counts", environment).status, 0);
+    // A clean audit is the only state in which the run may stay silent about
+    // drift. It has to say so. Otherwise a green run cannot be told apart from a
+    // green run that hid a finding.
+    const clean = record([]);
+    assert.equal(clean.result.status, 0);
+    assert.ok(clean.summary.includes(testCase.cleanLine), clean.summary);
+    assert.doesNotMatch(clean.summary, /### Open drift/);
+    assert.doesNotMatch(clean.summary, /### Refused evidence/);
+    assert.equal(clean.result.stderr, "", "a clean audit must publish no annotation");
+
+    // The case issue #325 records: retrieval succeeded, so the run is green, and
+    // the drift issue was the only signal. Every drifted repository and every
+    // reason code has to be named in the run. So does the cause that names the
+    // read that failed. None of it may require an operator to open the issue.
+    const drift = record([
+      finding("Ambiguous-Interactive/DoxReloaded", testCase.driftCode),
+      finding("Ambiguous-Interactive/DoxReloaded", testCase.retrievalCode),
+      finding("Ambiguous-Interactive/qora-redux", testCase.driftCode, testCase.cause)
+    ]);
+    assert.equal(
+      drift.result.status,
+      0,
+      "consumer drift must not fail a run this repository does not own"
+    );
+    // jq sorts the reasons, so the row lists them in the same order here.
+    const sortedReasons = [testCase.driftCode, testCase.retrievalCode].sort();
+    assert.ok(
+      drift.summary.includes(
+        "| `Ambiguous-Interactive/DoxReloaded` | 2 | " +
+        `\`${sortedReasons[0]}\`, \`${sortedReasons[1]}\` |`
+      ),
+      drift.summary
+    );
+    assert.ok(
+      drift.summary.includes(`| \`Ambiguous-Interactive/qora-redux\` | 1 | \`${testCase.driftCode}\` |`),
+      drift.summary
+    );
+    assert.ok(drift.summary.includes(testCase.cause), drift.summary);
+    // The cause table filters to cause-bearing findings before it renders. Without
+    // that filter it publishes a `null` cell for every drift finding. Only the
+    // repository that carries the cause may reach that section.
+    const driftCauseSection = drift.summary.split("### Open drift")[0];
+    assert.match(driftCauseSection, /qora-redux/);
     assert.doesNotMatch(
-      fs.readFileSync(summaryPath, "utf8"),
-      /Refused evidence/,
-      "an audit with no cause must not publish an empty cause table"
+      driftCauseSection,
+      /DoxReloaded|\| null \|/,
+      "a finding with no cause must not publish a row in the cause table"
+    );
+    assert.match(
+      drift.result.stderr,
+      new RegExp(
+        `^::warning::3 open ${testCase.label} findings across 2 repositories: ` +
+        `${testCase.retrievalCode} x1, ${testCase.driftCode} x2\\. ` +
+        "A green run means the audit read every repository\\. " +
+        "Read the drift issue for the detail\\.\\n$"
+      )
     );
 
-    // Each script is fed a cause only its own analyzer can produce, so a change
-    // to either alphabet is caught by the script that renders it. The bounded
-    // block below uses one cause for both, so it checks the bound and not the
-    // alphabet.
-    write(
-      [
-        {
-          repository: "Ambiguous-Interactive/DoxReloaded",
-          code: testCase.code,
-          cause: testCase.cause
-        },
-        { repository: "Ambiguous-Interactive/qora-redux", code: testCase.code }
-      ],
+    // Incomplete retrieval keeps the run failing. It still publishes the cause,
+    // because that cause is what an operator has to act on.
+    const incomplete = record(
+      [finding("Ambiguous-Interactive/qora-redux", testCase.retrievalCode, testCase.cause)],
       false
     );
-    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
-    const summary = fs.readFileSync(summaryPath, "utf8");
-    assert.match(summary, /Refused evidence/);
-    assert.match(summary, testCase.fileNeedle);
-    assert.match(summary, /Ambiguous-Interactive\/DoxReloaded/);
-    assert.doesNotMatch(summary, /qora-redux/, "a finding with no cause must not publish a blank row");
+    assert.notEqual(incomplete.result.status, 0);
+    assert.ok(incomplete.summary.includes(testCase.incompleteLine), incomplete.summary);
+    assert.ok(incomplete.summary.includes(testCase.cause), incomplete.summary);
+    assert.equal(
+      incomplete.result.stderr,
+      "",
+      "a failing run must not also publish a green verdict"
+    );
 
-    // The table is bounded, so a long list cannot push a summary past its limit.
-    write(
-      Array.from({ length: 25 }, (_, index) => ({
-        repository: `Ambiguous-Interactive/repo-${index}`,
-        code: "repository-retrieval-incomplete",
-        cause: "lock state is not valid UTF-8"
-      })),
-      false
+    // The cause table is bounded. The drift table keeps the count complete.
+    // It holds one row per drifted repository whatever the bound is.
+    const bounded = record(
+      Array.from({ length: 25 }, (_, index) =>
+        finding(`Ambiguous-Interactive/repo-${index}`, testCase.retrievalCode, testCase.cause)
+      )
     );
-    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
-    const bounded = fs.readFileSync(summaryPath, "utf8");
-    assert.match(bounded, /and 5 more in the retained artifact/);
-    assert.doesNotMatch(bounded, /repo-24/, "the bounded table must stop before the last cause");
+    assert.equal(bounded.result.status, 0);
+    const [causeSection, driftSection] = bounded.summary.split("### Open drift");
+    assert.match(causeSection, /and 5 more in the retained artifact/);
+    assert.doesNotMatch(causeSection, /repo-24/, "the bounded cause table must stop before the last cause");
+    assert.equal(
+      (causeSection.match(/^\| `Ambiguous-Interactive\/repo-\d+` \|/gm) || []).length,
+      20,
+      "the cause table must publish its bound"
+    );
+    assert.equal(
+      (driftSection.match(/^\| `Ambiguous-Interactive\/repo-\d+` \| 1 \| /gm) || []).length,
+      25,
+      "the drift table must name every drifted repository"
+    );
+    assert.ok(
+      bounded.result.stderr.includes(
+        `::warning::25 open ${testCase.label} findings across 25 repositories: ` +
+        `${testCase.retrievalCode} x25.`
+      ),
+      bounded.result.stderr
+    );
   });
+
+  for (const unreadable of unreadableAudits) {
+    test(`${testCase.script} refuses to publish ${unreadable.name}`, (t) => {
+      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "audit-unreadable-"));
+      t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+      const auditPath = path.join(temporary, "audit.json");
+      const summaryPath = path.join(temporary, "summary.md");
+      fs.writeFileSync(auditPath, JSON.stringify(unreadable.audit));
+      fs.writeFileSync(summaryPath, "");
+
+      const result = runScript(testCase.script, "record-counts", {
+        AUDIT_PATH: auditPath,
+        GITHUB_STEP_SUMMARY: summaryPath
+      });
+
+      assert.notEqual(result.status, 0, result.stderr);
+      // jq reports its own parse error on stderr, which is the operator's reason.
+      // What must never appear is a verdict, because none was established.
+      assert.doesNotMatch(result.stderr, /^::warning::/m, "a refused artifact must publish no verdict");
+      assert.ok(
+        fs.readFileSync(summaryPath, "utf8").includes(testCase.unreadableNotice)
+      );
+    });
+  }
 }
 
 
-test("merge policy summary fails closed when retained audit evidence is incomplete", (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "merge-policy-summary-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const auditPath = path.join(temporary, "audit.json");
-  const summaryPath = path.join(temporary, "summary.md");
-  const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: true }));
-  assert.equal(runScript("merge-policy-audit.sh", "record-counts", environment).status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /Complete: true/);
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: false }));
-  const incomplete = runScript("merge-policy-audit.sh", "record-counts", environment);
-  assert.notEqual(incomplete.status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /merge-gate status is unknown/);
-});
 
 
 test("head revalidation passes without refresh when every head matches", (t) => {

@@ -660,6 +660,15 @@ branch protection bypass evidence stays readable with Administration read.
 Findings are consumer decisions; the audit reports and opens one deduplicated
 issue.
 
+A green run means the audit read every repository. It does not mean the policy
+matched. This repository does not own a consumer's merge policy, so a complete
+audit with findings keeps the run green. Its summary lists every repository that
+carries a finding, with the finding count and the reason codes for that
+repository. A warning annotation counts every reason code with its full count. A
+clean run says so in its summary. The required check context and the detail stay
+in the drift issue. The retained artifact holds the complete set. An incomplete
+audit fails the run, because no trustworthy policy result was established.
+
 - `missing-required-context`: no active ruleset or branch protection on the
   default branch requires the reviewed aggregate. Add the requirement.
 - `renamed-required-context`: the reviewed aggregate is required with a

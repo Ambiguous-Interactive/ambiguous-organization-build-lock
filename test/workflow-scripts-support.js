@@ -114,23 +114,89 @@ function shellCheckInstallHarness(t, architecture, checksumStatus = "0") {
   };
 }
 
-// A refusal cause reaches an operator through the run summary, because the
-// drift issue holds counts and codes only. A cause with no row in the summary is
-// a cause an operator cannot act on, which is what the cause field was added to
-// prevent. Both summary writers share this table, so one data-driven case covers
-// the merge-policy and the Unity enrollment artifact.
-const causeSummaryCases = [
+// A finding reaches an operator through the run summary, because the drift
+// issue is a separate place to look. A finding a green run does not name is a
+// finding the run hides, which is what issue #325 records. Both summary writers
+// share this table, so one data-driven case covers the merge-policy and the Unity
+// enrollment artifact. Each script names its own audit and its own inventory, so
+// those labels differ.
+const auditSummaryCases = [
   {
     script: "merge-policy-audit.sh",
-    code: "merge-policy-retrieval-incomplete",
-    cause: "ruleset 17663217 response is not valid UTF-8",
-    fileNeedle: /ruleset 17663217 response is not valid UTF-8/
+    label: "merge policy",
+    inventoryLabel: "Observed required checks",
+    cleanLine: "The merge policy audit is complete and clean. No drift is open.",
+    incompleteLine: "The merge policy audit is incomplete; merge-gate status is unknown.",
+    unreadableNotice: "could not be published; the run proves nothing about drift.",
+    driftCode: "unexpected-required-check-source",
+    retrievalCode: "merge-policy-retrieval-incomplete",
+    cause: "ruleset 17663217 response is not valid UTF-8"
   },
   {
     script: "unity-enrollment-audit.sh",
-    code: "repository-retrieval-incomplete",
-    cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8",
-    fileNeedle: /scripts\/unity\/editor-check\.ps1 at 0123456789abcdef is not valid UTF-8/
+    label: "Unity enrollment",
+    inventoryLabel: "Active jobs",
+    cleanLine: "The Unity enrollment audit is complete and clean. No drift is open.",
+    incompleteLine: "The Unity enrollment audit is incomplete; policy status is unknown.",
+    unreadableNotice: "could not be published; the run proves nothing about drift.",
+    driftCode: "unapproved-lock-ref",
+    retrievalCode: "repository-retrieval-incomplete",
+    cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8"
+  }
+];
+
+// An artifact the summary step cannot publish is evidence it did not read. No
+// green run may claim a verdict from it. Two different lines report that, one for
+// the shape gate and one for the drift table, so the assertion is the phrase they
+// share.
+//
+// No fixture below can reach the step from a shipped writer. Both writers always
+// emit `findings` as a non-null array, and both always emit a repository and a
+// reason code as JSON strings. These stay as defence in depth, against a reader
+// that becomes more permissive than the writers are, or a writer that changes.
+const unreadableAudits = [
+  { name: "no findings key", audit: { repositories: [], inventory: [], complete: true } },
+  { name: "a null findings key", audit: { repositories: [], inventory: [], findings: null, complete: true } },
+  { name: "a findings key that is not an array", audit: { repositories: [], inventory: [], findings: {}, complete: true } },
+  { name: "a finding that is not an object", audit: { repositories: [], inventory: [], findings: ["nope"], complete: true } },
+  { name: "a finding without a repository", audit: { repositories: [], inventory: [], findings: [{ code: "unapproved-lock-ref" }], complete: true } },
+  {
+    name: "a finding with an empty repository name",
+    audit: {
+      repositories: [],
+      inventory: [],
+      findings: [{ repository: "", code: "unapproved-lock-ref" }],
+      complete: true
+    }
+  },
+  {
+    // A reason code reaches a workflow command, so one carrying a line break
+    // could forge a second command.
+    name: "a reason code with a line break",
+    audit: {
+      repositories: [],
+      inventory: [],
+      findings: [{ repository: "Ambiguous-Interactive/example", code: "unapproved-lock-ref\n::error::forged" }],
+      complete: true
+    }
+  },
+  {
+    name: "a reason code that is not a string",
+    audit: {
+      repositories: [],
+      inventory: [],
+      findings: [{ repository: "Ambiguous-Interactive/example", code: 7 }],
+      complete: true
+    }
+  },
+  {
+    name: "a cause that is not a string",
+    audit: {
+      repositories: [],
+      inventory: [],
+      findings: [{ repository: "Ambiguous-Interactive/example", code: "unapproved-lock-ref", cause: 7 }],
+      complete: true
+    }
   }
 ];
 
@@ -977,7 +1043,8 @@ module.exports = {
   scriptsRoot,
   runScript,
   shellCheckInstallHarness,
-  causeSummaryCases,
+  auditSummaryCases,
+  unreadableAudits,
   headRevalidationHarness,
   runHeadRevalidation,
   readHeadRevalidationEvents,

@@ -143,6 +143,33 @@ revalidate_heads() {
   done
 }
 
+# refuse_publish reports that this step cannot publish what the audit wrote, and
+# fails the run. No green run may claim a verdict it did not read. The subject
+# names what could not be published: the findings, the drift table, or the
+# verdict.
+refuse_publish() {
+  echo "${1} could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+  exit 1
+}
+
+# require_readable_findings refuses an artifact whose findings cannot be
+# published below. Every finding must name a non-empty repository and a reason
+# code, and the reason code also reaches a workflow command. A finding that names
+# neither is evidence this step did not read, so the run fails closed. The reason code
+# shape is the rule both drift issue readers already apply to that field. The
+# repository and the cause are bounded where the analyzer produces them: one is a
+# validated registry entry, the other is a sanitized reason.
+require_readable_findings() {
+  if ! jq -e '(.findings | type) == "array" and all(.findings[];
+    (.repository | type) == "string" and (.repository | length) > 0 and
+    (.code | type) == "string" and
+    (.code | test("^[a-z0-9][a-z0-9-]{0,79}$")) and
+    ((.cause // "") | type) == "string"
+  )' "${AUDIT_PATH:?AUDIT_PATH is required}" >/dev/null; then
+    refuse_publish "Unity enrollment audit findings"
+  fi
+}
+
 # record_causes publishes every finding that names a refusal cause, so an
 # operator reads the file or the reason in the run summary instead of opening a
 # consumer checkout. The drift issue keeps counts, codes, and reviewed
@@ -169,20 +196,79 @@ record_causes() {
     echo "Refusal causes could not be read from the retained artifact." >> "${GITHUB_STEP_SUMMARY}"
 }
 
+# record_drift names every repository that carries a finding. The table above
+# publishes the reads that failed. This one publishes the repositories that
+# drifted, which is the rest of what an operator needs. One row per repository,
+# so its length is the number of drifted repositories and not the number of
+# findings. A repository can carry many findings.
+#
+# Unlike the table above, this one does not degrade to a note. It is the only
+# place the run names the drifted repositories, so a note would leave a green run
+# with no repository in it. It fails the run instead.
+record_drift() {
+  if ! jq -r '
+    if (.findings | length) == 0 then empty
+    else
+      [ .findings[] ]
+      | group_by(.repository)
+      | map("| `\(.[0].repository)` | \(length) | \(map(.code) | unique | map("`\(.)`") | join(", ")) |")
+      | "### Open drift\n\n| Repository | Findings | Reasons |\n| --- | --- | --- |\n"
+        + (join("\n"))
+        + "\n"
+    end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"; then
+    refuse_publish "Unity enrollment audit drift"
+  fi
+}
+
+# record_verdict states what a green run means. A complete audit with findings
+# keeps the run green. The counts, the two tables, and the annotation below name
+# every repository and every reason code. The drift issue is not the only
+# signal. A complete audit with no findings says so, so a clean run cannot be
+# read as a silent one.
+#
+# Consumer drift stays green on purpose. This repository does not own a
+# consumer's enrollment policy. A daily run that keeps failing teaches operators
+# to ignore it. That failure would also hide an incomplete audit, which is the
+# failure that does matter.
+record_verdict() {
+  local summary
+  if ! summary="$(jq -r '
+    [ .findings[] ] as $findings
+    | ($findings | group_by(.repository) | length) as $repositories
+    | ($findings | map(.code) | group_by(.) | map("\(.[0]) x\(length)") | join(", ")) as $reasons
+    | if $findings | length == 0
+      then "clean"
+      else "\($findings | length) open Unity enrollment findings across \($repositories) repositories: \($reasons)"
+      end
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}")"; then
+    refuse_publish "Unity enrollment audit verdict"
+  fi
+  if [ "${summary}" = "clean" ]; then
+    echo "The Unity enrollment audit is complete and clean. No drift is open." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+    return 0
+  fi
+  printf '::warning::%s. A green run means the audit read every repository. Read the drift issue for the detail.\n' \
+    "${summary}" >&2
+}
+
 record_counts() {
   if [ ! -f "${AUDIT_PATH:?AUDIT_PATH is required}" ]; then
     echo "Unity enrollment audit artifact unavailable." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     exit 1
   fi
+  require_readable_findings
   expected_repositories="$(jq -r '.repositories | length' unity-enrollment-policy.json)"
   jq -r --arg expected "${expected_repositories}" \
     '"Repositories: \(.repositories | length)/\($expected)\nActive jobs: \(.inventory | length)\nFindings: \(.findings | length)\nComplete: \(.complete)"' \
     "${AUDIT_PATH}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
   record_causes
+  record_drift
   if [ "$(jq -r '.complete' "${AUDIT_PATH}")" != "true" ]; then
-    echo "The organization audit is incomplete; policy status is unknown." >> "${GITHUB_STEP_SUMMARY}"
+    echo "The Unity enrollment audit is incomplete; policy status is unknown." >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
     exit 1
   fi
+  record_verdict
 }
 
 case "${1:-}" in
