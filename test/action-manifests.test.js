@@ -703,5 +703,9 @@ test("both acquire wait phases stay documented and keep their measured boundarie
   // The summary cannot always echo the output: a success that never waited has no
   // observation to report. The manifest must not promise that it always does.
   assert.doesNotMatch(folded(manifest), /The job summary reports the same value/);
-  assert.match(folded(readme), /its `queue-position` is the same value the output publishes/);
+  assert.match(folded(readme), /its `queue-position`\s+is the value the output publishes/);
+  // The refuse paths publish a position but no summary, so neither document may
+  // promise that every summary echoes it.
+  assert.match(folded(manifest), /A timed out run reports its last observed poll/);
+  assert.doesNotMatch(folded(readme), /Every summary the action writes/);
 });

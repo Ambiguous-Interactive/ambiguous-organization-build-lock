@@ -305,15 +305,15 @@ operator can tell them apart without reading logs (issue #53 item 6):
 | --- | --- |
 | `runner-wait-ms` | Time the job waited for a GitHub runner before the action could start. Measured from the exact job's own Actions timeline. Empty when the wait cannot be proven. |
 | `wait-ms` | Time this action spent. It covers the organization FIFO wait and the action's own setup reads. It excludes the runner wait above. |
-| `queue-position` | 1-based FIFO position where this caller stood, and 0 when it was never observed in the queue. |
+| `queue-position` | 1-based FIFO position where this caller waited, and 0 when no holder or reservation ever withheld it. |
 | `attempts` | Poll iterations in the acquire wait loop. |
 
-Every summary the action writes reports `runner-wait-ms` under the same name.
-An acquired run also reports the last observation that withheld the lock. That
+Every acquire outcome summary reports `runner-wait-ms` under the same name. An
+acquired run also reports the last observation that withheld the lock. That
 observation names the blocking holder or reservation, and its `queue-position`
-is the same value the output publishes. The phases carry only elapsed
-milliseconds and a queue position, so they publish no credential data. An empty
-`runner-wait-ms` means unproven, not zero.
+is the value the output publishes. A timed out summary reports the same number.
+The phases carry only elapsed milliseconds and a queue position, so they publish
+no credential data. An empty `runner-wait-ms` means unproven, not zero.
 
 
 Replace `COMPATIBILITY_COMMIT_SHA` with the reviewed 40-character release commit;

@@ -4672,6 +4672,14 @@ test("the release budget gives every phase a share strictly inside the total", a
       assertOutputContract(outputs, releaseOutputNames);
       assert.equal(outputs["cleanup-result"], "lock-release-unreachable");
       assert.equal(outputs.released, "false");
+      // This path never read the history that would prove a session window, so the
+      // timeline is unavailable with a reason. not-applicable would claim no session
+      // existed, which the path cannot prove.
+      assert.deepEqual(JSON.parse(outputs["peer-timeline"]), {
+        status: "unavailable",
+        events: [],
+        reason: "lock-release-unreachable"
+      });
     });
   });
 

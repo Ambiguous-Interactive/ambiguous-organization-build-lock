@@ -3030,14 +3030,16 @@ function acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker }) {
     : line;
 }
 
-// Peer-written holder IDs, runner IDs, and reason codes are rendered through
-// summaryCell, because this text reaches an operator-facing evidence document.
+// Every peer-written value is rendered through summaryCell, because this text reaches an
+// operator-facing evidence document. A stored runUrl is included: the state file is not
+// revalidated on read, so a run link is escaped even though the action builds it from
+// validated inputs.
 function observationText(config, observation, attempts, waitMs) {
   const details = [`attempts=${attempts}`, `wait-ms=${waitMs}`];
   if (observation && observation.holderId) {
     details.push(`holder=${summaryCell(observation.holderId)}`);
     if (observation.holderRunUrl) {
-      details.push(`holder-run=${observation.holderRunUrl}`);
+      details.push(`holder-run=${summaryCell(observation.holderRunUrl)}`);
     }
     details.push(`queue-position=${observation.queuePosition}`);
     details.push(`reason=${summaryCell(observation.reason)}`);

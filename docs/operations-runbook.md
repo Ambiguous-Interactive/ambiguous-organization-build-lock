@@ -586,8 +586,8 @@ not need log reading.
   action could start. It is empty when the wait cannot be proven. An empty value
   means unproven, not zero.
 - `wait-ms` is the time the action itself spent.
-- `queue-position` is the FIFO position where the caller stood, and 0 when it was
-  never observed in the queue.
+- `queue-position` is the FIFO position where the caller waited, and 0 when no
+  holder or reservation ever withheld it.
 
 Prefer normal cancellation first. If GitHub leaves a run stuck after a normal
 cancellation request, force-cancel only after confirming that cleanup has

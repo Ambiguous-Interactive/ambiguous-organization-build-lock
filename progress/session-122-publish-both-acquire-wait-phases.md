@@ -49,7 +49,7 @@ The record does carry `created_at` and `started_at`. Confirmed.
 
 ## Change
 
-Two commits on `issue-53-acquire-wait-phase-diagnostics`.
+Three commits on `issue-53-acquire-wait-phase-diagnostics`.
 
 - Publish `runner-wait-ms`, measured from the exact job's Actions timeline.
 - Publish `queue-position`. It was computed and discarded into a log line.
@@ -72,13 +72,13 @@ each is one line, so both are fixed here.
 | Site | Symptom | Fix |
 | --- | --- | --- |
 | Release whose state write never landed | Published `peer-timeline` status `unavailable` with no `reason`, which the manifest promises. | Publish the reason. `not-applicable` would claim no session, and this path cannot prove that. |
-| Reaper, prune-only run | Summary said "Reaped capacity-critical stale state" when it had pruned only expired cooldowns and reaped no holder. | Say which happened. The `reaped` output is unchanged and still correct. |
+| Reaper, prune-only run | Summary said "Reaped capacity-critical stale state" when it had pruned only expired cooldowns and reaped no holder. | Say which happened. The `reaped` output is unchanged and still correct. Not covered by a test; no reap fixture reads a summary today. |
 
 ## Red-green
 
 | Check | Before | After |
 | --- | --- | --- |
-| `current job lookup` cases | 2 | 8, as a data-driven table |
+| `current job lookup` cases | 2 | 9, as a data-driven table plus one fail-closed case |
 | `acquire publishes both wait phases` | absent | 1 |
 | `queue-position` on the superseded path | not asserted | asserted `1` |
 | Acquire wait-phase documentation | no test | 1 test, whitespace-folded |
@@ -103,12 +103,12 @@ Two independent adversarial reviews, then a verification pass on the fixes.
 
 | Finding | Severity | Disposition |
 | --- | --- | --- |
-| Only 2 of 9 paths reported both phases, and the timeout path was one of them | should-fix | `runnerWaitText` is now on every summary the action writes, including the two account-blocked paths that previously wrote outputs and no summary. |
+| Only the two acquired paths named the runner wait, and one of them named it `github-runner-wait-ms`, which is not the output name. A timeout summary named neither phase. | should-fix | One `runnerWaitText` helper now names it as `runner-wait-ms` on every acquire outcome summary. The account-blocked path that wrote outputs and no summary got one. The `account-blocked-cleanup-failed` path still writes no summary, so the run-level failure block is the only summary there. |
 | Six denial paths published `queue-position` 0 for a caller that had queued, so one name carried three meanings | should-fix | Every site publishes a derived value. A test now pins the superseded path. |
-| `queue-position` meant the final poll in the output and the blocking poll in the summary | should-fix | An acquired run reports where it waited. A refused or timed out run reports its last observed poll, which is also what its summary reports. The manifest no longer promises the summary always echoes the output, because a success that never waited has nothing to report. |
+| `queue-position` meant the final poll in the output and the blocking poll in the summary | should-fix | An acquired run reports where it waited. A refused or timed out run reports its last observed poll, and a timed out summary reports the same number. Neither document now promises that every summary echoes the output, because a success that never waited has nothing to report and a refusal summary carries only the runner wait. |
 | The success summary named a peer that never withheld the caller, or claimed a wait it had no evidence for | should-fix | The observation is recorded where the caller provably remained queued, and the summary reports it only when one exists. |
-| The success summary rendered peer-written holder IDs and reason codes unescaped | should-fix | Routed through the escaping helper the peer timeline already used. A consumer could otherwise inject markdown into another consumer's summary. `holder-run` stays a link, because `canonicalRunUrl` validates its own inputs. |
-| `Date.parse` accepted non-ISO formats and unbounded spans, so a bad record published an impossible measurement | should-fix | Only the RFC 3339 shape is read, offset form included, and a span past a year is rejected. A one-week bound was tried first and rejected: a self-hosted runner can be offline for days, and a real wait must never be discarded. |
+| The success summary rendered peer-written values unescaped | should-fix | Routed through the escaping helper the peer timeline already used. A consumer could otherwise inject markdown into another consumer's summary. A stored `runUrl` is escaped too: the state file is not revalidated on read, so it is not trusted. |
+| `Date.parse` accepted non-ISO formats and unbounded spans, so a bad record published an impossible measurement | should-fix | Only the RFC 3339 shape is read, offset form included, and a span past a year is rejected. A one-week bound was tried first and rejected: a self-hosted runner can be offline for days. A one-year bound still rejects a corrupt record. |
 | The manifest claimed `wait-ms` starts at the step, but the clock starts inside `acquire` after the inputs are read | should-fix | Wording corrected in both manifests, the README, and the runbook. |
 | The manifest and README disagreed on `attempts` | should-fix | Both now say poll iterations. `CAS attempts` was already wrong. |
 | `wait-ms` unification had no test | should-fix | The timeout fixture now charges the lock-config read a distinctive cost, so `wait-ms` is pinned to the loop bound plus that cost. The pre-change clock reported the loop bound alone. The first attempt at this assertion compared against a value from an unrelated measurement path and had no headroom; it was replaced. |
