@@ -105,6 +105,9 @@ test("acquire removes its queued request when the PR is superseded during the FI
     const outputs = readEnvironmentFile(outputFile);
     assert.equal(outputs.acquired, "false");
     assert.equal(outputs["admission-result"], "superseded");
+    // This caller did queue, so it must not publish the not-queued position. The
+    // output, the job summary, and every outcome path must agree on one value.
+    assert.equal(outputs["queue-position"], "1");
   });
 
   assert.equal(prReads, 2, "PR identity must be checked at entry and again before admission");

@@ -15,7 +15,8 @@ inputs:
     description: >-
       GitHub token with Actions read access, plus pull request read access for PR
       runs. Records the exact numeric job ID for safe stale reaping and binds
-      queued PR admission to the event head.
+      queued PR admission to the event head. It also measures runner-wait-ms, so that
+      output stays empty without it.
     required: false
   pull-request-number:
     description: Pull request number to revalidate throughout the FIFO wait. Required for pull request runs.
@@ -61,9 +62,24 @@ outputs:
   state-sha:
     description: Lock-state file SHA after acquire.
   wait-ms:
-    description: Milliseconds waited before acquiring.
+    description: >-
+      Milliseconds this action spent before its outcome. Measured from the start of the
+      acquire routine, after the action reads its inputs. Covers the organization FIFO
+      wait and this action's own setup reads. Excludes the time before the job reached a
+      runner; runner-wait-ms reports that time.
+  runner-wait-ms:
+    description: >-
+      Milliseconds the job waited for a GitHub runner before this action could start.
+      Measured from the exact job's own Actions timeline. Empty when the wait cannot be
+      proven, which needs github-token and runner-id. A proven wait shorter than the
+      one-second resolution of that timeline reports 0. An unproven wait is never 0.
+  queue-position:
+    description: >-
+      1-based organization FIFO position where this caller waited, and 0 when no holder or
+      reservation ever withheld it. An acquired run reports where it waited. A timed out
+      run reports its last observed poll, and its summary reports the same number.
   attempts:
-    description: CAS attempts.
+    description: Poll iterations in the acquire wait loop.
   stale-recovered:
     description: Compatibility output; always false because only the scheduled reaper handles stale holders.
   quarantine-recovered:

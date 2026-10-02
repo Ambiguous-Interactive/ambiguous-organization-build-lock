@@ -23,7 +23,7 @@ const {
   release,
   reap,
   reapDeadlineBudgets,
-  resolveCurrentJobId,
+  resolveCurrentJob,
   resolveReleaseReport,
   selectEligibleQueueEntries,
   testAppPrivateKey,
@@ -1648,32 +1648,126 @@ test("exact holder-job lookup retains holders and queue entries with missing or 
 });
 
 
-test("current job lookup records the unique active job on the exact runner", async () => {
-  const identity = {
-    repository: "owner/repo",
-    runId: "123",
-    runAttempt: "2",
-    runnerId: "runner-a"
-  };
+// Issue #53 item 6: the acquire step must be able to tell an operator whether the
+// job spent its time waiting for a GitHub runner or waiting in the organization
+// FIFO. The runner wait is the exact job's own Actions timeline, so it is measured
+// from the job record the caller lookup already reads. An unprovable wait stays
+// empty; it is never reported as zero.
+const currentJobTimingCases = [
+  {
+    name: "measures the wait between job creation and job start",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00.000Z",
+      started_at: "2026-06-06T00:04:30.000Z"
+    },
+    runnerWaitMs: "270000"
+  },
+  {
+    name: "measures a zero wait when the runner started the job as soon as it was created",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00.000Z",
+      started_at: "2026-06-06T00:00:00.000Z"
+    },
+    runnerWaitMs: "0"
+  },
+  {
+    name: "leaves the wait unmeasured when GitHub records no job start time",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00.000Z",
+      started_at: null
+    },
+    runnerWaitMs: ""
+  },
+  {
+    name: "leaves the wait unmeasured when the job payload carries no timeline at all",
+    job: { id: 41, runner_name: "runner-a", status: "in_progress" },
+    runnerWaitMs: ""
+  },
+  {
+    name: "leaves the wait unmeasured when the start time precedes creation",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:04:30.000Z",
+      started_at: "2026-06-06T00:00:00.000Z"
+    },
+    runnerWaitMs: ""
+  },
+  {
+    name: "reads a timeline that carries a numeric UTC offset",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00.000-08:00",
+      started_at: "2026-06-06T00:04:30.000-08:00"
+    },
+    runnerWaitMs: "270000"
+  },
+  {
+    name: "leaves the wait unmeasured when a span passes the plausibility bound",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06T00:00:00Z",
+      started_at: "9999-12-31T23:59:59Z"
+    },
+    runnerWaitMs: ""
+  },
+  {
+    name: "leaves the wait unmeasured when the timeline is not the RFC 3339 shape GitHub documents",
+    job: {
+      id: 41,
+      runner_name: "runner-a",
+      status: "in_progress",
+      created_at: "2026-06-06 00:00:00 GMT",
+      started_at: "2026-06-06 00:04:30 GMT"
+    },
+    runnerWaitMs: ""
+  }
+];
 
-  await withMockedFetch(async (url) => {
-    const parsed = new URL(url);
-    assert.equal(parsed.pathname, "/repos/owner/repo/actions/runs/123/attempts/2/jobs");
-    return jsonResponse(200, {
-      total_count: 3,
-      jobs: [
-        { id: 40, runner_name: "runner-a", status: "completed" },
-        { id: 41, runner_name: "runner-a", status: "in_progress" },
-        { id: 42, runner_name: "runner-b", status: "in_progress" }
-      ]
+for (const timingCase of currentJobTimingCases) {
+  test(`current job lookup ${timingCase.name}`, async () => {
+    const identity = {
+      repository: "owner/repo",
+      runId: "123",
+      runAttempt: "2",
+      runnerId: "runner-a"
+    };
+
+    await withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      assert.equal(parsed.pathname, "/repos/owner/repo/actions/runs/123/attempts/2/jobs");
+      return jsonResponse(200, {
+        total_count: 3,
+        jobs: [
+          { id: 40, runner_name: "runner-a", status: "completed" },
+          timingCase.job,
+          { id: 42, runner_name: "runner-b", status: "in_progress" }
+        ]
+      });
+    }, async () => {
+      const resolved = await resolveCurrentJob(identity, "github-token");
+      assert.equal(resolved.jobId, "41");
+      assert.equal(resolved.runnerWaitMs, timingCase.runnerWaitMs);
     });
-  }, async () => {
-    assert.equal(await resolveCurrentJobId(identity, "github-token"), "41");
   });
-});
+}
 
 
-test("current job lookup fails closed when the runner has no unique active job", async () => {
+test("current job lookup records no job and no runner wait without a unique active job", async () => {
   const identity = {
     repository: "owner/repo",
     runId: "123",
@@ -1688,7 +1782,8 @@ test("current job lookup fails closed when the runner has no unique active job",
       { id: 52, runner_name: "runner-a", status: "in_progress" }
     ]
   }), async (logs) => {
-    assert.equal(await resolveCurrentJobId(identity, "github-token"), "");
+    const resolved = await resolveCurrentJob(identity, "github-token");
+    assert.deepEqual(resolved, { jobId: "", runnerWaitMs: "" });
     assert.match(logs.join("\n"), /found 2 active jobs/);
   });
 });

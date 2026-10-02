@@ -32,6 +32,8 @@ const acquireOutputKeys = [
   "holder-id",
   "state-sha",
   "wait-ms",
+  "runner-wait-ms",
+  "queue-position",
   "attempts",
   "stale-recovered",
   "quarantine-recovered",
@@ -673,4 +675,39 @@ test("README documents the time-bounded release retry budget", () => {
   assert.match(readme, /each one\s+carries a matching abort signal/);
   assert.match(readme, /are both ceilings: whichever a call reaches\s+first ends its budget/);
   assert.match(readme, /deliberately no per-call attempt floor underneath/);
+});
+
+test("both acquire wait phases stay documented and keep their measured boundaries", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+  const operations = fs.readFileSync(path.join(repoRoot, "docs", "operations-runbook.md"), "utf8");
+  const manifest = readActionManifest("acquire-build-lock");
+
+  for (const name of ["runner-wait-ms", "wait-ms", "queue-position", "attempts"]) {
+    assert.match(manifest, new RegExp(`^  ${name}:$`, "m"), `${name} must stay a declared acquire output`);
+    assert.match(readme, new RegExp(`\\| \`${name}\` \\|`), `README must define ${name}`);
+  }
+  // An operator reads both surfaces together, so neither may drop the shared names or
+  // claim a boundary the code does not enforce. Fold whitespace so the assertions do
+  // not depend on how the prose happens to wrap.
+  const folded = (text) => text.replace(/\s+/g, " ");
+  assert.match(folded(readme), /Empty when the wait cannot be proven\./);
+  assert.match(folded(readme), /An empty `runner-wait-ms` means unproven, not zero\./);
+  assert.match(folded(operations), /An empty value means unproven, not zero\./);
+  assert.match(folded(manifest), /An unproven wait is never 0\./);
+  assert.match(folded(manifest), /Poll iterations in the acquire wait loop\./);
+  assert.doesNotMatch(manifest, /description: CAS attempts\./);
+  // wait-ms must not claim to start before the acquire routine, because the action
+  // reads its inputs first.
+  assert.doesNotMatch(folded(manifest), /measured from the start of the step/i);
+  assert.match(folded(manifest), /Measured from the start of the acquire routine/);
+  // The summary cannot always echo the output: a success that never waited has no
+  // observation to report. The manifest must not promise that it always does.
+  assert.doesNotMatch(folded(manifest), /The job summary reports the same value/);
+  assert.match(folded(readme), /its `queue-position`\s+is the value the output publishes/);
+  // The refuse paths publish a position but no summary, so neither document may
+  // promise that every summary echoes it.
+  assert.match(folded(manifest), /A timed out run reports its last observed poll/);
+  assert.doesNotMatch(folded(readme), /Every summary the action writes/);
+  // The run-level failure block repeats the error alone and carries neither phase.
+  assert.match(folded(readme), /The run-level failure block repeats the error alone/);
 });

@@ -579,9 +579,19 @@ missing portal proof, or incomplete run-status evidence must fail closed.
 
 Before cancelling a workflow, determine whether its licensed job is still
 GitHub-queued, waiting in the organization FIFO, holding a slot, or cleaning
-up. Prefer normal cancellation first. If GitHub leaves a run stuck after a
-normal cancellation request, force-cancel only after confirming that cleanup
-has finished or that the resulting quarantine is understood and recoverable.
+up. The acquire action publishes each phase separately, so the distinction does
+not need log reading.
+
+- `runner-wait-ms` is the time the job waited for a GitHub runner before the
+  action could start. It is empty when the wait cannot be proven. An empty value
+  means unproven, not zero.
+- `wait-ms` is the time the action itself spent.
+- `queue-position` is the FIFO position where the caller waited, and 0 when no
+  holder or reservation ever withheld it.
+
+Prefer normal cancellation first. If GitHub leaves a run stuck after a normal
+cancellation request, force-cancel only after confirming that cleanup has
+finished or that the resulting quarantine is understood and recoverable.
 
 After any cancellation:
 
@@ -707,7 +717,8 @@ Monitor and alert on:
 - unknown cleanup and quarantine creation;
 - App permission, installation, or selected-secret scope drift;
 - unauthorized caller attempts;
-- runner wait versus organization FIFO wait; and
+- runner wait versus organization FIFO wait, read from the acquire
+  `runner-wait-ms` and `wait-ms` outputs rather than from logs; and
 - required aggregate deletion, rename, unexpected skip, or cancellation.
 
 Use [Lock State](../locks/README.md) for the state/config contract and

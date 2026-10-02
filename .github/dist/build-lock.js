@@ -2064,7 +2064,35 @@ async function getRunAttemptJobs(identity, authToken, options = {}) {
   return jobs;
 }
 
-async function resolveCurrentJobId(identity, authToken, options = {}) {
+// The runner wait happens before this process starts. The exact job record read to prove
+// the caller identity already carries that timeline, so the phase costs no extra API
+// call.
+//
+// An unprovable timeline returns an empty string, never a zero. A zero would claim the
+// job never waited for a runner, and the evidence does not support that claim.
+// Date.parse is implementation-defined outside RFC 3339, so only the shape GitHub
+// documents is accepted. GitHub sends a Z suffix today and documents date-time, which
+// also permits a numeric offset, so both are read. A span past the bound is a corrupt
+// record, not a measurement. The bound is a year because a self-hosted runner can be
+// offline for days, so no plausible wait is discarded.
+const RFC_3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RUNNER_WAIT_MAX_MS = 365 * 24 * 60 * 60 * 1000;
+
+function jobRunnerWaitMs(job) {
+  const created = String((job && job.created_at) || "");
+  const started = String((job && job.started_at) || "");
+  if (!RFC_3339_TIMESTAMP.test(created) || !RFC_3339_TIMESTAMP.test(started)) {
+    return "";
+  }
+  const waitMs = Date.parse(started) - Date.parse(created);
+  if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > RUNNER_WAIT_MAX_MS) {
+    return "";
+  }
+  return String(waitMs);
+}
+
+async function resolveCurrentJob(identity, authToken, options = {}) {
+  const unresolved = { jobId: "", runnerWaitMs: "" };
   if (
     !authToken ||
     !/^[1-9][0-9]*$/.test(identity.runId || "") ||
@@ -2075,7 +2103,7 @@ async function resolveCurrentJobId(identity, authToken, options = {}) {
       "::warning::Cannot record the current numeric Actions job ID; github-token, run identity, and runner-id are required. " +
         "The scheduled reaper will retain this identity while its workflow run remains active."
     );
-    return "";
+    return unresolved;
   }
 
   let jobs;
@@ -2086,7 +2114,7 @@ async function resolveCurrentJobId(identity, authToken, options = {}) {
       `::warning::Cannot record the current numeric Actions job ID for ${identity.repository}/${identity.runId} ` +
         `(${oneLine(error.message)}); the scheduled reaper will retain this identity while its workflow run remains active.`
     );
-    return "";
+    return unresolved;
   }
 
   const matchingJobs = jobs.filter(
@@ -2102,9 +2130,9 @@ async function resolveCurrentJobId(identity, authToken, options = {}) {
         `${matchingJobs.length} active jobs on runner ${identity.runnerId}; the scheduled reaper will retain this ` +
         "identity while its workflow run remains active."
     );
-    return "";
+    return unresolved;
   }
-  return String(matchingJobs[0].id);
+  return { jobId: String(matchingJobs[0].id), runnerWaitMs: jobRunnerWaitMs(matchingJobs[0]) };
 }
 
 async function getRunStatus(repository, runId, authToken, options = {}) {
@@ -2944,20 +2972,23 @@ async function collectPeerTimeline(config, identity, sessionAcquiredAt) {
   }
 }
 
+// Holder IDs, runner IDs, and reason codes come from state that peers write, so every
+// summary that renders them must escape. Render each as an inline code span so it cannot
+// inject markdown, and escape pipes because GFM splits cells on them even inside code
+// spans. This is the only rendering helper for peer-written values.
+function summaryCell(value) {
+  return value
+    ? `\`${oneLine(value).replace(/`/g, "'").replace(/\|/g, "\\|")}\``
+    : "";
+}
+
 function appendPeerTimelineSummary(peerTimeline, holderId) {
   if (!peerTimeline || peerTimeline.status === "not-applicable") {
     return;
   }
   const count = Array.isArray(peerTimeline.events) ? peerTimeline.events.length : 0;
-  // Holder IDs and reason codes come from state that peers write. Render each
-  // as an inline code span so it cannot inject markdown into the summary, and
-  // escape pipes because GFM splits cells on them even inside code spans.
-  const cell = (value) =>
-    value
-      ? `\`${oneLine(value).replace(/`/g, "'").replace(/\|/g, "\\|")}\``
-      : "";
   const header =
-    `### Peer lock activity for ${cell(holderId)}\n\n` +
+    `### Peer lock activity for ${summaryCell(holderId)}\n\n` +
     `Status: ${peerTimeline.status}${peerTimeline.reason ? ` (${oneLine(peerTimeline.reason)})` : ""}; ` +
     `window from ${peerTimeline.windowFrom || "unknown"}; ${count} event(s).` +
     `${peerTimeline.truncated ? " The window was truncated; see the peer-timeline output." : ""}\n`;
@@ -2970,8 +3001,8 @@ function appendPeerTimelineSummary(peerTimeline, holderId) {
           ? [event.reservationState, event.incidentId, event.reason].filter(Boolean).join(" ")
           : event.reason || "";
       lines.push(
-        `| ${cell(event.time)} | ${cell(event.kind)} | ${cell(event.holderId)} | ` +
-        `${cell(event.runnerId)} | ${cell(detail)} |`
+        `| ${summaryCell(event.time)} | ${summaryCell(event.kind)} | ${summaryCell(event.holderId)} | ` +
+        `${summaryCell(event.runnerId)} | ${summaryCell(detail)} |`
       );
     }
   } else if (peerTimeline.status !== "unavailable") {
@@ -2980,20 +3011,43 @@ function appendPeerTimelineSummary(peerTimeline, holderId) {
   appendSummary(lines.join("\n"));
 }
 
-function observationText(config, observation, attempts, elapsedMs) {
-  const details = [`attempts=${attempts}`, `elapsed-ms=${elapsedMs}`];
+// The runner wait happens before this process starts, so no outcome path can measure it
+// on its own. Publish it on every terminal summary under the same name as the output, and
+// name it unmeasured rather than zero when it cannot be proven.
+function runnerWaitText(runnerWaitMs) {
+  return `runner-wait-ms=${runnerWaitMs === "" ? "unmeasured" : runnerWaitMs}.`;
+}
+
+// A caller that was admitted on its first poll never waited, so there is nothing to
+// explain. A caller that waited reports the last observation that withheld the lock,
+// using the same vocabulary the timeout path already uses.
+function acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker }) {
+  const line =
+    `Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts. ` +
+    runnerWaitText(runnerWaitMs);
+  return blocker
+    ? `${line} ${observationText(config, blocker, attempts, waitMs)}`
+    : line;
+}
+
+// Every peer-written value is rendered through summaryCell, because this text reaches an
+// operator-facing evidence document. A stored runUrl is included: the state file is not
+// revalidated on read, so a run link is escaped even though the action builds it from
+// validated inputs.
+function observationText(config, observation, attempts, waitMs) {
+  const details = [`attempts=${attempts}`, `wait-ms=${waitMs}`];
   if (observation && observation.holderId) {
-    details.push(`holder=${observation.holderId}`);
+    details.push(`holder=${summaryCell(observation.holderId)}`);
     if (observation.holderRunUrl) {
-      details.push(`holder-run=${observation.holderRunUrl}`);
+      details.push(`holder-run=${summaryCell(observation.holderRunUrl)}`);
     }
     details.push(`queue-position=${observation.queuePosition}`);
-    details.push(`reason=${observation.reason}`);
+    details.push(`reason=${summaryCell(observation.reason)}`);
   } else if (observation) {
     details.push(`holder=<none>`);
     details.push(`queue-position=${observation.queuePosition}`);
     if (observation.reason) {
-      details.push(`reason=${observation.reason}`);
+      details.push(`reason=${summaryCell(observation.reason)}`);
     }
   }
   return `${config.lockName} wait state: ${details.join("; ")}.`;
@@ -3103,12 +3157,22 @@ async function runCancellationCleanup(config, identity, cancellation) {
   }
 }
 
+// The published queue position is where this caller stood in the organization FIFO, and
+// 0 when it was never observed there. An admitted caller reports where it waited, which
+// is the informative number. Every other outcome reports its last observed poll, so the
+// output and the job summary never disagree.
+function queuePositionAt(observation) {
+  return observation ? observation.queuePosition : 0;
+}
+
 function writeAcquireOutputs({
   acquired,
   lockName,
   holderId,
   stateSha = "",
   waitMs,
+  runnerWaitMs = "",
+  queuePosition = queuePositionAt(null),
   attempts,
   staleRecovered = false,
   quarantineRecovered = false,
@@ -3122,6 +3186,8 @@ function writeAcquireOutputs({
   writeOutput("holder-id", holderId);
   writeOutput("state-sha", stateSha);
   writeOutput("wait-ms", String(waitMs));
+  writeOutput("runner-wait-ms", runnerWaitMs);
+  writeOutput("queue-position", String(queuePosition));
   writeOutput("attempts", String(attempts));
   writeOutput("stale-recovered", String(staleRecovered));
   writeOutput("quarantine-recovered", String(quarantineRecovered));
@@ -3180,23 +3246,32 @@ async function acquire(config) {
 
   try {
     let lockConfig = null;
-    let started = Date.now();
-    let deadline = started + config.timeoutMinutes * 60 * 1000;
+    // Two clocks, both published. `started` is the first thing this routine does, so
+    // wait-ms covers every moment from there to the outcome, on every path. The wait
+    // budget gets its own origin after the setup reads below, so timeout-minutes still
+    // bounds the organization FIFO wait and not the setup.
+    const started = Date.now();
     let attempts = 0;
     const staleRecovered = false;
     let quarantineRecovered = false;
     let lastObservation = null;
+    let lastBlocker = null;
     let authFailureSince = null;
     let lastPrHeadCheckAt = 0;
     let lockStateMayNeedCleanup = false;
     let admissionMayHaveBeenWrittenByThisInvocation = false;
     let preActivationReservation = null;
 
-    const currentJobId = await resolveCurrentJobId(identity, config.githubToken, { apiOptions });
-    if (currentJobId) {
-      identity.jobId = currentJobId;
-      console.log(`Recorded exact Actions job ID ${currentJobId} for scheduled stale-state verification.`);
+    const currentJob = await resolveCurrentJob(identity, config.githubToken, { apiOptions });
+    const runnerWaitMs = currentJob.runnerWaitMs;
+    if (currentJob.jobId) {
+      identity.jobId = currentJob.jobId;
+      console.log(`Recorded exact Actions job ID ${identity.jobId} for scheduled stale-state verification.`);
     }
+    console.log(
+      `GitHub runner wait before this step: ${runnerWaitMs === "" ? "unmeasured" : `${runnerWaitMs} ms`}. ` +
+        "The organization FIFO wait is reported as wait-ms."
+    );
 
     const cleanupBeforeActivation = async (reason, options = {}) => {
       const result = await cleanupIdentity(config, identity, {
@@ -3229,6 +3304,8 @@ async function acquire(config) {
             lockName: config.lockName,
             holderId: identity.holderId,
             waitMs,
+            runnerWaitMs,
+            queuePosition: queuePositionAt(lastObservation),
             attempts,
             admissionResult: "account-blocked-cleanup-failed",
             incidentId: incident.incidentId,
@@ -3249,12 +3326,15 @@ async function acquire(config) {
         holderId: identity.holderId,
         stateSha: cleanupResult?.sha || observedStateSha || "",
         waitMs,
+        runnerWaitMs,
+        queuePosition: queuePositionAt(lastObservation),
         attempts,
         admissionResult: "account-blocked",
         incidentId: incident.incidentId,
         resourceHealth: "blocked",
         resourceReason: incident.reason
       });
+      appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
       throw new Error(message);
     };
 
@@ -3307,6 +3387,8 @@ async function acquire(config) {
               lockName: config.lockName,
               holderId: identity.holderId,
               waitMs,
+              runnerWaitMs,
+              queuePosition: queuePositionAt(lastObservation),
               attempts,
               staleRecovered,
               quarantineRecovered,
@@ -3315,7 +3397,7 @@ async function acquire(config) {
             const message =
               `Pull request head validation failed (${oneLine(error.message)}), and exact pre-activation ` +
               `build-lock cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
-            appendSummary(message);
+            appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
             throw new Error(message, { cause: cleanupError });
           }
         }
@@ -3325,6 +3407,8 @@ async function acquire(config) {
           lockName: config.lockName,
           holderId: identity.holderId,
           waitMs,
+          runnerWaitMs,
+          queuePosition: queuePositionAt(lastObservation),
           attempts,
           staleRecovered,
           quarantineRecovered,
@@ -3332,7 +3416,7 @@ async function acquire(config) {
           admissionResult: "pr-head-check-failed"
         });
         const message = `Pull request head validation failed before ${config.lockName} admission: ${oneLine(error.message)}.`;
-        appendSummary(message);
+        appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
         const terminalError = new Error(message, { cause: error });
         terminalError.prHeadValidationFailed = true;
         throw terminalError;
@@ -3357,6 +3441,8 @@ async function acquire(config) {
             lockName: config.lockName,
             holderId: identity.holderId,
             waitMs,
+            runnerWaitMs,
+            queuePosition: queuePositionAt(lastObservation),
             attempts,
             staleRecovered,
             quarantineRecovered,
@@ -3365,7 +3451,7 @@ async function acquire(config) {
           const message =
             `Pull request ${config.pullRequestNumber} was superseded, and exact pre-activation build-lock ` +
             `cleanup could not be confirmed (${oneLine(cleanupError.message)}).`;
-          appendSummary(message);
+          appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}`);
           throw new Error(message, { cause: cleanupError });
         }
       }
@@ -3375,6 +3461,8 @@ async function acquire(config) {
         lockName: config.lockName,
         holderId: identity.holderId,
         waitMs,
+        runnerWaitMs,
+        queuePosition: queuePositionAt(lastObservation),
         attempts,
         staleRecovered,
         quarantineRecovered,
@@ -3384,7 +3472,7 @@ async function acquire(config) {
       const message =
         `Stale pull request run for ${config.expectedHeadSha}; pull request #${config.pullRequestNumber} ` +
         `now points to ${result.currentHeadSha}`;
-      appendSummary(`${message}. No licensed work was admitted.`);
+      appendSummary(`${runnerWaitText(runnerWaitMs)} ${message}. No licensed work was admitted.`);
       throw new Error(message);
     };
 
@@ -3393,8 +3481,9 @@ async function acquire(config) {
     assertAcquireConfigRequirements(config, lockConfig);
     await ensureStateBranch(config, { apiOptions });
     let lockConfigReadAt = Date.now();
-    started = Date.now();
-    deadline = started + config.timeoutMinutes * 60 * 1000;
+    // The wait budget starts here, so timeout-minutes bounds the organization FIFO wait
+    // and not the setup reads above.
+    const deadline = lockConfigReadAt + config.timeoutMinutes * 60 * 1000;
 
     console.log(`::group::Acquire build lock ${config.lockName}`);
     console.log(`Lock repository: ${config.lockRepository}`);
@@ -3546,9 +3635,12 @@ async function acquire(config) {
             console.log(`Backfilled exact Actions job ID ${identity.jobId} into the existing holder.`);
           }
           const waitMs = Date.now() - started;
-          const position = queuePosition(state, identity.holderId);
+          // This identity is a holder, so it has no queue position. Reporting the
+          // findIndex result of a holder would print a position for an entity that
+          // is not queued.
           console.log(
-            `Attempt ${attempts}: already holds ${config.lockName} queue-position=${position} reason=${staleness.get(identity.holderId).reason}`
+            `Attempt ${attempts}: already holds ${config.lockName} not-queued ` +
+              `reason=${staleness.get(identity.holderId).reason}`
           );
           writeAcquireOutputs({
             acquired: true,
@@ -3556,11 +3648,13 @@ async function acquire(config) {
             holderId: identity.holderId,
             stateSha: acquiredStateSha,
             waitMs,
+            runnerWaitMs,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             staleRecovered,
             quarantineRecovered
           });
-          appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
+          appendSummary(acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker: lastBlocker }));
           console.log(`Already holds ${config.lockName}; treating acquire as successful.`);
           console.log("::endgroup::");
           return;
@@ -3746,15 +3840,24 @@ async function acquire(config) {
             holderId: identity.holderId,
             stateSha: write.sha,
             waitMs,
+            runnerWaitMs,
+            queuePosition: queuePositionAt(lastBlocker),
             attempts,
             staleRecovered,
             quarantineRecovered
           });
-          appendSummary(`Acquired ${config.lockName} after ${waitMs} ms and ${attempts} attempts.`);
+          appendSummary(acquireSummary({ config, waitMs, attempts, runnerWaitMs, blocker: lastBlocker }));
           console.log(`Acquired ${config.lockName}.`);
           console.log("::endgroup::");
           return;
         }
+
+        // Reaching here means the caller was not admitted, so it is still waiting in the
+        // organization FIFO. This observation is the wait it is living through, and it is
+        // the last one on any path that ends without an admission. An admitted caller
+        // therefore reports the position and the blocker that ended its wait, which is the
+        // same value the queue-position output publishes.
+        lastBlocker = lastObservation;
 
         if (changed) {
           throwIfCancellation(cancellation);
@@ -3816,11 +3919,13 @@ async function acquire(config) {
       lockName: config.lockName,
       holderId: identity.holderId,
       waitMs,
+      runnerWaitMs,
+      queuePosition: queuePositionAt(lastObservation),
       attempts,
       staleRecovered,
       quarantineRecovered
     });
-    appendSummary(`Timed out waiting for ${config.lockName}. ${details}`);
+    appendSummary(`Timed out waiting for ${config.lockName}. ${runnerWaitText(runnerWaitMs)} ${details}`);
     await cleanupAfterAcquireFailure(config, identity, "timeout", {
       maxAttempts: 3,
       conflictDelayMs: 500,
@@ -4025,7 +4130,11 @@ async function release(config) {
           globalQuarantined: false,
           incidentId: "",
           resourceHealth: resourceReport.health,
-          resourceReason: resourceReport.reason
+          resourceReason: resourceReport.reason,
+          // The history that would prove a session window was never read, so this is
+          // unavailable, not not-applicable. Claiming no session would be a fact this
+          // path cannot support, and the manifest promises a reason with unavailable.
+          peerTimeline: { status: "unavailable", events: [], reason: UNRECORDED_RELEASE_RESULT }
         },
         UNRECORDED_RELEASE_RESULT
       );
@@ -4435,7 +4544,9 @@ async function reap(config, options = {}) {
           ? `Skipped stale holder checkpoint for ${config.lockName}; fresh state no longer matched the proven version.`
           : holderScanIncomplete
           ? `Checkpointed capacity-critical stale state for ${config.lockName}, but the bounded holder scan did not finish.`
-          : `Reaped capacity-critical stale state for ${config.lockName}.`
+          : holderReaped
+          ? `Reaped capacity-critical stale state for ${config.lockName}.`
+          : `Pruned expired cooldowns for ${config.lockName}. No stale holder was proven.`
       );
       if (holderScanIncomplete) {
         throw reapDeadlineError("holder scan after checkpoint");
@@ -4813,7 +4924,7 @@ module.exports = {
   releaseRetryApiOptions,
   reap,
   reapDeadlineBudgets,
-  resolveCurrentJobId,
+  resolveCurrentJob,
   resolveReleaseReport,
   run,
   runCancellationCleanup,

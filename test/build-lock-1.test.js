@@ -6,6 +6,7 @@ const {
   assert,
   crypto,
   fs,
+  path,
   acquire,
   api,
   authorizeCaller,
@@ -2079,6 +2080,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
   let calls = [];
 
   await withTempFile(async (outputFile) => {
+    const summaryFile = path.join(path.dirname(outputFile), "step-summary");
+    fs.writeFileSync(summaryFile, "", "utf8");
     await withActionEnv(
       {
         GITHUB_REPOSITORY: "owner/repo",
@@ -2086,7 +2089,8 @@ test("acquire succeeds idempotently when this run already holds the lock", async
         GITHUB_RUN_ATTEMPT: "2",
         GITHUB_WORKFLOW: "Perf",
         GITHUB_JOB: "perf-benchmarks",
-        GITHUB_OUTPUT: outputFile
+        GITHUB_OUTPUT: outputFile,
+        GITHUB_STEP_SUMMARY: summaryFile
       },
       async () => {
         await withMockedFetch(async (url, options = {}) => {
@@ -2135,6 +2139,13 @@ test("acquire succeeds idempotently when this run already holds the lock", async
     assert.equal(outputs["state-sha"], "state-sha");
     assert.equal(outputs.attempts, "1");
     assert.equal(outputs["stale-recovered"], "false");
+    // This caller never waited in the FIFO, so it publishes no queue position. Without
+    // a github-token its runner wait cannot be proven, so it stays empty rather than 0.
+    assert.equal(outputs["queue-position"], "0");
+    assert.equal(outputs["runner-wait-ms"], "");
+    const summary = fs.readFileSync(summaryFile, "utf8");
+    assert.match(summary, /runner-wait-ms=unmeasured\./);
+    assert.doesNotMatch(summary, /queue-position/);
   });
 
   assert.deepEqual(
@@ -2846,7 +2857,7 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
                     leaseMinutes: 240,
                     pollSeconds: 1
                   }),
-                /holder=other\/repo:999:perf-benchmarks:editmode.*queue-position=1.*reason=awaiting scheduled reaper/
+                /holder=`other\/repo:999:perf-benchmarks:editmode`.*queue-position=1.*reason=`awaiting scheduled reaper/
               );
 
               assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
@@ -2857,6 +2868,9 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
               assert.equal(outputs["holder-id"], "owner/repo:123:perf-benchmarks:playmode");
               assert.equal(outputs["state-sha"], "");
               assert.equal(outputs.attempts, "1");
+              // The timeout output and its summary must publish the same position. This
+              // is the one path where they are two separate expressions, so pin it.
+              assert.equal(outputs["queue-position"], "1");
               assert.equal(outputs["stale-recovered"], "false");
             });
           });
@@ -2872,7 +2886,111 @@ test("acquire timeout includes holder context and cleans this run queue entry", 
 });
 
 
+// Issue #53 item 6: an operator must be able to tell a GitHub-runner wait from an
+// organization FIFO wait, and a wait that was survived has to be explained on the
+// success path too, not only on timeout.
+test("acquire publishes both wait phases and explains the wait it survived", async () => {
+  const CLOCK_STEP_MS = 30000;
+  const originalNow = Date.now;
+  let now = 0;
+  let peerReleased = false;
+  let releaseOnNextRead = false;
+  let state = semaphoreState([semaphoreHolder("other/repo", "888", "editmode")]);
+
+  Date.now = () => {
+    now += CLOCK_STEP_MS;
+    return now;
+  };
+
+  try {
+    await withTempFile(async (outputFile) => {
+      const summaryFile = path.join(path.dirname(outputFile), "step-summary");
+      fs.writeFileSync(summaryFile, "", "utf8");
+      await withActionEnv(
+        { ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile, GITHUB_STEP_SUMMARY: summaryFile },
+        async () => {
+          await withImmediateTimers(async () => {
+            await withMockedFetch(async (url, options = {}) => {
+              const parsed = new URL(url);
+              if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+                return jsonResponse(200, { object: { sha: "branch-sha" } });
+              }
+              if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+                return base64Content({ maxHolders: 1 }, "cfg");
+              }
+              if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+                if (options.method === "PUT") {
+                  const body = JSON.parse(options.body);
+                  state = JSON.parse(Buffer.from(body.content, "base64").toString("utf8"));
+                  releaseOnNextRead = true;
+                  return jsonResponse(200, { content: { sha: "state-after-write" } });
+                }
+                if (releaseOnNextRead && !peerReleased) {
+                  // The peer releases its slot but leaves this caller's queue entry.
+                  peerReleased = true;
+                  state = { ...semaphoreState([]), queue: state.queue };
+                }
+                return base64Content(state, "state-sha");
+              }
+              if (parsed.pathname === "/repos/owner/repo/actions/runs/123/attempts/1/jobs") {
+                return jsonResponse(200, {
+                  total_count: 1,
+                  jobs: [
+                    {
+                      id: 77,
+                      runner_name: "runner-a",
+                      status: "in_progress",
+                      created_at: "2026-06-06T00:00:00.000Z",
+                      started_at: "2026-06-06T00:00:45.000Z"
+                    }
+                  ]
+                });
+              }
+              if (parsed.pathname === "/repos/other/repo/actions/runs/888") {
+                return jsonResponse(200, { status: "in_progress", conclusion: null });
+              }
+              return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+            }, async (logs) => {
+              await acquire(semaphoreConfig({
+                githubToken: "gh-token",
+                runnerId: "runner-a",
+                timeoutMinutes: 30
+              }));
+
+              assert.match(logs.join("\n"), /GitHub runner wait before this step: 45000 ms/);
+            });
+          });
+        }
+      );
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, acquireOutputNames);
+      assert.equal(outputs.acquired, "true");
+      assert.equal(outputs["runner-wait-ms"], "45000");
+      assert.equal(outputs["queue-position"], "1");
+      assert.equal(outputs.attempts, "2");
+      assert.notEqual(
+        outputs["wait-ms"],
+        outputs["runner-wait-ms"],
+        "the two phases must not collapse into one number"
+      );
+
+      const summary = fs.readFileSync(summaryFile, "utf8");
+      assert.match(summary, /runner-wait-ms=45000/);
+      assert.match(summary, /holder=`other\/repo:888:perf-benchmarks:editmode`/);
+      assert.match(summary, /queue-position=1/);
+    });
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+
 test("acquire base poll stops exactly at timeout and cleans its queued identity", async () => {
+  // The lock-config read is charged a distinctive SETUP_COST_MS, so wait-ms is pinned to
+  // the loop bound plus the setup cost. The pre-change runtime reset its clock after the
+  // setup reads and reported the loop bound alone, which is what this pins against.
+  const SETUP_COST_MS = 120000;
   const originalNow = Date.now;
   const originalRandom = Math.random;
   const originalSetTimeout = global.setTimeout;
@@ -2896,6 +3014,7 @@ test("acquire base poll stops exactly at timeout and cleans its queued identity"
             return jsonResponse(200, { object: { sha: "branch-sha" } });
           }
           if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            now += SETUP_COST_MS;
             return base64Content({ maxHolders: 1 }, "cfg");
           }
           if (parsed.pathname === SEMAPHORE_STATE_PATH) {
@@ -2914,7 +3033,7 @@ test("acquire base poll stops exactly at timeout and cleans its queued identity"
           assert.match(logs.join("\n"), /Build-lock cleanup after timeout: queue-cleaned/);
         });
       });
-      assert.equal(readEnvironmentFile(outputFile)["wait-ms"], "60000");
+      assert.equal(readEnvironmentFile(outputFile)["wait-ms"], String(60000 + SETUP_COST_MS));
     });
   } finally {
     Date.now = originalNow;
@@ -4556,6 +4675,14 @@ test("the release budget gives every phase a share strictly inside the total", a
       assertOutputContract(outputs, releaseOutputNames);
       assert.equal(outputs["cleanup-result"], "lock-release-unreachable");
       assert.equal(outputs.released, "false");
+      // This path never read the history that would prove a session window, so the
+      // timeline is unavailable with a reason. not-applicable would claim no session
+      // existed, which the path cannot prove.
+      assert.deepEqual(JSON.parse(outputs["peer-timeline"]), {
+        status: "unavailable",
+        events: [],
+        reason: "lock-release-unreachable"
+      });
     });
   });
 
