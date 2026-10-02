@@ -12,7 +12,7 @@ const {
   scriptsRoot,
   runScript,
   shellCheckInstallHarness,
-  causeSummaryCases,
+  auditSummaryCases,
   headRevalidationHarness,
   runHeadRevalidation,
   readHeadRevalidationEvents,
@@ -209,100 +209,99 @@ test("trusted onboarding validates request shape before publishing outputs", (t)
 });
 
 
-test("enrollment summary fails closed when retained audit evidence is incomplete", (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "unity-enrollment-summary-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const auditPath = path.join(temporary, "audit.json");
-  const summaryPath = path.join(temporary, "summary.md");
-  const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: true }));
-  assert.equal(runScript("unity-enrollment-audit.sh", "record-counts", environment).status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /Complete: true/);
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: false }));
-  const incomplete = runScript("unity-enrollment-audit.sh", "record-counts", environment);
-  assert.notEqual(incomplete.status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /policy status is unknown/);
-});
-
-
-for (const testCase of causeSummaryCases) {
-  test(`${testCase.script} publishes every refusal cause in the run summary`, (t) => {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "refusal-cause-summary-"));
+for (const testCase of auditSummaryCases) {
+  test(`${testCase.script} never lets a green run hide a finding`, (t) => {
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "audit-summary-"));
     t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
     const auditPath = path.join(temporary, "audit.json");
     const summaryPath = path.join(temporary, "summary.md");
     const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-    const write = (findings, complete) =>
+    const record = (findings, complete) => {
+      fs.writeFileSync(summaryPath, "");
       fs.writeFileSync(
         auditPath,
         JSON.stringify({ repositories: [], inventory: [], findings, complete })
       );
+      const result = runScript(testCase.script, "record-counts", environment);
+      return { result, summary: fs.readFileSync(summaryPath, "utf8") };
+    };
+    const driftFinding = {
+      repository: "Ambiguous-Interactive/DoxReloaded",
+      code: testCase.driftCode,
+      context: "CI Success",
+      detail: "required context source is App ID 0"
+    };
+    const retrievalFinding = {
+      repository: "Ambiguous-Interactive/qora-redux",
+      code: testCase.retrievalCode,
+      cause: testCase.cause
+    };
 
-    write([], true);
-    assert.equal(runScript(testCase.script, "record-counts", environment).status, 0);
-    assert.doesNotMatch(
-      fs.readFileSync(summaryPath, "utf8"),
-      /Refused evidence/,
-      "an audit with no cause must not publish an empty cause table"
+    // A clean audit is the only state in which the run may stay silent about
+    // drift, and it has to say so. Otherwise a green run cannot be told apart
+    // from a green run that hid a finding.
+    const clean = record([], true);
+    assert.equal(clean.result.status, 0);
+    assert.ok(clean.summary.includes(testCase.cleanLine), clean.summary);
+    assert.equal(clean.result.stdout, "", "a clean audit must publish no annotation");
+
+    // The case issue #325 records: retrieval succeeded, so the run is green,
+    // and the drift issue is the only signal. Every finding needs a row of its
+    // own and a warning annotation, because neither may require an operator to
+    // open the drift issue.
+    const drift = record([driftFinding, retrievalFinding], true);
+    assert.equal(
+      drift.result.status,
+      0,
+      "consumer drift must not red a run this repository owns"
     );
-
-    // Each script is fed a cause only its own analyzer can produce, so a change
-    // to either alphabet is caught by the script that renders it. The bounded
-    // block below uses one cause for both, so it checks the bound and not the
-    // alphabet.
-    write(
-      [
-        {
-          repository: "Ambiguous-Interactive/DoxReloaded",
-          code: testCase.code,
-          cause: testCase.cause
-        },
-        { repository: "Ambiguous-Interactive/qora-redux", code: testCase.code }
-      ],
-      false
+    assert.ok(
+      drift.summary.includes(`| \`Ambiguous-Interactive/DoxReloaded\` | \`${testCase.driftCode}\` |`),
+      drift.summary
     );
-    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
-    const summary = fs.readFileSync(summaryPath, "utf8");
-    assert.match(summary, /Refused evidence/);
-    assert.match(summary, testCase.fileNeedle);
-    assert.match(summary, /Ambiguous-Interactive\/DoxReloaded/);
-    assert.doesNotMatch(summary, /qora-redux/, "a finding with no cause must not publish a blank row");
+    assert.ok(drift.summary.includes(testCase.cause), drift.summary);
+    assert.ok(
+      !drift.summary.includes("required context source is App ID 0"),
+      `the detail belongs to the drift issue: ${drift.summary}`
+    );
+    assert.match(drift.result.stdout, /^::warning::2 open /);
+    for (const code of [testCase.driftCode, testCase.retrievalCode]) {
+      assert.ok(drift.result.stdout.includes(`${code} x1`), drift.result.stdout);
+    }
 
-    // The table is bounded, so a long list cannot push a summary past its limit.
-    write(
+    // Incomplete retrieval stays red, and the findings that proved it are still
+    // published, so a cause an operator must act on is never hidden by the very
+    // run that reports it.
+    const incomplete = record([retrievalFinding], false);
+    assert.notEqual(incomplete.result.status, 0);
+    assert.ok(incomplete.summary.includes(testCase.incompleteLine), incomplete.summary);
+    assert.ok(incomplete.summary.includes(testCase.cause), incomplete.summary);
+
+    // The table is bounded, so the annotation is what makes the counts
+    // complete: it names every reason code with its full count even when the
+    // last rows are not rendered.
+    const bounded = record(
       Array.from({ length: 25 }, (_, index) => ({
         repository: `Ambiguous-Interactive/repo-${index}`,
-        code: "repository-retrieval-incomplete",
-        cause: "lock state is not valid UTF-8"
+        code: testCase.driftCode
       })),
-      false
+      true
     );
-    assert.notEqual(runScript(testCase.script, "record-counts", environment).status, 0);
-    const bounded = fs.readFileSync(summaryPath, "utf8");
-    assert.match(bounded, /and 5 more in the retained artifact/);
-    assert.doesNotMatch(bounded, /repo-24/, "the bounded table must stop before the last cause");
+    assert.equal(bounded.result.status, 0);
+    assert.match(bounded.summary, /and 5 more in the retained artifact/);
+    assert.doesNotMatch(bounded.summary, /repo-24/, "the bounded table must stop before the last finding");
+    assert.ok(
+      bounded.result.stdout.includes(`${testCase.driftCode} x25`),
+      bounded.result.stdout
+    );
+
+    // A finding this step cannot render is evidence it did not read. No green
+    // run may claim otherwise.
+    const unreadable = record(["not-a-finding-object"], true);
+    assert.notEqual(unreadable.result.status, 0);
+    assert.ok(unreadable.summary.includes(testCase.unreadableLine), unreadable.summary);
   });
 }
-
-
-test("merge policy summary fails closed when retained audit evidence is incomplete", (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "merge-policy-summary-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const auditPath = path.join(temporary, "audit.json");
-  const summaryPath = path.join(temporary, "summary.md");
-  const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: true }));
-  assert.equal(runScript("merge-policy-audit.sh", "record-counts", environment).status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /Complete: true/);
-
-  fs.writeFileSync(auditPath, JSON.stringify({ repositories: [], inventory: [], findings: [], complete: false }));
-  const incomplete = runScript("merge-policy-audit.sh", "record-counts", environment);
-  assert.notEqual(incomplete.status, 0);
-  assert.match(fs.readFileSync(summaryPath, "utf8"), /merge-gate status is unknown/);
-});
 
 
 test("head revalidation passes without refresh when every head matches", (t) => {

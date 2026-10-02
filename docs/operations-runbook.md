@@ -117,12 +117,19 @@ counts. Use the artifact—not the preview—as the complete evidence set. Artif
 upload/link validation and issue synchronization are mandatory; failure keeps
 the workflow red.
 
-A complete scan that finds policy drift keeps the workflow run green only after
-the marker-fenced issue has been synchronized; that open issue is the
-operational-red state. Retrieval, analysis, head-revalidation, or issue-sync
-ambiguity keeps the workflow run red because no trustworthy policy result was
-established. The standalone audit command returns nonzero for both drift and
-incomplete evidence.
+A complete scan that finds policy drift keeps the workflow run green. Retrieval,
+analysis, head-revalidation, or issue-sync ambiguity keeps the workflow run red
+because no trustworthy policy result was established. The standalone audit
+command returns nonzero for both drift and incomplete evidence.
+
+A green run means the audit read every repository. It does not mean the policy
+matched. Drift would otherwise be visible only in the marker-fenced issue, so
+both central audits report it in the run. The run summary names each finding by
+repository and reason code, and counts the findings its bound leaves out. A
+warning annotation counts every reason code. A clean run says so in its summary.
+The `Organization merge-policy audit` reports drift the same way. Every reason
+code maps to its reviewed fix in
+[Consumer Enrollment](consumer-enrollment.md).
 
 Synthetic or deliberately disabled Unity-shaped workflows require an explicit
 registry exception with repository, path, classification, owner, and RFC3339

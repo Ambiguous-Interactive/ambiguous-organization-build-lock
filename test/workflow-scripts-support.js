@@ -114,23 +114,32 @@ function shellCheckInstallHarness(t, architecture, checksumStatus = "0") {
   };
 }
 
-// A refusal cause reaches an operator through the run summary, because the
-// drift issue holds counts and codes only. A cause with no row in the summary is
-// a cause an operator cannot act on, which is what the cause field was added to
-// prevent. Both summary writers share this table, so one data-driven case covers
-// the merge-policy and the Unity enrollment artifact.
-const causeSummaryCases = [
+// A finding reaches an operator through the run summary, because the drift
+// issue is a separate place to look. A finding with no row in the summary is a
+// finding a green run hides, which is what issue #325 records. Both summary
+// writers share this table, so one data-driven case covers the merge-policy and
+// the Unity enrollment artifact. Each script names its own audit, so the labels
+// differ.
+const auditSummaryCases = [
   {
     script: "merge-policy-audit.sh",
-    code: "merge-policy-retrieval-incomplete",
-    cause: "ruleset 17663217 response is not valid UTF-8",
-    fileNeedle: /ruleset 17663217 response is not valid UTF-8/
+    label: "merge policy",
+    cleanLine: "The merge policy audit is complete and clean. No drift is open.",
+    incompleteLine: "The merge policy audit is incomplete; merge-gate status is unknown.",
+    unreadableLine: "Merge policy audit findings could not be published; the run proves nothing about drift.",
+    driftCode: "unexpected-required-check-source",
+    retrievalCode: "merge-policy-retrieval-incomplete",
+    cause: "ruleset 17663217 response is not valid UTF-8"
   },
   {
     script: "unity-enrollment-audit.sh",
-    code: "repository-retrieval-incomplete",
-    cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8",
-    fileNeedle: /scripts\/unity\/editor-check\.ps1 at 0123456789abcdef is not valid UTF-8/
+    label: "Unity enrollment",
+    cleanLine: "The organization audit is complete and clean. No drift is open.",
+    incompleteLine: "The organization audit is incomplete; policy status is unknown.",
+    unreadableLine: "Unity enrollment audit findings could not be published; the run proves nothing about drift.",
+    driftCode: "unapproved-lock-ref",
+    retrievalCode: "repository-retrieval-incomplete",
+    cause: "load exact snapshot: policy file scripts/unity/editor-check.ps1 at 0123456789abcdef is not valid UTF-8"
   }
 ];
 
@@ -977,7 +986,7 @@ module.exports = {
   scriptsRoot,
   runScript,
   shellCheckInstallHarness,
-  causeSummaryCases,
+  auditSummaryCases,
   headRevalidationHarness,
   runHeadRevalidation,
   readHeadRevalidationEvents,

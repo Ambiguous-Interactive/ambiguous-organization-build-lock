@@ -143,30 +143,50 @@ revalidate_heads() {
   done
 }
 
-# record_causes publishes every finding that names a refusal cause, so an
-# operator reads the file or the reason in the run summary instead of opening a
-# consumer checkout. The drift issue keeps counts, codes, and reviewed
-# expectation text, because a cause can name a consumer-controlled file.
+# record_findings publishes every finding the audit wrote, so an operator reads
+# the run instead of opening the drift issue. Every value in the table is bounded
+# where it is produced: the repository name is a reviewed registry entry, the
+# reason code is an analyzer constant, and the analyzer sanitizes the cause to an
+# alphabet with no pipe, no backtick, and no newline. So the table needs no
+# escaping. The workflow path, job, commit, and detail stay in the drift issue.
 #
-# The analyzer sanitizes every cause to an alphabet with no pipe, no backtick,
-# and no newline, so the table needs no escaping. A finding with no cause has no
-# row here, so every row names a specific read and a specific reason.
-#
-# The table is bounded; the retained artifact holds the complete set. A jq
-# failure here must not skip the incomplete line below, so it is reported rather
-# than aborting the step.
-record_causes() {
-  jq -r '
-    [ .findings[] | select(((.cause // "") | length) > 0) ] as $causes
-    | ($causes | length) as $total
+# The table is bounded; the annotation in record_verdict carries the full count
+# of every reason code, so a bounded table still names every finding. A jq
+# failure means this step read a finding it cannot render, which no green run may
+# hide, so it fails closed instead of reporting a note and exiting zero.
+record_findings() {
+  if ! jq -r '
+    .findings as $findings
+    | ($findings | length) as $total
     | if $total == 0 then empty
-      else "### Refused evidence\n\n| Repository | Reason | Cause |\n| --- | --- | --- |\n"
-        + ($causes[0:20] | map("| `\(.repository)` | `\(.code)` | \(.cause) |") | join("\n"))
+      else "\n### Open drift\n\n| Repository | Reason | Cause |\n| --- | --- | --- |\n"
+        + ($findings[0:20] | map(
+            "| `\(.repository)` | `\(.code)` | \(if ((.cause // "") | length) > 0 then .cause else "-" end) |"
+          ) | join("\n"))
         + (if $total > 20 then "\n_... and \($total - 20) more in the retained artifact._" else "" end)
         + "\n"
       end
-  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}" ||
-    echo "Refusal causes could not be read from the retained artifact." >> "${GITHUB_STEP_SUMMARY}"
+  ' "${AUDIT_PATH:?AUDIT_PATH is required}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"; then
+    echo "Unity enrollment audit findings could not be published; the run proves nothing about drift." >> "${GITHUB_STEP_SUMMARY}"
+    exit 1
+  fi
+}
+
+# record_verdict states what the run's conclusion means. Consumer drift must not
+# red a run this repository owns: a daily run that is red until every consumer
+# fixes its policy teaches operators to ignore it, and it collides with the
+# incomplete-audit red that does mean the audit failed. So a complete audit with
+# findings keeps the run green and reports the drift in the run instead.
+record_verdict() {
+  local total reasons
+  total="$(jq -r '.findings | length' "${AUDIT_PATH}")"
+  if [ "${total}" -eq 0 ]; then
+    echo "The organization audit is complete and clean. No drift is open." >> "${GITHUB_STEP_SUMMARY}"
+    return 0
+  fi
+  reasons="$(jq -r '[.findings[].code] | group_by(.) | map("\(.[0]) x\(length)") | join(", ")' "${AUDIT_PATH}")"
+  printf '::warning::%s open Unity enrollment findings: %s. A green run means the audit read every repository. Read the drift issue for the detail.\n' \
+    "${total}" "${reasons}"
 }
 
 record_counts() {
@@ -178,11 +198,12 @@ record_counts() {
   jq -r --arg expected "${expected_repositories}" \
     '"Repositories: \(.repositories | length)/\($expected)\nActive jobs: \(.inventory | length)\nFindings: \(.findings | length)\nComplete: \(.complete)"' \
     "${AUDIT_PATH}" >> "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
-  record_causes
+  record_findings
   if [ "$(jq -r '.complete' "${AUDIT_PATH}")" != "true" ]; then
     echo "The organization audit is incomplete; policy status is unknown." >> "${GITHUB_STEP_SUMMARY}"
     exit 1
   fi
+  record_verdict
 }
 
 case "${1:-}" in
