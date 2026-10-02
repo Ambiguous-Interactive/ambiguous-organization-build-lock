@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1214,14 +1215,14 @@ func TestConcludeNamesTheReasonAndItsConsequence(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "summary.md")
 			var annotations strings.Builder
 
-			if err := conclude(runnotice.New(path, &annotations), reason, ""); err != nil {
-				t.Fatal(err)
+			if code := conclude(io.Discard, runnotice.New(path, &annotations), reason, "", 0); code != 0 {
+				t.Fatalf("conclude() = %d, want 0", code)
 			}
 			summary, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := meaning + " Reason: `" + reason + "`.\n"
+			want := meaning + " Reason: `" + reason + "`." + "\n"
 			if string(summary) != want {
 				t.Fatalf("summary = %q, want %q", summary, want)
 			}
@@ -1238,8 +1239,8 @@ func TestConcludePublishesAnAlertingConclusionToBothChannels(t *testing.T) {
 	var annotations strings.Builder
 	handle := "Incident: `" + incidentFixture().IncidentID + "`. Alert issue: \"" + alertTitle + "\"."
 
-	if err := conclude(runnotice.New(path, &annotations), reasonIncidentActive, handle); err != nil {
-		t.Fatal(err)
+	if code := conclude(io.Discard, runnotice.New(path, &annotations), reasonIncidentActive, handle, 0); code != 0 {
+		t.Fatalf("conclude() = %d, want 0", code)
 	}
 	summary, err := os.ReadFile(path)
 	if err != nil {
@@ -1255,17 +1256,33 @@ func TestConcludePublishesAnAlertingConclusionToBothChannels(t *testing.T) {
 	}
 }
 
-func TestConcludeRefusesAReasonItCannotState(t *testing.T) {
+func TestConcludeFailsClosedWhenItCannotStateItsConclusion(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "summary.md")
-	var annotations strings.Builder
-
-	err := conclude(runnotice.New(path, &annotations), "reason-nobody-declared", "")
-	if !errors.Is(err, runnotice.ErrUnstatedReason) {
-		t.Fatalf("conclude() error = %v, want %v", err, runnotice.ErrUnstatedReason)
+	cases := []struct {
+		name   string
+		path   string
+		reason string
+	}{
+		{"unstated reason", "summary.md", "reason-nobody-declared"},
+		{"no summary path", "", reasonHealthy},
 	}
-	if summary, readErr := os.ReadFile(path); readErr == nil {
-		t.Fatalf("an unstated reason was published: %q", summary)
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), test.path)
+			var stderr strings.Builder
+
+			if code := conclude(&stderr, runnotice.New(test.path, &stderr), test.reason, "", 0); code != 1 {
+				t.Fatalf("conclude() = %d, want 1", code)
+			}
+			if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
+				t.Fatalf("a refusal must name its cause, got %q", stderr.String())
+			}
+			if summary, readErr := os.ReadFile(path); readErr == nil {
+				t.Fatalf("an unpublishable conclusion reached the summary: %q", summary)
+			}
+		})
 	}
 }
 
@@ -1345,6 +1362,7 @@ func TestRunAnnotatesOnlyTheConditionThatKeepsTheRunGreen(t *testing.T) {
 		{"healthy", &stubGitHub{stateBody: stateFixture(t, nil), issues: `[]`}, 0},
 		{"active incident", &stubGitHub{stateBody: stateFixture(t, &active), issues: `[]`}, 1},
 		{"state unavailable", &stubGitHub{stateFail: http.StatusInternalServerError, issues: `[]`}, 0},
+		{"state refused", &stubGitHub{stateBody: []byte(`{"schemaVersion":5,"activeIncident":{"incidentId":"nope"}}`), issues: `[]`}, 0},
 		{"alert synchronization refused", &stubGitHub{stateBody: stateFixture(t, &active), issuesFail: http.StatusInternalServerError}, 0},
 	}
 	for _, test := range cases {
@@ -1367,35 +1385,54 @@ func TestRunAnnotatesOnlyTheConditionThatKeepsTheRunGreen(t *testing.T) {
 	}
 }
 
+// An unpublishable conclusion fails the run on every branch. A green branch
+// that cannot state its condition is exactly the gap #326 records, so it must
+// not fall through to a passing exit code and a stdout verdict.
 func TestRunFailsClosedWhenItCannotPublishItsConclusion(t *testing.T) {
 	t.Parallel()
-	stub := &stubGitHub{t: t, stateBody: stateFixture(t, nil), issues: `[]`}
-	server := httptest.NewServer(stub.handler())
-	t.Cleanup(server.Close)
+	active := incidentFixture()
 
-	var stdout, stderr strings.Builder
-	code := run(
-		context.Background(),
-		config{
-			Lock:        testLock,
-			StateRef:    "lock-state",
-			Repository:  "owner/repo",
-			APIURL:      server.URL,
-			ServerURL:   testServerURL,
-			Token:       "test-token",
-			SummaryPath: filepath.Join(t.TempDir(), "absent", "summary.md"),
-		},
-		server.Client(),
-		&stdout,
-		&stderr,
-	)
-	if code != 1 {
-		t.Fatalf("run() = %d, want 1", code)
+	cases := []struct {
+		name     string
+		state    []byte
+		wantCode int
+	}{
+		{"healthy branch", stateFixture(t, nil), 1},
+		{"active incident branch", stateFixture(t, &active), 1},
 	}
-	if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
-		t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr.String())
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout.String())
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &stubGitHub{t: t, stateBody: test.state, issues: `[]`}
+			server := httptest.NewServer(stub.handler())
+			t.Cleanup(server.Close)
+
+			var stdout, stderr strings.Builder
+			code := run(
+				context.Background(),
+				config{
+					Lock:        testLock,
+					StateRef:    "lock-state",
+					Repository:  "owner/repo",
+					APIURL:      server.URL,
+					ServerURL:   testServerURL,
+					Token:       "test-token",
+					SummaryPath: filepath.Join(t.TempDir(), "absent", "summary.md"),
+				},
+				server.Client(),
+				&stdout,
+				&stderr,
+			)
+			if code != test.wantCode {
+				t.Fatalf("run() = %d, want %d", code, test.wantCode)
+			}
+			if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
+				t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout.String())
+			}
+		})
 	}
 }

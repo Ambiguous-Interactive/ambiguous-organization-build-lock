@@ -22,25 +22,29 @@ import (
 const summaryFileMode = 0o600
 
 // ErrUnstatedReason reports that a caller offered a reason code with no stated
-// meaning. It is the only refusal this package raises on its own, because only
-// the caller owns the reason vocabulary.
+// meaning. It is the only refusal this package raises about the reason
+// vocabulary, because only the caller owns that vocabulary.
 var ErrUnstatedReason = errors.New("run reason code has no published meaning")
 
 var (
-	errNoSummary     = errors.New("run summary line is empty")
+	errNoSummaryPath = errors.New("no run summary path is set")
+	errNoReasonCode  = errors.New("run reason code is empty")
 	errBrokenSummary = errors.New("run notice contains a line break")
 	errSummaryWrite  = errors.New("run summary file is not writable")
-	errAnnotations   = errors.New("run annotation stream rejected the notice")
+	errAnnotations   = errors.New("the annotation stream refused the run notice")
 )
 
-// Conclusion is one monitor verdict in the two registers an operator reads.
-type Conclusion struct {
-	// Summary is the single line published to the job summary. It is required.
-	// A conclusion with no summary is a conclusion the operator cannot read.
-	Summary string
-	// Warning is the single line published to the annotations tab. An empty
-	// Warning publishes no annotation, which is what a clean run does.
-	Warning string
+// Notice is one monitor verdict before it reaches either channel.
+type Notice struct {
+	// Meaning states what the reason concluded, as one sentence. It is required.
+	// A bare reason code leaves an operator to guess the consequence.
+	Meaning string
+	// Reason is the monitor's own reason code.
+	Reason string
+	// Handle names the exact input an operator acts on. A handle is what makes a
+	// conclusion alerting, so an alerting conclusion can never be published
+	// without naming what to act on. An empty handle publishes no annotation.
+	Handle string
 }
 
 // Reporter publishes conclusions for one step.
@@ -49,48 +53,61 @@ type Reporter struct {
 	annotations io.Writer
 }
 
-// New returns a Reporter. An empty summary path means the runner published no
-// summary file, which is what a local run outside Actions looks like. The
-// annotation still reaches the log in that case, and the caller decides whether
-// a missing summary is fatal.
+// New returns a Reporter. The summary path is required: without it the run has
+// no place to state its conclusion, which is the failure this package exists to
+// prevent. An absent annotation stream publishes the summary and refuses the
+// annotation.
 func New(summaryPath string, annotations io.Writer) *Reporter {
 	return &Reporter{summaryPath: strings.TrimSpace(summaryPath), annotations: annotations}
 }
 
-// Publish appends the summary line and emits the warning annotation.
+// Publish states one conclusion in both channels.
 //
-// The summary is written first because it is the durable record. The annotation
-// is derived by the caller from the same line, so the two cannot disagree. A
-// line break in either text is refused: the summary is Markdown, but the
-// annotation is a workflow command, and one line break inside it would forge a
-// second command on the runner.
-func (reporter *Reporter) Publish(conclusion Conclusion) error {
-	if strings.TrimSpace(conclusion.Summary) == "" {
-		return errNoSummary
+// The summary carries the meaning, the reason code, and the handle. The
+// annotation repeats that line without its Markdown, so the two channels cannot
+// drift apart. Both texts are single lines: the summary is Markdown, but the
+// annotation is a workflow command, and one line break inside it would end the
+// command and forge the next one. A percent sign needs no escaping here because
+// the runner does not decode escapes in a command message.
+func (reporter *Reporter) Publish(notice Notice) error {
+	if strings.TrimSpace(notice.Meaning) == "" {
+		return ErrUnstatedReason
 	}
-	if singleLine(conclusion.Summary) != conclusion.Summary ||
-		singleLine(conclusion.Warning) != conclusion.Warning {
+	if strings.TrimSpace(notice.Reason) == "" {
+		return errNoReasonCode
+	}
+	summary := notice.Meaning + " Reason: `" + notice.Reason + "`."
+	warning := ""
+	if notice.Handle != "" {
+		summary += " " + notice.Handle
+		warning = strings.ReplaceAll(summary, "`", "")
+	}
+	// One check covers both channels: the annotation is the summary without its
+	// Markdown, so it cannot hold a break the summary does not.
+	if summary != singleLine(summary) {
 		return errBrokenSummary
 	}
-	if reporter.summaryPath != "" {
-		file, err := os.OpenFile(
-			reporter.summaryPath,
-			os.O_APPEND|os.O_CREATE|os.O_WRONLY,
-			summaryFileMode,
-		)
-		if err != nil {
-			return errSummaryWrite
-		}
-		_, writeErr := io.WriteString(file, conclusion.Summary+"\n")
-		closeErr := file.Close()
-		if writeErr != nil || closeErr != nil {
-			return errSummaryWrite
-		}
+	if reporter.summaryPath == "" {
+		return errNoSummaryPath
 	}
-	if conclusion.Warning != "" && reporter.annotations != nil {
-		if _, err := fmt.Fprintf(reporter.annotations, "::warning::%s\n", conclusion.Warning); err != nil {
-			return errAnnotations
-		}
+	// The summary is written first because it is the durable record.
+	file, err := os.OpenFile(reporter.summaryPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, summaryFileMode)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errSummaryWrite, err)
+	}
+	_, writeErr := io.WriteString(file, summary+"\n")
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		return fmt.Errorf("%w: %w", errSummaryWrite, errors.Join(writeErr, closeErr))
+	}
+	if warning == "" {
+		return nil
+	}
+	if reporter.annotations == nil {
+		return errAnnotations
+	}
+	if _, err := fmt.Fprintf(reporter.annotations, "::warning::%s\n", warning); err != nil {
+		return fmt.Errorf("%w: %w", errAnnotations, err)
 	}
 	return nil
 }

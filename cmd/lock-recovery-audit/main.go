@@ -157,11 +157,10 @@ func run(
 	}
 	state, err := client.lockState(ctx, settings.Lock, settings.StateRef)
 	if err != nil {
-		if !report(stderr, reporter, reasonStateUnavailable, "") {
-			return 1
-		}
+		// The classified reason is stated first, so a publication refusal never
+		// hides the cause this run actually proved.
 		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateUnavailable, err)
-		return 1
+		return conclude(stderr, reporter, reasonStateUnavailable, "", 1)
 	}
 	result := classifyState(state, settings.ServerURL, settings.Lock)
 	result.Lock = settings.Lock
@@ -170,32 +169,26 @@ func run(
 		// must never open, edit, or close the alert. The cause is named when one
 		// is known, so an operator does not read a fail-closed code with nothing
 		// to act on.
-		if !report(stderr, reporter, reasonStateInvalid, "") {
-			return 1
-		}
 		if result.Cause != "" {
 			_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonStateInvalid, result.Cause)
-			return 1
+		} else {
+			_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
 		}
-		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s.\n", reasonStateInvalid)
-		return 1
+		return conclude(stderr, reporter, reasonStateInvalid, "", 1)
 	}
 	if err := client.syncAlert(ctx, result, settings.ServerURL); err != nil {
-		if !report(stderr, reporter, reasonSyncFailed, "") {
-			return 1
-		}
 		_, _ = fmt.Fprintf(stderr, "Build lock incident audit failed: %s (%s).\n", reasonSyncFailed, err)
-		return 1
+		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
 	}
 	if result.Reason == reasonIncidentActive {
-		if !report(stderr, reporter, reasonIncidentActive, incidentHandle(*result.Incident)) {
-			return 1
+		if code := conclude(stderr, reporter, reasonIncidentActive, incidentHandle(*result.Incident), 0); code != 0 {
+			return code
 		}
 		_, _ = fmt.Fprintf(stdout, "Build lock incident alert synchronized: %s.\n", result.Incident.IncidentID)
 		return 0
 	}
-	if !report(stderr, reporter, reasonHealthy, "") {
-		return 1
+	if code := conclude(stderr, reporter, reasonHealthy, "", 0); code != 0 {
+		return code
 	}
 	_, _ = fmt.Fprintln(stdout, "Build lock incident audit passed: no active global incident.")
 	return 0
@@ -220,37 +213,27 @@ func incidentHandle(active incident) string {
 	return fmt.Sprintf("Incident: `%s`. Alert issue: %q.", active.IncidentID, alertTitle)
 }
 
-// conclude publishes one conclusion. A handle is what makes a conclusion
-// alerting, so an alerting conclusion can never be published without naming what
-// the operator acts on. The annotation repeats the summary line without its
-// Markdown, so the two channels cannot drift apart.
-func conclude(reporter *runnotice.Reporter, reason, handle string) error {
-	meaning, stated := monitorMeanings[reason]
-	if !stated {
-		return runnotice.ErrUnstatedReason
-	}
-	summary := meaning + " Reason: `" + reason + "`."
-	warning := ""
-	if handle != "" {
-		summary += " " + handle
-		warning = strings.ReplaceAll(summary, "`", "")
-	}
-	return reporter.Publish(runnotice.Conclusion{Summary: summary, Warning: warning})
-}
-
-// report publishes one conclusion and reports a refusal as the run's own
-// fail-closed outcome. No green run may claim a verdict the run did not publish.
-func report(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string) bool {
-	if err := conclude(reporter, reason, handle); err != nil {
+// conclude publishes one conclusion and returns the exit code the run should
+// use. A handle is what makes a conclusion alerting, so an alerting conclusion
+// can never be published without naming what the operator acts on. A refusal is
+// always a failed run, because a run that cannot state what it proved proves
+// nothing.
+func conclude(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string, exit int) int {
+	err := reporter.Publish(runnotice.Notice{
+		Meaning: monitorMeanings[reason],
+		Reason:  reason,
+		Handle:  handle,
+	})
+	if err != nil {
 		_, _ = fmt.Fprintf(
 			stderr,
 			"Build lock incident audit failed: %s (%s).\n",
 			reasonRunNoticeUnpublished,
 			err,
 		)
-		return false
+		return 1
 	}
-	return true
+	return exit
 }
 
 func parseConfig(arguments []string, getenv func(string) string) (config, error) {

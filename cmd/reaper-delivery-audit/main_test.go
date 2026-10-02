@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -381,16 +382,27 @@ func TestRunSucceedsAfterSynchronizingKnownAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 	// #326: a green run that names its condition only in a step log is the gap
-	// this closes, so the annotation and the summary now carry the reason.
-	if !issueCreated || !strings.Contains(stdout.String(), "scheduled-run-missing") ||
-		strings.Contains(stdout.String(), "test-token") ||
-		!strings.Contains(string(summary), "`scheduled-run-missing`") ||
-		!strings.Contains(stderr.String(), "::warning::") ||
-		strings.Contains(stderr.String(), "test-token") {
+	// this closes, so the annotation and the summary now carry the reason, and
+	// stderr carries nothing else.
+	wantSummary := "No scheduled reaper delivery can be proven, so stale build locks are not being reaped. " +
+		"Reason: `scheduled-run-missing`. Delivery threshold: `30m0s`. Run-duration threshold: `15m0s`. " +
+		"Alert issue: \"ops: scheduled reaper delivery outside SLO\".\n"
+	if !issueCreated ||
+		stdout.String() != "Reaper delivery alert synchronized: scheduled-run-missing.\n" ||
+		string(summary) != wantSummary {
 		t.Fatalf(
-			"run did not safely report synchronized alert: created=%v stdout=%q stderr=%q summary=%q",
-			issueCreated, stdout.String(), stderr.String(), summary,
+			"run did not safely report synchronized alert: created=%v stdout=%q summary=%q",
+			issueCreated, stdout.String(), summary,
 		)
+	}
+	wantStderr := "::warning::No scheduled reaper delivery can be proven, so stale build locks are not " +
+		"being reaped. Reason: scheduled-run-missing. Delivery threshold: 30m0s. Run-duration threshold: " +
+		"15m0s. Alert issue: \"ops: scheduled reaper delivery outside SLO\".\n"
+	if stderr.String() != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
+	}
+	if strings.Contains(stdout.String()+stderr.String()+string(summary), "test-token") {
+		t.Fatal("a published conclusion leaked a credential")
 	}
 }
 
@@ -481,14 +493,14 @@ func TestConcludeNamesTheReasonAndItsConsequence(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "summary.md")
 			var annotations strings.Builder
 
-			if err := conclude(runnotice.New(path, &annotations), reason, ""); err != nil {
-				t.Fatal(err)
+			if code := conclude(io.Discard, runnotice.New(path, &annotations), reason, "", 0); code != 0 {
+				t.Fatalf("conclude() = %d, want 0", code)
 			}
 			summary, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := meaning + " Reason: `" + reason + "`.\n"
+			want := meaning + " Reason: `" + reason + "`." + "\n"
 			if string(summary) != want {
 				t.Fatalf("summary = %q, want %q", summary, want)
 			}
@@ -504,10 +516,10 @@ func TestConcludePublishesAnAlertingConclusionToBothChannels(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "summary.md")
 	var annotations strings.Builder
 	latest := runFixture(9, 10*time.Minute, "completed", "success")
-	handle := reaperHandle(&latest)
+	handle := reaperHandle(&latest, auditConfig())
 
-	if err := conclude(runnotice.New(path, &annotations), reasonRunMissing, handle); err != nil {
-		t.Fatal(err)
+	if code := conclude(io.Discard, runnotice.New(path, &annotations), reasonRunMissing, handle, 0); code != 0 {
+		t.Fatalf("conclude() = %d, want 0", code)
 	}
 	summary, err := os.ReadFile(path)
 	if err != nil {
@@ -523,42 +535,65 @@ func TestConcludePublishesAnAlertingConclusionToBothChannels(t *testing.T) {
 	}
 }
 
-func TestReaperHandleNamesTheAlertIssueWithAndWithoutARun(t *testing.T) {
+func TestReaperHandleNamesTheRunThresholdsAndAlertIssue(t *testing.T) {
 	t.Parallel()
 	latest := runFixture(9, 10*time.Minute, "completed", "success")
-	withRun := reaperHandle(&latest)
-	withoutRun := reaperHandle(nil)
 
-	for _, handle := range []string{withRun, withoutRun} {
-		if !strings.Contains(handle, incidentTitle) {
-			t.Fatalf("handle %q does not name the alert issue", handle)
-		}
+	withRun := reaperHandle(&latest, auditConfig())
+	wantRun := "Latest scheduled run: `9` delivered at `2026-07-26T19:50:00Z`. " +
+		"Delivery threshold: `30m0s`. Run-duration threshold: `15m0s`. " +
+		"Alert issue: \"ops: scheduled reaper delivery outside SLO\"."
+	if withRun != wantRun {
+		t.Fatalf("handle = %q, want %q", withRun, wantRun)
 	}
-	if strings.Contains(withoutRun, "Latest scheduled run") {
-		t.Fatalf("a missing delivery published a run: %q", withoutRun)
-	}
-	if !strings.Contains(withRun, "9") || !strings.Contains(withRun, "2026-07-26T19:50:00Z") {
-		t.Fatalf("handle %q does not name the scheduled run", withRun)
+
+	wantWithoutRun := "Delivery threshold: `30m0s`. Run-duration threshold: `15m0s`. " +
+		"Alert issue: \"ops: scheduled reaper delivery outside SLO\"."
+	if withoutRun := reaperHandle(nil, auditConfig()); withoutRun != wantWithoutRun {
+		t.Fatalf("handle = %q, want %q", withoutRun, wantWithoutRun)
 	}
 }
 
-func TestConcludeRefusesAReasonItCannotState(t *testing.T) {
+func TestConcludeFailsClosedWhenItCannotStateItsConclusion(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "summary.md")
-	var annotations strings.Builder
-
-	err := conclude(runnotice.New(path, &annotations), "reason-nobody-declared", "")
-	if !errors.Is(err, runnotice.ErrUnstatedReason) {
-		t.Fatalf("conclude() error = %v, want %v", err, runnotice.ErrUnstatedReason)
+	cases := []struct {
+		name   string
+		path   string
+		reason string
+	}{
+		{"unstated reason", "summary.md", "reason-nobody-declared"},
+		{"no summary path", "", reasonHealthy},
 	}
-	if summary, readErr := os.ReadFile(path); readErr == nil {
-		t.Fatalf("an unstated reason was published: %q", summary)
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), test.path)
+			var stderr strings.Builder
+
+			if code := conclude(&stderr, runnotice.New(test.path, &stderr), test.reason, "", 0); code != 1 {
+				t.Fatalf("conclude() = %d, want 1", code)
+			}
+			if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
+				t.Fatalf("a refusal must name its cause, got %q", stderr.String())
+			}
+			if summary, readErr := os.ReadFile(path); readErr == nil {
+				t.Fatalf("an unpublishable conclusion reached the summary: %q", summary)
+			}
+		})
 	}
 }
 
 func runAuditPublishing(t *testing.T, config cliConfig, runs string, now time.Time) (int, string, string, string) {
 	t.Helper()
 	return runAuditAgainst(t, config, runs, false, false, now)
+}
+
+// runAuditUnpublishable points the run summary at a directory that does not
+// exist, so publication must be refused.
+func runAuditUnpublishable(t *testing.T, config cliConfig, runs string, now time.Time) (int, string, string, string) {
+	t.Helper()
+	return runAuditWithSummary(t, config, runs, false, false, true, now)
 }
 
 // runAuditAgainst runs the monitor against a stub that serves runs and issues
@@ -568,6 +603,19 @@ func runAuditAgainst(
 	config cliConfig,
 	runs string,
 	failRuns, failIssues bool,
+	now time.Time,
+) (int, string, string, string) {
+	t.Helper()
+	return runAuditWithSummary(t, config, runs, failRuns, failIssues, false, now)
+}
+
+// runAuditWithSummary runs the monitor with the given summary path. A broken
+// path names a directory that does not exist, so publication must be refused.
+func runAuditWithSummary(
+	t *testing.T,
+	config cliConfig,
+	runs string,
+	failRuns, failIssues, brokenSummary bool,
 	now time.Time,
 ) (int, string, string, string) {
 	t.Helper()
@@ -590,6 +638,9 @@ func runAuditAgainst(
 	}))
 	t.Cleanup(server.Close)
 	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	if brokenSummary {
+		summaryPath = filepath.Join(t.TempDir(), "absent", "summary.md")
+	}
 
 	config.APIURL = server.URL
 	config.SummaryPath = summaryPath
@@ -623,21 +674,66 @@ func scheduledRuns(runs ...workflowRun) string {
 func TestRunPublishesEveryConclusionToTheRunSummary(t *testing.T) {
 	t.Parallel()
 	recent := runFixture(9, 10*time.Minute, "completed", "success")
+	thresholds := "Delivery threshold: `30m0s`. Run-duration threshold: `15m0s`. " +
+		"Alert issue: \"ops: scheduled reaper delivery outside SLO\"."
+	alert := "Latest scheduled run: `9` delivered at `2026-07-26T19:50:00Z`. " + thresholds
 
 	cases := []struct {
-		name          string
-		runs          string
-		reason        string
-		wantCode      int
-		wantAnnotated bool
+		name     string
+		runs     string
+		wantCode int
+		want     string
 	}{
-		{"healthy", scheduledRuns(recent), reasonHealthy, 0, false},
-		{"delivery missing", scheduledRuns(), reasonRunMissing, 0, true},
-		{"delivery overdue", scheduledRuns(runFixture(9, 31*time.Minute, "completed", "success")), reasonRunOverdue, 0, true},
-		{"delivery stalled", scheduledRuns(runFixture(9, 16*time.Minute, "in_progress", "")), reasonRunStalled, 0, true},
-		{"delivery unsuccessful", scheduledRuns(runFixture(9, 10*time.Minute, "completed", "failure")), reasonRunUnsuccessful, 0, true},
-		{"history unreadable", `{"workflow_runs":[`, reasonRunHistoryUnreadable, 1, false},
-		{"run evidence refused", scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success").manual()), reasonEvidenceInvalid, 1, false},
+		{
+			"healthy",
+			scheduledRuns(recent),
+			0,
+			"The latest scheduled reaper delivery is on time and its run succeeded. Reason: `healthy`.",
+		},
+		{
+			"delivery missing",
+			scheduledRuns(),
+			0,
+			"No scheduled reaper delivery can be proven, so stale build locks are not being reaped. " +
+				"Reason: `scheduled-run-missing`. " + thresholds,
+		},
+		{
+			"delivery overdue",
+			scheduledRuns(runFixture(9, 31*time.Minute, "completed", "success")),
+			0,
+			"The latest scheduled reaper delivery is later than the delivery threshold, so reaping is " +
+				"late. Reason: `scheduled-run-overdue`. Latest scheduled run: `9` delivered at " +
+				"`2026-07-26T19:29:00Z`. " + thresholds,
+		},
+		{
+			"delivery stalled",
+			scheduledRuns(runFixture(9, 16*time.Minute, "in_progress", "")),
+			0,
+			"The latest scheduled reaper run is still active past the run-duration threshold, so " +
+				"reaping is stalled. Reason: `scheduled-run-stalled`. Latest scheduled run: `9` " +
+				"delivered at `2026-07-26T19:44:00Z`. " + thresholds,
+		},
+		{
+			"delivery unsuccessful",
+			scheduledRuns(runFixture(9, 10*time.Minute, "completed", "failure")),
+			0,
+			"The latest scheduled reaper run did not succeed, so stale build locks may not have been " +
+				"reaped. Reason: `scheduled-run-unsuccessful`. " + alert,
+		},
+		{
+			"history unreadable",
+			`{"workflow_runs":[`,
+			1,
+			"The scheduled reaper run history could not be requested, so delivery status is unknown. " +
+				"Reason: `workflow-api-unavailable`.",
+		},
+		{
+			"run evidence refused",
+			scheduledRuns(recent.manual()),
+			1,
+			"The scheduled reaper run evidence was refused, so delivery status is unknown. " +
+				"Reason: `workflow-evidence-invalid`.",
+		},
 	}
 	for _, test := range cases {
 		test := test
@@ -647,26 +743,11 @@ func TestRunPublishesEveryConclusionToTheRunSummary(t *testing.T) {
 			if code != test.wantCode {
 				t.Fatalf("run() = %d, want %d", code, test.wantCode)
 			}
-			want := monitorMeanings[test.reason] + " Reason: `" + test.reason + "`."
-			if test.wantAnnotated {
-				want += " " + reaperHandle(classifyRuns(testNow, decodeRuns(t, test.runs), 30*time.Minute, 15*time.Minute).Latest)
-			}
-			if summary != want+"\n" {
-				t.Fatalf("summary = %q, want %q", summary, want+"\n")
+			if summary != test.want+"\n" {
+				t.Fatalf("summary = %q, want %q", summary, test.want+"\n")
 			}
 		})
 	}
-}
-
-func decodeRuns(t *testing.T, runs string) []workflowRun {
-	t.Helper()
-	var payload struct {
-		WorkflowRuns []workflowRun `json:"workflow_runs"`
-	}
-	if err := json.Unmarshal([]byte(runs), &payload); err != nil {
-		t.Fatal(err)
-	}
-	return payload.WorkflowRuns
 }
 
 func TestRunPublishesTheReasonAnAPIOrSyncFailureLeaves(t *testing.T) {
@@ -715,12 +796,14 @@ func TestRunAnnotatesOnlyTheConditionThatKeepsTheRunGreen(t *testing.T) {
 	}{
 		{"healthy", healthy, false, 0},
 		{"delivery missing", scheduledRuns(), false, 1},
+		{"history unreadable", `{"workflow_runs":[`, false, 0},
+		{"run evidence refused", scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success").manual()), false, 0},
 		{"alert synchronization refused", healthy, true, 0},
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, _, stderr, _ := runAuditAgainst(
+			_, _, stderr, summary := runAuditAgainst(
 				t, auditConfig(), test.runs, false, test.failIssues, testNow,
 			)
 			annotations := strings.Count(stderr, "::warning::")
@@ -730,18 +813,44 @@ func TestRunAnnotatesOnlyTheConditionThatKeepsTheRunGreen(t *testing.T) {
 			if test.want > 0 && !strings.HasPrefix(stderr, "::warning::") {
 				t.Fatalf("the annotation must be the first stderr line, got %q", stderr)
 			}
-			if strings.Contains(stderr, "test-token") {
-				t.Fatalf("the annotation leaked a credential: %q", stderr)
+			if strings.Contains(stderr, "test-token") || strings.Contains(summary, "test-token") {
+				t.Fatalf("a published conclusion leaked a credential: stderr %q summary %q", stderr, summary)
 			}
 		})
 	}
 }
 
+// An unpublishable conclusion fails the run on every branch. A green branch
+// that cannot state its condition is exactly the gap #326 records, so it must
+// not fall through to a passing exit code and a stdout verdict.
 func TestRunFailsClosedWhenItCannotPublishItsConclusion(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		runs string
+	}{
+		{"healthy branch", scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success"))},
+		{"alerting branch", scheduledRuns()},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			code, _, stderr, _ := runAuditUnpublishable(t, auditConfig(), test.runs, testNow)
+			if code != 1 {
+				t.Fatalf("run() = %d, want 1", code)
+			}
+			if !strings.Contains(stderr, reasonRunNoticeUnpublished) {
+				t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr)
+			}
+		})
+	}
+}
+
+func TestRunPublishesNoStdoutVerdictWhenItCannotPublish(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.Contains(request.URL.Path, "/actions/workflows/") {
-			_, _ = fmt.Fprint(writer, scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success")))
+			_, _ = fmt.Fprint(writer, scheduledRuns())
 			return
 		}
 		_, _ = fmt.Fprint(writer, `[]`)
@@ -754,9 +863,6 @@ func TestRunFailsClosedWhenItCannotPublishItsConclusion(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := run(context.Background(), config, testNow, server.Client(), &stdout, &stderr); code != 1 {
 		t.Fatalf("run() = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
-		t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout.String())

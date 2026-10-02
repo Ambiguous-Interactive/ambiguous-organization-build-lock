@@ -291,29 +291,25 @@ func run(
 		result = classifyRuns(now, runs, config.MaxDeliveryDelay, config.MaxRunDuration)
 		auditFailed = result.Reason == reasonEvidenceInvalid
 	}
+	// The classified reason is stated first, so a publication refusal never hides
+	// the cause this run actually proved.
 	if syncErr := client.syncIncident(ctx, config.Repository, result); syncErr != nil {
-		if !report(stderr, reporter, reasonSyncFailed, "") {
-			return 1
-		}
-		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: incident-sync-failed.")
-		return 1
+		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: "+reasonSyncFailed+".")
+		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
 	}
 	if auditFailed {
-		if !report(stderr, reporter, result.Reason, "") {
-			return 1
-		}
 		_, _ = fmt.Fprintf(stderr, "Reaper delivery audit failed: %s.\n", result.Reason)
-		return 1
+		return conclude(stderr, reporter, result.Reason, "", 1)
 	}
 	if !result.Healthy {
-		if !report(stderr, reporter, result.Reason, reaperHandle(result.Latest)) {
-			return 1
+		if code := conclude(stderr, reporter, result.Reason, reaperHandle(result.Latest, config), 0); code != 0 {
+			return code
 		}
 		_, _ = fmt.Fprintf(stdout, "Reaper delivery alert synchronized: %s.\n", result.Reason)
 		return 0
 	}
-	if !report(stderr, reporter, reasonHealthy, "") {
-		return 1
+	if code := conclude(stderr, reporter, reasonHealthy, "", 0); code != 0 {
+		return code
 	}
 	_, _ = fmt.Fprintln(stdout, "Reaper delivery audit passed: healthy.")
 	return 0
@@ -328,57 +324,53 @@ var monitorMeanings = map[string]string{
 	reasonRunOverdue:      "The latest scheduled reaper delivery is later than the delivery threshold, so reaping is late.",
 	reasonRunStalled:      "The latest scheduled reaper run is still active past the run-duration threshold, so reaping is stalled.",
 	reasonRunUnsuccessful: "The latest scheduled reaper run did not succeed, so stale build locks may not have been reaped.",
-	reasonEvidenceInvalid: "The scheduled reaper run history could not be read, so delivery status is unknown.",
+	reasonEvidenceInvalid: "The scheduled reaper run evidence was refused, so delivery status is unknown.",
 	reasonRunHistoryUnreadable: "The scheduled reaper run history could not be requested, so delivery status is " +
 		"unknown.",
 	reasonSyncFailed: "The alert issue could not be synchronized, so delivery status is unknown.",
 }
 
-// reaperHandle names the exact scheduled run the conclusion is about, and the
-// alert issue that carries the detail. A missing delivery has no run to name.
-func reaperHandle(latest *workflowRun) string {
-	if latest == nil {
-		return fmt.Sprintf("Alert issue: %q.", incidentTitle)
+// reaperHandle names the exact scheduled run the conclusion is about, the
+// thresholds it was measured against, and the alert issue that carries the
+// detail. A missing delivery has no run to name.
+func reaperHandle(latest *workflowRun, config cliConfig) string {
+	run := ""
+	if latest != nil {
+		run = fmt.Sprintf(
+			"Latest scheduled run: `%d` delivered at `%s`. ",
+			latest.ID,
+			latest.CreatedAt.UTC().Format(time.RFC3339),
+		)
 	}
-	return fmt.Sprintf(
-		"Latest scheduled run: `%d` delivered at `%s`. Alert issue: %q.",
-		latest.ID,
-		latest.CreatedAt.UTC().Format(time.RFC3339),
+	return run + fmt.Sprintf(
+		"Delivery threshold: `%s`. Run-duration threshold: `%s`. Alert issue: %q.",
+		config.MaxDeliveryDelay,
+		config.MaxRunDuration,
 		incidentTitle,
 	)
 }
 
-// conclude publishes one conclusion. A handle is what makes a conclusion
-// alerting, so an alerting conclusion can never be published without naming what
-// the operator acts on. The annotation repeats the summary line without its
-// Markdown, so the two channels cannot drift apart.
-func conclude(reporter *runnotice.Reporter, reason, handle string) error {
-	meaning, stated := monitorMeanings[reason]
-	if !stated {
-		return runnotice.ErrUnstatedReason
-	}
-	summary := meaning + " Reason: `" + reason + "`."
-	warning := ""
-	if handle != "" {
-		summary += " " + handle
-		warning = strings.ReplaceAll(summary, "`", "")
-	}
-	return reporter.Publish(runnotice.Conclusion{Summary: summary, Warning: warning})
-}
-
-// report publishes one conclusion and reports a refusal as the run's own
-// fail-closed outcome. No green run may claim a verdict the run did not publish.
-func report(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string) bool {
-	if err := conclude(reporter, reason, handle); err != nil {
+// conclude publishes one conclusion and returns the exit code the run should
+// use. A handle is what makes a conclusion alerting, so an alerting conclusion
+// can never be published without naming what the operator acts on. A refusal is
+// always a failed run, because a run that cannot state what it proved proves
+// nothing.
+func conclude(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string, exit int) int {
+	err := reporter.Publish(runnotice.Notice{
+		Meaning: monitorMeanings[reason],
+		Reason:  reason,
+		Handle:  handle,
+	})
+	if err != nil {
 		_, _ = fmt.Fprintf(
 			stderr,
 			"Reaper delivery audit failed: %s (%s).\n",
 			reasonRunNoticeUnpublished,
 			err,
 		)
-		return false
+		return 1
 	}
-	return true
+	return exit
 }
 
 func parseConfig(arguments []string, getenv func(string) string) (cliConfig, error) {
