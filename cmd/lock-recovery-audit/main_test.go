@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/runnotice"
 )
 
 const (
@@ -666,25 +669,39 @@ func existingAlert(t *testing.T, state, body string) string {
 
 func runAudit(t *testing.T, stub *stubGitHub) (int, string, string) {
 	t.Helper()
+	code, stdout, stderr, _ := runAuditPublishing(t, stub)
+	return code, stdout, stderr
+}
+
+// runAuditPublishing runs the audit with a real run-summary file, so the tests
+// can read what an operator would read.
+func runAuditPublishing(t *testing.T, stub *stubGitHub) (int, string, string, string) {
+	t.Helper()
 	server := httptest.NewServer(stub.handler())
 	t.Cleanup(server.Close)
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
 
 	var stdout, stderr strings.Builder
 	code := run(
 		context.Background(),
 		config{
-			Lock:       testLock,
-			StateRef:   "lock-state",
-			Repository: "owner/repo",
-			APIURL:     server.URL,
-			ServerURL:  testServerURL,
-			Token:      "test-token",
+			Lock:        testLock,
+			StateRef:    "lock-state",
+			Repository:  "owner/repo",
+			APIURL:      server.URL,
+			ServerURL:   testServerURL,
+			Token:       "test-token",
+			SummaryPath: summaryPath,
 		},
 		server.Client(),
 		&stdout,
 		&stderr,
 	)
-	return code, stdout.String(), stderr.String()
+	summary, err := os.ReadFile(summaryPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return code, stdout.String(), stderr.String(), string(summary)
 }
 
 func TestRunOpensUpdatesAndClosesExactlyOneAlert(t *testing.T) {
@@ -1094,6 +1111,16 @@ func TestParseConfigAcceptsOnlyProvableTargets(t *testing.T) {
 	if settings.Lock != testLock || settings.StateRef != "lock-state" || settings.ServerURL != testServerURL {
 		t.Fatalf("unexpected configuration %#v", settings)
 	}
+	// #326 closes only if the runner's own summary file reaches the command. A
+	// monitor that ignores the variable would publish nothing and stay green.
+	environment["GITHUB_STEP_SUMMARY"] = "/runner/does/not/exist/summary.md"
+	settings, err = parseConfig(baseArguments, func(key string) string { return environment[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SummaryPath != environment["GITHUB_STEP_SUMMARY"] {
+		t.Fatalf("summary path = %q, want the runner's", settings.SummaryPath)
+	}
 }
 
 func TestStateRequestIsBoundedRawAndSameOrigin(t *testing.T) {
@@ -1143,5 +1170,232 @@ func TestClientRejectsCrossOriginRedirects(t *testing.T) {
 	}
 	if _, err := client.lockState(context.Background(), "wallstop-organization-builds", "lock-state"); err == nil {
 		t.Fatal("cross-origin redirect must be rejected")
+	}
+}
+
+// #326 records that a monitor which keeps a known condition a successful run
+// outcome named it in one step-log line and nowhere else. Every conclusion now
+// reaches the job summary, and the conclusion that keeps the run green also
+// reaches the annotations tab.
+
+func TestMonitorMeaningCoversEveryReasonTheAuditCanReturn(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []string{
+		reasonHealthy,
+		reasonIncidentActive,
+		reasonStateInvalid,
+		reasonStateUnavailable,
+		reasonSyncFailed,
+	} {
+		meaning, stated := monitorMeanings[reason]
+		if !stated {
+			t.Fatalf("reason %q has no published meaning", reason)
+		}
+		if meaning == "" || strings.HasSuffix(meaning, " ") {
+			t.Fatalf("reason %q publishes an unusable meaning %q", reason, meaning)
+		}
+	}
+	for reason := range monitorMeanings {
+		known := reason == reasonHealthy || reason == reasonIncidentActive ||
+			reason == reasonStateInvalid || reason == reasonStateUnavailable ||
+			reason == reasonSyncFailed
+		if !known {
+			t.Fatalf("meaning published for unknown reason %q", reason)
+		}
+	}
+}
+
+func TestConcludeNamesTheReasonAndItsConsequence(t *testing.T) {
+	t.Parallel()
+	for reason, meaning := range monitorMeanings {
+		reason, meaning := reason, meaning
+		t.Run(reason, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "summary.md")
+			var annotations strings.Builder
+
+			if err := conclude(runnotice.New(path, &annotations), reason, ""); err != nil {
+				t.Fatal(err)
+			}
+			summary, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := meaning + " Reason: `" + reason + "`.\n"
+			if string(summary) != want {
+				t.Fatalf("summary = %q, want %q", summary, want)
+			}
+			if annotations.Len() != 0 {
+				t.Fatalf("a conclusion with no operator handle published an annotation: %q", annotations.String())
+			}
+		})
+	}
+}
+
+func TestConcludePublishesAnAlertingConclusionToBothChannels(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "summary.md")
+	var annotations strings.Builder
+	handle := "Incident: `" + incidentFixture().IncidentID + "`. Alert issue: \"" + alertTitle + "\"."
+
+	if err := conclude(runnotice.New(path, &annotations), reasonIncidentActive, handle); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := monitorMeanings[reasonIncidentActive] + " Reason: `" + reasonIncidentActive + "`. " + handle + "\n"
+	if string(summary) != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
+	}
+	annotation := "::warning::" + strings.ReplaceAll(strings.TrimSuffix(want, "\n"), "`", "") + "\n"
+	if annotations.String() != annotation {
+		t.Fatalf("annotation = %q, want %q", annotations.String(), annotation)
+	}
+}
+
+func TestConcludeRefusesAReasonItCannotState(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "summary.md")
+	var annotations strings.Builder
+
+	err := conclude(runnotice.New(path, &annotations), "reason-nobody-declared", "")
+	if !errors.Is(err, runnotice.ErrUnstatedReason) {
+		t.Fatalf("conclude() error = %v, want %v", err, runnotice.ErrUnstatedReason)
+	}
+	if summary, readErr := os.ReadFile(path); readErr == nil {
+		t.Fatalf("an unstated reason was published: %q", summary)
+	}
+}
+
+func TestRunPublishesEveryConclusionToTheRunSummary(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+	activeState := stateFixture(t, &active)
+
+	cases := []struct {
+		name          string
+		stub          *stubGitHub
+		reason        string
+		wantCode      int
+		wantAnnotated bool
+	}{
+		{
+			name:     "healthy",
+			stub:     &stubGitHub{stateBody: stateFixture(t, nil), issues: `[]`},
+			reason:   reasonHealthy,
+			wantCode: 0,
+		},
+		{
+			name:          "active incident keeps the run green",
+			stub:          &stubGitHub{stateBody: activeState, issues: `[]`},
+			reason:        reasonIncidentActive,
+			wantCode:      0,
+			wantAnnotated: true,
+		},
+		{
+			name:     "state unavailable",
+			stub:     &stubGitHub{stateFail: http.StatusInternalServerError, issues: `[]`},
+			reason:   reasonStateUnavailable,
+			wantCode: 1,
+		},
+		{
+			name:     "state refused",
+			stub:     &stubGitHub{stateBody: []byte(`{"schemaVersion":5,"activeIncident":{"incidentId":"nope"}}`), issues: `[]`},
+			reason:   reasonStateInvalid,
+			wantCode: 1,
+		},
+		{
+			name:     "alert synchronization refused",
+			stub:     &stubGitHub{stateBody: activeState, issuesFail: http.StatusInternalServerError},
+			reason:   reasonSyncFailed,
+			wantCode: 1,
+		},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			test.stub.t = t
+			code, _, _, summary := runAuditPublishing(t, test.stub)
+			if code != test.wantCode {
+				t.Fatalf("run() = %d, want %d", code, test.wantCode)
+			}
+			want := monitorMeanings[test.reason] + " Reason: `" + test.reason + "`."
+			if test.wantAnnotated {
+				want += " Incident: `" + active.IncidentID + "`. Alert issue: \"" + alertTitle + "\"."
+			}
+			if summary != want+"\n" {
+				t.Fatalf("summary = %q, want %q", summary, want+"\n")
+			}
+		})
+	}
+}
+
+func TestRunAnnotatesOnlyTheConditionThatKeepsTheRunGreen(t *testing.T) {
+	t.Parallel()
+	active := incidentFixture()
+
+	cases := []struct {
+		name string
+		stub *stubGitHub
+		want int
+	}{
+		{"healthy", &stubGitHub{stateBody: stateFixture(t, nil), issues: `[]`}, 0},
+		{"active incident", &stubGitHub{stateBody: stateFixture(t, &active), issues: `[]`}, 1},
+		{"state unavailable", &stubGitHub{stateFail: http.StatusInternalServerError, issues: `[]`}, 0},
+		{"alert synchronization refused", &stubGitHub{stateBody: stateFixture(t, &active), issuesFail: http.StatusInternalServerError}, 0},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			test.stub.t = t
+			_, _, stderr, summary := runAuditPublishing(t, test.stub)
+			annotations := strings.Count(stderr, "::warning::")
+			if annotations != test.want {
+				t.Fatalf("annotations = %d, want %d (stderr %q)", annotations, test.want, stderr)
+			}
+			if test.want > 0 && !strings.HasPrefix(stderr, "::warning::") {
+				t.Fatalf("the annotation must be the first stderr line, got %q", stderr)
+			}
+			if strings.Contains(summary, "test-token") {
+				t.Fatalf("the summary leaked a credential: %q", summary)
+			}
+		})
+	}
+}
+
+func TestRunFailsClosedWhenItCannotPublishItsConclusion(t *testing.T) {
+	t.Parallel()
+	stub := &stubGitHub{t: t, stateBody: stateFixture(t, nil), issues: `[]`}
+	server := httptest.NewServer(stub.handler())
+	t.Cleanup(server.Close)
+
+	var stdout, stderr strings.Builder
+	code := run(
+		context.Background(),
+		config{
+			Lock:        testLock,
+			StateRef:    "lock-state",
+			Repository:  "owner/repo",
+			APIURL:      server.URL,
+			ServerURL:   testServerURL,
+			Token:       "test-token",
+			SummaryPath: filepath.Join(t.TempDir(), "absent", "summary.md"),
+		},
+		server.Client(),
+		&stdout,
+		&stderr,
+	)
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), reasonRunNoticeUnpublished) {
+		t.Fatalf("an unpublished conclusion must name its cause, got %q", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("a failed run must publish no verdict on stdout, got %q", stdout.String())
 	}
 }

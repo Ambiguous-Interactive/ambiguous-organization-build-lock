@@ -637,6 +637,16 @@ every scheduled monitor run itself fail. The workflow fails red when run
 history is unavailable, malformed, oversized, cross-origin, or otherwise
 ambiguous, or when incident synchronization cannot be confirmed.
 
+A green run must never hide a known condition, so `Build lock incident recovery
+audit` and `Reaper delivery audit` both follow one rule. Every monitor run
+states its conclusion in the job summary, and every reason code says what the
+conclusion means. The reason that keeps the run green also reaches the
+annotations tab as one warning. That warning names the reason code and the exact
+incident or scheduled run the operator acts on. A failed run publishes its
+summary line and no annotation, because the red run is already the signal. A
+conclusion the run cannot publish fails the run with `run-notice-unpublished`:
+a run that cannot state what it proved proves nothing.
+
 The independent `Build lock incident recovery audit` workflow runs at
 `2,12,22,32,42,52 * * * *`. It reads committed `lock-state` JSON through the
 workflow token, proves that any active global incident is internally consistent,
@@ -663,7 +673,9 @@ state. It never opens, edits, or closes the alert on unprovable state: an
 unavailable, oversized, malformed, wrong-lock, unsupported-schema, or
 digest-inconsistent read fails the run red and leaves any existing alert exactly
 as it was. Publishing the alert never relaxes recovery, which still requires the
-exact incident identifier plus explicit portal-cleanup proof.
+exact incident identifier plus explicit portal-cleanup proof. The alert issue
+stays the retained record; the job summary and the annotation are what an
+operator reads without leaving the run.
 
 Discovery asks only for the issues this automation created, so it stays bounded
 by that automation's own output rather than by the repository's issue history.

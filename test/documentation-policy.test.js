@@ -228,6 +228,26 @@ test("every document that describes the central audits states what a green run m
   }
 });
 
+test("every document that describes a central monitor states where its conclusion is published", () => {
+  // #326: both monitors used to name a known condition in one step-log line and
+  // nowhere else. `README.md` and the runbook are the two documents that
+  // describe them, so both must carry the rule. Fold whitespace so the
+  // assertion does not depend on how the prose wraps.
+  const claims = [
+    "states its conclusion in the job summary",
+    "reaches the annotations tab as one warning"
+  ];
+  for (const file of [activeDocumentation[0], operationsPath]) {
+    const text = read(file).replace(/\s+/g, " ");
+    for (const claim of claims) {
+      assert.ok(
+        text.includes(claim),
+        `${path.relative(repoRoot, file)} must state "${claim}"`
+      );
+    }
+  }
+});
+
 test("rollout history cannot be mistaken for the active runbook", () => {
   const history = read(historyPath);
 

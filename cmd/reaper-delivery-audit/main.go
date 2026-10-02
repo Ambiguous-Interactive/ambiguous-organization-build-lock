@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/runnotice"
 )
 
 const (
@@ -22,6 +23,18 @@ const (
 	incidentActor    = "github-actions[bot]"
 	maxResponseBytes = githubissue.DefaultResponseLimit
 	issuePageSize    = githubissue.DefaultPageSize
+
+	reasonHealthy              = "healthy"
+	reasonRunMissing           = "scheduled-run-missing"
+	reasonRunOverdue           = "scheduled-run-overdue"
+	reasonRunStalled           = "scheduled-run-stalled"
+	reasonRunUnsuccessful      = "scheduled-run-unsuccessful"
+	reasonEvidenceInvalid      = "workflow-evidence-invalid"
+	reasonRunHistoryUnreadable = "workflow-api-unavailable"
+	reasonSyncFailed           = "incident-sync-failed"
+	// reasonRunNoticeUnpublished reports that this run could not state what it
+	// proved. It is the run's own outcome, not a property of the reaper.
+	reasonRunNoticeUnpublished = "run-notice-unpublished"
 )
 
 var (
@@ -48,6 +61,7 @@ type cliConfig struct {
 	Workflow         string
 	MaxDeliveryDelay time.Duration
 	MaxRunDuration   time.Duration
+	SummaryPath      string
 }
 
 type workflowRun struct {
@@ -75,12 +89,12 @@ type githubClient struct {
 }
 
 func classifyRuns(now time.Time, runs []workflowRun, maxDeliveryDelay, maxRunDuration time.Duration) observation {
-	result := observation{Reason: "workflow-evidence-invalid", CheckedAt: now.UTC()}
+	result := observation{Reason: reasonEvidenceInvalid, CheckedAt: now.UTC()}
 	if maxDeliveryDelay <= 0 || maxRunDuration <= 0 || now.IsZero() {
 		return result
 	}
 	if len(runs) == 0 {
-		result.Reason = "scheduled-run-missing"
+		result.Reason = reasonRunMissing
 		return result
 	}
 	if len(runs) > 2 {
@@ -103,19 +117,19 @@ func classifyRuns(now time.Time, runs []workflowRun, maxDeliveryDelay, maxRunDur
 	result.Latest = &latest
 	age := now.Sub(latest.CreatedAt)
 	if age > maxDeliveryDelay {
-		result.Reason = "scheduled-run-overdue"
+		result.Reason = reasonRunOverdue
 		return result
 	}
 	if latest.Status != "completed" && age > maxRunDuration {
-		result.Reason = "scheduled-run-stalled"
+		result.Reason = reasonRunStalled
 		return result
 	}
 	if latest.Status == "completed" && latest.Conclusion != "success" {
-		result.Reason = "scheduled-run-unsuccessful"
+		result.Reason = reasonRunUnsuccessful
 		return result
 	}
 	result.Healthy = true
-	result.Reason = "healthy"
+	result.Reason = reasonHealthy
 	return result
 }
 
@@ -261,32 +275,110 @@ func run(
 	httpClient *http.Client,
 	stdout, stderr io.Writer,
 ) int {
+	// The summary and the annotations are where an operator looks first. A
+	// conclusion this run cannot publish is evidence it did not read, so every
+	// classified outcome is published and a refusal fails the run.
+	reporter := runnotice.New(config.SummaryPath, stderr)
 	client, err := newGitHubClient(config, httpClient)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: invalid configuration.")
 		return 1
 	}
 	runs, err := client.workflowRuns(ctx, config.Repository, config.Workflow)
-	result := observation{Reason: "workflow-api-unavailable", CheckedAt: now.UTC()}
+	result := observation{Reason: reasonRunHistoryUnreadable, CheckedAt: now.UTC()}
 	auditFailed := err != nil
 	if err == nil {
 		result = classifyRuns(now, runs, config.MaxDeliveryDelay, config.MaxRunDuration)
-		auditFailed = result.Reason == "workflow-evidence-invalid"
+		auditFailed = result.Reason == reasonEvidenceInvalid
 	}
-	if err := client.syncIncident(ctx, config.Repository, result); err != nil {
+	if syncErr := client.syncIncident(ctx, config.Repository, result); syncErr != nil {
+		if !report(stderr, reporter, reasonSyncFailed, "") {
+			return 1
+		}
 		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: incident-sync-failed.")
 		return 1
 	}
 	if auditFailed {
+		if !report(stderr, reporter, result.Reason, "") {
+			return 1
+		}
 		_, _ = fmt.Fprintf(stderr, "Reaper delivery audit failed: %s.\n", result.Reason)
 		return 1
 	}
 	if !result.Healthy {
+		if !report(stderr, reporter, result.Reason, reaperHandle(result.Latest)) {
+			return 1
+		}
 		_, _ = fmt.Fprintf(stdout, "Reaper delivery alert synchronized: %s.\n", result.Reason)
 		return 0
 	}
+	if !report(stderr, reporter, reasonHealthy, "") {
+		return 1
+	}
 	_, _ = fmt.Fprintln(stdout, "Reaper delivery audit passed: healthy.")
 	return 0
+}
+
+// monitorMeanings states, for each reason this audit returns, what the run
+// concluded. A reason code alone leaves an operator to guess the consequence,
+// which is the log-only condition #326 records.
+var monitorMeanings = map[string]string{
+	reasonHealthy:         "The latest scheduled reaper delivery is on time and its run succeeded.",
+	reasonRunMissing:      "No scheduled reaper delivery can be proven, so stale build locks are not being reaped.",
+	reasonRunOverdue:      "The latest scheduled reaper delivery is later than the delivery threshold, so reaping is late.",
+	reasonRunStalled:      "The latest scheduled reaper run is still active past the run-duration threshold, so reaping is stalled.",
+	reasonRunUnsuccessful: "The latest scheduled reaper run did not succeed, so stale build locks may not have been reaped.",
+	reasonEvidenceInvalid: "The scheduled reaper run history could not be read, so delivery status is unknown.",
+	reasonRunHistoryUnreadable: "The scheduled reaper run history could not be requested, so delivery status is " +
+		"unknown.",
+	reasonSyncFailed: "The alert issue could not be synchronized, so delivery status is unknown.",
+}
+
+// reaperHandle names the exact scheduled run the conclusion is about, and the
+// alert issue that carries the detail. A missing delivery has no run to name.
+func reaperHandle(latest *workflowRun) string {
+	if latest == nil {
+		return fmt.Sprintf("Alert issue: %q.", incidentTitle)
+	}
+	return fmt.Sprintf(
+		"Latest scheduled run: `%d` delivered at `%s`. Alert issue: %q.",
+		latest.ID,
+		latest.CreatedAt.UTC().Format(time.RFC3339),
+		incidentTitle,
+	)
+}
+
+// conclude publishes one conclusion. A handle is what makes a conclusion
+// alerting, so an alerting conclusion can never be published without naming what
+// the operator acts on. The annotation repeats the summary line without its
+// Markdown, so the two channels cannot drift apart.
+func conclude(reporter *runnotice.Reporter, reason, handle string) error {
+	meaning, stated := monitorMeanings[reason]
+	if !stated {
+		return runnotice.ErrUnstatedReason
+	}
+	summary := meaning + " Reason: `" + reason + "`."
+	warning := ""
+	if handle != "" {
+		summary += " " + handle
+		warning = strings.ReplaceAll(summary, "`", "")
+	}
+	return reporter.Publish(runnotice.Conclusion{Summary: summary, Warning: warning})
+}
+
+// report publishes one conclusion and reports a refusal as the run's own
+// fail-closed outcome. No green run may claim a verdict the run did not publish.
+func report(stderr io.Writer, reporter *runnotice.Reporter, reason, handle string) bool {
+	if err := conclude(reporter, reason, handle); err != nil {
+		_, _ = fmt.Fprintf(
+			stderr,
+			"Reaper delivery audit failed: %s (%s).\n",
+			reasonRunNoticeUnpublished,
+			err,
+		)
+		return false
+	}
+	return true
 }
 
 func parseConfig(arguments []string, getenv func(string) string) (cliConfig, error) {
@@ -302,6 +394,7 @@ func parseConfig(arguments []string, getenv func(string) string) (cliConfig, err
 	config.Repository = getenv("GITHUB_REPOSITORY")
 	config.Token = getenv("GITHUB_TOKEN")
 	config.APIURL = getenv("GITHUB_API_URL")
+	config.SummaryPath = getenv("GITHUB_STEP_SUMMARY")
 	apiURL, err := url.Parse(config.APIURL)
 	if err != nil || apiURL.Scheme != "https" || apiURL.Host == "" {
 		return cliConfig{}, errors.New("invalid GitHub API URL")
