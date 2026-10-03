@@ -29,8 +29,12 @@
       "expiresAt": "2026-10-03T15:46:36.625Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "111196118571"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "96a8a35c-33c0-46ab-b2ea-4c56c532664e",
       "holderId": "Ambiguous-Interactive/unity-helpers:37120700200:unitypackage-smoke:unitypackage-smoke-37120700200",
       "repository": "Ambiguous-Interactive/unity-helpers",
       "workflow": "Unity Tests",
@@ -38,15 +42,13 @@
       "runId": "37120700200",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/37120700200",
-      "queuedAt": "2026-10-03T11:46:39.980Z",
-      "acquiredAt": "2026-10-03T11:46:42.972Z",
-      "expiresAt": "2026-10-03T15:46:42.972Z",
       "runnerId": "ELI-MACHINE",
-      "jobId": "111196118552"
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-03T11:47:36.734Z",
+      "availableAt": "2026-10-03T11:47:37.734Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-03T11:46:42.972Z"
+  "updatedAt": "2026-10-03T11:47:36.735Z"
 }
