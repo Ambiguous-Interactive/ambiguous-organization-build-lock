@@ -108,3 +108,14 @@ Dependency discovery initially failed because the default GOPATH sumdb cache
 was not writable. A temporary writable GOPATH with the existing module cache
 allowed discovery and retained checksum verification. Both module verification
 and tidy checks, root Go tests, and actionlint passed after the refresh.
+
+The full tooling audit also updated ESLint to 10.12.0, semantic-release to
+25.0.9, its GitHub plugin to 12.0.10, and GitHub CLI to 2.102.0. Both CLI
+architecture archives were downloaded and matched the release API SHA256.
+The feature pin, fallback URLs, paths, hashes, and contract tests agree.
+All configured action pins and devcontainer feature versions already match
+latest releases. The base digest matches the current Go 1.27 Bookworm image.
+Go 1.27.1, supported Node 24.21.0, golangci-lint 2.14.0, PowerShell 7.6.6,
+ShellCheck 0.11.0, and actionlint 1.7.12 were current at this audit.
+Plugin peer ranges support the updated semantic-release runtime. Seventy-seven
+focused tests, ESLint 10, actionlint, ShellCheck, and credential audit passed.

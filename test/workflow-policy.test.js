@@ -3344,11 +3344,11 @@ test("semantic-release workflows serialize releases without canceling active pub
 test("semantic-release runtime and configured plugins are exact", () => {
   const text = readWorkflow("auto-release.yml");
 
-  assert.match(text, /^\s*semantic_version:\s*25\.0\.8\s*$/m);
+  assert.match(text, /^\s*semantic_version:\s*25\.0\.9\s*$/m);
   for (const plugin of [
     "@semantic-release/commit-analyzer@13.0.1",
     "@semantic-release/release-notes-generator@14.1.1",
-    "@semantic-release/github@12.0.9"
+    "@semantic-release/github@12.0.10"
   ]) {
     assert.match(text, new RegExp(`^\\s*${plugin.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*$`, "m"));
   }

@@ -25,7 +25,7 @@ case "${1:-}" in
     # that owns the platform. The globals below are the ones this repository's
     # Node version provides; they are listed rather than configured, because the
     # run uses --no-config-lookup.
-    npx --yes eslint@9.35.0 \
+    npx --yes eslint@10.12.0 \
       --no-config-lookup \
       --rule 'no-undef:["error",{"typeof":false}]' \
       --global require --global module --global exports --global __dirname --global __filename \

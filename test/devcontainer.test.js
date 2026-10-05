@@ -39,7 +39,7 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   );
   assert.equal(
     config.features["ghcr.io/devcontainers/features/github-cli:1.1.3"].version,
-    "2.101.0"
+    "2.102.0"
   );
   assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].version, "1.27.1");
   assert.equal(config.features["ghcr.io/devcontainers/features/go:1.4.0"].golangciLintVersion, "2.14.0");
@@ -111,20 +111,20 @@ test("dev container is portable, pinned, and editor-neutral", async () => {
   );
   assert.match(
     config.postCreateCommand,
-    /github\.com\/cli\/cli\/releases\/download\/v2\.101\.0\/gh_2\.101\.0_linux_\$\{gh_arch\}\.tar\.gz/
+    /github\.com\/cli\/cli\/releases\/download\/v2\.102\.0\/gh_2\.102\.0_linux_\$\{gh_arch\}\.tar\.gz/
   );
   assert.match(
     config.postCreateCommand,
-    /amd64[\s\S]*gh_sha=9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8/
+    /amd64[\s\S]*gh_sha=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386/
   );
   assert.match(
     config.postCreateCommand,
-    /arm64[\s\S]*gh_sha=b57e8063f18862647c9d22727c32e9da1b963f8bf9db648fe123a6975695640f/
+    /arm64[\s\S]*gh_sha=7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484/
   );
   assert.match(config.postCreateCommand, /echo "\$\{gh_sha\}  \/tmp\/gh\.tar\.gz" \| sha256sum -c -/);
   assert.match(
     config.postCreateCommand,
-    /install -m 0755 "\/tmp\/gh_2\.101\.0_linux_\$\{gh_arch\}\/bin\/gh" \/usr\/local\/bin\/gh/
+    /install -m 0755 "\/tmp\/gh_2\.102\.0_linux_\$\{gh_arch\}\/bin\/gh" \/usr\/local\/bin\/gh/
   );
   assert.equal(config.postStartCommand, "bash .devcontainer/scripts/post-start.sh");
 
