@@ -59,6 +59,7 @@ type UnityEnrollmentRepository struct {
 	DefaultBranch         string   `json:"defaultBranch"`
 	Fork                  bool     `json:"fork"`
 	AllowWorkflowDispatch bool     `json:"allowWorkflowDispatch"`
+	AllowSchedule         bool     `json:"allowSchedule"`
 	RequiredContexts      []string `json:"requiredContexts,omitempty"`
 }
 

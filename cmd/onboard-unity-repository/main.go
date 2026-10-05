@@ -28,6 +28,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		false,
 		"whether audited workflows may use workflow_dispatch",
 	)
+	allowSchedule := flags.Bool("allow-schedule", false, "whether audited workflows may use at most daily schedules")
 	validateOnly := flags.Bool("validate-only", false, "validate target values without changing policy")
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return 2
@@ -55,6 +56,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		DefaultBranch:         *defaultBranch,
 		Fork:                  *fork,
 		AllowWorkflowDispatch: *allowWorkflowDispatch,
+		AllowSchedule:         *allowSchedule,
 	}
 	if err := enrollment.ValidateUnityEnrollmentRepository(candidate); err != nil {
 		_, _ = fmt.Fprintf(stderr, "cannot onboard Unity repository: %v\n", err)

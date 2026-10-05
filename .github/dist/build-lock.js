@@ -4446,6 +4446,7 @@ async function reap(config, options = {}) {
     }
     let holderReaped = false;
     let holderScanIncomplete = false;
+    let unprovenHolders = 0;
     const provenHolderChanges = [];
     const keptHolders = [];
     for (let index = 0; index < state.holders.length; index++) {
@@ -4477,10 +4478,16 @@ async function reap(config, options = {}) {
         break;
       } else {
         console.log(`Keeping holder ${holder.holderId}: ${stale.reason}.`);
+        if (stale.reason === "holder status unavailable before lease expiry") {
+          unprovenHolders++;
+        }
         keptHolders.push(holder);
       }
     }
     state.holders = keptHolders;
+    if (unprovenHolders) {
+      appendSummary(`Kept ${unprovenHolders} holder(s) whose run status is unavailable before lease expiry. Their hold remains unchanged.`);
+    }
 
     // Capacity-critical ownership is checkpointed before routine queue cleanup.
     // A large FIFO must never consume the outer workflow budget before a proven
@@ -4737,7 +4744,8 @@ async function reap(config, options = {}) {
     if (!queueChanged && !queueScanIncomplete) {
       writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
       appendSummary(
-        ambiguousReap ? `Reaped stale state for ${config.lockName}.` : `No stale state found for ${config.lockName}.`
+        ambiguousReap ? `Reaped stale state for ${config.lockName}.`
+          : `No stale state was proven for ${config.lockName}.`
       );
       console.log("::endgroup::");
       return;

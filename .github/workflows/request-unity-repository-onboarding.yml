@@ -22,6 +22,12 @@ on:
         default: false
         type: boolean
 
+      allow_schedule:
+        description: Audited workflows may use one cron entry at most daily
+        required: true
+        default: false
+        type: boolean
+
 permissions: {}
 
 concurrency:
@@ -52,6 +58,7 @@ jobs:
           TARGET_DEFAULT_BRANCH: ${{ inputs.default_branch }}
           TARGET_FORK: ${{ inputs.fork }}
           TARGET_ALLOW_WORKFLOW_DISPATCH: ${{ inputs.allow_workflow_dispatch }}
+          TARGET_ALLOW_SCHEDULE: ${{ inputs.allow_schedule }}
         shell: bash
         run: bash tools/workflows/request-unity-repository-onboarding.sh write-request
 

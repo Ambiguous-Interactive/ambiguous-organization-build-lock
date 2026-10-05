@@ -94,6 +94,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			RequiredContexts:         requiredContexts(registry),
 			ProtectedBranches:        []string{repository.DefaultBranch},
 			AllowWorkflowDispatch:    repository.AllowWorkflowDispatch,
+			AllowSchedule:            repository.AllowSchedule,
 			Now:                      time.Now().UTC(),
 		})
 		if analyzeErr != nil {

@@ -230,6 +230,73 @@ test("reap writes full output contract when no stale state is found", async () =
 });
 
 
+test("reap reports unproven holders without changing their fail-closed hold", async () => {
+  for (const scenario of [
+    { status: 404, count: 1 },
+    { status: 401, count: 25 },
+    { status: 404, count: 1, queue: true },
+    { status: 404, count: 1, cooldown: true },
+    { status: 200, count: 1 }
+  ]) {
+    const holders = Array.from({ length: scenario.count }, (_, index) =>
+      withRunner(semaphoreHolder("other/repo", String(100 + index), "editmode"), `runner-${index}`)
+    );
+    let state = lifecycleState(holders,
+      scenario.queue ? [withRunner(semaphoreQueueEntry("other/repo", "999", "playmode"), "queue-runner")] : [],
+      scenario.cooldown ? [lifecycleReservation(withRunner(semaphoreHolder("other/repo", "998", "playmode"), "cooldown-runner"), {
+        state: "cooldown", availableAt: "2026-06-06T00:02:00.000Z"
+      })] : []
+    );
+    let writes = 0;
+    await withTempFile(async (summaryFile) => {
+      await withTempFile(async (outputFile) => {
+        await withActionEnv({ GITHUB_STEP_SUMMARY: summaryFile, GITHUB_OUTPUT: outputFile }, async () => {
+          await withEnvironment({ BUILD_LOCK_API_MAX_ATTEMPTS: "1" }, () => withMockedFetch(async (url, options = {}) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === "/repos/o/r/git/ref/heads/lock-state") {
+              return jsonResponse(200, { object: { sha: "branch-sha" } });
+            }
+            if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+              if (options.method === "PUT") {
+                writes++;
+                state = JSON.parse(Buffer.from(JSON.parse(options.body).content, "base64").toString("utf8"));
+                return jsonResponse(200, { content: { sha: "state-after-reap" } });
+              }
+              return base64Content(state, "state-sha");
+            }
+            if (parsed.pathname === "/repos/other/repo") {
+              return jsonResponse(200, {});
+            }
+            if (parsed.pathname === "/repos/other/repo/actions/runs/999") {
+              return jsonResponse(200, { status: "completed", conclusion: "success" });
+            }
+            if (parsed.pathname.startsWith("/repos/other/repo/actions/runs/")) {
+              return jsonResponse(scenario.status, scenario.status === 200
+                ? { status: "in_progress", conclusion: null }
+                : { message: "status unavailable" });
+            }
+            throw new Error(`Unexpected request ${parsed.pathname}`);
+          }, () => reap(semaphoreConfig())));
+        });
+        const outputs = readEnvironmentFile(outputFile);
+        assertOutputContract(outputs, reapOutputNames);
+        assert.equal(outputs.reaped, String(Boolean(scenario.queue || scenario.cooldown)));
+      });
+      const summary = fs.readFileSync(summaryFile, "utf8");
+      if (scenario.status === 200) {
+        assert.match(summary, /No stale state was proven/);
+        assert.doesNotMatch(summary, /run status is unavailable/);
+      } else {
+        assert.match(summary, new RegExp(`Kept ${scenario.count} holder\\(s\\) whose run status is unavailable before lease expiry`));
+        assert.doesNotMatch(summary, /No stale state found/);
+        assert.ok(summary.length < 500, "Summary size must not grow with the holder list");
+      }
+    });
+    assert.deepEqual(state.holders, holders);
+    assert.equal(writes, Number(Boolean(scenario.queue || scenario.cooldown)));
+  }
+});
+
 test("reap writes full output contract when a stale holder is removed", async () => {
   let state = {
     ...emptyState("wallstop-organization-builds"),

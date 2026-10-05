@@ -59,6 +59,11 @@ A new regression test needs a red result on the commit that introduced the
 defect. Copy that commit's version of the one production file onto a scratch
 tree and run the test there. A test that passes before the fix covers nothing.
 
+When matching an external tool's behavior, inspect its exact pinned version and
+the parser dependencies it uses. Current upstream code can have different
+semantics. Derive counterexamples from the installed contract before claiming
+that a local diagnostic matches that tool.
+
 Place the fault where the defect needs it. A check that matches a literal
 token survives a bad byte elsewhere in the file. A fixture that puts the byte
 on its own line then passes on the code it must catch.

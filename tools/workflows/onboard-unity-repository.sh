@@ -10,22 +10,25 @@ reject_untrusted_request() {
 validate_request() {
   jq -e '
     type == "object" and
-    (keys | sort) == ["allowWorkflowDispatch", "defaultBranch", "fork", "repository"] and
+    (keys | sort) == ["allowSchedule", "allowWorkflowDispatch", "defaultBranch", "fork", "repository"] and
     (.repository | type == "string") and
     (.defaultBranch | type == "string") and
     (.fork | type == "boolean") and
-    (.allowWorkflowDispatch | type == "boolean")
+    (.allowWorkflowDispatch | type == "boolean") and
+    (.allowSchedule | type == "boolean")
   ' "${REQUEST_PATH:?REQUEST_PATH is required}" >/dev/null
   repository="$(jq -er .repository "${REQUEST_PATH}")"
   default_branch="$(jq -er .defaultBranch "${REQUEST_PATH}")"
   fork="$(jq -r .fork "${REQUEST_PATH}")"
   allow_dispatch="$(jq -r .allowWorkflowDispatch "${REQUEST_PATH}")"
+  allow_schedule="$(jq -r .allowSchedule "${REQUEST_PATH}")"
   go run ./cmd/onboard-unity-repository \
     --policy unity-enrollment-policy.json \
     --repository "${repository}" \
     --default-branch "${default_branch}" \
     --fork="${fork}" \
     --allow-workflow-dispatch="${allow_dispatch}" \
+    --allow-schedule="${allow_schedule}" \
     --validate-only
   {
     echo "repository=${repository}"
@@ -33,6 +36,7 @@ validate_request() {
     echo "default_branch=${default_branch}"
     echo "fork=${fork}"
     echo "allow_dispatch=${allow_dispatch}"
+    echo "allow_schedule=${allow_schedule}"
   } >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 }
 
@@ -59,7 +63,8 @@ update_policy() {
     --repository "${TARGET_REPOSITORY:?TARGET_REPOSITORY is required}" \
     --default-branch "${TARGET_DEFAULT_BRANCH:?TARGET_DEFAULT_BRANCH is required}" \
     --fork="${TARGET_FORK:?TARGET_FORK is required}" \
-    --allow-workflow-dispatch="${TARGET_ALLOW_WORKFLOW_DISPATCH:?TARGET_ALLOW_WORKFLOW_DISPATCH is required}"
+    --allow-workflow-dispatch="${TARGET_ALLOW_WORKFLOW_DISPATCH:?TARGET_ALLOW_WORKFLOW_DISPATCH is required}" \
+    --allow-schedule="${TARGET_ALLOW_SCHEDULE:?TARGET_ALLOW_SCHEDULE is required}"
   go test ./internal/enrollment ./cmd/onboard-unity-repository
 }
 

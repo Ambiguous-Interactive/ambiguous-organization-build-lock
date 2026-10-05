@@ -62,7 +62,9 @@ jobs:
         run: bash tools/workflows/ci.sh shellcheck
 
       - name: Run fast action tests
-        run: node --test test/*.test.js
+        # These tests mostly wait for child processes. Keep eight files active
+        # even when the hosted runner exposes only four cores.
+        run: node --test --test-concurrency=8 test/*.test.js
 
       - name: Run Go tests
         run: go test ./...
