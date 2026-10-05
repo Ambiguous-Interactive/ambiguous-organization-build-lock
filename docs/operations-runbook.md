@@ -716,6 +716,9 @@ disabled, so a schedule cannot replace or cancel running or pending recovery.
 Concurrent reaping and recovery still use the lock action's compare-and-swap
 retry and exact-ID fencing.
 
+If run status is unavailable before lease expiry, the reaper summary counts
+the holders kept with unproven status. It does not claim that no stale state
+exists. The count has a fixed-size format and includes no holder identities.
 Scheduled reaping is capacity-first. It evaluates holders before routine queue
 cleanup and commits a proven stale-holder quarantine/reap immediately, leaving
 the FIFO unchanged for the next five-minute run. Status scanning has an
@@ -748,3 +751,9 @@ Monitor and alert on:
 
 Use [Lock State](../locks/README.md) for the state/config contract and
 [Consumer Enrollment](consumer-enrollment.md) for adding a repository.
+
+Licensed workflows with a schedule are `paid-serial` inventory, even when they
+also allow manual dispatch. They are not controlled canaries. The repository
+registry must opt in with `allowSchedule: true`. The analyzer accepts exactly
+one cron entry with a fixed minute and hour. This bounds total scheduled seat
+use to one run per UTC day. All licensed cleanup and concurrency controls apply.
