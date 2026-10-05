@@ -4745,8 +4745,7 @@ async function reap(config, options = {}) {
       writeReapOutputs({ reaped: ambiguousReap, stateSha: sha || "" });
       appendSummary(
         ambiguousReap ? `Reaped stale state for ${config.lockName}.`
-          : unprovenHolders ? `No state change for ${config.lockName}; holder status remains unproven.`
-          : `No stale state found for ${config.lockName}.`
+          : `No stale state was proven for ${config.lockName}.`
       );
       console.log("::endgroup::");
       return;

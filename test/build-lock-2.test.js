@@ -284,7 +284,7 @@ test("reap reports unproven holders without changing their fail-closed hold", as
       });
       const summary = fs.readFileSync(summaryFile, "utf8");
       if (scenario.status === 200) {
-        assert.match(summary, /No stale state found/);
+        assert.match(summary, /No stale state was proven/);
         assert.doesNotMatch(summary, /run status is unavailable/);
       } else {
         assert.match(summary, new RegExp(`Kept ${scenario.count} holder\\(s\\) whose run status is unavailable before lease expiry`));
