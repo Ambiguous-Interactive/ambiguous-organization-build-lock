@@ -800,3 +800,39 @@ func TestUnityEnrollmentRegistryNamesTheEncodingBeforeTheSchemaVersion(t *testin
 		})
 	}
 }
+
+func TestUnityEnrollmentRegistryScheduleOptInIsTypedAndDefaultsFalse(t *testing.T) {
+	registry := validUnityRegistry()
+	registry.Repositories[0].AllowSchedule = true
+	content := encodeRegistry(t, registry)
+	parsed, err := ParseUnityEnrollmentRegistry(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, repository := range parsed.Repositories {
+		if repository.Repository == registry.Repositories[0].Repository {
+			found = repository.AllowSchedule
+		}
+	}
+	if !found {
+		t.Fatal("schedule opt-in lost")
+	}
+	without := bytes.ReplaceAll(content, []byte(`,"allowSchedule":true`), nil)
+	without = bytes.ReplaceAll(without, []byte(`,"allowSchedule":false`), nil)
+	parsed, err = ParseUnityEnrollmentRegistry(without)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repository := range parsed.Repositories {
+		if repository.AllowSchedule {
+			t.Fatal("absent schedule opt-in enabled")
+		}
+	}
+	for _, value := range []string{`"true"`, `1`, `[]`} {
+		malformed := bytes.Replace(content, []byte(`"allowSchedule":true`), []byte(`"allowSchedule":`+value), 1)
+		if _, err := ParseUnityEnrollmentRegistry(malformed); err == nil {
+			t.Fatalf("schedule accepted %s", value)
+		}
+	}
+}

@@ -139,7 +139,8 @@ test("request onboarding rejects non-main refs and writes typed inert evidence",
     TARGET_REPOSITORY: "Ambiguous-Interactive/example",
     TARGET_DEFAULT_BRANCH: "main",
     TARGET_FORK: "false",
-    TARGET_ALLOW_WORKFLOW_DISPATCH: "true"
+    TARGET_ALLOW_WORKFLOW_DISPATCH: "true",
+    TARGET_ALLOW_SCHEDULE: "true"
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(
@@ -148,7 +149,8 @@ test("request onboarding rejects non-main refs and writes typed inert evidence",
       repository: "Ambiguous-Interactive/example",
       defaultBranch: "main",
       fork: false,
-      allowWorkflowDispatch: true
+      allowWorkflowDispatch: true,
+      allowSchedule: true
     }
   );
 });
@@ -185,7 +187,8 @@ test("trusted onboarding validates request shape before publishing outputs", (t)
     repository: "Ambiguous-Interactive/example",
     defaultBranch: "main",
     fork: false,
-    allowWorkflowDispatch: false
+    allowWorkflowDispatch: false,
+    allowSchedule: false
   };
   fs.writeFileSync(requestPath, JSON.stringify(request));
 
@@ -196,7 +199,7 @@ test("trusted onboarding validates request shape before publishing outputs", (t)
   assert.equal(valid.status, 0, valid.stderr);
   assert.equal(
     fs.readFileSync(outputPath, "utf8"),
-    "repository=Ambiguous-Interactive/example\nrepository_name=example\ndefault_branch=main\nfork=false\nallow_dispatch=false\n"
+    "repository=Ambiguous-Interactive/example\nrepository_name=example\ndefault_branch=main\nfork=false\nallow_dispatch=false\nallow_schedule=false\n"
   );
 
   fs.writeFileSync(requestPath, JSON.stringify({ ...request, unexpected: true }));

@@ -115,6 +115,7 @@ type UnityEnrollmentPolicy struct {
 	RequiredContexts         map[string][]string    `json:"-"`
 	ProtectedBranches        []string               `json:"-"`
 	AllowWorkflowDispatch    bool                   `json:"-"`
+	AllowSchedule            bool                   `json:"-"`
 	Now                      time.Time              `json:"-"`
 }
 
@@ -398,6 +399,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 					steps,
 					protectedBranches,
 					policy.AllowWorkflowDispatch,
+					policy.AllowSchedule,
 				)
 			} else if paid {
 				a.auditPaidJob(
@@ -411,6 +413,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 					licensed,
 					protectedBranches,
 					policy.AllowWorkflowDispatch,
+					policy.AllowSchedule,
 				)
 			}
 		}
@@ -468,6 +471,7 @@ func (a *unityPolicyAnalyzer) auditFallbackCleanup(
 	steps []flattenedUnityStep,
 	protectedBranches map[string]bool,
 	allowWorkflowDispatch bool,
+	allowSchedule bool,
 ) {
 	if unsafeConcurrency(mappingValue(workflow, "concurrency")) {
 		a.analyzer.add("unsafe-workflow-queue", workflowPath, jobName)
@@ -484,7 +488,7 @@ func (a *unityPolicyAnalyzer) auditFallbackCleanup(
 	if mappingValue(job, "env") != nil {
 		a.analyzer.add("job-scoped-unity-credential", workflowPath, jobName)
 	}
-	if !eligibleUnityTrigger(workflow, job, protectedBranches, allowWorkflowDispatch) {
+	if !eligibleUnityTrigger(workflow, job, protectedBranches, allowWorkflowDispatch, allowSchedule) {
 		a.analyzer.add("ineligible-unity-trigger", workflowPath, jobName)
 	}
 	if scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" {
@@ -652,6 +656,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	licensed bool,
 	protectedBranches map[string]bool,
 	allowWorkflowDispatch bool,
+	allowSchedule bool,
 ) {
 	if !licensed {
 		a.analyzer.add("missing-lock-acquire", workflowPath, jobName)
@@ -678,7 +683,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	if jobEnvContainsCredential(job) {
 		a.analyzer.add("job-scoped-unity-credential", workflowPath, jobName)
 	}
-	if !eligibleUnityTrigger(workflow, job, protectedBranches, allowWorkflowDispatch) {
+	if !eligibleUnityTrigger(workflow, job, protectedBranches, allowWorkflowDispatch, allowSchedule) {
 		a.analyzer.add("ineligible-unity-trigger", workflowPath, jobName)
 	}
 
@@ -4346,6 +4351,7 @@ func eligibleUnityTrigger(
 	workflow, job *yaml.Node,
 	protectedBranches map[string]bool,
 	allowWorkflowDispatch bool,
+	allowSchedule bool,
 ) bool {
 	on := mappingValue(workflow, "on")
 	if on == nil {
@@ -4355,6 +4361,8 @@ func eligibleUnityTrigger(
 		switch event {
 		case "workflow_dispatch":
 			return allowWorkflowDispatch
+		case "schedule":
+			return allowSchedule && len(protectedBranches) > 0 && boundedUnitySchedule(config)
 		case "pull_request":
 			return sameRepositoryPullRequestGuard(mappingValue(job, "if"))
 		case "pull_request_target":

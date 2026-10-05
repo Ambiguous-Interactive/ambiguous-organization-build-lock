@@ -28,6 +28,7 @@ func TestRunAddsValidatedRepository(t *testing.T) {
 		"--default-branch", "develop/unity",
 		"--fork=true",
 		"--allow-workflow-dispatch=true",
+		"--allow-schedule=true",
 	}, &stdout, &stderr)
 	if exit != 0 {
 		t.Fatalf("got exit %d\nstdout=%s\nstderr=%s", exit, stdout.String(), stderr.String())
@@ -45,7 +46,7 @@ func TestRunAddsValidatedRepository(t *testing.T) {
 		if repository.Repository == "Ambiguous-Interactive/NewUnityGame" {
 			found = repository.DefaultBranch == "develop/unity" &&
 				repository.Fork &&
-				repository.AllowWorkflowDispatch
+				repository.AllowWorkflowDispatch && repository.AllowSchedule
 		}
 	}
 	if !found {

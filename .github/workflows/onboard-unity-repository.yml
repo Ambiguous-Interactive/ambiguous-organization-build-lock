@@ -84,6 +84,7 @@ jobs:
           TARGET_DEFAULT_BRANCH: ${{ steps.request.outputs.default_branch }}
           TARGET_FORK: ${{ steps.request.outputs.fork }}
           TARGET_ALLOW_WORKFLOW_DISPATCH: ${{ steps.request.outputs.allow_dispatch }}
+          TARGET_ALLOW_SCHEDULE: ${{ steps.request.outputs.allow_schedule }}
         shell: bash
         run: bash tools/workflows/onboard-unity-repository.sh update-policy
 

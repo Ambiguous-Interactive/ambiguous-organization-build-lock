@@ -11,11 +11,13 @@ case "${1:-}" in
       --arg defaultBranch "${TARGET_DEFAULT_BRANCH:?TARGET_DEFAULT_BRANCH is required}" \
       --argjson fork "${TARGET_FORK:?TARGET_FORK is required}" \
       --argjson allowWorkflowDispatch "${TARGET_ALLOW_WORKFLOW_DISPATCH:?TARGET_ALLOW_WORKFLOW_DISPATCH is required}" \
+      --argjson allowSchedule "${TARGET_ALLOW_SCHEDULE:?TARGET_ALLOW_SCHEDULE is required}" \
       '{
         repository: $repository,
         defaultBranch: $defaultBranch,
         fork: $fork,
-        allowWorkflowDispatch: $allowWorkflowDispatch
+        allowWorkflowDispatch: $allowWorkflowDispatch,
+        allowSchedule: $allowSchedule
       }' > "${RUNNER_TEMP:?RUNNER_TEMP is required}/unity-onboarding-request.json"
     ;;
   *)
