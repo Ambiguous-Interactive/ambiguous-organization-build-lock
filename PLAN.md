@@ -4,7 +4,12 @@ Living milestone plan for the organization build lock. Keep it current:
 remove completed or obsolete items after each session. Order milestones by
 impact on licensed-resource safety and consumer CI churn.
 
-## Current state (2026-10-02, session 124)
+## Current state (2026-10-05, session 125)
+
+- Session 125 reviewed all 16 open issues and completed release adoption PR #333.
+  It selected #329. Refused reaper history now leaves retained alert evidence
+  unchanged and reports unknown delivery status in the run. No Unity run is
+  needed. Hosted runner acquisition failures are tracked in #334.
 
 - Session 124 reviewed all 13 open issues and found no open pull requests in this
   repository. It selected #326, the two monitors that named a known condition in a
