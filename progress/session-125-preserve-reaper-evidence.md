@@ -119,3 +119,18 @@ Go 1.27.1, supported Node 24.21.0, golangci-lint 2.14.0, PowerShell 7.6.6,
 ShellCheck 0.11.0, and actionlint 1.7.12 were current at this audit.
 Plugin peer ranges support the updated semantic-release runtime. Seventy-seven
 focused tests, ESLint 10, actionlint, ShellCheck, and credential audit passed.
+
+Final implementation verification: `.devcontainer/scripts/verify.sh` exited 0
+with the complete tooling refresh. It ran 1006 Node tests: 1000 passed, zero
+failed, and six native-platform tests were skipped on Linux. Go tests, vet,
+race tests, both module verification/tidy checks, all linters, the harness,
+and credential audit passed.
+
+Independent tooling review release_review found no actionable findings. It
+checked both official CLI checksums, fallback paths, version contracts, release
+plugin peers, current base-image digest, and the YAML compatibility boundary.
+Its 77 focused tests and ESLint check passed. No remediation was needed in the
+latest monitor, adoption, or tooling review rounds.
+
+PR #336 carries this implementation and closes #329. Remote checks and main
+verification remain required; local passing results do not replace them.
