@@ -11,7 +11,12 @@ or writer App. The current inventory is recorded in
    action in the candidate repository. Classify paid activation, synthetic
    fixtures, intentionally disabled/manual paths, and static references.
 2. Require an eligible trusted trigger: same-repository PR, protected default
-   branch, or controlled dispatch. Fork and Dependabot PRs must remain
+   branch, controlled dispatch, or an opted-in schedule on the protected default
+   branch. Scheduled workflows must use exactly one cron entry, at most daily.
+   The minute and hour must be plain integers. Date fields support numeric
+   wildcards, lists, ranges, and steps. Named months or weekdays are refused.
+   The registry must set `allowSchedule: true`. An absent value is false.
+   Fork and Dependabot PRs must remain
    unlicensed because organization secrets are unavailable.
 3. Add the candidate to the reviewed central consumer registry and continuous
    audit. That audit must read the exact default-branch commit and fail closed
@@ -38,6 +43,11 @@ or writer App. The current inventory is recorded in
 Releases are cut by the automatic `Auto release` workflow. Each release is not
 usable by consumers until a reviewed pull request adds its exact SHA to
 `unity-enrollment-policy.json`.
+
+`Auto release` reports unreleased commits only after semantic-release publishes
+no release. The warning names the last reachable release tag, commit count,
+and subject types found. It also lists commit subject errors. The report does
+not fail the workflow. semantic-release decides which commits produce a release.
 
 After each release, `Auto release` opens an `Authorize vN.N.N release adoption`
 pull request. Every workflow run, including scheduled runs and manual

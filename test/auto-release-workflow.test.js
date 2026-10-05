@@ -34,6 +34,7 @@ test("auto release workflow is scheduled and uses semantic-release", () => {
   assert.match(text, /new_release_major_version\s*==\s*'1'/);
   assert.match(text, /run: bash tools\/workflows\/auto-release\.sh/);
   assert.match(text, /run: bash tools\/workflows\/report-nonconventional-commits\.sh/);
+  assert.match(text, /if: steps\.semantic\.outputs\.new_release_published != 'true'\n\s+run: bash tools\/workflows\/report-nonconventional-commits\.sh/);
   assert.match(text, /new_release_published != 'true'/);
   assert.match(text, /run: bash tools\/workflows\/open-release-authorization-pr\.sh/);
   assert.match(text, /uses: actions\/create-github-app-token@[a-f0-9]{40}\s+#\s+v[0-9.]+\s*$/m);

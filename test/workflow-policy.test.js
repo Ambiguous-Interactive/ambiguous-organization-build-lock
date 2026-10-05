@@ -45,7 +45,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/ci.sh javascript",
       "bash tools/workflows/ci.sh install-shellcheck",
       "bash tools/workflows/ci.sh shellcheck",
-      "node --test test/*.test.js",
+      "node --test --test-concurrency=8 test/*.test.js",
       "go test ./...",
       "go vet ./...",
       "go test -race ./...",

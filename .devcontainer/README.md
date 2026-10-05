@@ -19,6 +19,12 @@ layers and named Go/npm caches. Run the complete local CI contract with:
 .devcontainer/scripts/verify.sh
 ```
 
+The verifier overlaps three independent check groups and keeps their logs
+together. It waits for every group and fails if any group fails. It uses Linux
+`setsid` to stop each group's child processes when interrupted.
+For iteration, run the focused test first. Run the complete verifier before
+handoff.
+
 The lifecycle scripts download module dependencies, preserve command history,
 and leave repository files owned by the host-compatible non-root `vscode`
 user. On every container start, npm updates `@openai/codex@latest` and

@@ -6,6 +6,7 @@ const {
   assert,
   childProcess,
   fs,
+  path,
   gitRun,
   consumerRepinHarness,
   repinEventLog,
@@ -239,14 +240,54 @@ test("release diagnostics report non-conventional subjects since the newest rele
 });
 
 
-test("release diagnostics stay silent for conventional subjects and for no unreleased commits", (t) => {
-  const conventional = diagnosticHarness(t, ["fix(release): repair discovery", "docs: record session"]);
-  assert.equal(conventional.run().status, 0);
-  assert.equal(fs.readFileSync(conventional.summary, "utf8"), "");
+test("release diagnostics report conventional unreleased trains when the caller reports no release", (t) => {
+  const harness = diagnosticHarness(t, ["chore: update tools", "docs: record session", "ci: update checks", "test: add coverage"]);
+  const result = harness.run();
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(harness.summary, "utf8");
+  assert.match(summary, /Unreleased commits after `v1\.14\.0`: 4/);
+  assert.match(summary, /chore, ci, docs, test/);
+  assert.match(result.stderr, /::warning::.*unreleased commit/);
+  assert.doesNotMatch(summary, /without a conventional subject/);
+});
 
-  const noCommits = diagnosticHarness(t, []);
-  assert.equal(noCommits.run().status, 0);
-  assert.equal(fs.readFileSync(noCommits.summary, "utf8"), "");
+
+test("release diagnostics defer release semantics to the caller for types and breaking notes", (t) => {
+  const harness = diagnosticHarness(t, [
+    "feat: add capability", "FIX: repair discovery", "perf: reduce startup cost",
+    "chore: migrate\n\nBREAKING CHANGE: old configuration is no longer supported",
+    'REVERT "feat: add capability"\n\nThis reverts commit abcdef1234567890.'
+  ]);
+  const result = harness.run();
+  assert.equal(result.status, 0, result.stderr);
+  const summary = fs.readFileSync(harness.summary, "utf8");
+  assert.match(summary, /Unreleased commits after `v1\.14\.0`: 5/);
+  assert.match(summary, /semantic-release published no release/);
+  assert.doesNotMatch(summary, /No release trigger|will not publish/);
+});
+
+
+test("release diagnostics stay silent when there are no unreleased commits", (t) => {
+  const harness = diagnosticHarness(t, []);
+  const result = harness.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(harness.summary, "utf8"), "");
+  assert.equal(result.stderr, "");
+});
+
+
+test("release diagnostics stay successful when Git or summary writes fail", (t) => {
+  const noGit = diagnosticHarness(t, ["chore: update tools"]);
+  fs.rmSync(path.join(noGit.root, ".git"), { recursive: true });
+  const gitResult = noGit.run();
+  assert.equal(gitResult.status, 0, gitResult.stderr);
+  assert.match(gitResult.stderr, /::warning::/);
+  const noWrite = diagnosticHarness(t, ["chore: update tools"]);
+  fs.rmSync(noWrite.summary);
+  fs.mkdirSync(noWrite.summary);
+  const writeResult = noWrite.run();
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  assert.match(writeResult.stderr, /::warning::/);
 });
 
 
