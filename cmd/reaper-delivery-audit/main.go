@@ -293,13 +293,13 @@ func run(
 	}
 	// The classified reason is stated first, so a publication refusal never hides
 	// the cause this run actually proved.
-	if syncErr := client.syncIncident(ctx, config.Repository, result); syncErr != nil {
-		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: "+reasonSyncFailed+".")
-		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
-	}
 	if auditFailed {
 		_, _ = fmt.Fprintf(stderr, "Reaper delivery audit failed: %s.\n", result.Reason)
 		return conclude(stderr, reporter, result.Reason, "", 1)
+	}
+	if syncErr := client.syncIncident(ctx, config.Repository, result); syncErr != nil {
+		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: "+reasonSyncFailed+".")
+		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
 	}
 	if !result.Healthy {
 		if code := conclude(stderr, reporter, result.Reason, reaperHandle(result.Latest, config), 0); code != 0 {

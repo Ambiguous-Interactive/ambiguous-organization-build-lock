@@ -636,7 +636,9 @@ synchronized; the open issue carries the operational red state without making
 every scheduled monitor run itself fail. Both monitors also state the condition
 in the run itself, as the next paragraph describes. The workflow fails red when
 run history is unavailable, malformed, oversized, cross-origin, or otherwise
-ambiguous, or when incident synchronization cannot be confirmed.
+ambiguous, or when incident synchronization cannot be confirmed. A refused
+run-history read or classification leaves the alert issue unchanged. The run
+summary reports unknown delivery status. It does not replace a retained run ID.
 
 A green run must never hide a known condition, so `Build lock incident recovery
 audit` and `Reaper delivery audit` both follow one rule. Every classified

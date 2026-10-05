@@ -407,38 +407,55 @@ func TestRunSucceedsAfterSynchronizingKnownAlert(t *testing.T) {
 	}
 }
 
-func TestRunFailsClosedAfterSynchronizingAmbiguousEvidence(t *testing.T) {
+func TestRunRefusesAmbiguousEvidenceWithoutTouchingAlerts(t *testing.T) {
 	t.Parallel()
-	var issueCreated bool
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch {
-		case strings.Contains(request.URL.Path, "/actions/workflows/"):
-			_, _ = fmt.Fprint(writer, `{"workflow_runs":[`)
-		case request.Method == http.MethodGet:
-			_, _ = fmt.Fprint(writer, `[]`)
-		default:
-			issueCreated = true
-			writer.WriteHeader(http.StatusCreated)
-			_, _ = fmt.Fprint(writer, `{}`)
-		}
-	}))
-	defer server.Close()
-
-	config := cliConfig{
-		Repository:       "owner/repo",
-		Token:            "test-token",
-		APIURL:           server.URL,
-		Workflow:         "reap-stale-locks.yml",
-		MaxDeliveryDelay: 30 * time.Minute,
-		MaxRunDuration:   15 * time.Minute,
-	}
-	var stdout, stderr strings.Builder
-	if code := run(context.Background(), config, testNow, server.Client(), &stdout, &stderr); code != 1 {
-		t.Fatalf("run returned %d, want 1", code)
-	}
-	if !issueCreated || stdout.Len() != 0 || !strings.Contains(stderr.String(), "workflow-api-unavailable") ||
-		strings.Contains(stderr.String(), "test-token") {
-		t.Fatalf("run did not fail closed safely: created=%v stdout=%q stderr=%q", issueCreated, stdout.String(), stderr.String())
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+		reason string
+	}{
+		{"API refused", http.StatusForbidden, `{}`, reasonRunHistoryUnreadable},
+		{"malformed JSON", http.StatusOK, `{"workflow_runs":[`, reasonRunHistoryUnreadable},
+		{"invalid run", http.StatusOK, scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success").manual()), reasonEvidenceInvalid},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var issueRequests int
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if strings.Contains(request.URL.Path, "/actions/workflows/") {
+					writer.WriteHeader(test.status)
+					_, _ = fmt.Fprint(writer, test.body)
+					return
+				}
+				issueRequests++
+				writer.WriteHeader(http.StatusForbidden)
+			}))
+			defer server.Close()
+			config := auditConfig()
+			config.APIURL = server.URL
+			config.SummaryPath = filepath.Join(t.TempDir(), "summary.md")
+			var stdout, stderr strings.Builder
+			if code := run(context.Background(), config, testNow, server.Client(), &stdout, &stderr); code != 1 {
+				t.Fatalf("run returned %d, want 1", code)
+			}
+			if issueRequests != 0 || stdout.Len() != 0 {
+				t.Fatalf("refused evidence touched alerts: requests=%d stdout=%q", issueRequests, stdout.String())
+			}
+			wantStderr := "Reaper delivery audit failed: " + test.reason + ".\n"
+			if stderr.String() != wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), wantStderr)
+			}
+			summary, err := os.ReadFile(config.SummaryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(summary), "delivery status is unknown.") ||
+				!strings.Contains(string(summary), "Reason: `"+test.reason+"`.") ||
+				strings.Contains(string(summary)+stderr.String(), config.Token) {
+				t.Fatalf("unsafe refusal publication: summary=%q stderr=%q", summary, stderr.String())
+			}
+		})
 	}
 }
 
