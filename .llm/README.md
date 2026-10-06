@@ -60,6 +60,10 @@ Generation is deterministic, recursive, timestamp-free, and uses repository
 relative POSIX paths. `check` validates metadata, pointer thinness, index drift,
 forbidden symlinks, and the exact 300-line maximum.
 
+When `PLAN.md` exists, `check` also enforces its separate 60-line maximum and
+rejects completed checklist items. Content ownership and session pruning follow
+the [task-driven-development skill](./skills/task-driven-development/SKILL.md).
+
 The committed pre-commit hook materializes and validates the staged Git index,
 so partially staged work cannot pair source knowledge with an index generated
 from different working-tree content. CI and the devcontainer verifier run the

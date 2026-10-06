@@ -197,6 +197,28 @@ test("line counting treats 300 as valid and 301 as invalid", async (t) => {
   );
 });
 
+test("plans have a separate line budget and exclude completed checklist items", async (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { generateIndex, verifyRepository } = await loadHarness();
+  fs.writeFileSync(path.join(root, ".llm", "index.md"), generateIndex(root));
+  const plan = path.join(root, "PLAN.md");
+  const errors = () => verifyRepository(root, { checkPointers: false }).errors;
+
+  for (const newline of ["\n", "\r\n"]) {
+    fs.writeFileSync(plan, Array(60).fill("- [ ] Next action (#1).").join(newline));
+    assert.deepEqual(errors(), []);
+    fs.appendFileSync(plan, `${newline}One more line${newline}`);
+    assert.ok(errors().includes("PLAN.md: 61 lines exceeds 60; move details to knowledge or progress records"));
+  }
+  for (const item of ["- [x] Done", "  * [X] Done", "+ [x] Done", "1. [x] Done", "2) [X] Done"]) {
+    fs.writeFileSync(plan, `# Plan\n\n${item}\n`);
+    assert.ok(errors().includes("PLAN.md: completed checklist items belong in progress records"));
+  }
+  fs.writeFileSync(plan, "# Plan\n\n- [ ] Confirm the next result (#1).\n");
+  assert.deepEqual(errors(), []);
+});
+
 test("progress records reject credential-shaped literals without echoing them", async (t) => {
   const root = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
