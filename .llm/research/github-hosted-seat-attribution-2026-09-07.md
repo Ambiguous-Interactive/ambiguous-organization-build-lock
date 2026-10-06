@@ -36,4 +36,5 @@ here.
 
 Seat attribution needs both halves: the address range proves the runner is
 GitHub-hosted, and the audit names the workflow and job. Disposition of the
-identified jobs is a maintainer decision recorded in `PLAN.md` (M1).
+identified jobs is a maintainer decision preserved in the M1 section of the
+[session 127 plan archive](../../progress/session-127-lean-plan.md#archived-plan).

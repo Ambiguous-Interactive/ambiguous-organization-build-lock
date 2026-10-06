@@ -4,6 +4,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { fileURLToPath } from "node:url";
 export const MAX_LINES = 300;
+export const MAX_PLAN_LINES = 60;
 export const POINTERS = [
   { path: "AGENTS.md", title: "Codex and OpenAI Agents", target: ".llm/context.md" },
   { path: "CLAUDE.md", title: "Claude Code", target: ".llm/context.md" },
@@ -212,6 +213,31 @@ function auditProgressRecords(root) {
   return errors;
 }
 
+function auditPlan(root) {
+  const planPath = path.join(root, "PLAN.md");
+  if (!fs.existsSync(planPath)) return [];
+  if (fs.lstatSync(planPath).isSymbolicLink()) {
+    return ["PLAN.md: symbolic links are not allowed in the LLM harness"];
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      fs.readFileSync(planPath)
+    );
+  } catch {
+    return ["PLAN.md: cannot read valid UTF-8 text"];
+  }
+  const errors = [];
+  const lines = countLines(text);
+  if (lines > MAX_PLAN_LINES) {
+    errors.push(`PLAN.md: ${lines} lines exceeds ${MAX_PLAN_LINES}; move details to knowledge or progress records`);
+  }
+  if (/^\s*(?:[-*+]|\d+[.)])\s+\[[xX]\]/m.test(text)) {
+    errors.push("PLAN.md: completed checklist items belong in progress records");
+  }
+  return errors;
+}
+
 function catalog(root) {
   const entries = [];
   const errors = [];
@@ -409,6 +435,7 @@ export function verifyRepository(root = process.cwd(), options = {}) {
     }
   }
   errors.push(...auditProgressRecords(root));
+  errors.push(...auditPlan(root));
   return { errors: [...new Set(errors)] };
 }
 

@@ -1,134 +1,26 @@
 # Plan
 
-Living milestone plan for the organization build lock. Keep it current:
-remove completed or obsolete items after each session. Order milestones by
-impact on licensed-resource safety and consumer CI churn.
+Open work only. Maintenance rules: [task-driven development](.llm/skills/task-driven-development/SKILL.md#plan-maintenance).
 
-## Current state (2026-10-05, session 125)
+## Future work and blockers
 
-- Session 125 reviewed all 16 open issues and completed release adoption PR #333.
-  It selected #329. Refused reaper history now leaves retained alert evidence
-  unchanged and reports unknown delivery status in the run. No Unity run is
-  needed. Hosted runner acquisition failures are tracked in #334.
-
-- Session 124 reviewed all 13 open issues and found no open pull requests in this
-  repository. It selected #326, the two monitors that named a known condition in a
-  step log only. Both now state their conclusion and its reason code in the job
-  summary, and the condition that keeps the run green also reaches the
-  annotations tab. No licensed Unity job spends a cycle on it.
-- Session 098 reviewed all 14 open issues and found no open pull requests in
-  this repository. It selected #283, the current repin YAML comment defect,
-  for its direct consumer CI impact and zero licensed Unity job changes.
-- Session 114's #283 hard-coded two spaces before every repin version comment.
-  That is IshoBoy's rule, not the organization's: unity-helpers runs Prettier
-  over `.github/` and asserts one space, so the v1.16.0 offer left its `main`
-  red after auto-merge (#307). The rewrite now keeps each consumer's own
-  spacing, reads a new comment's gap from that repository, and fails closed on
-  an absent or split precedent.
-- Higher impact items remain gated by external evidence or authority: #51
-  needs owner-approved secret scope changes; #83 needs entitlement and portal
-  proof; #44 needs ruleset authority; #113 needs its reported findings
-  reconciled against the aggregate visible in its audited workflow.
-
-- M3 was completed (see Completed milestones). Issue #113 reopened with two
-  DoxReloaded aggregate findings at commit `1bc7790`. The audited workflow
-  contains a `ci-success` aggregate using the central validator; reproduce the
-  exact finding before changing the consumer or analyzer.
-- Session 097 verified the #279 repin fix live: dispatched run 34768908054
-  completed green with the bounded superseded-offer scan in effect, and
-  #280 closed with that run as evidence. The day's scheduled run
-  (34743810332, created 06:52 UTC) started before #279 merged and still
-  shows the old failure.
-- Session 097 RCA'd #278 from lock-state history: the quoted "collision"
-  lines are the release leg's normal summary output, and attempts 1 and 2
-  of qora-redux run 34736599983 acquired, held, and released clean. The
-  consumer's own push plus the reviewed `cancel-in-progress: true` flip
-  cancelled attempt 3 before acquire. The same attribution data point went
-  to #277; the remaining ask there stays an accepted evidence gap.
-- The cancellation contract is standing: workflow scopes that reach acquire
-  carry literal `cancel-in-progress: true`, aggregate reporters keep
-  literal false, and licensed matrices use `fail-fast: false`.
-- v1.14.0 (PR #224) and v1.14.2 (d79e1cc2a, PR #247) are released and
-  authorized for consumer pins. v1.14.1 stays unauthorized by design
-  (superseded within minutes; discovery offers only the newest release).
-- `Auto release` opens the release-authorization pull request after every
-  release. Merging it stays the human decision.
-- The cleanup classifier attributes generic return failures through
-  `licensing-codes-checked` and `licensing-code-matched` outputs.
-- The enrollment audit rejects licensed Unity jobs on GitHub-hosted or
-  ambiguous runners (`unsafe-hosted-unity-runner`), admits the central
-  return on Windows and, for pins listed in the reviewed
-  `approvedDarwinReturnShas` allowlist, on macOS. The allowlist is empty
-  until a Darwin verifier release exists (#153, #228).
-- The Darwin trusted return runtime landed (PR #240, squash-merged as
-  6a384393c). The analyzer still refuses every Darwin return until
-  `approvedDarwinReturnShas` names a release (#231).
-- Repin automation honors reviewed, expiring `repinExceptions`, closes its
-  own superseded offers, updates release version comments in each consumer's
-  own spacing for Dependabot visibility, and enables auto-merge on every offer
-  (squash preferred; a repository-level `Allow auto-merge` opt-out restores a
-  manual gate). A closed repin pull request is the consumer's adoption
-  answer: never re-offered, never force-updated.
-- The 64-code audit vocabulary is test-locked to `docs/consumer-enrollment.md`.
-- The scheduled audit survives a consumer push that lands mid-run, and
-  reports stale or expired `repinExceptions` entries.
-- The central merge-policy drift audit (#44 item 7, #252) compares the
-  reviewed expectation list with each consumer's live rulesets daily. The
-  #252 blind spot (ruleset `bypass_actors` need a ruleset-write caller) is
-  filled by consumer attestations in
-  `.github/merge-policy-attestation.json`, proven fresh against the live
-  ruleset (session 083). All attestation pull requests merged; ruleset
-  22983578 on unity-helpers requires `Unity CI Success`.
-- Session 091 answered the lock-side half of #269: the release action
-  publishes a redacted `peer-timeline` output and job-summary table. The
-  consumer half is canary item 12 of the enrollment contract. Lock-state
-  history proves no peer held the lock in either #269 casualty window.
-
-## M1: attribute every Unity seat to a lock holder (#223, #83)
-
-- [x] Classifier emits licensing-code attribution (PR #224).
-- [x] Audit names licensed jobs that run outside the self-hosted fleet.
-- [x] Decide the disposition of the unity-helpers hosted export jobs:
-      unity-helpers moved both jobs to the self-hosted Windows fleet at
-      audited commit `93671a56` (#226 closed 2026-09-07). The audit confirms
-      `unsafe-hosted-unity-runner` no longer appears for that repository.
-- [ ] Determine whether a peer activation can invalidate a live incumbent's
-      seat. Needs Unity portal evidence (#223, section 3).
-
-## M2: shared-seat capacity decision (#83)
-
-- [x] Release the benign shared-seat handoff normally: the classifier confirms
-      a `400006` return whose log proves the ULF serial return with a
-      completed command (maintainer directive 2026-09-07; implements the
-      re-opened #106 part 2). No quarantine, no red cleanup gate.
-- [x] Keep fail-closed quarantine for a `400006` without ULF proof, degraded
-      reports, timeouts, truncation, and termination. Enforced by the session
-      068 classifier verdict tests; verified again 2026-09-07.
-- [ ] Decide holder capacity against real seat capacity: independent
-      returnable Unity identities, slot-aware state, and two-order live proof.
-
-## Completed milestones
-
-- M3 (consumer enrollment drift, #113) closed 2026-09-13: zero-touch repin
-  automation with auto-merge, the per-code fix contract, the #274 flip
-  cohort (DoxReloaded #835, DxMessaging #584, IshoBoy #906, unity-helpers
-  #776; qora-redux `main` already canceled, unity-builder exempt), and the
-  unity-helpers static-matrix restore (#785) drove the audit to 0 findings
-  over 118 active inventory rows. The alert auto-closed as completed
-  (run 34770239068).
-
-## Blocked on authority or evidence (do not start here)
-
-- #29 canaries and monitoring, #44 truthful aggregates, #51 App credential
-  scope, #53 FIFO starvation: each needs organization-owner authority,
-  portal decisions, or multi-week live evidence windows. Triage recorded
-  2026-09-06 (session 066) and 2026-09-07 (session 067).
-- #153 Windows-container trusted cleanup and the Darwin verifier release:
-  PR #240 landed the Darwin action design with its requirement compiled in
-  CI (draft #228 is closed as superseded), and stays runtime-only until
-  #229's canary reads the Developer ID Application team on a real macOS
-  install and an exact-head licensed canary runs. The enrollment-audit
-  admission contract for the Darwin shape is done; the reviewed
-  `approvedDarwinReturnShas` merge is the separate authorization step that
-  follows a Darwin-capable release. Issue #229 tracks the remaining canary,
-  authorization, and Windows-container work.
+- Credential scope (#51): inventory App and secret access; obtain owner
+  authorization before scope changes.
+- Merge gates (#44, #255): prove required-check source binding and enforcement;
+  obtain ruleset authority for changes.
+- Seat attribution (#223): use Unity portal evidence to determine whether peer
+  activation can invalidate an incumbent seat.
+- Shared-seat capacity (#83): prove independent returnable identities and both
+  return orders before deciding capacity or slot-aware state changes.
+- Queue fairness (#53): measure live two-runner load before changing admission.
+- Platform cleanup (#153, #229, #231, #249): collect native/container canary and
+  macOS signing evidence; authorize the exact Darwin-capable release separately.
+- Operational canaries (#29): obtain deliberate-failure and seven-day monitoring
+  evidence before closing the rollout.
+- Scheduler availability (#334): prove an independent delivery path or obtain
+  an owner decision; recovered monitor runs alone do not close the issue.
+- Consumer failure (#278): collect consumer test and retry evidence; recorded
+  lock cleanup was clean.
+- Cancellation attribution (#277): obtain actor evidence beyond run records.
+- Linter compatibility (#335): move actionlint's YAML dependency only after
+  the pinned linter supports the newer API and passes validation.

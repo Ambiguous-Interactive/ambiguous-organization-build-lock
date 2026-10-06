@@ -143,3 +143,44 @@ cases became unnecessary when the duplicated parser was removed.
 The latest independent review rounds found no actionable findings in #328,
 #330, #332, the verifier, the CI command, or the knowledge change. Full local
 verification ran after implementation and review remediation stopped.
+
+## Verified remote delivery (2026-10-06)
+
+PR #337 merged as `57107d1e01c4ed5aafbeaefd47712bb121bd3272`.
+Fresh GitHub API checks confirm that #328, #330, and #332 are closed.
+All applicable PR checks passed, including Bugbot and native Windows/macOS.
+The PR has no review submissions or inline comments. Independent review and
+remediation evidence remains in the section above.
+
+Merged-main evidence:
+
+- Build lock CI 37390137569: all three jobs passed.
+- Development container 37390137372: amd64 and arm64 passed.
+- Enrollment audit 37390136471: passed, complete retrieval, zero findings,
+  115 active inventory rows. Alert #113 is closed. Its older reproduction
+  task is obsolete at the audited consumer commits.
+- Merge-policy audit 37390136610: passed. This does not close #255's
+  enforcement and source-binding requirements.
+- Incident recovery audit 37398519667 and reaper delivery audit 37400198701:
+  passed on the same merged SHA.
+
+GitHub job timestamps confirm the PR's recorded comparison:
+
+| Validation job | Prior main | Merged main |
+| --- | ---: | ---: |
+| Linux action checks | 90 s | 55 s |
+| Windows native checks | 59 s | 84 s |
+| macOS native checks | 10 s | 9 s |
+| Container amd64 | 290 s | 251 s |
+| Container arm64 | 222 s | 217 s |
+| Total runner time | 671 s | 616 s |
+
+Total observed runner time fell 8%. The longest job fell from 290 to 251
+seconds. The Linux Node step stayed at 15 seconds. The Windows command did
+not change; this comparison does not establish a Windows speed improvement.
+No check or original test was removed. Hosted variation limits extrapolation.
+The local 43% verifier improvement and same-suite concurrency experiments
+remain recorded above. No draft, dependency, or other PR was open when checked.
+
+Final remote evidence is also retained in
+[PR #337](https://github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/pull/337).

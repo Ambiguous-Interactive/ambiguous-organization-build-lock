@@ -46,6 +46,10 @@ indexed knowledge.
 Never weaken a fail-closed path merely to make a check green. Do not edit
 unrelated user changes in a dirty worktree.
 
+`PLAN.md` contains only open work, next actions, and blockers. Keep it within
+60 physical lines. Follow the plan maintenance rules in the
+[task-driven-development skill](./skills/task-driven-development/SKILL.md).
+
 ## User-facing writing
 
 Use Simplified Technical English (STE) for all copy you present to users:
