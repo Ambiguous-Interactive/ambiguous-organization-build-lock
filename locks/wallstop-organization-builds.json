@@ -29,20 +29,6 @@
       "expiresAt": "2026-10-07T02:57:50.859Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "112533139474"
-    },
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:37540709128:unity-tests:6000.6.0f1",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "37540709128",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/37540709128",
-      "queuedAt": "2026-10-06T22:57:54.937Z",
-      "acquiredAt": "2026-10-06T22:57:57.949Z",
-      "expiresAt": "2026-10-07T02:57:57.949Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "112533139421"
     }
   ],
   "queue": [
@@ -59,7 +45,22 @@
       "jobId": "112533139453"
     }
   ],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "47b7f89f-a79c-4fb9-9370-a017a84307d3",
+      "holderId": "Ambiguous-Interactive/unity-helpers:37540709128:unity-tests:6000.6.0f1",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "37540709128",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/37540709128",
+      "runnerId": "ELI-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder job 112533139421 is completed",
+      "createdAt": "2026-10-06T23:13:20.110Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-10-06T23:02:43.506Z"
+  "updatedAt": "2026-10-06T23:13:20.110Z"
 }
