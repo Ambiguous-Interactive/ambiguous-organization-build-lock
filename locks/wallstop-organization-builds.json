@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/doughby-td:37664333456:unity:doughby-td",
-    "repository": "Ambiguous-Interactive/doughby-td",
-    "workflow": "ci",
-    "job": "unity",
-    "runId": "37664333456",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37664333456",
-    "queuedAt": "2026-10-07T18:08:29.887Z",
-    "acquiredAt": "2026-10-07T18:08:32.393Z",
-    "expiresAt": "2026-10-07T22:08:32.393Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/doughby-td:37664333456:unity:doughby-td",
-      "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "37664333456",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37664333456",
-      "queuedAt": "2026-10-07T18:08:29.887Z",
-      "acquiredAt": "2026-10-07T18:08:32.393Z",
-      "expiresAt": "2026-10-07T22:08:32.393Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "scheduled stale reaping: holder run is completed",
       "createdAt": "2026-10-07T17:05:53.950Z"
+    },
+    {
+      "reservationId": "e071171a-eca8-43fc-bb54-9b594c94b67d",
+      "holderId": "Ambiguous-Interactive/doughby-td:37664333456:unity:doughby-td",
+      "repository": "Ambiguous-Interactive/doughby-td",
+      "workflow": "ci",
+      "job": "unity",
+      "runId": "37664333456",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37664333456",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-07T18:11:00.735Z",
+      "availableAt": "2026-10-07T18:11:01.735Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-10-07T18:08:32.394Z"
+  "updatedAt": "2026-10-07T18:11:00.735Z"
 }
