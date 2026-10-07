@@ -1,40 +1,36 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/doughby-td:37665055688:unity:doughby-td",
+    "repository": "Ambiguous-Interactive/doughby-td",
+    "workflow": "ci",
+    "job": "unity",
+    "runId": "37665055688",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37665055688",
+    "queuedAt": "2026-10-07T18:14:06.185Z",
+    "acquiredAt": "2026-10-07T18:14:07.724Z",
+    "expiresAt": "2026-10-07T22:14:07.724Z",
+    "runnerId": "ELI-MACHINE"
+  },
+  "holders": [
     {
-      "reservationId": "9504f87f-b818-45a6-a7c0-e2d8b923dc06",
-      "holderId": "Ambiguous-Interactive/IshoBoy:37652827842:unity-validation:isho-ci",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Unity CI Validation",
-      "job": "unity-validation",
-      "runId": "37652827842",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/37652827842",
-      "runnerId": "ELI-MACHINE",
-      "state": "quarantine",
-      "reason": "scheduled stale reaping: holder run is completed",
-      "createdAt": "2026-10-07T17:05:53.950Z"
-    },
-    {
-      "reservationId": "e071171a-eca8-43fc-bb54-9b594c94b67d",
-      "holderId": "Ambiguous-Interactive/doughby-td:37664333456:unity:doughby-td",
+      "holderId": "Ambiguous-Interactive/doughby-td:37665055688:unity:doughby-td",
       "repository": "Ambiguous-Interactive/doughby-td",
       "workflow": "ci",
       "job": "unity",
-      "runId": "37664333456",
+      "runId": "37665055688",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37664333456",
-      "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-10-07T18:11:00.735Z",
-      "availableAt": "2026-10-07T18:11:01.735Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/37665055688",
+      "queuedAt": "2026-10-07T18:14:06.185Z",
+      "acquiredAt": "2026-10-07T18:14:07.724Z",
+      "expiresAt": "2026-10-07T22:14:07.724Z",
+      "runnerId": "ELI-MACHINE"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-07T18:11:00.735Z"
+  "updatedAt": "2026-10-07T18:14:07.724Z"
 }
