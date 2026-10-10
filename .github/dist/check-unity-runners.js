@@ -2,7 +2,7 @@
 "use strict";
 
 const fs = require("fs");
-const { api, createGitHubAppAuth, workflowCommandData } = require("./build-lock.js");
+const { api, createGitHubAppAuth, summaryCell, workflowCommandData } = require("./build-lock.js");
 
 const AUTHORIZED_OWNER = "Ambiguous-Interactive";
 const MAX_RUNNER_INVENTORY_PAGES = 10;
@@ -246,6 +246,8 @@ function runnerAvailability(runner) {
   return { name: runner.name, status, busy: runner.busy === true };
 }
 
+// The summary is markdown a person reads. Every name and label set here was typed
+// by an organization admin, so each rides in a summaryCell and carries no markup.
 function availabilityLine(match) {
   const counts = { online: 0, busy: 0, offline: 0, unknown: 0 };
   for (const runner of match.runners) {
@@ -254,9 +256,12 @@ function availabilityLine(match) {
       counts.busy += 1;
     }
   }
-  const names = match.runners.map((runner) => runner.name).join(", ") || "none";
+  const names =
+    match.runners
+      .map((runner) => summaryCell(runner.name))
+      .join(", ") || "none";
   return (
-    `[${match.labels.join(", ")}]: ${match.runners.length} matched; ` +
+    `${summaryCell(`[${match.labels.join(", ")}]`)}: ${match.runners.length} matched; ` +
     `online ${counts.online} (busy ${counts.busy}); offline ${counts.offline}; ` +
     `unknown ${counts.unknown}; runners: ${names}`
   );
@@ -271,15 +276,15 @@ function offlineNotices(matches) {
     for (const runner of match.runners) {
       if (runner.status === "offline") {
         notices.push(
-          `Runner ${runner.name} matches [${match.labels.join(", ")}] and reports offline. ` +
-            "The job queues until it reconnects; it is not lost. " +
+          `Runner ${summaryCell(runner.name)} matches ${summaryCell(`[${match.labels.join(", ")}]`)} ` +
+            "and reports offline. The job queues until it reconnects; it is not lost. " +
             "Recovery: confirm the host is on and its runner service is connected. " +
             "An organization admin can check Settings > Actions > Runners."
         );
       } else if (runner.status === "unknown") {
         notices.push(
-          `Runner ${runner.name} matches [${match.labels.join(", ")}] but reports no ` +
-            "connection status, so this preflight cannot tell online from offline. " +
+          `Runner ${summaryCell(runner.name)} matches ${summaryCell(`[${match.labels.join(", ")}]`)} ` +
+            "but reports no connection status, so this preflight cannot tell online from offline. " +
             "Treat the job queue as the authority."
         );
       }

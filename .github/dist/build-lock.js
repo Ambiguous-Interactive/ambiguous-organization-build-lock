@@ -4938,6 +4938,7 @@ module.exports = {
   runCancellationCleanup,
   runPostCleanup,
   selectEligibleQueueEntries,
+  summaryCell,
   workflowCommandData,
   writeState
 };

@@ -122,13 +122,21 @@ test("availability lines count matched, online, busy, offline, and unknown runne
 
   assert.equal(
     availabilityLine(match),
-    "[self-hosted, Windows]: 3 matched; online 1 (busy 1); offline 1; unknown 1; " +
-      "runners: busy-host, asleep-host, mystery-host"
+    "`[self-hosted, Windows]`: 3 matched; online 1 (busy 1); offline 1; unknown 1; " +
+      "runners: `busy-host`, `asleep-host`, `mystery-host`"
   );
   assert.equal(
     availabilityLine({ labels: ["self-hosted"], runners: [] }),
-    "[self-hosted]: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
+    "`[self-hosted]`: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
   );
+
+  const hostile = {
+    labels: ['win`dow[s](https://x)'],
+    runners: [{ name: "`pwn`", status: "online", busy: false }]
+  };
+  const line = availabilityLine(hostile);
+  assert.doesNotMatch(line.replace(/^`[^`]*`/, "").replace(/`[^`]*`/g, ""), /https:|\[|\]/);
+  assert.equal(line, "`[win'dow[s](https://x)]`: 1 matched; online 1 (busy 0); offline 0; unknown 0; runners: `'pwn'`");
 });
 
 test("offline and unknown matches carry a recovery path, and online matches carry none", () => {
@@ -396,7 +404,7 @@ test("runtime requests only organization runner read permission and rejects an e
   );
   assert.match(
     fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8"),
-    /\[self-hosted, windows, unity\]: 1 matched; online 1 \(busy 0\); offline 0; unknown 0/
+    /`\[self-hosted, windows, unity\]`: 1 matched; online 1 \(busy 0\); offline 0; unknown 0/
   );
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
@@ -760,7 +768,7 @@ test("a registered label set passes on any connection status, and reports what i
   const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
   assert.match(
     summary,
-    /\[self-hosted, linux\]: 1 matched; online 0 \(busy 0\); offline 1; unknown 0; runners: box-linux/
+    /`\[self-hosted, linux\]`: 1 matched; online 0 \(busy 0\); offline 1; unknown 0; runners: `box-linux`/
   );
   assert.match(
     summary,
