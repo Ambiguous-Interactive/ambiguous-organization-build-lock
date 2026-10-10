@@ -18,7 +18,7 @@ outputs:
   registered-runner-count:
     description: Number of registered runners in groups visible to the calling repository.
   matched-runners:
-    description: JSON array of per-label-set entries carrying the matching registered runner names.
+    description: JSON array of per-label-set entries carrying matching runners with name, status, and busy.
 runs:
   using: node24
   main: ../../dist/check-unity-runners.js

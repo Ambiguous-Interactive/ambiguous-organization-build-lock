@@ -122,12 +122,12 @@ test("availability lines count matched, online, busy, offline, and unknown runne
 
   assert.equal(
     availabilityLine(match),
-    "[self-hosted, Windows]: 3 matched; online 1 (busy 1); offline 1; unknown 1; " +
-      "runners: busy-host, asleep-host, mystery-host"
+    "`[self-hosted, Windows]`: 3 matched; online 1 (busy 1); offline 1; unknown 1; " +
+      "runners: `busy-host`, `asleep-host`, `mystery-host`"
   );
   assert.equal(
     availabilityLine({ labels: ["self-hosted"], runners: [] }),
-    "[self-hosted]: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
+    "`[self-hosted]`: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
   );
 });
 
@@ -396,7 +396,7 @@ test("runtime requests only organization runner read permission and rejects an e
   );
   assert.match(
     fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8"),
-    /\[self-hosted, windows, unity\]: 1 matched; online 1 \(busy 0\); offline 0; unknown 0/
+    /`\[self-hosted, windows, unity\]`: 1 matched; online 1 \(busy 0\); offline 0; unknown 0/
   );
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
@@ -760,7 +760,7 @@ test("a registered label set passes on any connection status, and reports what i
   const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
   assert.match(
     summary,
-    /\[self-hosted, linux\]: 1 matched; online 0 \(busy 0\); offline 1; unknown 0; runners: box-linux/
+    /`\[self-hosted, linux\]`: 1 matched; online 0 \(busy 0\); offline 1; unknown 0; runners: `box-linux`/
   );
   assert.match(
     summary,
