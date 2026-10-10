@@ -237,6 +237,57 @@ function matchingRegisteredRunners(runners, requiredLabels) {
   });
 }
 
+// The reader app sees every field the runner inventory returns, but a group page
+// without the status word says nothing about the connection. Unknown is reported,
+// never guessed.
+function runnerAvailability(runner) {
+  const status =
+    runner.status === "online" || runner.status === "offline" ? runner.status : "unknown";
+  return { name: runner.name, status, busy: runner.busy === true };
+}
+
+function availabilityLine(match) {
+  const counts = { online: 0, busy: 0, offline: 0, unknown: 0 };
+  for (const runner of match.runners) {
+    counts[runner.status] += 1;
+    if (runner.busy) {
+      counts.busy += 1;
+    }
+  }
+  const names = match.runners.map((runner) => runner.name).join(", ") || "none";
+  return (
+    `[${match.labels.join(", ")}]: ${match.runners.length} matched; ` +
+    `online ${counts.online} (busy ${counts.busy}); offline ${counts.offline}; ` +
+    `unknown ${counts.unknown}; runners: ${names}`
+  );
+}
+
+// A registered runner that reports offline still holds a legitimate place in the
+// queue, so this stays a notice. A busy runner is working infrastructure and gets
+// no notice at all.
+function offlineNotices(matches) {
+  const notices = [];
+  for (const match of matches) {
+    for (const runner of match.runners) {
+      if (runner.status === "offline") {
+        notices.push(
+          `Runner ${runner.name} matches [${match.labels.join(", ")}] and reports offline. ` +
+            "The job queues until it reconnects; it is not lost. " +
+            "Recovery: confirm the host is on and its runner service is connected. " +
+            "An organization admin can check Settings > Actions > Runners."
+        );
+      } else if (runner.status === "unknown") {
+        notices.push(
+          `Runner ${runner.name} matches [${match.labels.join(", ")}] but reports no ` +
+            "connection status, so this preflight cannot tell online from offline. " +
+            "Treat the job queue as the authority."
+        );
+      }
+    }
+  }
+  return notices;
+}
+
 async function execute(options = {}) {
   const owner = input("owner") || AUTHORIZED_OWNER;
   if (owner !== AUTHORIZED_OWNER) {
@@ -271,7 +322,7 @@ async function execute(options = {}) {
   const registeredRunnerCount = runners.length;
   const matches = requiredLabelSets.map((labels) => ({
     labels,
-    runners: matchingRegisteredRunners(runners, labels).map((runner) => runner.name)
+    runners: matchingRegisteredRunners(runners, labels).map(runnerAvailability)
   }));
 
   // The preflight exists to catch a job that NOTHING will ever pick up, so the
@@ -299,6 +350,13 @@ async function execute(options = {}) {
       `${requiredLabelSets.length} required label set(s), ` +
       `${registeredRunnerCount} accessible registered runner(s).`
   );
+  for (const match of matches) {
+    appendSummary(availabilityLine(match));
+  }
+  for (const notice of offlineNotices(matches)) {
+    console.warn(`::warning::${workflowCommandData(notice)}`);
+    appendSummary(`Recovery notice: ${notice}`);
+  }
   console.log(
     `Unity runner registration preflight passed for ${requiredLabelSets.length} required label set(s).`
   );
@@ -325,14 +383,17 @@ if (require.main === module) {
 
 module.exports = {
   RUNNER_INVENTORY_TIMEOUT_MS,
+  availabilityLine,
   classifyRunnerInventoryError,
   execute,
   matchingRegisteredRunners,
+  offlineNotices,
   parseRequiredLabelSets,
   parseRepository,
   readAccessibleOrganizationRunners,
   readAllGroupRunners,
   readAllRunnerGroups,
+  runnerAvailability,
   runnerInventoryApiOptions,
   run
 };

@@ -7,13 +7,16 @@ const test = require("node:test");
 
 const {
   RUNNER_INVENTORY_TIMEOUT_MS,
+  availabilityLine,
   classifyRunnerInventoryError,
   execute,
   matchingRegisteredRunners,
+  offlineNotices,
   parseRequiredLabelSets,
   parseRepository,
   readAccessibleOrganizationRunners,
   readAllRunnerGroups,
+  runnerAvailability,
   runnerInventoryApiOptions,
   run
 } = require("../.github/dist/check-unity-runners.js");
@@ -82,6 +85,74 @@ test("runner matching requires every label and ignores connection status", () =>
     [2, 3]
   );
   assert.deepEqual(matchingRegisteredRunners(runners, ["self-hosted", "macos"]), []);
+});
+
+test("runner availability reads name, normalized status, and busy without failing on gaps", () => {
+  assert.deepEqual(runnerAvailability({ name: "eli", status: "online", busy: true }), {
+    name: "eli",
+    status: "online",
+    busy: true
+  });
+  assert.deepEqual(runnerAvailability({ name: "asleep", status: "offline", busy: false }), {
+    name: "asleep",
+    status: "offline",
+    busy: false
+  });
+  assert.deepEqual(runnerAvailability({ name: "mystery" }), {
+    name: "mystery",
+    status: "unknown",
+    busy: false
+  });
+  assert.deepEqual(runnerAvailability({ name: "odd", status: "terminal", busy: null }), {
+    name: "odd",
+    status: "unknown",
+    busy: false
+  });
+});
+
+test("availability lines count matched, online, busy, offline, and unknown runners", () => {
+  const match = {
+    labels: ["self-hosted", "Windows"],
+    runners: [
+      { name: "busy-host", status: "online", busy: true },
+      { name: "asleep-host", status: "offline", busy: false },
+      { name: "mystery-host", status: "unknown", busy: false }
+    ]
+  };
+
+  assert.equal(
+    availabilityLine(match),
+    "[self-hosted, Windows]: 3 matched; online 1 (busy 1); offline 1; unknown 1; " +
+      "runners: busy-host, asleep-host, mystery-host"
+  );
+  assert.equal(
+    availabilityLine({ labels: ["self-hosted"], runners: [] }),
+    "[self-hosted]: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
+  );
+});
+
+test("offline and unknown matches carry a recovery path, and online matches carry none", () => {
+  const offlineMatch = {
+    labels: ["self-hosted", "Windows"],
+    runners: [{ name: "asleep-host", status: "offline", busy: false }]
+  };
+  const unknownMatch = {
+    labels: ["self-hosted", "Windows"],
+    runners: [{ name: "mystery-host", status: "unknown", busy: false }]
+  };
+  const onlineMatch = {
+    labels: ["self-hosted", "Windows"],
+    runners: [{ name: "awake-host", status: "online", busy: true }]
+  };
+
+  const notices = offlineNotices([offlineMatch, unknownMatch, onlineMatch]);
+  assert.equal(notices.length, 2);
+  assert.match(notices[0], /asleep-host.*offline/s);
+  assert.match(notices[0], /queues until it reconnects/);
+  assert.match(notices[0], /runner service is connected/i);
+  assert.match(notices[1], /mystery-host/);
+  assert.match(notices[1], /cannot tell online from offline/);
+  assert.deepEqual(offlineNotices([onlineMatch]), []);
 });
 
 test("calling repository identity is canonical and organization-owned", () => {
@@ -314,12 +385,156 @@ test("runtime requests only organization runner read permission and rejects an e
     fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8"),
     /^registered-runner-count=1$/m
   );
+  assert.equal(
+    fs.readFileSync(process.env.GITHUB_OUTPUT, "utf8").match(/^matched-runners=(.*)$/m)?.[1],
+    JSON.stringify([
+      {
+        labels: ["self-hosted", "windows", "unity"],
+        runners: [{ name: "windows-unity", status: "online", busy: false }]
+      }
+    ])
+  );
+  assert.match(
+    fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8"),
+    /\[self-hosted, windows, unity\]: 1 matched; online 1 \(busy 0\); offline 0; unknown 0/
+  );
 
   process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Linux","unity"]]';
   await assert.rejects(
     () => execute(),
     /No accessible organization runner is registered for required label set\(s\): \[self-hosted, linux, unity\]/
   );
+});
+
+test("a matching offline runner passes and reports its recovery path", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runner-preflight-offline-"));
+  const warnings = [];
+
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    console.warn = originalWarn;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  console.log = () => {};
+  console.warn = (message) => warnings.push(String(message));
+
+  process.env["INPUT_READER-APP-ID"] = "12345";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows","unity"]]';
+  process.env.GITHUB_OUTPUT = path.join(tempRoot, "output.txt");
+  process.env.GITHUB_STEP_SUMMARY = path.join(tempRoot, "summary.md");
+
+  global.fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      return jsonResponse({ id: 99 });
+    }
+    if (parsed.pathname === "/app/installations/99/access_tokens") {
+      return jsonResponse({ token: "short-lived-reader-token", expires_at: "2099-01-01T00:00:00Z" });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
+      return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {
+      return jsonResponse({
+        total_count: 1,
+        runners: [
+          {
+            id: 1,
+            name: "asleep-unity",
+            status: "offline",
+            busy: false,
+            labels: [{ name: "self-hosted" }, { name: "Windows" }, { name: "unity" }]
+          }
+        ]
+      });
+    }
+    return jsonResponse({ message: "unexpected test request" }, 404);
+  };
+
+  const result = await execute();
+  assert.equal(result.registeredRunnerCount, 1);
+  const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
+  assert.match(summary, /offline 1/);
+  assert.match(summary, /asleep-unity/);
+  assert.match(summary, /Recovery notice: /);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^::warning::/);
+  assert.match(warnings[0], /asleep-unity/);
+  assert.match(warnings[0], /queues until it reconnects/);
+  assert.match(warnings[0], /runner service is connected/i);
+});
+
+test("a matching runner with no readable status reports unknown and still passes", async (t) => {
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runner-preflight-unknown-"));
+  const warnings = [];
+
+  t.after(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    console.warn = originalWarn;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  console.log = () => {};
+  console.warn = (message) => warnings.push(String(message));
+
+  process.env["INPUT_READER-APP-ID"] = "12345";
+  process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
+  process.env.INPUT_OWNER = "Ambiguous-Interactive";
+  process.env.GITHUB_REPOSITORY = "Ambiguous-Interactive/unity-helpers";
+  process.env["INPUT_REQUIRED-LABEL-SETS"] = '[["self-hosted","Windows","unity"]]';
+  process.env.GITHUB_OUTPUT = path.join(tempRoot, "output.txt");
+  process.env.GITHUB_STEP_SUMMARY = path.join(tempRoot, "summary.md");
+
+  global.fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/installation") {
+      return jsonResponse({ id: 99 });
+    }
+    if (parsed.pathname === "/app/installations/99/access_tokens") {
+      return jsonResponse({ token: "short-lived-reader-token", expires_at: "2099-01-01T00:00:00Z" });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups") {
+      return jsonResponse({ total_count: 1, runner_groups: [{ id: 42, name: "Unity" }] });
+    }
+    if (parsed.pathname === "/orgs/Ambiguous-Interactive/actions/runner-groups/42/runners") {
+      return jsonResponse({
+        total_count: 1,
+        runners: [
+          {
+            id: 1,
+            name: "mystery-unity",
+            labels: [{ name: "self-hosted" }, { name: "Windows" }, { name: "unity" }]
+          }
+        ]
+      });
+    }
+    return jsonResponse({ message: "unexpected test request" }, 404);
+  };
+
+  const result = await execute();
+  assert.equal(result.registeredRunnerCount, 1);
+  const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
+  assert.match(summary, /unknown 1/);
+  assert.match(summary, /mystery-unity/);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /mystery-unity/);
+  assert.match(warnings[0], /cannot tell online from offline/);
 });
 
 test("runner retry policy also covers GitHub App installation discovery", async (t) => {
@@ -471,21 +686,25 @@ test("runtime validates repository identity before parsing credentials or making
   await assert.rejects(() => execute(), /repository owner is not authorized/i);
 });
 
-test("a registered label set passes without inspecting connection status", async (t) => {
+test("a registered label set passes on any connection status, and reports what it saw", async (t) => {
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
   const originalLog = console.log;
+  const originalWarn = console.warn;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runner-preflight-offline-"));
 
   t.after(() => {
     process.env = originalEnv;
     global.fetch = originalFetch;
     console.log = originalLog;
+    console.warn = originalWarn;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
   const logged = [];
+  const warnings = [];
   console.log = (line) => logged.push(String(line));
+  console.warn = (line) => warnings.push(String(line));
 
   process.env["INPUT_READER-APP-ID"] = "12345";
   process.env["INPUT_READER-APP-PRIVATE-KEY"] = testKey;
@@ -527,14 +746,22 @@ test("a registered label set passes without inspecting connection status", async
 
   assert.equal(result.registeredRunnerCount, 1);
   assert.deepEqual(result.matches, [
-    { labels: ["self-hosted", "linux"], runners: ["box-linux"] }
+    {
+      labels: ["self-hosted", "linux"],
+      runners: [{ name: "box-linux", status: "offline", busy: false }]
+    }
   ]);
 
-  const warnings = logged.filter((line) => line.startsWith("::warning::"));
-  assert.equal(warnings.length, 0);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^::warning::/);
+  assert.match(warnings[0], /box-linux/);
+  assert.match(warnings[0], /queues until it reconnects/);
 
   const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, "utf8");
-  assert.doesNotMatch(summary, /offline|online/);
+  assert.match(
+    summary,
+    /\[self-hosted, linux\]: 1 matched; online 0 \(busy 0\); offline 1; unknown 0; runners: box-linux/
+  );
   assert.match(
     summary,
     /^Unity runner registration preflight passed for Ambiguous-Interactive\/unity-helpers/m
