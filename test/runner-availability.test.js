@@ -129,6 +129,14 @@ test("availability lines count matched, online, busy, offline, and unknown runne
     availabilityLine({ labels: ["self-hosted"], runners: [] }),
     "`[self-hosted]`: 0 matched; online 0 (busy 0); offline 0; unknown 0; runners: none"
   );
+
+  const hostile = {
+    labels: ['win`dow[s](https://x)'],
+    runners: [{ name: "`pwn`", status: "online", busy: false }]
+  };
+  const line = availabilityLine(hostile);
+  assert.doesNotMatch(line.replace(/^`[^`]*`/, "").replace(/`[^`]*`/g, ""), /https:|\[|\]/);
+  assert.equal(line, "`[win'dow[s](https://x)]`: 1 matched; online 1 (busy 0); offline 0; unknown 0; runners: `'pwn'`");
 });
 
 test("offline and unknown matches carry a recovery path, and online matches carry none", () => {
