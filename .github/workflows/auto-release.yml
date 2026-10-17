@@ -27,7 +27,7 @@ jobs:
 
       - name: Publish release from conventional commits
         id: semantic
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        uses: cycjimmy/semantic-release-action@9e1f8a3ef91f1097285028e799a5fb8bb90e8899 # v8.1.0
         with:
           semantic_version: 25.0.9
           extra_plugins: |
@@ -51,7 +51,7 @@ jobs:
 
       - name: Mint release authorization token
         id: release-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.BUILD_LOCK_APP_ID }}
           private-key: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
