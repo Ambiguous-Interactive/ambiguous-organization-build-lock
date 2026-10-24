@@ -663,12 +663,16 @@ ceiling is not universal to every standalone action.
 
 Every caller must retain the raw instruction until its semantic and
 remaining-budget decisions are complete, then cap only the eventual sleep
-according to its own contract. The standalone current-PR-head guard is the
-intentional exception to the shared-client policy: it keeps its 30-second total
-budget and 10-second eventual-sleep cap. If the raw instruction cannot fit the
-remaining budget, the guard fails after the current response instead of treating
-the capped sleep as evidence that another request can succeed; an instruction
-that does fit may still produce a sleep capped at 10 seconds.
+according to its own contract. The standalone current-PR-head guard intentionally
+differs from the shared-client policy in its budget, not its instruction
+handling: it retries transient 5xx and transport failures across a 120-second
+budget, pacing capped backoff to deliver every wait with room for one more
+attempt, instead of giving up after a few rapid requests. A rate-limit
+instruction is honored in full while it fits the remaining budget; the guard
+fails on the current response with a rate-limit diagnosis when the instruction
+cannot fit, without treating a capped sleep as evidence that another request
+can succeed. Stale-head responses and permanent authorization failures stay
+non-retryable in either policy.
 
 Within the shared client, an instruction shorter than the configured base
 backoff lengthens nothing and never shortens the wait below it: GitHub sometimes

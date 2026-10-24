@@ -3359,6 +3359,13 @@ async function acquire(config) {
             "INPUT_PULL-REQUEST-NUMBER": config.pullRequestNumber || "",
             "INPUT_EXPECTED-HEAD-SHA": config.expectedHeadSha || ""
           },
+          // Acquire revalidates on its own wait loop with its own budgeted
+          // bookkeeping, so it keeps the shorter PR-read budget the standalone
+          // guard used before #349 instead of inheriting the wider action
+          // default. A transient outage here fails admission closed, and a
+          // rerun rejoins the queue; a long stall at this checkpoint would
+          // delay admission past the caller's own wait budget.
+          timeoutMs: 30_000,
           signal: apiOptions.signal,
           writeOutputs: false,
           throwOnStale: false,
