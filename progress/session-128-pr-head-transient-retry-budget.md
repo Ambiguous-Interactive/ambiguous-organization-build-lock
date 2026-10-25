@@ -77,8 +77,8 @@ window (the old suite covered the shape, #349's live log covered the outcome).
    clamped to the remaining budget, so no wait outlives the budget.
    `MAX_ATTEMPTS = 20` is a backstop for injection callers whose sleep never
    advances real time, and it can also end a run early while a fitting
-   `Retry-After` shorter than eight seconds keeps repeating; every end of the
-   budget names the attempt count and the last failure.
+   `Retry-After` shorter than about six seconds keeps repeating; every end of
+   the budget names the attempt count and the last failure.
 2. **Instruction handling.** The raw `Retry-After` is read once and stays raw
    for the fit decision. A fitting instruction is now honored in full instead
    of the old capped 10 seconds (the shared-client lesson from #200 applies to
@@ -124,8 +124,8 @@ hang the loop).
   hosted-Windows skips, plus Go, lint, actionlint, shellcheck, workflow
   policy, and credential-literal audits).
 
-Unrelated pre-existing working-tree edits in `.devcontainer/` are left
-untouched and out of the commit.
+Unrelated pre-existing working-tree edits in `.devcontainer/` and
+`test/devcontainer.test.js` are left untouched and out of the commit.
 
 ## Independent review findings and dispositions
 
@@ -224,6 +224,19 @@ Round-2 verification: `node --test test/*.test.js`: 1028 tests, 1022 passed,
 6 expected hosted-Windows skips, 0 failed; the focused trio
 `test/current-pr-head.test.js test/build-lock-0.test.js
 test/action-manifests.test.js`: 115 tests, 0 failed.
+
+## Round 3 independent review
+
+A third independent agent re-reviewed the round-2-remediated change without
+finding any actionable runtime, test, or documentation defect beyond one
+documentation-only LOW: this record's own prose (Change section, item 1)
+still said "shorter than eight seconds" for the repeating-fitting-instruction
+ceiling threshold after round 2 fixed the runtime comment to the right
+steady-instruction bound of about six seconds. **Accepted.** The prose now
+matches the runtime comment, and the working-tree note above now names the
+`test/devcontainer.test.js` opencode-rename edit explicitly
+(INFO, accepted). Everything else was confirmed clean: runtime invariants,
+test determinism, and the README/manifest anchors.
 
 ## Publication and post-merge evidence
 
