@@ -21,7 +21,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 retry 5 npm install --global --prefix "${npm_prefix}" --no-audit --no-fund \
   @openai/codex@latest \
-  opencode-ai@latest
+  @opencode/cli@latest
 
 command -v codex >/dev/null
 command -v opencode >/dev/null
