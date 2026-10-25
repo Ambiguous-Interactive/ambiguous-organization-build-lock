@@ -296,10 +296,11 @@ test("current PR head guard fails closed on a permanent authorization failure wi
   );
 
   // A bad token never succeeds with backoff, so the guard fails closed on the
-  // first response and keeps the HTTP status as the cause downstream.
+  // first response and keeps the HTTP status as the cause downstream. Its body
+  // is still disposed before the failure.
   assert.equal(attempts, 1);
   assert.deepEqual(sleeps, []);
-  assert.equal(discarded, 0);
+  assert.equal(discarded, 1);
   assert.deepEqual(writes, []);
 });
 
@@ -329,6 +330,130 @@ test("current PR head guard rejects a head that changed during recovery without 
   assert.equal(attempts, 2);
   assert.equal(discarded, 1);
   assert.deepEqual(writes, [`is-current=false\n`, `current-head-sha=${newerSha}\n`]);
+});
+
+test("current PR head guard names the exhausted diagnosis when the budget kills a paced wait", async () => {
+  let attempts = 0;
+
+  // The default sleep is the thread discipline the paced run uses in
+  // production, so this contract runs on real timers: the 100 ms budget kills
+  // the first 250 ms wait, and the rejection must not escape as a bare
+  // AbortError (timers/promises rejects aborts without the signal's reason).
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {}, { "x-github-request-id": "req-1" });
+    },
+    timeoutMs: 100,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
+  assert.equal(outcome.status, 503);
+  assert.match(
+    String(outcome.message),
+    /exhausted its bounded retry budget after 1 attempt\(s\) because the bounded deadline elapsed.*last failure: HTTP 503 \(request-id=req-1\)\./
+  );
+});
+
+test("current PR head guard keeps the caller's typed cancellation reason from a paced wait", async () => {
+  const caller = new AbortController();
+  const typedReason = new Error("Build lock acquire cancelled by SIGINT");
+  let attempts = 0;
+
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    signal: caller.signal,
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {});
+    },
+    sleep: async () => {
+      caller.abort(typedReason);
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      throw abortError;
+    },
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected cancellation"); },
+    (failure) => failure
+  );
+
+  // A cancellation landing inside the wait no longer discards acquire's typed
+  // reason behind timers' generic AbortError rejection.
+  assert.equal(attempts, 1);
+  assert.equal(outcome, typedReason);
+});
+
+test("current PR head guard names the attempt ceiling when a fitting instruction repeats it away", async () => {
+  const writes = [];
+  const sleeps = [];
+  let attempts = 0;
+
+  const error = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: (_path, value) => writes.push(value),
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {}, { "retry-after": "1" });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    timeoutMs: 120_000,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  // Honoring a short fitting instruction in full keeps every attempt inside
+  // its window, so the ceiling can end the lookup with budget left. The
+  // ending still names the attempt count and the last HTTP status.
+  assert.equal(attempts, MAX_ATTEMPTS);
+  assert.deepEqual(sleeps, Array.from({ length: MAX_ATTEMPTS - 1 }, () => 1_000));
+  assert.deepEqual(writes, []);
+  assert.equal(error.attempts, MAX_ATTEMPTS);
+  assert.equal(error.status, 503);
+  assert.match(
+    String(error.message),
+    /exhausted its bounded retry budget after 20 attempt\(s\) because the attempt ceiling was reached; last failure: HTTP 503\./
+  );
+});
+
+test("current PR head guard warns before retrying a transport failure", async () => {
+  const logs = [];
+  const sleeps = [];
+  let attempts = 0;
+
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("ECONNRESET");
+      }
+      return response(200, { state: "open", head: { sha: expectedSha } });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    log: (line) => logs.push(line)
+  });
+
+  assert.equal(result.isCurrent, true);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [250]);
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /::warning::GitHub pull request lookup failed before receiving a response; retrying in 250 ms \(attempt 1; transport error: ECONNRESET\)/);
+  assert.match(logs[1], /#52 still points to this run's head SHA/);
 });
 
 test("current PR head guard fails closed without retrying past its rate-limit budget", async () => {

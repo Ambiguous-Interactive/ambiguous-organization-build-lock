@@ -666,8 +666,9 @@ remaining-budget decisions are complete, then cap only the eventual sleep
 according to its own contract. The standalone current-PR-head guard intentionally
 differs from the shared-client policy in its budget, not its instruction
 handling: it retries transient 5xx and transport failures across a 120-second
-budget, pacing capped backoff to deliver every wait with room for one more
-attempt, instead of giving up after a few rapid requests. A rate-limit
+budget, pacing capped backoff with each wait clamped to the remaining budget,
+and it names its attempt count and last failure when the budget or the attempt
+ceiling ends the lookup. A rate-limit
 instruction is honored in full while it fits the remaining budget; the guard
 fails on the current response with a rate-limit diagnosis when the instruction
 cannot fit, without treating a capped sleep as evidence that another request

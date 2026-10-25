@@ -635,6 +635,7 @@ test("README documents caller-specific server-directed retry contracts", () => {
     /cap only the eventual sleep\s+according to its own contract/,
     /current-PR-head guard intentionally\s+differs from the shared-client policy in its budget/,
     /120-second\s+budget/,
+    /attempt\s+ceiling\s+ends the lookup/,
     /honor(\w)* in full while it fits the remaining budget/,
     /fails on the current response with a rate-limit diagnosis/,
     /Stale-head responses and permanent authorization failures stay/,
