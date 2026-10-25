@@ -240,5 +240,35 @@ test determinism, and the README/manifest anchors.
 
 ## Publication and post-merge evidence
 
-Pending the follow-up review round, PR CI, merge, release, and post-merge
-`main` verification. Sections will be updated only with observed evidence.
+CI on the final PR head `4055979b4` was fully green (Build lock CI run
+40147072185, plus the Darwin, hosted-Windows, and lock-action validation
+jobs and the Bugbot pass for that commit). PR #350 was squash-merged as
+`ff1a5e55a4` at 2026-10-25T00:34:22Z; issue #349 closed as completed at
+00:34:24Z through the PR body's `Closes #349`.
+
+Post-merge `main` run `ff1a5e55a4` is green: Build lock CI run 40147220643
+(success), the Organization Unity enrollment audit run 40147220600
+(success), and the post-merge Dependabot auto-merge bookkeeping skipped as
+expected for a non-Dependabot push. Local `main` was fast-forwarded to
+`ff1a5e55a4` with the three pre-existing working-tree edits in
+`.devcontainer/` and `test/devcontainer.test.js` still uncommitted and
+excluded from every commit.
+
+Reviewer consensus: three independent review rounds ended with zero
+actionable findings (round 1: eight findings, all dispositioned; round 2:
+seven findings, two accepted and remediated in commit `aefe7d57c`, the rest
+documented or rejected with reasons; round 3: one documentation-only LOW in
+this record plus one INFO, both accepted in commit `4055979b4`).
+
+Release and consumer follow-up (observed, not assumed): the merge commit
+subject `fix(guard): ...` is conventional, so the next scheduled Auto
+release run publishes it. Every past Auto release run was triggered by the
+Monday 09:00 UTC schedule — none was dispatched manually — so the fix goes
+out in the Monday 2026-10-26 run, after which the release-authorization PR
+opens automatically and the daily repin-consumer-locks schedule (06:37 UTC)
+re-pins consumers such as unity-helpers to the new tag. Consumers pick up
+the retry-budget fix only after that release and re-pin; no release-input
+action was taken in this session.
+
+The remaining open issue list and the prioritization that selected #349
+are recorded in the Triage section above.
