@@ -28,7 +28,7 @@ handoff.
 The lifecycle scripts download module dependencies, preserve command history,
 and leave repository files owned by the host-compatible non-root `vscode`
 user. On every container start, npm updates `@openai/codex@latest` and
-`opencode-ai@latest` under the user-owned `~/.local` prefix. This installation
+`@opencode/cli@latest` under the user-owned `~/.local` prefix. This installation
 does not use `sudo`; `codex` and `opencode` are available on `PATH` in VS Code
 terminals after startup completes.
 

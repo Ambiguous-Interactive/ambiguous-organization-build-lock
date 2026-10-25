@@ -174,7 +174,7 @@ test("dev container lifecycle scripts are committed", async () => {
   assert.match(installAgents, /npm_prefix="\$\{HOME\}\/\.local"/);
   assert.match(
     installAgents,
-    /npm install --global --prefix "\$\{npm_prefix\}"[\s\\]*[\s\S]*@openai\/codex@latest[\s\\]*[\s\S]*opencode-ai@latest/
+    /npm install --global --prefix "\$\{npm_prefix\}"[\s\\]*[\s\S]*@openai\/codex@latest[\s\\]*[\s\S]*@opencode\/cli@latest/
   );
   assert.match(installAgents, /command -v codex/);
   assert.match(installAgents, /command -v opencode/);
