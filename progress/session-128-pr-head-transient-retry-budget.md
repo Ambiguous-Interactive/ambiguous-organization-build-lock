@@ -120,7 +120,7 @@ hang the loop).
   parser-level instruction pins) and updated pacing/full-honor pins.
 - `node --test test/build-lock-0.test.js`: acquire's own 17 contracts stayed
   green with the explicit 30-second embedded budget.
-- `bash .devcontainer/scripts/verify.sh`: exit 0 (1016 node tests, 6 expected
+- `bash .devcontainer/scripts/verify.sh`: exit 0 (1022 node tests, 6 expected
   hosted-Windows skips, plus Go, lint, actionlint, shellcheck, workflow
   policy, and credential-literal audits).
 
@@ -142,7 +142,9 @@ Round 1 findings and dispositions:
    reaching budget end lost the named diagnosis. **Accepted.** The guard now
    converts wait rejections at both sleep sites: the budget kill becomes the
    named exhausted error, a caller cancellation re-emits the caller's typed
-   reason. Two new tests cover both conversions on the default wait.
+   reason. Two new tests cover the conversions: the budget-kill conversion
+   runs on the guard's default wait discipline, and the typed-cancellation
+   contract uses an injected wait that mimics the generic timers rejection.
 2. HIGH — `MAX_ATTEMPTS = 20` could end the lookup before the budget when a
    fitting instruction under eight seconds repeats, and that ending lost the
    attempt count and last failure. **Accepted.** The ceiling exits now throw
@@ -174,6 +176,54 @@ Areas confirmed clean by round 1: embedded acquire caller (timing, queue
 fairness, wait accounting unchanged), fetch-client census (only the shared
 client and the guard use `fetch`), secret handling, output-writing paths, and
 the doc/runtime/manifest synchronization.
+
+Round 2 findings and dispositions (independent reviewer, fresh read):
+
+1. HIGH — the first budget-killed-pace-wait test ran on real timers where the
+   100 ms wait and the abort expired in the same millisecond, so a second
+   attempt could win the race and both pinned assertions lost (measured mixed
+   results across runs, including a failing full-verifier run). **Accepted.**
+   The flaky real-clock test was removed and the conversion is now pinned
+   deterministically: an injected wait that mimics `timers/promises` (generic
+   `AbortError` name shape) runs 10 ms inside a 2 ms budget, so the guard's
+   own `AbortSignal.timeout` is reliably fired first and the conversion branch
+   is tested directly.
+2. MEDIUM — the transport-mode attempt-ceiling ending had no test. **Accepted:**
+   a new test pins 20 transport attempts, the capped generated-backoff
+   sequence, and the named ceiling diagnosis ending.
+3. MEDIUM — the caller-supplied-timeout discrimination had no test. **Accepted:**
+   a new test proves an `AbortSignal.timeout(20)` caller receives its own
+   timeout reason by identity and the outcome is not the guard's exhausted
+   error.
+4. LOW — the comment said "shorter than eight seconds" for the ceiling
+   threshold; the right steady-instruction bound is about six seconds (nineteen
+   honored waits must still fit in 120 seconds). **Accepted**, comment fixed.
+5. LOW — the deadline diagnosis's "last failure" is the last completed
+   attempt's failure, not the budget-killed in-flight request. **Accepted as a
+   documented semantic**: a comment states it; the elapsed reason describes the
+   killed attempt.
+6. LOW — caller-cancel and guard-budget endings in the same instant are
+   resolved in the budget's favor. **Accepted as documented**: one comment line
+   records the deliberate ordering.
+7. INFO — a budget kill during the post-break `response.json()` body read
+   still surfaces the raw abort reason. **Rejected for this change**: the case
+   needs a success followed by a body read longer than the remaining budget,
+   stays fail closed, and writes no outputs; the conversion value does not
+   justify touching the success path.
+8. INFO — round-1 record wording: the "three of every four runs" fraction was
+   reviewer-measured (9 of 12 instrumented runs), and the full-verifier count
+   is the current suite size (verified in the fresh run below).
+
+Areas confirmed clean in round 2: attempt counting, no fall-through of a
+non-ok response to parsing, output-writing discipline, secrets, acquire embed
+and its contracts, README/manifest runtime story, and the round-1 dispositions
+for the sleep conversion, wording clamp, timeout discriminator, and body
+disposal.
+
+Round-2 verification: `node --test test/*.test.js`: 1028 tests, 1022 passed,
+6 expected hosted-Windows skips, 0 failed; the focused trio
+`test/current-pr-head.test.js test/build-lock-0.test.js
+test/action-manifests.test.js`: 115 tests, 0 failed.
 
 ## Publication and post-merge evidence
 

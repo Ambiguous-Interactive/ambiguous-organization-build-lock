@@ -11,8 +11,9 @@ const { setTimeout: wait } = require("node:timers/promises");
 // end of the budget instead of abandoning admission inside the outage window.
 // MAX_ATTEMPTS is a backstop for injection callers whose sleep never advances
 // real time; it can also end a run early while a fitting Retry-After shorter
-// than eight seconds repeats, and that ending still names its attempt count
-// and last failure like a deadline ending does.
+// than about six seconds keeps repeating (nineteen waits of that length are
+// still inside the budget), and that ending still names its attempt count and
+// last failure like a deadline ending does.
 const MAX_ATTEMPTS = 20;
 const BACKOFF_BASE_MS = 250;
 const MAX_BACKOFF_MS = 10_000;
@@ -157,7 +158,11 @@ async function requireCurrentPrHead(options = {}) {
   // A paced wait can be killed by the same budget that bounds the whole guard.
   // timers/promises rejects such a wait with a generic AbortError, so the
   // rejection is converted here: the budget kill becomes the named exhausted
-  // diagnosis and a caller's cancellation keeps its own typed reason.
+  // diagnosis and a caller's cancellation keeps its own typed reason. The
+  // guard's own timeout signal is read first, so a caller carrying a timeout
+  // of its own is not misattributed to the guard's budget; if the caller and
+  // the guard budget end in the same instant, the named budget diagnosis
+  // deliberately wins over the caller's bare cancellation reason.
   const throwAfterFailedWait = (waitError, attempt) => {
     if (timeoutSignal.aborted) {
       throw retryBudgetExhaustedError(
@@ -186,6 +191,8 @@ async function requireCurrentPrHead(options = {}) {
         signal
       });
     } catch (error) {
+      // The named attempt is the last completed one; a fetch killed by the
+      // budget before its own response is described by the elapsed reason.
       if (timeoutSignal.aborted) {
         throw retryBudgetExhaustedError(
           attempt,

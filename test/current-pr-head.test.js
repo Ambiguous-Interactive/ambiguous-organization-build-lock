@@ -332,36 +332,6 @@ test("current PR head guard rejects a head that changed during recovery without 
   assert.deepEqual(writes, [`is-current=false\n`, `current-head-sha=${newerSha}\n`]);
 });
 
-test("current PR head guard names the exhausted diagnosis when the budget kills a paced wait", async () => {
-  let attempts = 0;
-
-  // The default sleep is the thread discipline the paced run uses in
-  // production, so this contract runs on real timers: the 100 ms budget kills
-  // the first 250 ms wait, and the rejection must not escape as a bare
-  // AbortError (timers/promises rejects aborts without the signal's reason).
-  const outcome = await requireCurrentPrHead({
-    env: guardEnvironment(),
-    appendFile: () => {},
-    fetchImpl: async () => {
-      attempts += 1;
-      return response(503, {}, { "x-github-request-id": "req-1" });
-    },
-    timeoutMs: 100,
-    log: () => {}
-  }).then(
-    () => { throw new Error("expected exhaustion"); },
-    (failure) => failure
-  );
-
-  assert.equal(attempts, 1);
-  assert.equal(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
-  assert.equal(outcome.status, 503);
-  assert.match(
-    String(outcome.message),
-    /exhausted its bounded retry budget after 1 attempt\(s\) because the bounded deadline elapsed.*last failure: HTTP 503 \(request-id=req-1\)\./
-  );
-});
-
 test("current PR head guard keeps the caller's typed cancellation reason from a paced wait", async () => {
   const caller = new AbortController();
   const typedReason = new Error("Build lock acquire cancelled by SIGINT");
@@ -426,6 +396,69 @@ test("current PR head guard names the attempt ceiling when a fitting instruction
     String(error.message),
     /exhausted its bounded retry budget after 20 attempt\(s\) because the attempt ceiling was reached; last failure: HTTP 503\./
   );
+});
+
+test("current PR head guard names the attempt ceiling when transport failures use the whole ceiling", async () => {
+  const sleeps = [];
+  let attempts = 0;
+
+  const error = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      throw new Error("ECONNRESET");
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    // The 19 generated waits sum to 145,750 ms, still under this budget.
+    timeoutMs: 200_000,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  // A transport failure on the last attempt is a ceiling ending too, and it
+  // must not fall back to a bare rethrow without the attempt record.
+  assert.equal(attempts, MAX_ATTEMPTS);
+  assert.equal(error.attempts, MAX_ATTEMPTS);
+  assert.equal(error.status, undefined);
+  assert.match(
+    String(error.message),
+    /exhausted its bounded retry budget after 20 attempt\(s\) because the attempt ceiling was reached; last failure: transport error: ECONNRESET\./
+  );
+  assert.deepEqual(
+    sleeps,
+    [250, 500, 1000, 2000, 4000, 8000, ...Array.from({ length: 13 }, () => 10_000)]
+  );
+});
+
+test("a caller's own AbortSignal timeout is not misreported as the guard's budget", async () => {
+  const callerTimeout = AbortSignal.timeout(20);
+  let callerReason = null;
+
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    signal: callerTimeout,
+    fetchImpl: (url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          callerReason = options.signal.reason;
+          reject(callerReason);
+        }, { once: true });
+      }),
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected cancellation"); },
+    (failure) => failure
+  );
+
+  // The caller's abort reason reaches the caller by identity: the guard's
+  // discriminator reads its own timeout signal, not the composite's reason.
+  assert.equal(outcome, callerReason);
+  assert.notEqual(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
 });
 
 test("current PR head guard warns before retrying a transport failure", async () => {
@@ -577,6 +610,52 @@ test("current PR head guard treats an absent or invalid instruction as no instru
     const headers = retryAfter === undefined ? {} : { "retry-after": retryAfter };
     assert.equal(retryAfterDelay(response(503, {}, headers), Date.UTC(2026, 6, 16, 12, 0, 0)), null);
   }
+});
+
+function genericWaitAbortError() {
+  const abortError = new Error("The operation was aborted");
+  abortError.name = "AbortError";
+  return abortError;
+}
+
+test("current PR head guard names the exhausted diagnosis when the budget kills a paced wait", async () => {
+  let attempts = 0;
+  let sleepsStarted = 0;
+
+  // The conversion must also cover the paced wait that the budget kills, not
+  // just the in-flight fetch. The injected wait mimics timers/promises, which
+  // rejects an aborted wait with a generic AbortError instead of the signal's
+  // own timeout reason. A small injected real delay lets the guard's
+  // AbortSignal.timeout fire first, so the branch is exercised deterministically.
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {}, { "x-github-request-id": "req-1" });
+    },
+    sleep: async () => {
+      sleepsStarted += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      throw genericWaitAbortError();
+    },
+    // A 2 ms deadline aborts while the injected 10 ms wait is still running.
+    timeoutMs: 2,
+    monotonicNow: () => (sleepsStarted === 0 ? 0 : 1),
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(sleepsStarted, 1);
+  assert.equal(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
+  assert.equal(outcome.status, 503);
+  assert.match(
+    String(outcome.message),
+    /exhausted its bounded retry budget after 1 attempt\(s\) because the bounded deadline elapsed \(The operation was aborted due to timeout\); last failure: HTTP 503 \(request-id=req-1\)\./
+  );
 });
 
 test("current PR head guard skips API access for non-PR events", async () => {
