@@ -4,8 +4,20 @@ const fs = require("node:fs");
 const { performance } = require("node:perf_hooks");
 const { setTimeout: wait } = require("node:timers/promises");
 
-const MAX_ATTEMPTS = 3;
-const MAX_RETRY_DELAY_MS = 10_000;
+// The wall-clock budget is the real ceiling for transient upstream failures.
+// The 2026-10-24 incident (issue #349) returned HTTP 503 for at least 40 seconds
+// at two consumer checkpoints, while this action gave up after three rapid
+// attempts in about five seconds. Pacing keeps re-reading the live head to the
+// end of the budget instead of abandoning admission inside the outage window.
+// MAX_ATTEMPTS is a backstop for injection callers whose sleep never advances
+// real time; it can also end a run early while a fitting Retry-After shorter
+// than about six seconds keeps repeating (nineteen waits of that length are
+// still inside the budget), and that ending still names its attempt count and
+// last failure like a deadline ending does.
+const MAX_ATTEMPTS = 20;
+const BACKOFF_BASE_MS = 250;
+const MAX_BACKOFF_MS = 10_000;
+const DEFAULT_RETRY_BUDGET_MS = 120_000;
 
 function oneLine(value) {
   return String(value).replace(/[\r\n]+/g, " ").trim();
@@ -59,14 +71,32 @@ function retryAfterDelay(response, now = Date.now()) {
   return null;
 }
 
-function boundedRetryDelay(retryAfterMs, attempt) {
-  return retryAfterMs === null
-    ? 250 * 2 ** (attempt - 1)
-    : Math.min(MAX_RETRY_DELAY_MS, retryAfterMs);
+function generatedBackoffMs(attempt) {
+  return Math.min(MAX_BACKOFF_MS, BACKOFF_BASE_MS * 2 ** (attempt - 1));
 }
 
-function retryDelay(response, attempt, now = Date.now()) {
-  return boundedRetryDelay(retryAfterDelay(response, now), attempt);
+function requestIdOf(response) {
+  const id = oneLine(response?.headers?.get?.("x-github-request-id") || "");
+  return id ? ` (request-id=${id})` : "";
+}
+
+function responseFailureDescription(response) {
+  return `HTTP ${response.status}${requestIdOf(response)}`;
+}
+
+function retryBudgetExhaustedError(attempts, lastFailure, reasonParts) {
+  const reason = reasonParts.length ? ` because ${reasonParts.join("; ")}` : "";
+  const lastDescription = lastFailure?.description || "no response was received before the deadline";
+  const error = new Error(
+    `GitHub pull request lookup exhausted its bounded retry budget after ${attempts} attempt(s)` +
+    `${reason}; last failure: ${lastDescription}.`
+  );
+  error.code = "GITHUB_API_RETRY_EXHAUSTED";
+  error.retryable = true;
+  error.attempts = attempts;
+  error.status = lastFailure?.status;
+  error.requestId = lastFailure?.requestId || "";
+  return error;
 }
 
 async function discardResponse(response) {
@@ -103,7 +133,7 @@ async function requireCurrentPrHead(options = {}) {
   const token = input(env, "GITHUB-TOKEN");
   const repository = String(env.GITHUB_REPOSITORY || "").trim();
   const apiUrl = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
-  const timeoutMs = options.timeoutMs === undefined ? 30_000 : options.timeoutMs;
+  const timeoutMs = options.timeoutMs === undefined ? DEFAULT_RETRY_BUDGET_MS : options.timeoutMs;
   const monotonicNow = options.monotonicNow || (() => performance.now());
   const retryDeadline = monotonicNow() + timeoutMs;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -124,7 +154,32 @@ async function requireCurrentPrHead(options = {}) {
   }
 
   let response;
+  let lastFailure = null;
+  // A paced wait can be killed by the same budget that bounds the whole guard.
+  // timers/promises rejects such a wait with a generic AbortError, so the
+  // rejection is converted here: the budget kill becomes the named exhausted
+  // diagnosis and a caller's cancellation keeps its own typed reason. The
+  // guard's own timeout signal is read first, so a caller carrying a timeout
+  // of its own is not misattributed to the guard's budget; if the caller and
+  // the guard budget end in the same instant, the named budget diagnosis
+  // deliberately wins over the caller's bare cancellation reason.
+  const throwAfterFailedWait = (waitError, attempt) => {
+    if (timeoutSignal.aborted) {
+      throw retryBudgetExhaustedError(
+        attempt,
+        lastFailure,
+        [`the bounded deadline elapsed (${oneLine(timeoutSignal.reason?.message || "timeout")})`]
+      );
+    }
+    if (signal.aborted) {
+      throw signal.reason ?? waitError;
+    }
+    throw waitError;
+  };
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 1 && monotonicNow() >= retryDeadline) {
+      throw retryBudgetExhaustedError(attempt - 1, lastFailure, ["the bounded deadline elapsed"]);
+    }
     try {
       response = await fetchImpl(`${apiUrl}/repos/${repository}/pulls/${pullRequestNumber}`, {
         headers: {
@@ -136,19 +191,64 @@ async function requireCurrentPrHead(options = {}) {
         signal
       });
     } catch (error) {
-      if (attempt === MAX_ATTEMPTS || signal.aborted || error?.name === "AbortError") {
+      // The named attempt is the last completed one; a fetch killed by the
+      // budget before its own response is described by the elapsed reason.
+      if (timeoutSignal.aborted) {
+        throw retryBudgetExhaustedError(
+          attempt,
+          lastFailure,
+          [`the bounded deadline elapsed (${oneLine(timeoutSignal.reason?.message || "timeout")})`]
+        );
+      }
+      if (signal.aborted) {
+        throw signal.reason ?? error;
+      }
+      lastFailure = {
+        status: undefined,
+        requestId: "",
+        description: `transport error: ${oneLine(error?.message || error)}`
+      };
+      // Caller-declared abort classes and a timeout named by the caller's own
+      // fetch glue stay terminal on the current error. Acquire treats a PR
+      // lookup timeout as a terminal validation failure, not cancellation.
+      if (error?.name === "AbortError" || error?.name === "TimeoutError" || error?.code === "ABORT_ERR") {
         throw error;
       }
-      await sleep(250 * 2 ** (attempt - 1));
+      if (attempt === MAX_ATTEMPTS) {
+        throw retryBudgetExhaustedError(attempt, lastFailure, ["the attempt ceiling was reached"]);
+      }
+      const delay = Math.max(0, Math.min(generatedBackoffMs(attempt), retryDeadline - monotonicNow()));
+      log(
+        `::warning::GitHub pull request lookup failed before receiving a response; ` +
+        `retrying in ${delay} ms (attempt ${attempt}; ${lastFailure.description}).`
+      );
+      try {
+        await sleep(delay);
+      } catch (waitError) {
+        throwAfterFailedWait(waitError, attempt);
+      }
       continue;
     }
-    if (response.ok || !retryableResponse(response) || attempt === MAX_ATTEMPTS) {
+    if (response.ok) {
       break;
     }
-    const retryNow = Date.now();
-    const retryAfterMs = retryAfterDelay(response, retryNow);
+    lastFailure = {
+      status: response.status,
+      requestId: oneLine(response.headers?.get?.("x-github-request-id") || ""),
+      description: responseFailureDescription(response)
+    };
+    if (attempt === MAX_ATTEMPTS) {
+      await discardResponse(response);
+      throw retryBudgetExhaustedError(attempt, lastFailure, ["the attempt ceiling was reached"]);
+    }
+    if (!retryableResponse(response)) {
+      await discardResponse(response);
+      throw new Error(`GitHub pull request lookup failed with HTTP ${response.status}`);
+    }
+    const remaining = retryDeadline - monotonicNow();
+    const rawDelayMs = retryAfterDelay(response, Date.now());
     await discardResponse(response);
-    if (retryAfterMs !== null && retryAfterMs >= retryDeadline - monotonicNow()) {
+    if (rawDelayMs !== null && rawDelayMs >= remaining) {
       if (response.status === 403 || response.status === 429) {
         throw new Error(
           "GitHub pull request lookup was rate limited for longer than this guard's remaining retry budget"
@@ -159,10 +259,16 @@ async function requireCurrentPrHead(options = {}) {
         `(HTTP ${response.status})`
       );
     }
-    await sleep(boundedRetryDelay(retryAfterMs, attempt));
-  }
-  if (!response.ok) {
-    throw new Error(`GitHub pull request lookup failed with HTTP ${response.status}`);
+    const delay = Math.max(0, Math.min(rawDelayMs ?? generatedBackoffMs(attempt), remaining));
+    log(
+      `::warning::GitHub pull request lookup returned HTTP ${response.status}; ` +
+      `retrying in ${delay} ms (attempt ${attempt}${requestIdOf(response)}).`
+    );
+    try {
+      await sleep(delay);
+    } catch (waitError) {
+      throwAfterFailedWait(waitError, attempt);
+    }
   }
 
   const pullRequest = await response.json();
@@ -206,4 +312,10 @@ if (require.main === module) {
   run();
 }
 
-module.exports = { oneLine, requireCurrentPrHead, retryDelay, workflowCommandData };
+module.exports = {
+  MAX_ATTEMPTS,
+  oneLine,
+  requireCurrentPrHead,
+  retryAfterDelay,
+  workflowCommandData
+};

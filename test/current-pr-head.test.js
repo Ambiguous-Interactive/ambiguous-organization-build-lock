@@ -10,8 +10,9 @@ const { promisify } = require("node:util");
 const execFileAsync = promisify(execFile);
 
 const {
+  MAX_ATTEMPTS,
   requireCurrentPrHead,
-  retryDelay,
+  retryAfterDelay,
   workflowCommandData
 } = require("../.github/dist/require-current-pr-head.js");
 
@@ -169,6 +170,325 @@ test("current PR head guard retries a transient lookup without a fixed long slee
   assert.deepEqual(sleeps, [0]);
 });
 
+test("current PR head guard paces transient lookups across its whole budget (issue #349)", async () => {
+  const logs = [];
+  const sleeps = [];
+  let attempts = 0;
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return attempts <= 3 ? response(503, {}) : response(200, { state: "open", head: { sha: expectedSha } });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    log: (line) => logs.push(line)
+  });
+
+  assert.equal(result.isCurrent, true);
+  // Three rapid 503s ended the old three-attempt loop in about five seconds and
+  // aborted admission inside a longer-than-40 s upstream window. The paced
+  // budget keeps sampling the window instead of giving up early.
+  assert.equal(attempts, 4);
+  assert.deepEqual(sleeps, [250, 500, 1000]);
+  // The attempt ceiling is a backstop, not the ordinary bound: a paced run
+  // reaches the deadline long before it.
+  assert.equal(MAX_ATTEMPTS, 20);
+  assert.equal(logs.filter((line) => /::warning::GitHub pull request lookup returned HTTP 503/.test(line)).length, 3);
+  assert.match(logs.at(-1), /#52 still points to this run's head SHA/);
+});
+
+test("current PR head guard exhausts to a named diagnosis when the deadline passes", async () => {
+  const monotonicValues = [];
+  let monotonicStep = 0;
+  const monotonicNow = () => {
+    const value = monotonicStep * 10_000;
+    monotonicStep += 1;
+    monotonicValues.push(value);
+    return value;
+  };
+  const writes = [];
+  const sleeps = [];
+  let attempts = 0;
+  let discarded = 0;
+
+  const error = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: (_path, value) => writes.push(value),
+    fetchImpl: async () => {
+      attempts += 1;
+      return {
+        ...response(503, {}, { "x-github-request-id": "req-9", }),
+        body: { cancel: async () => { discarded += 1; } }
+      };
+    },
+    monotonicNow,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    timeoutMs: 30_000,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  // monotonicNow calls: budget setup, one top-of-loop check per attempt after
+  // the first, and one remaining read per handled failure.
+  assert.deepEqual(monotonicValues, [0, 10_000, 20_000, 30_000, 40_000]);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [250, 0]);
+  assert.equal(discarded, 2);
+  assert.deepEqual(writes, []);
+  assert.equal(error.code, "GITHUB_API_RETRY_EXHAUSTED");
+  assert.equal(error.attempts, 2);
+  assert.equal(error.status, 503);
+  assert.match(
+    String(error.message),
+    /exhausted its bounded retry budget after 2 attempt\(s\) because the bounded deadline elapsed; last failure: HTTP 503 \(request-id=req-9\)/
+  );
+});
+
+test("current PR head guard names the deadline when its last in-flight request is killed by the budget", async () => {
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: (url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      }),
+    timeoutMs: 5,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  assert.match(
+    String(outcome.message),
+    /exhausted its bounded retry budget after 1 attempt\(s\) because the bounded deadline elapsed/
+  );
+  assert.match(String(outcome.message), /no response was received before the deadline/);
+});
+
+test("current PR head guard fails closed on a permanent authorization failure without retrying", async () => {
+  const sleeps = [];
+  const writes = [];
+  let discarded = 0;
+  let attempts = 0;
+
+  await assert.rejects(
+    requireCurrentPrHead({
+      env: guardEnvironment(),
+      appendFile: (_path, value) => writes.push(value),
+      fetchImpl: async (_url, _options) => {
+        attempts += 1;
+        return {
+          ...response(401, { message: "Bad credentials" }),
+          body: { cancel: async () => { discarded += 1; } }
+        };
+      },
+      monotonicNow: () => 0,
+      sleep: async (milliseconds) => sleeps.push(milliseconds),
+      timeoutMs: 30_000,
+      log: () => {}
+    }),
+    /GitHub pull request lookup failed with HTTP 401/
+  );
+
+  // A bad token never succeeds with backoff, so the guard fails closed on the
+  // first response and keeps the HTTP status as the cause downstream. Its body
+  // is still disposed before the failure.
+  assert.equal(attempts, 1);
+  assert.deepEqual(sleeps, []);
+  assert.equal(discarded, 1);
+  assert.deepEqual(writes, []);
+});
+
+test("current PR head guard rejects a head that changed during recovery without admission", async () => {
+  const writes = [];
+  let discarded = 0;
+  let attempts = 0;
+
+  await assert.rejects(
+    requireCurrentPrHead({
+      env: guardEnvironment(),
+      appendFile: (_path, value) => writes.push(value),
+      fetchImpl: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? { ...response(503, {}), body: { cancel: async () => { discarded += 1; } } }
+          : response(200, { state: "open", head: { sha: newerSha } });
+      },
+      monotonicNow: () => 0,
+      sleep: async () => {},
+      timeoutMs: 30_000,
+      log: () => {}
+    }),
+    new RegExp(`Stale pull request run for ${expectedSha}.*${newerSha}`)
+  );
+
+  assert.equal(attempts, 2);
+  assert.equal(discarded, 1);
+  assert.deepEqual(writes, [`is-current=false\n`, `current-head-sha=${newerSha}\n`]);
+});
+
+test("current PR head guard keeps the caller's typed cancellation reason from a paced wait", async () => {
+  const caller = new AbortController();
+  const typedReason = new Error("Build lock acquire cancelled by SIGINT");
+  let attempts = 0;
+
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    signal: caller.signal,
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {});
+    },
+    sleep: async () => {
+      caller.abort(typedReason);
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      throw abortError;
+    },
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected cancellation"); },
+    (failure) => failure
+  );
+
+  // A cancellation landing inside the wait no longer discards acquire's typed
+  // reason behind timers' generic AbortError rejection.
+  assert.equal(attempts, 1);
+  assert.equal(outcome, typedReason);
+});
+
+test("current PR head guard names the attempt ceiling when a fitting instruction repeats it away", async () => {
+  const writes = [];
+  const sleeps = [];
+  let attempts = 0;
+
+  const error = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: (_path, value) => writes.push(value),
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {}, { "retry-after": "1" });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    timeoutMs: 120_000,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  // Honoring a short fitting instruction in full keeps every attempt inside
+  // its window, so the ceiling can end the lookup with budget left. The
+  // ending still names the attempt count and the last HTTP status.
+  assert.equal(attempts, MAX_ATTEMPTS);
+  assert.deepEqual(sleeps, Array.from({ length: MAX_ATTEMPTS - 1 }, () => 1_000));
+  assert.deepEqual(writes, []);
+  assert.equal(error.attempts, MAX_ATTEMPTS);
+  assert.equal(error.status, 503);
+  assert.match(
+    String(error.message),
+    /exhausted its bounded retry budget after 20 attempt\(s\) because the attempt ceiling was reached; last failure: HTTP 503\./
+  );
+});
+
+test("current PR head guard names the attempt ceiling when transport failures use the whole ceiling", async () => {
+  const sleeps = [];
+  let attempts = 0;
+
+  const error = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      throw new Error("ECONNRESET");
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    // The 19 generated waits sum to 145,750 ms, still under this budget.
+    timeoutMs: 200_000,
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  // A transport failure on the last attempt is a ceiling ending too, and it
+  // must not fall back to a bare rethrow without the attempt record.
+  assert.equal(attempts, MAX_ATTEMPTS);
+  assert.equal(error.attempts, MAX_ATTEMPTS);
+  assert.equal(error.status, undefined);
+  assert.match(
+    String(error.message),
+    /exhausted its bounded retry budget after 20 attempt\(s\) because the attempt ceiling was reached; last failure: transport error: ECONNRESET\./
+  );
+  assert.deepEqual(
+    sleeps,
+    [250, 500, 1000, 2000, 4000, 8000, ...Array.from({ length: 13 }, () => 10_000)]
+  );
+});
+
+test("a caller's own AbortSignal timeout is not misreported as the guard's budget", async () => {
+  const callerTimeout = AbortSignal.timeout(20);
+  let callerReason = null;
+
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    signal: callerTimeout,
+    fetchImpl: (url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          callerReason = options.signal.reason;
+          reject(callerReason);
+        }, { once: true });
+      }),
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected cancellation"); },
+    (failure) => failure
+  );
+
+  // The caller's abort reason reaches the caller by identity: the guard's
+  // discriminator reads its own timeout signal, not the composite's reason.
+  assert.equal(outcome, callerReason);
+  assert.notEqual(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
+});
+
+test("current PR head guard warns before retrying a transport failure", async () => {
+  const logs = [];
+  const sleeps = [];
+  let attempts = 0;
+
+  const result = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("ECONNRESET");
+      }
+      return response(200, { state: "open", head: { sha: expectedSha } });
+    },
+    monotonicNow: () => 0,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    log: (line) => logs.push(line)
+  });
+
+  assert.equal(result.isCurrent, true);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [250]);
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /::warning::GitHub pull request lookup failed before receiving a response; retrying in 250 ms \(attempt 1; transport error: ECONNRESET\)/);
+  assert.match(logs[1], /#52 still points to this run's head SHA/);
+});
+
 test("current PR head guard fails closed without retrying past its rate-limit budget", async () => {
   const sleeps = [];
   const writes = [];
@@ -200,7 +520,7 @@ test("current PR head guard fails closed without retrying past its rate-limit bu
   assert.deepEqual(writes, []);
 });
 
-test("current PR head guard waits and retries when Retry-After fits its remaining budget", async () => {
+test("current PR head guard honors a fitting rate-limit instruction in full", async () => {
   const sleeps = [];
   let attempts = 0;
 
@@ -221,14 +541,17 @@ test("current PR head guard waits and retries when Retry-After fits its remainin
 
   assert.equal(result.isCurrent, true);
   assert.equal(attempts, 2);
-  assert.deepEqual(sleeps, [10_000]);
+  // The active deadline already bounds the total wait, so the instructed 15 s
+  // window is honored instead of producing the old capped 10 s retry that would
+  // re-enter the window GitHub asked us to wait out.
+  assert.deepEqual(sleeps, [15_000]);
 });
 
 test("current PR head action exits nonzero without writing outputs when the rate-limit budget is exhausted", async (t) => {
   let requests = 0;
   const server = createServer((_request, response) => {
     requests += 1;
-    response.writeHead(403, { "Retry-After": "60" });
+    response.writeHead(403, { "Retry-After": "150" });
     response.end();
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -265,19 +588,74 @@ test("current PR head action exits nonzero without writing outputs when the rate
   assert.equal(existsSync(outputPath), false);
 });
 
-test("current PR head guard honors HTTP-date Retry-After values within its bounded delay", () => {
+test("current PR head guard rejects an instruction that cannot fit its remaining budget on the first response", () => {
   const now = Date.UTC(2026, 6, 16, 12, 0, 0);
   const retryAt = new Date(now + 7_000).toUTCString();
-  assert.equal(retryDelay(response(503, {}, { "retry-after": retryAt }), 1, now), 7_000);
-  assert.equal(retryDelay(response(503, {}, { "retry-after": new Date(now + 60_000).toUTCString() }), 1, now), 10_000);
+  assert.equal(retryAfterDelay(response(503, {}, { "retry-after": retryAt }), now), 7_000);
+  assert.equal(retryAfterDelay(response(503, {}, { "retry-after": new Date(now + 60_000).toUTCString() }), now), 60_000);
 });
 
-test("current PR head guard backs off when Retry-After is absent or invalid", () => {
+test("current PR head guard reports the raw instruction, not a capped one", () => {
+  // #349 widened the guard's budget and removed its 10 s eventual-sleep cap, so
+  // a fitting instruction is honored in full. The parser itself must stay
+  // uncapped: a downstream budget decision may always see the GitHub value.
+  assert.equal(
+    retryAfterDelay(response(429, {}, { "retry-after": "600" }), Date.UTC(2026, 6, 16, 12, 0, 0)),
+    600_000
+  );
+});
+
+test("current PR head guard treats an absent or invalid instruction as no instruction", () => {
   for (const retryAfter of [undefined, "", "not-a-delay", "-1"]) {
     const headers = retryAfter === undefined ? {} : { "retry-after": retryAfter };
-    assert.equal(retryDelay(response(503, {}, headers), 1), 250);
-    assert.equal(retryDelay(response(503, {}, headers), 2), 500);
+    assert.equal(retryAfterDelay(response(503, {}, headers), Date.UTC(2026, 6, 16, 12, 0, 0)), null);
   }
+});
+
+function genericWaitAbortError() {
+  const abortError = new Error("The operation was aborted");
+  abortError.name = "AbortError";
+  return abortError;
+}
+
+test("current PR head guard names the exhausted diagnosis when the budget kills a paced wait", async () => {
+  let attempts = 0;
+  let sleepsStarted = 0;
+
+  // The conversion must also cover the paced wait that the budget kills, not
+  // just the in-flight fetch. The injected wait mimics timers/promises, which
+  // rejects an aborted wait with a generic AbortError instead of the signal's
+  // own timeout reason. A small injected real delay lets the guard's
+  // AbortSignal.timeout fire first, so the branch is exercised deterministically.
+  const outcome = await requireCurrentPrHead({
+    env: guardEnvironment(),
+    appendFile: () => {},
+    fetchImpl: async () => {
+      attempts += 1;
+      return response(503, {}, { "x-github-request-id": "req-1" });
+    },
+    sleep: async () => {
+      sleepsStarted += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      throw genericWaitAbortError();
+    },
+    // A 2 ms deadline aborts while the injected 10 ms wait is still running.
+    timeoutMs: 2,
+    monotonicNow: () => (sleepsStarted === 0 ? 0 : 1),
+    log: () => {}
+  }).then(
+    () => { throw new Error("expected exhaustion"); },
+    (failure) => failure
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(sleepsStarted, 1);
+  assert.equal(outcome.code, "GITHUB_API_RETRY_EXHAUSTED");
+  assert.equal(outcome.status, 503);
+  assert.match(
+    String(outcome.message),
+    /exhausted its bounded retry budget after 1 attempt\(s\) because the bounded deadline elapsed \(The operation was aborted due to timeout\); last failure: HTTP 503 \(request-id=req-1\)\./
+  );
 });
 
 test("current PR head guard skips API access for non-PR events", async () => {
