@@ -1,21 +1,12 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:40301365784:build:isho-build",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Build and Deploy to Steam",
-    "job": "build",
-    "runId": "40301365784",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/40301365784",
-    "queuedAt": "2026-10-26T09:41:09.733Z",
-    "acquiredAt": "2026-10-26T09:41:11.318Z",
-    "expiresAt": "2026-10-26T13:41:11.318Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
+  "holder": null,
+  "holders": [],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "eac1a563-b26c-4ab3-879b-b7c67c744f69",
       "holderId": "Ambiguous-Interactive/IshoBoy:40301365784:build:isho-build",
       "repository": "Ambiguous-Interactive/IshoBoy",
       "workflow": "Build and Deploy to Steam",
@@ -23,14 +14,13 @@
       "runId": "40301365784",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/40301365784",
-      "queuedAt": "2026-10-26T09:41:09.733Z",
-      "acquiredAt": "2026-10-26T09:41:11.318Z",
-      "expiresAt": "2026-10-26T13:41:11.318Z",
-      "runnerId": "DAD-MACHINE"
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-26T09:51:11.968Z",
+      "availableAt": "2026-10-26T09:51:12.968Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-26T09:41:11.318Z"
+  "updatedAt": "2026-10-26T09:51:11.968Z"
 }
