@@ -9,7 +9,7 @@
   title, body, and alerting decision.
 - Foreign-authored lookalikes and pull requests are ignored; invalid matching
   evidence, duplicates, response overflow, and pagination exhaustion fail
-  closed without mutation.
+  closed without mutation when the caller does not opt into consolidation.
 - Identical desired issue state performs no write.
 - Existing monitor suites pass without weakening their safety assertions.
 - The standard library remains the only dependency and no Unity job runs.
@@ -57,8 +57,8 @@
 - Concurrency/ordering: creator-scoped ascending discovery validates GitHub's
   opaque same-origin cursor and rebases it onto the configured repository path,
   so concurrent creation or deletion cannot shift a later alert between
-  synthesized offsets and a Link cannot change repositories; duplicates remain
-  ambiguous.
+  synthesized offsets and a Link cannot change repositories; without
+  consolidation duplicates remain ambiguous.
 - Cancellation/recovery: request contexts and explicit 20-second client
   timeouts bound stalls; recovery closes by state only and retains evidence.
 - Determinism/isolation: `httptest` fixtures, no sleeps, no credentials, and no

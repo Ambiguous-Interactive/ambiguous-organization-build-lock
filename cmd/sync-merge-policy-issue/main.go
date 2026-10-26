@@ -253,7 +253,15 @@ func (client *githubClient) sync(
 	_, err := client.issues.Sync(
 		ctx,
 		alertIdentity(),
-		githubissue.Desired{Title: alertTitle, Body: body, State: state},
+		githubissue.Desired{
+			Title: alertTitle,
+			Body:  body,
+			State: state,
+			// Consolidation keeps one authoritative alert when transient
+			// list quirks publish twins; every twin closes without a
+			// body rewrite, so its last published evidence stays.
+			ConsolidateDuplicates: true,
+		},
 	)
 	return err
 }

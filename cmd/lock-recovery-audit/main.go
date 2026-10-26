@@ -580,7 +580,10 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 		_, err := client.issues.Sync(
 			ctx,
 			alertIdentity(),
-			githubissue.Desired{State: "closed", PreserveBodyOnClose: true},
+			// Consolidation keeps one authoritative recovery alert when transient
+			// list quirks publish twins; every twin closes with a state-only
+			// patch, so retained incident evidence stays untouched.
+			githubissue.Desired{State: "closed", PreserveBodyOnClose: true, ConsolidateDuplicates: true},
 		)
 		return err
 	}
@@ -595,6 +598,8 @@ func (client *githubClient) syncAlert(ctx context.Context, result observation, s
 			Body:              body,
 			AllowRenamedTitle: true,
 			VerifyCreate:      true,
+			// See the comment above: twins close, one alert lives.
+			ConsolidateDuplicates: true,
 		},
 	)
 	return err

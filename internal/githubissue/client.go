@@ -90,6 +90,16 @@ type Desired struct {
 	ClosedIsTerminal    bool
 	AllowRenamedTitle   bool
 	VerifyCreate        bool
+	// ConsolidateDuplicates opts the caller into healing a duplicate-alert
+	// cluster. GitHub's creator-scoped issue list has transiently stopped
+	// matching recent bot-authored issues, which let the create path publish
+	// several alerts for one identity; monitoring then refused every
+	// synchronization forever. When this is set, Sync walks the same bounded
+	// discovery, keeps the oldest open alert (or the oldest alert when none
+	// is open), and closes every other open duplicate with a state-only
+	// patch, so each extra's last published evidence stays readable. Without
+	// it two matches still fail closed without mutation.
+	ConsolidateDuplicates bool
 }
 
 // Action records the write, if any, needed to reach the desired state.
@@ -100,6 +110,10 @@ const (
 	ActionCreated Action = "created"
 	ActionUpdated Action = "updated"
 	ActionClosed  Action = "closed"
+	// ActionConsolidated reports that the desired state is reached and at
+	// least one duplicate alert was closed. Consolidation drives the action
+	// because a duplicate heal is the most specific outcome of the call.
+	ActionConsolidated Action = "consolidated"
 )
 
 // New creates a client with explicit request, response, and pagination bounds.
@@ -268,8 +282,31 @@ func (client *Client) RequestJSON(
 	return header, nil
 }
 
-// Find resolves exactly zero or one automation-owned marker issue.
+// Find resolves exactly zero or one automation-owned marker issue. Its
+// walk refuses the moment a second distinct match appears, so the refusal
+// names the first ambiguous evidence an operator meets and no later page
+// can replace that reason.
 func (client *Client) Find(ctx context.Context, identity Identity) (*Issue, error) {
+	matches, err := client.matchAlerts(ctx, identity, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	return &matches[0], nil
+}
+
+// matchAlerts walks the same bounded creator-scoped discovery Find uses and
+// returns the valid automation-owned matches in list order. With
+// eagerRefusal set, the walk refuses the moment a second distinct match
+// appears and keeps the newest copy of a repeated number, which preserves
+// the exact prior refusal contract for callers that cannot consolidate. In
+// list mode a number that repeats, even across page boundaries, is one
+// issue: the walk keeps the first copy and drops the rest. Every
+// distinct-number match counts toward duplication. Invalid matching
+// evidence, response overflow, and pagination exhaustion fail closed.
+func (client *Client) matchAlerts(ctx context.Context, identity Identity, eagerRefusal bool) ([]Issue, error) {
 	if err := validateIdentity(identity); err != nil {
 		return nil, err
 	}
@@ -283,7 +320,7 @@ func (client *Client) Find(ctx context.Context, identity Identity) (*Issue, erro
 	}
 	next := client.RepositoryPath("/issues?" + query.Encode())
 	cursorUsed := false
-	var found *Issue
+	var matches []Issue
 	for page := 0; page < client.maxPages; page++ {
 		var issues []Issue
 		header, err := client.RequestJSON(
@@ -309,11 +346,28 @@ func (client *Client) Find(ctx context.Context, identity Identity) (*Issue, erro
 				candidate.State != "open" && candidate.State != "closed" {
 				return nil, errors.New("invalid automation issue evidence")
 			}
-			if found != nil && found.Number != candidate.Number {
-				return nil, errors.New("duplicate automation issue evidence")
+			if eagerRefusal {
+				if len(matches) > 0 && matches[0].Number != candidate.Number {
+					return nil, errors.New("duplicate automation issue evidence")
+				}
+				if len(matches) > 0 {
+					matches[0] = *candidate
+				} else {
+					matches = []Issue{*candidate}
+				}
+				continue
 			}
-			copy := *candidate
-			found = &copy
+			repeated := false
+			for seen := range matches {
+				if matches[seen].Number == candidate.Number {
+					repeated = true
+					break
+				}
+			}
+			if repeated {
+				continue
+			}
+			matches = append(matches, *candidate)
 		}
 		next, err = client.nextLink(header.Get("Link"), identity)
 		if err != nil {
@@ -328,7 +382,7 @@ func (client *Client) Find(ctx context.Context, identity Identity) (*Issue, erro
 			next = client.RepositoryPath("/issues?" + query.Encode())
 		}
 		if next == "" {
-			return found, nil
+			return matches, nil
 		}
 		if page == client.maxPages-1 {
 			return nil, errors.New("automation issue pagination exceeded")
@@ -338,7 +392,8 @@ func (client *Client) Find(ctx context.Context, identity Identity) (*Issue, erro
 }
 
 // Sync creates, updates, reopens, or closes an issue without rewriting an
-// already identical record.
+// already identical record. It can also consolidate a duplicate alert cluster
+// when the desired state opts in.
 func (client *Client) Sync(
 	ctx context.Context,
 	identity Identity,
@@ -356,10 +411,29 @@ func (client *Client) Sync(
 			return ActionNone, errors.New("desired issue is missing its identity")
 		}
 	}
-	existing, err := client.Find(ctx, identity)
+	existing, consolidated, err := client.resolveAlert(ctx, identity, desired)
 	if err != nil {
 		return ActionNone, err
 	}
+	action, err := client.applyDesiredState(ctx, identity, desired, existing)
+	if err != nil {
+		return ActionNone, err
+	}
+	if consolidated {
+		return ActionConsolidated, nil
+	}
+	return action, nil
+}
+
+// applyDesiredState writes the desired state onto one alert. An absent alert
+// is created; an identical record is left unwritten; anything else updates,
+// reopens, or closes the existing alert.
+func (client *Client) applyDesiredState(
+	ctx context.Context,
+	identity Identity,
+	desired Desired,
+	existing *Issue,
+) (Action, error) {
 	if desired.State == "closed" && existing == nil {
 		return ActionNone, nil
 	}
@@ -433,6 +507,46 @@ func (client *Client) Sync(
 		return ActionClosed, nil
 	}
 	return ActionUpdated, nil
+}
+
+// resolveAlert finds the issue Sync operates on. With consolidation enabled a
+// duplicate cluster heals first: every open duplicate except the keeper closes
+// with a state-only patch, and the keeper becomes the single match. The second
+// return reports whether the heal wrote, so a monitor can see that a
+// consolidation happened even when the keeper itself needed no write.
+func (client *Client) resolveAlert(ctx context.Context, identity Identity, desired Desired) (*Issue, bool, error) {
+	if !desired.ConsolidateDuplicates {
+		alert, err := client.Find(ctx, identity)
+		return alert, false, err
+	}
+	matches, err := client.matchAlerts(ctx, identity, false)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(matches) == 0 {
+		return nil, false, nil
+	}
+	keeper := matches[0]
+	for index := range matches {
+		if matches[index].State == "open" {
+			keeper = matches[index]
+			break
+		}
+	}
+	consolidated := false
+	for index := range matches {
+		if matches[index].Number == keeper.Number {
+			continue
+		}
+		if matches[index].State != "open" {
+			continue
+		}
+		if err := client.patch(ctx, matches[index].Number, map[string]any{"state": "closed"}); err != nil {
+			return nil, false, err
+		}
+		consolidated = true
+	}
+	return &keeper, consolidated, nil
 }
 
 func (client *Client) patch(ctx context.Context, number int, payload map[string]any) error {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/githubissue"
+	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/jsonstrict"
 	"github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/runnotice"
 )
 
@@ -230,6 +231,12 @@ func (client *githubClient) syncIncident(ctx context.Context, repository string,
 			Title:            incidentTitle,
 			Body:             incidentBody(result),
 			ClosedIsTerminal: true,
+			// One transient GitHub-side list anomaly published three open
+			// twin alerts. The duplicate refusal then made every sync and
+			// every healthy close-out fail for days. Consolidation restores
+			// one authoritative incident without rewriting any twin's last
+			// published evidence.
+			ConsolidateDuplicates: true,
 		},
 	)
 	return err
@@ -298,7 +305,10 @@ func run(
 		return conclude(stderr, reporter, result.Reason, "", 1)
 	}
 	if syncErr := client.syncIncident(ctx, config.Repository, result); syncErr != nil {
-		_, _ = fmt.Fprintln(stderr, "Reaper delivery audit failed: "+reasonSyncFailed+".")
+		// The cause is sanitized to the published cause alphabet, so a
+		// response nobody controls cannot inject a false log line here.
+		cause := jsonstrict.SanitizeCause(syncErr.Error())
+		_, _ = fmt.Fprintf(stderr, "Reaper delivery audit failed: %s (%s).\n", reasonSyncFailed, cause)
 		return conclude(stderr, reporter, reasonSyncFailed, "", 1)
 	}
 	if !result.Healthy {
