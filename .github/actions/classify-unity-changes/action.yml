@@ -18,7 +18,7 @@ inputs:
     required: false
 outputs:
   unity-required:
-    description: True unless a pull request changes only centrally audited Unity-independent paths.
+    description: True unless a pull request changes only central or caller-declared Unity-independent paths.
 runs:
   using: node24
   main: ../../dist/classify-unity-changes.js

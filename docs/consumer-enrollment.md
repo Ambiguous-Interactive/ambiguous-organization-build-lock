@@ -479,8 +479,10 @@ touches a Dependabot pull request.
    before classification completes and must never be uploaded.
 10. Emit one stable, always-reporting aggregate. Use the central
    `classify-unity-changes` action in a hosted, failure-propagating classifier
-   job; it defaults to requiring Unity and skips only the central
-   Unity-independent path allowlist. Use `require-unity-validation` for the
+   job; it defaults to requiring Unity and skips only central or caller-declared
+   Unity-independent paths. A caller may declare extra inert prefixes with the
+   `independent-paths` input; the reserved prefixes are still refused. Use
+   `require-unity-validation` for the
    aggregate when the workflow has a change-classifier or untrusted-revision
    branch. Bind its inputs directly to that classifier, preflight, licensed,
    and hosted fallback job results plus the fallback release's typed
