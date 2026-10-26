@@ -277,20 +277,37 @@ test("a declaration that is not an auditable directory prefix is refused rather 
   assert.deepEqual(parseDeclaredIndependentPaths(".github/scripts/**"), [".github/scripts/"]);
 });
 
+/*
+ * BOTH HALVES OF THE DECLARATION CONTRACT ARE PINNED END TO END: a diff of only declared or
+ * centrally independent paths skips Unity, and ONE undeclared path flips the decision back to
+ * required. The flip is exercised through the runner input name on purpose: the unit test of
+ * classifyUnityChanges above already pins it in isolation, but a runtime that dropped the
+ * declaration input entirely would still pass that unit test.
+ */
 test("committed classifier runtime honours a declaration through the runner input name", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-declared-"));
-  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const workspace = fixtureRepository(root, ["Benchmarks/Baselines/x.json", "progress/s.md"]);
-  const outputPath = path.join(root, "output.txt");
-  const result = classifierRuntime({
-    GITHUB_OUTPUT: outputPath,
-    "INPUT_EVENT-NAME": "pull_request",
-    "INPUT_BASE-SHA": workspace.baseSHA,
-    "INPUT_HEAD-SHA": workspace.headSHA,
-    "INPUT_INDEPENDENT-PATHS": "Benchmarks/**"
-  }, workspace.directory);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=false");
+  for (const { changedPaths, expected } of [
+    { changedPaths: ["Benchmarks/Baselines/x.json", "progress/s.md"], expected: "unity-required=false" },
+    { changedPaths: ["Benchmarks/Baselines/x.json", "scripts/build.ps1"], expected: "unity-required=true" }
+  ]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-declared-"));
+    test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    try {
+      const workspace = fixtureRepository(root, changedPaths);
+      const outputPath = path.join(root, "output.txt");
+      const result = classifierRuntime({
+        GITHUB_OUTPUT: outputPath,
+        "INPUT_EVENT-NAME": "pull_request",
+        "INPUT_BASE-SHA": workspace.baseSHA,
+        "INPUT_HEAD-SHA": workspace.headSHA,
+        "INPUT_INDEPENDENT-PATHS": "Benchmarks/**"
+      }, workspace.directory);
+      const output = fs.readFileSync(outputPath, "utf8").trim().split("\n").pop();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(output, expected, changedPaths.join(", "));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
 });
 
 test("committed classifier runtime fails CLOSED on an unparseable declaration", () => {
