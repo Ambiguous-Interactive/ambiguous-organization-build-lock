@@ -30,7 +30,8 @@ Observed facts:
   classifies `true`, `Assets/**` is refused.
 - Tests already pinned clauses 1-3 and the first half of clause 4. Gap: the
   flip back to `true` was pinned only at unit level, never end to end through
-  the runner input name where #184 hid a real input-reading bug.
+  the runner input name. That is the exact gap #184 later repaired: a unit
+  test of `run()` passed while the runtime read an absent input name.
 
 ## Red-green
 
@@ -40,8 +41,11 @@ green. No committed file was mutated in the final state.
 
 Green: the runtime declaration test is now data-driven over both halves:
 
-- declared-only diff reports `unity-required=false`;
-- the same diff plus one undeclared path reports `unity-required=true`.
+- a diff of one declared path plus one centrally independent path reports
+  `unity-required=false`; the independent path proves the declaration cannot
+  narrow the central floor;
+- replacing the centrally independent path with one undeclared path flips the
+  same declaration back to `unity-required=true`.
 
 ## Documentation sync
 
@@ -50,7 +54,8 @@ described the skip set as the central allowlist only:
 
 - `action.yml` output description now says "central or caller-declared".
 - `README.md` and `docs/consumer-enrollment.md` now name the
-  `independent-paths` input and keep the reserved-prefix refusal visible.
+  `independent-paths` input. `docs/consumer-enrollment.md` keeps the
+  reserved-prefix refusal visible.
 
 ## Validation
 

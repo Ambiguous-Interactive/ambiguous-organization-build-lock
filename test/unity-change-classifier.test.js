@@ -290,19 +290,23 @@ test("committed classifier runtime honours a declaration through the runner inpu
     { changedPaths: ["Benchmarks/Baselines/x.json", "scripts/build.ps1"], expected: "unity-required=true" }
   ]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-declared-"));
-    const workspace = fixtureRepository(root, changedPaths);
-    const outputPath = path.join(root, "output.txt");
-    const result = classifierRuntime({
-      GITHUB_OUTPUT: outputPath,
-      "INPUT_EVENT-NAME": "pull_request",
-      "INPUT_BASE-SHA": workspace.baseSHA,
-      "INPUT_HEAD-SHA": workspace.headSHA,
-      "INPUT_INDEPENDENT-PATHS": "Benchmarks/**"
-    }, workspace.directory);
-    const output = fs.readFileSync(outputPath, "utf8").trim().split("\n").pop();
-    fs.rmSync(root, { recursive: true, force: true });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(output, expected, changedPaths.join(", "));
+    test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    try {
+      const workspace = fixtureRepository(root, changedPaths);
+      const outputPath = path.join(root, "output.txt");
+      const result = classifierRuntime({
+        GITHUB_OUTPUT: outputPath,
+        "INPUT_EVENT-NAME": "pull_request",
+        "INPUT_BASE-SHA": workspace.baseSHA,
+        "INPUT_HEAD-SHA": workspace.headSHA,
+        "INPUT_INDEPENDENT-PATHS": "Benchmarks/**"
+      }, workspace.directory);
+      const output = fs.readFileSync(outputPath, "utf8").trim().split("\n").pop();
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(output, expected, changedPaths.join(", "));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
