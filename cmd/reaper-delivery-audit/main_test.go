@@ -289,12 +289,19 @@ func TestSyncIncidentDeduplicatesAndTransitionsOneIssue(t *testing.T) {
 	}
 }
 
-func TestSyncIncidentRejectsUntrustedOrDuplicateMarkerIssues(t *testing.T) {
+func TestSyncIncidentIgnoresUntrustedMarkersAndConsolidatesDuplicates(t *testing.T) {
 	t.Parallel()
+	// No proven scheduled run history leaves the incident alerting, so the
+	// keeper stays open and carries the incident body.
+	noHistory := classifyRuns(testNow, nil, 30*time.Minute, 15*time.Minute)
+	noHistoryBody := incidentBody(noHistory)
 	cases := []struct {
-		name   string
-		issues func() []incidentIssue
-		error  bool
+		name        string
+		issues      func() []incidentIssue
+		wantCreates int
+		wantCloses  []string
+		wantSyncs   []string
+		wantPatches map[string][2]string
 	}{
 		{
 			name: "untrusted marker is ignored",
@@ -303,17 +310,23 @@ func TestSyncIncidentRejectsUntrustedOrDuplicateMarkerIssues(t *testing.T) {
 				issue.User.Login = "untrusted-user"
 				return []incidentIssue{issue}
 			},
+			wantCreates: 1,
 		},
 		{
-			name: "duplicate bot markers fail closed",
+			name: "duplicate bot markers consolidate",
 			issues: func() []incidentIssue {
 				first := incidentIssue{Number: 77, State: "open", Title: incidentTitle, Body: incidentMarker}
 				first.User.Login = incidentActor
-				second := incidentIssue{Number: 78, State: "closed", Title: incidentTitle, Body: incidentMarker}
+				second := incidentIssue{Number: 78, State: "open", Title: incidentTitle, Body: incidentMarker}
 				second.User.Login = incidentActor
 				return []incidentIssue{first, second}
 			},
-			error: true,
+			wantCloses: []string{"/repos/owner/repo/issues/78"},
+			wantSyncs:  []string{"/repos/owner/repo/issues/77"},
+			wantPatches: map[string][2]string{
+				"/repos/owner/repo/issues/78": {"", "closed"},
+				"/repos/owner/repo/issues/77": {noHistoryBody, "open"},
+			},
 		},
 	}
 	for _, test := range cases {
@@ -321,27 +334,60 @@ func TestSyncIncidentRejectsUntrustedOrDuplicateMarkerIssues(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			var creates int
+			var closes, syncs []string
+			patches := map[string][2]string{}
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if request.Method == http.MethodGet {
 					_ = json.NewEncoder(writer).Encode(test.issues())
 					return
 				}
-				creates++
-				writer.WriteHeader(http.StatusCreated)
+				if request.Method == http.MethodPost {
+					creates++
+					writer.WriteHeader(http.StatusCreated)
+					_, _ = fmt.Fprint(writer, `{}`)
+					return
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				body, _ := payload["body"].(string)
+				state, _ := payload["state"].(string)
+				patches[request.URL.Path] = [2]string{body, state}
+				if _, titled := payload["title"]; titled {
+					syncs = append(syncs, request.URL.Path)
+				} else {
+					closes = append(closes, request.URL.Path)
+				}
+				writer.WriteHeader(http.StatusOK)
 				_, _ = fmt.Fprint(writer, `{}`)
 			}))
 			defer server.Close()
 
 			client := testGitHubClient(server.URL, server.Client())
-			err := client.syncIncident(context.Background(), "owner/repo", classifyRuns(testNow, nil, 30*time.Minute, 15*time.Minute))
-			if (err != nil) != test.error {
-				t.Fatalf("syncIncident error = %v, want error %v", err, test.error)
+			if err := client.syncIncident(context.Background(), "owner/repo", noHistory); err != nil {
+				t.Fatal(err)
 			}
-			if test.error && creates != 0 {
-				t.Fatalf("ambiguous incident created %d issues", creates)
+			if creates != test.wantCreates {
+				t.Fatalf("creates = %d, want %d", creates, test.wantCreates)
 			}
-			if !test.error && creates != 1 {
-				t.Fatalf("untrusted marker resulted in %d creates, want 1", creates)
+			// The keeper stays the oldest open alert; each extra closes with
+			// a state-only patch, so every duplicate's retained evidence
+			// stays untouched.
+			if strings.Join(closes, " ") != strings.Join(test.wantCloses, " ") {
+				t.Fatalf("closes = %v, want %v", closes, test.wantCloses)
+			}
+			if strings.Join(syncs, " ") != strings.Join(test.wantSyncs, " ") {
+				t.Fatalf("syncs = %v, want %v", syncs, test.wantSyncs)
+			}
+			if len(patches) != len(test.wantPatches) {
+				t.Fatalf("patches = %#v, want %#v", patches, test.wantPatches)
+			}
+			for path, got := range patches {
+				want, taken := test.wantPatches[path]
+				if !taken || got != want {
+					t.Fatalf("patch %s = %q, want %q", path, got, want)
+				}
 			}
 		})
 	}
@@ -782,7 +828,7 @@ func TestRunPublishesTheReasonAnAPIOrSyncFailureLeaves(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			code, _, _, summary := runAuditAgainst(
+			code, _, stderr, summary := runAuditAgainst(
 				t,
 				auditConfig(),
 				scheduledRuns(runFixture(9, 10*time.Minute, "completed", "success")),
@@ -796,6 +842,12 @@ func TestRunPublishesTheReasonAnAPIOrSyncFailureLeaves(t *testing.T) {
 			want := monitorMeanings[test.reason] + " Reason: `" + test.reason + "`.\n"
 			if summary != want {
 				t.Fatalf("summary = %q, want %q", summary, want)
+			}
+			// A sync failure must name its cause, so an operator can tell a
+			// refusal apart from a transport failure without reading code.
+			if test.reason == reasonSyncFailed &&
+				!strings.Contains(stderr, "incident-sync-failed (GitHub API status 500)") {
+				t.Fatalf("failure must name the sync cause, got %q", stderr)
 			}
 		})
 	}

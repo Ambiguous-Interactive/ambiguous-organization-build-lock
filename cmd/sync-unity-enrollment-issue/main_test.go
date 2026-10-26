@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -127,6 +128,96 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 	}
 }
 
+// One transient publication produced two alert twins. Consolidation keeps the
+// oldest open alert as the single authoritative record and closes the newer
+// twin with a state-only patch, so the twin's own last evidence stays.
+func TestSyncConsolidatesDuplicateAlerts(t *testing.T) {
+	current := []issue{
+		{Number: 7, State: "open", Title: alertTitle, Body: alertMarker},
+		{Number: 21, State: "open", Title: alertTitle, Body: alertMarker},
+	}
+	for index := range current {
+		current[index].User.Login = alertAuthor
+	}
+	var patches []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer test-token" {
+			t.Error("missing token")
+		}
+		switch request.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(writer).Encode(current)
+		case http.MethodPatch:
+			var payload map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			number := strings.TrimPrefix(request.URL.Path, "/repos/Ambiguous-Interactive/lock/issues/")
+			state, _ := payload["state"].(string)
+			_, titled := payload["title"]
+			if titled {
+				body, _ := payload["body"].(string)
+				for index := range current {
+					if fmt.Sprint(current[index].Number) == number {
+						current[index].State = state
+						current[index].Body = body
+					}
+				}
+				patches = append(patches, "sync "+number)
+				_, _ = writer.Write([]byte(`{}`))
+				return
+			}
+			for index := range current {
+				if fmt.Sprint(current[index].Number) == number {
+					current[index].State = state
+				}
+			}
+			patches = append(patches, "close "+number)
+			_, _ = writer.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "test-token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	drift := sampleAudit()
+	drift.Findings = []enrollment.UnityAuditFinding{{
+		Repository: "Ambiguous-Interactive/DoxReloaded",
+		SHA:        strings.Repeat("a", 40),
+		Code:       "missing-lock-acquire",
+		Path:       ".github/workflows/unity.yml",
+		Job:        "unity",
+	}}
+	if err := client.sync(t.Context(), drift, testArtifactURL); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(patches, " ") != "close 21 sync 7" {
+		t.Fatalf("patches = %v, want close 21 then sync 7", patches)
+	}
+	wantBody := renderIssueBody(drift, testArtifactURL)
+	if current[0].State != "open" || current[0].Body != wantBody {
+		t.Fatalf("keeper alert did not sync: %#v", current[0])
+	}
+	if current[1].State != "closed" || current[1].Body != alertMarker {
+		t.Fatalf("twin alert must keep its last published body: %#v", current[1])
+	}
+
+	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err != nil {
+		t.Fatal(err)
+	}
+	if current[0].State != "closed" {
+		t.Fatalf("clean audit did not close the kept alert: %#v", current[0])
+	}
+	// The closed twin is never touched again; its close stays the only write.
+	if strings.Join(patches, " ") != "close 21 sync 7 sync 7" {
+		t.Fatalf("patch sequence = %v, want the twin closed once and the alert synced twice", patches)
+	}
+}
+
 // A repository accumulates issues indefinitely, so alert discovery must stay
 // inside its response bound as the history grows. Every page must be walked and
 // every response must fit even when each issue carries a maximum-size body.
@@ -176,24 +267,6 @@ func TestAlertDiscoveryStaysBoundedAcrossPages(t *testing.T) {
 	}
 	if largest > maxResponseBytes {
 		t.Fatalf("a full page of maximum-size issues was %d bytes, over the %d byte bound", largest, maxResponseBytes)
-	}
-}
-
-func TestSyncRejectsDuplicateMarkerIssues(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		first := issue{Number: 1, Body: alertMarker}
-		first.User.Login = alertAuthor
-		second := issue{Number: 2, Body: alertMarker}
-		second.User.Login = alertAuthor
-		_ = json.NewEncoder(writer).Encode([]issue{first, second})
-	}))
-	defer server.Close()
-	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "token", server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err == nil {
-		t.Fatal("duplicate marker issues passed")
 	}
 }
 

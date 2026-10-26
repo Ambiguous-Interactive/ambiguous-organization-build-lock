@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,32 +69,7 @@ func TestRenderIssueBodyContainsOnlySanitizedFields(t *testing.T) {
 func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 	current := []issue{}
 	requests := make([]string, 0)
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer test-token" {
-			t.Error("missing token")
-		}
-		requests = append(requests, request.Method+" "+request.URL.Path)
-		switch request.Method {
-		case http.MethodGet:
-			_ = json.NewEncoder(writer).Encode(current)
-		case http.MethodPost:
-			var payload map[string]any
-			_ = json.NewDecoder(request.Body).Decode(&payload)
-			created := issue{Number: 42, State: "open", Title: alertTitle, Body: payload["body"].(string)}
-			created.User.Login = alertAuthor
-			current = []issue{created}
-			writer.WriteHeader(http.StatusCreated)
-			_, _ = writer.Write([]byte(`{}`))
-		case http.MethodPatch:
-			var payload map[string]any
-			_ = json.NewDecoder(request.Body).Decode(&payload)
-			current[0].State = payload["state"].(string)
-			current[0].Body = payload["body"].(string)
-			_, _ = writer.Write([]byte(`{}`))
-		default:
-			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
-		}
-	}))
+	server := httptest.NewTLSServer(issueSyncStub(t, &current, &requests))
 	defer server.Close()
 	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "test-token", server.Client())
 	if err != nil {
@@ -119,6 +95,93 @@ func TestSyncCreatesUpdatesAndClosesOneDeduplicatedIssue(t *testing.T) {
 	}
 	if current[0].State != "closed" {
 		t.Fatalf("clean audit did not close alert: %#v", current)
+	}
+	if len(requests) != 5 {
+		t.Fatalf("unexpected request count %d: %#v", len(requests), requests)
+	}
+}
+
+// The stub servers a mutable issue list and records every request in order, so
+// a consolidation test can pin the exact patch sequence.
+func issueSyncStub(
+	t *testing.T,
+	current *[]issue,
+	requests *[]string,
+) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer test-token" {
+			t.Error("missing token")
+		}
+		*requests = append(*requests, request.Method+" "+request.URL.Path)
+		switch request.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(writer).Encode(*current)
+		case http.MethodPost:
+			var payload map[string]any
+			_ = json.NewDecoder(request.Body).Decode(&payload)
+			created := issue{Number: 42, State: "open", Title: alertTitle, Body: payload["body"].(string)}
+			created.User.Login = alertAuthor
+			*current = []issue{created}
+			writer.WriteHeader(http.StatusCreated)
+			_, _ = writer.Write([]byte(`{}`))
+		case http.MethodPatch:
+			var payload map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			number := strings.TrimPrefix(request.URL.Path, "/repos/Ambiguous-Interactive/lock/issues/")
+			for index := range *current {
+				if fmt.Sprint((*current)[index].Number) == number {
+					if state, ok := payload["state"]; ok {
+						(*current)[index].State = state.(string)
+					}
+					if body, ok := payload["body"]; ok {
+						(*current)[index].Body = body.(string)
+					}
+				}
+			}
+			_, _ = writer.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	})
+}
+
+// Two open twins exist because one early run could not discover the alert
+// GitHub already had. Consolidation keeps the oldest open issue as the single
+// authoritative alert and closes the newer twin; the twin's body never changes.
+func TestSyncConsolidatesDuplicateAlerts(t *testing.T) {
+	drift := sampleAudit()
+	drift.Findings = []mergepolicy.Finding{sampleFinding()}
+	current := []issue{
+		{Number: 7, State: "open", Title: alertTitle, Body: alertMarker},
+		{Number: 21, State: "open", Title: alertTitle, Body: alertMarker},
+	}
+	for index := range current {
+		current[index].User.Login = alertAuthor
+	}
+	requests := make([]string, 0)
+	server := httptest.NewTLSServer(issueSyncStub(t, &current, &requests))
+	defer server.Close()
+	client, err := newGitHubClient(server.URL, "Ambiguous-Interactive/lock", "test-token", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.sync(t.Context(), drift, testArtifactURL); err != nil {
+		t.Fatal(err)
+	}
+	if current[0].State != "open" || current[0].Body != renderIssueBody(drift, testArtifactURL) {
+		t.Fatalf("kept alert did not take the finding: %#v", current[0])
+	}
+	if current[1].State != "closed" || current[1].Body != alertMarker {
+		t.Fatalf("twin alert must keep its last published body: %#v", current[1])
+	}
+	if err := client.sync(t.Context(), sampleAudit(), testArtifactURL); err != nil {
+		t.Fatal(err)
+	}
+	if current[0].State != "closed" {
+		t.Fatalf("clean audit did not close the kept alert: %#v", current[0])
 	}
 	if len(requests) != 5 {
 		t.Fatalf("unexpected request count %d: %#v", len(requests), requests)

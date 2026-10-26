@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -424,6 +425,281 @@ func TestSyncIsIdempotentAndPreservesRetainedCloseEvidence(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestSyncConsolidatesDuplicateAlerts(t *testing.T) {
+	t.Parallel()
+	type write struct {
+		method string
+		path   string
+		keys   []string
+		state  string
+		body   string
+	}
+	tests := []struct {
+		name       string
+		matches    []Issue
+		desired    Desired
+		wantError  bool
+		wantWrites []write
+		wantAction Action
+	}{
+		{
+			name: "collapse live duplicates onto the oldest open alert",
+			matches: []Issue{
+				issueFixture(7, "open", testTitle, testMarker+"\nold", testAuthor),
+				issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired: Desired{State: "open", Title: testTitle, Body: testMarker + "\nnew", ConsolidateDuplicates: true},
+			wantWrites: []write{
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/21", keys: []string{"state"}, state: "closed"},
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/7", keys: []string{"body", "state", "title"}, state: "open", body: testMarker + "\nnew"},
+			},
+			wantAction: ActionConsolidated,
+		},
+		{
+			name: "closed duplicates do not need another write",
+			matches: []Issue{
+				issueFixture(7, "open", testTitle, testMarker+"\nold", testAuthor),
+				issueFixture(21, "closed", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired:    Desired{State: "open", Title: testTitle, Body: testMarker + "\nold", ConsolidateDuplicates: true},
+			wantWrites: []write{},
+			wantAction: ActionNone,
+		},
+		{
+			name: "all-duplicates-closed reopen the oldest alert",
+			matches: []Issue{
+				issueFixture(7, "closed", testTitle, testMarker+"\nold", testAuthor),
+				issueFixture(21, "closed", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired: Desired{State: "open", Title: testTitle, Body: testMarker + "\nnew", ConsolidateDuplicates: true},
+			wantWrites: []write{
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/7", keys: []string{"body", "state", "title"}, state: "open", body: testMarker + "\nnew"},
+			},
+			wantAction: ActionUpdated,
+		},
+		{
+			name: "healthy close-out over a full live cluster closes twins and the keeper",
+			matches: []Issue{
+				issueFixture(1, "closed", testTitle, testMarker+"\npast", testAuthor),
+				issueFixture(7, "open", testTitle, testMarker+"\nactive", testAuthor),
+				issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+				issueFixture(34, "open", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired: Desired{State: "closed", Title: testTitle, Body: testMarker + "\nhealthy", ClosedIsTerminal: true, ConsolidateDuplicates: true},
+			wantWrites: []write{
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/21", keys: []string{"state"}, state: "closed"},
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/34", keys: []string{"state"}, state: "closed"},
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/7", keys: []string{"body", "state", "title"}, state: "closed", body: testMarker + "\nhealthy"},
+			},
+			wantAction: ActionConsolidated,
+		},
+		{
+			name: "retained close-out heals the cluster with state-only closes",
+			matches: []Issue{
+				issueFixture(1, "closed", testTitle, testMarker+"\npast", testAuthor),
+				issueFixture(7, "open", testTitle, testMarker+"\nactive", testAuthor),
+				issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired: Desired{State: "closed", PreserveBodyOnClose: true, ConsolidateDuplicates: true},
+			wantWrites: []write{
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/21", keys: []string{"state"}, state: "closed"},
+				{method: http.MethodPatch, path: "/repos/owner/repo/issues/7", keys: []string{"state"}, state: "closed"},
+			},
+			wantAction: ActionConsolidated,
+		},
+		{
+			name: "without consolidation duplicates still fail closed",
+			matches: []Issue{
+				issueFixture(7, "open", testTitle, testMarker+"\nold", testAuthor),
+				issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+			},
+			desired:    Desired{State: "open", Title: testTitle, Body: testMarker + "\nnew"},
+			wantError:  true,
+			wantWrites: []write{},
+			wantAction: ActionNone,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var writes []write
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method == http.MethodGet {
+					_ = json.NewEncoder(writer).Encode(test.matches)
+					return
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				keys := make([]string, 0, len(payload))
+				for key := range payload {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				state, _ := payload["state"].(string)
+				body, _ := payload["body"].(string)
+				writes = append(writes, write{
+					method: request.Method,
+					path:   request.URL.Path,
+					keys:   keys,
+					state:  state,
+					body:   body,
+				})
+				writer.WriteHeader(http.StatusOK)
+				_, _ = writer.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			action, err := testClient(t, server, 30, 2).Sync(
+				t.Context(),
+				Identity{Marker: testMarker, Author: testAuthor},
+				test.desired,
+			)
+			if (err != nil) != test.wantError {
+				t.Fatalf("sync error = %v, want error %v", err, test.wantError)
+			}
+			if action != test.wantAction {
+				t.Fatalf("action = %q, want %q", action, test.wantAction)
+			}
+			if len(writes) != len(test.wantWrites) {
+				t.Fatalf("writes = %#v, want %#v", writes, test.wantWrites)
+			}
+			for index, got := range writes {
+				want := test.wantWrites[index]
+				if got.method != want.method || got.path != want.path ||
+					strings.Join(got.keys, ",") != strings.Join(want.keys, ",") ||
+					got.state != want.state || got.body != want.body {
+					t.Fatalf("write %d = %s %s keys %v state %q body %q, want %s %s keys %v state %q body %q",
+						index, got.method, got.path, got.keys, got.state, got.body,
+						want.method, want.path, want.keys, want.state, want.body)
+				}
+			}
+		})
+	}
+}
+
+// A duplicate wedge is proven on the page where the second distinct match
+// first appears. The walk must not spend later pages before it refuses.
+func TestFindRefusesDuplicatesOnThePageTheyAppear(t *testing.T) {
+	t.Parallel()
+	var requests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		writeNextLink(writer, server.URL, 2, 2, "opaque-cursor")
+		_ = json.NewEncoder(writer).Encode([]Issue{
+			issueFixture(7, "open", testTitle, testMarker, testAuthor),
+			issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+		})
+	}))
+	defer server.Close()
+
+	_, err := testClient(t, server, 2, 5).Find(
+		t.Context(),
+		Identity{Marker: testMarker, Author: testAuthor},
+	)
+	if err == nil || err.Error() != "duplicate automation issue evidence" {
+		t.Fatalf("find error = %v, want the duplicate refusal", err)
+	}
+	if requests != 1 {
+		t.Fatalf("refusal requested %d pages, want 1", requests)
+	}
+}
+
+// GitHub can list one issue again across a page boundary. A repeated number
+// is one issue, and both discovery modes must walk past it as one.
+func TestBothWalkModesTreatARepeatedNumberAsOneIssue(t *testing.T) {
+	t.Parallel()
+	issue := issueFixture(7, "open", testTitle, testMarker, testAuthor)
+	var requests int
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if requests%2 == 1 {
+			writeNextLink(writer, server.URL, 2, 1, "opaque-cursor")
+		}
+		_ = json.NewEncoder(writer).Encode([]Issue{issue})
+	}))
+	defer server.Close()
+	client := testClient(t, server, 1, 5)
+
+	found, err := client.Find(t.Context(), Identity{Marker: testMarker, Author: testAuthor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.Number != 7 {
+		t.Fatalf("repeated-number result = %#v, want one alert", found)
+	}
+	matches, err := client.matchAlerts(t.Context(), Identity{Marker: testMarker, Author: testAuthor}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Number != 7 {
+		t.Fatalf("repeated-number cluster = %#v, want one match", matches)
+	}
+	if requests != 4 {
+		t.Fatalf("walks requested %d pages, want 4", requests)
+	}
+}
+
+// A heal that stops at its first failed twin close keeps the closes it
+// already wrote, writes nothing more, fails closed, and finishes the heal on
+// the next run.
+func TestConsolidationResumesAfterAFailedTwinClose(t *testing.T) {
+	t.Parallel()
+	matches := []Issue{
+		issueFixture(7, "open", testTitle, testMarker+"\nold", testAuthor),
+		issueFixture(21, "open", testTitle, testMarker+"\ndrift", testAuthor),
+		issueFixture(34, "open", testTitle, testMarker+"\ndrift", testAuthor),
+	}
+	attempts := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			_ = json.NewEncoder(writer).Encode(matches)
+			return
+		}
+		attempts[request.URL.Path]++
+		if request.URL.Path == "/repos/owner/repo/issues/21" && attempts[request.URL.Path] == 1 {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	identity := Identity{Marker: testMarker, Author: testAuthor}
+	desired := Desired{State: "open", Title: testTitle, Body: testMarker + "\nnew", ConsolidateDuplicates: true}
+
+	action, err := testClient(t, server, 30, 2).Sync(t.Context(), identity, desired)
+	if err == nil {
+		t.Fatal("a failed twin close must fail the sync")
+	}
+	if action != ActionNone {
+		t.Fatalf("failed heal action = %q, want %q", action, ActionNone)
+	}
+	// The failed close is the only write; the keeper waits for the next run.
+	if attempts["/repos/owner/repo/issues/21"] != 1 ||
+		attempts["/repos/owner/repo/issues/34"] != 0 ||
+		attempts["/repos/owner/repo/issues/7"] != 0 {
+		t.Fatalf("failed heal wrote beyond the failed close: %#v", attempts)
+	}
+
+	action, err = testClient(t, server, 30, 2).Sync(t.Context(), identity, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != ActionConsolidated {
+		t.Fatalf("resumed heal action = %q, want %q", action, ActionConsolidated)
+	}
+	if attempts["/repos/owner/repo/issues/21"] != 2 ||
+		attempts["/repos/owner/repo/issues/34"] != 1 ||
+		attempts["/repos/owner/repo/issues/7"] != 1 {
+		t.Fatalf("resumed heal did not close the rest and write the keeper: %#v", attempts)
 	}
 }
 

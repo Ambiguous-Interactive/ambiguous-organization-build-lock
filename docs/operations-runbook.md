@@ -631,6 +631,17 @@ reason codes, and commit SHAs only. It synchronizes an alert when:
 - a delivered run remains active beyond the 15-minute run-duration threshold;
 - the latest run is unsuccessful.
 
+A transient API anomaly can let monitoring publish several alerts for one
+identity. Every issue-synchronizing monitor then heals the cluster on its
+next run: it keeps the oldest open alert as the single authoritative record,
+closes every other open twin with a state-only patch, and leaves every
+closed twin's last published evidence untouched. A cluster with no open
+alert reopens its oldest alert. The heal writes nothing when discovery
+fails or when matching evidence is invalid. It also writes nothing when
+discovery runs past its page budget. When a heal write fails, the run fails
+red like any other write failure, the closes already written stay written,
+and the next run closes the rest.
+
 A known condition is a successful monitor outcome once the issue is
 synchronized; the open issue carries the operational red state without making
 every scheduled monitor run itself fail. Both monitors also state the condition
@@ -688,11 +699,14 @@ by that automation's own output rather than by the repository's issue history.
 Publication is self-verifying: after creating an alert the audit re-runs
 discovery and fails red unless it finds exactly what it just created, so a
 discovery filter that stopped matching cannot silently republish the alert on
-every run. Two conditions wedge the audit red until an operator intervenes:
-`duplicate alert issue evidence` means more than one automation-authored marker
-issue exists, and `alert issue pagination exceeded` means discovery ran past its
-page budget. For both, delete or retitle the extra automation-authored marker
-issue so exactly one remains; never resolve them by editing lock state.
+every run. Duplicate automation-authored marker issues no longer wedge this
+audit; the monitors heal duplicate alerts as described earlier in this
+runbook. One condition still wedges the audit red until an operator
+intervenes: `automation issue pagination exceeded` means discovery could not
+fit this automation's own issue history into its page budget. Make the
+history fit again, for example by deleting the automation's oldest closed
+alert issues, or widen the budget with a code change. Never resolve that
+condition by editing lock state.
 
 The alert is identified by its marker plus this automation's own authorship, not
 by its title. The repository is public, so a foreign-authored lookalike is

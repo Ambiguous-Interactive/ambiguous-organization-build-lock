@@ -570,6 +570,9 @@ type stubGitHub struct {
 	issuesFail int
 	mutex      sync.Mutex
 	published  []map[string]any
+	// patchPayloads keeps every issue patch body in arrival order, so tests
+	// can tell a state-only duplicate close from an alert rewrite.
+	patchPayloads [][2]string
 }
 
 func (stub *stubGitHub) handler() http.Handler {
@@ -651,6 +654,11 @@ func (stub *stubGitHub) record(request *http.Request) {
 	}
 	stub.lastBody.Store(payload.Body)
 	stub.lastState.Store(payload.State)
+	if request.Method == http.MethodPatch {
+		stub.mutex.Lock()
+		stub.patchPayloads = append(stub.patchPayloads, [2]string{payload.Body, payload.State})
+		stub.mutex.Unlock()
+	}
 }
 
 func existingAlert(t *testing.T, state, body string) string {
@@ -1009,7 +1017,7 @@ func TestUndiscoverablePublicationFailsInsteadOfRepublishing(t *testing.T) {
 	}
 }
 
-func TestRunRejectsDuplicateAlertIssues(t *testing.T) {
+func TestRunHealsDuplicateAlertIssues(t *testing.T) {
 	t.Parallel()
 	active := incidentFixture()
 	duplicates, err := json.Marshal([]map[string]any{
@@ -1020,11 +1028,32 @@ func TestRunRejectsDuplicateAlertIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	stub := &stubGitHub{t: t, stateBody: stateFixture(t, &active), issues: string(duplicates)}
-	if code, _, _ := runAudit(t, stub); code != 1 {
-		t.Fatalf("run() = %d, want 1", code)
+	// Consolidation keeps the oldest alert as the single authoritative record
+	// and closes the newer twin, so the run recovers instead of refusing.
+	if code, _, stderr := runAudit(t, stub); code != 0 {
+		t.Fatalf("run() = %d, want 0 (stderr %q)", code, stderr)
 	}
-	if stub.created.Load() != 0 || stub.patched.Load() != 0 {
-		t.Fatal("duplicate alert evidence must not be mutated")
+	if stub.created.Load() != 0 {
+		t.Fatalf("consolidation must not create alerts; created %d", stub.created.Load())
+	}
+
+	// The state-only close never rewrites the twin's last published body, and
+	// the kept alert carries the active incident.
+	if stub.patched.Load() != 2 {
+		t.Fatalf("expected one close patch and one alert patch, got patched %d", stub.patched.Load())
+	}
+	stub.mutex.Lock()
+	payloads := append([][2]string(nil), stub.patchPayloads...)
+	stub.mutex.Unlock()
+	if len(payloads) != 2 {
+		t.Fatalf("patch payloads = %#v", payloads)
+	}
+	if payloads[0] != [2]string{"", "closed"} {
+		t.Fatalf("twin close must patch state only, got %q", payloads[0])
+	}
+	wantKeeper := alertBody(active, testLock, testServerURL, "owner/repo")
+	if payloads[1] != [2]string{wantKeeper, "open"} {
+		t.Fatalf("kept alert must carry the active incident body and stay open, got %q", payloads[1])
 	}
 }
 
