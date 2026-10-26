@@ -89,9 +89,18 @@ Green after the smallest coherent change:
 - Full local verifier `bash .devcontainer/scripts/verify.sh`: pass
   (exit 0 on 2026-10-26; 1,022 node tests pass, 6 expected
   hosted-Windows skips; all Go suites and workflow checks pass).
-- Live evidence: after this change merges, the next monitor run must
-  close twins #346/#347, keep #345, and reach healthy on a fresh
-  scheduled delivery; that run is the published remediation evidence.
+- Live evidence after merge (observed on 2026-10-26):
+  - PR #353 squash-merged as `a365fc996`; `main` stayed green (Build lock
+    CI success on `a365fc996`; Dependabot auto-merge skipped as designed
+    for non-Dependabot PRs).
+  - The first scheduled `Reaper delivery audit` on the new commit
+    (03:27:07Z) succeeded, and the run log states
+    `Reaper delivery audit passed: healthy`.
+  - The heal kept #345 as the oldest-open keeper and the healthy
+    close-out wrote it closed with the healthy body; twins #346 and
+    #347 closed state-only and still carry their own 2026-10-22
+    evidence bodies.
+  - All three alert issues are closed with state reason `completed`.
 
 ## Review
 
@@ -151,3 +160,7 @@ stop monitors from touching each other's alerts; no monitor consumes
 `ActionConsolidated`, so no monitor can misclassify a heal; the reaper
 refusal log grows only `jsonstrict.SanitizeCause`-filtered causes; and
 flag-off callers keep the exact prior refusal contract.
+
+Roles: this session implemented and remediated; an independent
+reviewer agent produced both rounds. The loop stopped when the second
+round listed no open finding after remediation.
