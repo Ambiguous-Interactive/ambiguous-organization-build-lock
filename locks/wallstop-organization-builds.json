@@ -29,8 +29,12 @@
       "expiresAt": "2026-10-27T07:59:25.341Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "121997115626"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "5b60c528-c28a-4a93-a3ea-13b678c2b6a0",
       "holderId": "Ambiguous-Interactive/doughby-td:40448245344:unity:doughby-td",
       "repository": "Ambiguous-Interactive/doughby-td",
       "workflow": "ci",
@@ -38,14 +42,13 @@
       "runId": "40448245344",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/40448245344",
-      "queuedAt": "2026-10-27T04:13:14.994Z",
-      "acquiredAt": "2026-10-27T04:13:17.154Z",
-      "expiresAt": "2026-10-27T08:13:17.154Z",
-      "runnerId": "ELI-MACHINE"
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-27T04:14:43.524Z",
+      "availableAt": "2026-10-27T04:14:44.524Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-27T04:13:17.155Z"
+  "updatedAt": "2026-10-27T04:14:43.525Z"
 }
