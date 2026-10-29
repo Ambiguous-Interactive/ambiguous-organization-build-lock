@@ -29,8 +29,12 @@
       "expiresAt": "2026-10-29T11:30:24.369Z",
       "runnerId": "DAD-MACHINE",
       "jobId": "123313905510"
-    },
+    }
+  ],
+  "queue": [],
+  "reservations": [
     {
+      "reservationId": "9be29090-d1b4-4c56-b90f-a4b44283d38e",
       "holderId": "Ambiguous-Interactive/DxMessaging:40823785080:perf-benchmarks:perf-6000.5.2f1-standalone-comparisons",
       "repository": "Ambiguous-Interactive/DxMessaging",
       "workflow": "Performance Numbers",
@@ -38,15 +42,13 @@
       "runId": "40823785080",
       "runAttempt": "1",
       "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/40823785080",
-      "queuedAt": "2026-10-29T07:33:53.154Z",
-      "acquiredAt": "2026-10-29T07:33:56.102Z",
-      "expiresAt": "2026-10-29T11:33:56.102Z",
       "runnerId": "ELI-MACHINE",
-      "jobId": "123282136557"
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-29T07:52:48.941Z",
+      "availableAt": "2026-10-29T07:52:49.941Z"
     }
   ],
-  "queue": [],
-  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-29T07:33:56.103Z"
+  "updatedAt": "2026-10-29T07:52:48.942Z"
 }
