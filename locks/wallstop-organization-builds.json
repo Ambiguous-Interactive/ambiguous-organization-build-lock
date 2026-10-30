@@ -1,26 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/unity-helpers:41006715813:unity-tests:6000.6.0f1",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "41006715813",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/41006715813",
+    "queuedAt": "2026-10-30T05:09:09.572Z",
+    "acquiredAt": "2026-10-30T05:09:11.219Z",
+    "expiresAt": "2026-10-30T09:09:11.219Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "123903238589"
+  },
+  "holders": [
     {
-      "reservationId": "33fc027b-a8cd-4fd3-a63f-cdc1bd53d1d1",
-      "holderId": "Ambiguous-Interactive/doughby-td:41006187803:unity:doughby-td",
-      "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "41006187803",
+      "holderId": "Ambiguous-Interactive/unity-helpers:41006715813:unity-tests:6000.6.0f1",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "41006715813",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/41006187803",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/41006715813",
+      "queuedAt": "2026-10-30T05:09:09.572Z",
+      "acquiredAt": "2026-10-30T05:09:11.219Z",
+      "expiresAt": "2026-10-30T09:09:11.219Z",
       "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-10-30T05:05:33.543Z",
-      "availableAt": "2026-10-30T05:05:34.543Z"
+      "jobId": "123903238589"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-10-30T05:05:33.545Z"
+  "updatedAt": "2026-10-30T05:09:11.219Z"
 }
