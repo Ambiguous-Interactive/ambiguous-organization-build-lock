@@ -2,32 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/doughby-td:41163431339:unity:doughby-td",
-    "repository": "Ambiguous-Interactive/doughby-td",
-    "workflow": "ci",
-    "job": "unity",
-    "runId": "41163431339",
+    "holderId": "Ambiguous-Interactive/IshoBoy:41163051993:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "41163051993",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/41163431339",
-    "queuedAt": "2026-10-31T03:15:28.508Z",
-    "acquiredAt": "2026-10-31T03:15:30.829Z",
-    "expiresAt": "2026-10-31T07:15:30.829Z",
-    "runnerId": "ELI-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/41163051993",
+    "queuedAt": "2026-10-31T03:16:09.499Z",
+    "acquiredAt": "2026-10-31T03:16:12.078Z",
+    "expiresAt": "2026-10-31T07:16:12.078Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "124424682405"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/doughby-td:41163431339:unity:doughby-td",
-      "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "41163431339",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/41163431339",
-      "queuedAt": "2026-10-31T03:15:28.508Z",
-      "acquiredAt": "2026-10-31T03:15:30.829Z",
-      "expiresAt": "2026-10-31T07:15:30.829Z",
-      "runnerId": "ELI-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:41163051993:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -44,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "68774693-2048-4765-8378-67e98788fa38",
+      "holderId": "Ambiguous-Interactive/doughby-td:41163431339:unity:doughby-td",
+      "repository": "Ambiguous-Interactive/doughby-td",
+      "workflow": "ci",
+      "job": "unity",
+      "runId": "41163431339",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/41163431339",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-10-31T03:16:57.276Z",
+      "availableAt": "2026-10-31T03:16:58.276Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-10-31T03:16:12.078Z"
+  "updatedAt": "2026-10-31T03:16:57.277Z"
 }
