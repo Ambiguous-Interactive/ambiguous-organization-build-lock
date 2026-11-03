@@ -1,26 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:41564101340:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "41564101340",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/41564101340",
+    "queuedAt": "2026-11-03T02:10:39.200Z",
+    "acquiredAt": "2026-11-03T02:10:42.395Z",
+    "expiresAt": "2026-11-03T06:10:42.395Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "125681431790"
+  },
+  "holders": [
     {
-      "reservationId": "b2960385-9aaf-44fe-bb8d-f21a55c0d2d4",
-      "holderId": "Ambiguous-Interactive/unity-helpers:41560666426:unity-tests-single-threaded:6000.6.0f1-single-threaded",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests-single-threaded",
-      "runId": "41560666426",
+      "holderId": "Ambiguous-Interactive/IshoBoy:41564101340:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "41564101340",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/41560666426",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/41564101340",
+      "queuedAt": "2026-11-03T02:10:39.200Z",
+      "acquiredAt": "2026-11-03T02:10:42.395Z",
+      "expiresAt": "2026-11-03T06:10:42.395Z",
       "runnerId": "DAD-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-11-03T02:10:00.001Z",
-      "availableAt": "2026-11-03T02:10:01.001Z"
+      "jobId": "125681431790"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-11-03T02:10:00.001Z"
+  "updatedAt": "2026-11-03T02:10:42.396Z"
 }
