@@ -2,32 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:42593073620:build:isho-build",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Build and Deploy to Steam",
-    "job": "build",
-    "runId": "42593073620",
+    "holderId": "Ambiguous-Interactive/DxMessaging:42576143239:unity-tests:6000.5.2f1-standalone-all-modes",
+    "repository": "Ambiguous-Interactive/DxMessaging",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "42576143239",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/42593073620",
-    "queuedAt": "2026-11-09T09:53:21.607Z",
-    "acquiredAt": "2026-11-09T09:53:23.283Z",
-    "expiresAt": "2026-11-09T13:53:23.283Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/DxMessaging/actions/runs/42576143239",
+    "queuedAt": "2026-11-09T10:06:09.422Z",
+    "acquiredAt": "2026-11-09T10:06:12.320Z",
+    "expiresAt": "2026-11-09T14:06:12.320Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "129024638162"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:42593073620:build:isho-build",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Build and Deploy to Steam",
-      "job": "build",
-      "runId": "42593073620",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/42593073620",
-      "queuedAt": "2026-11-09T09:53:21.607Z",
-      "acquiredAt": "2026-11-09T09:53:23.283Z",
-      "expiresAt": "2026-11-09T13:53:23.283Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/DxMessaging:42576143239:unity-tests:6000.5.2f1-standalone-all-modes",
       "repository": "Ambiguous-Interactive/DxMessaging",
@@ -44,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "714f4b96-f1cb-4bb0-bfbe-f1e68cfb114e",
+      "holderId": "Ambiguous-Interactive/IshoBoy:42593073620:build:isho-build",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Build and Deploy to Steam",
+      "job": "build",
+      "runId": "42593073620",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/42593073620",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-11-09T10:10:45.965Z",
+      "availableAt": "2026-11-09T10:10:46.965Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-11-09T10:06:12.321Z"
+  "updatedAt": "2026-11-09T10:10:45.965Z"
 }
