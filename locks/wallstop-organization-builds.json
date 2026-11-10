@@ -1,34 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/doughby-td:42759035667:unity:doughby-td",
-    "repository": "Ambiguous-Interactive/doughby-td",
-    "workflow": "ci",
-    "job": "unity",
-    "runId": "42759035667",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/42759035667",
-    "queuedAt": "2026-11-10T04:58:44.584Z",
-    "acquiredAt": "2026-11-10T04:58:47.013Z",
-    "expiresAt": "2026-11-10T08:58:47.013Z",
-    "runnerId": "DAD-MACHINE"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/doughby-td:42759035667:unity:doughby-td",
-      "repository": "Ambiguous-Interactive/doughby-td",
-      "workflow": "ci",
-      "job": "unity",
-      "runId": "42759035667",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/42759035667",
-      "queuedAt": "2026-11-10T04:58:44.584Z",
-      "acquiredAt": "2026-11-10T04:58:47.013Z",
-      "expiresAt": "2026-11-10T08:58:47.013Z",
-      "runnerId": "DAD-MACHINE"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -44,8 +18,23 @@
       "state": "quarantine",
       "reason": "return-terminated",
       "createdAt": "2026-11-10T03:25:46.871Z"
+    },
+    {
+      "reservationId": "c83dda5f-cbee-4801-b86e-e77045b4ceb2",
+      "holderId": "Ambiguous-Interactive/doughby-td:42759035667:unity:doughby-td",
+      "repository": "Ambiguous-Interactive/doughby-td",
+      "workflow": "ci",
+      "job": "unity",
+      "runId": "42759035667",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/doughby-td/actions/runs/42759035667",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-11-10T05:01:28.322Z",
+      "availableAt": "2026-11-10T05:01:29.322Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-11-10T04:58:47.013Z"
+  "updatedAt": "2026-11-10T05:01:28.323Z"
 }
