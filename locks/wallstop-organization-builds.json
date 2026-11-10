@@ -1,36 +1,8 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": {
-    "holderId": "Ambiguous-Interactive/unity-helpers:42745976263:unity-tests:6000.5.2f1",
-    "repository": "Ambiguous-Interactive/unity-helpers",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "42745976263",
-    "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/42745976263",
-    "queuedAt": "2026-11-10T03:07:10.021Z",
-    "acquiredAt": "2026-11-10T03:07:11.898Z",
-    "expiresAt": "2026-11-10T07:07:11.898Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "129598142014"
-  },
-  "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/unity-helpers:42745976263:unity-tests:6000.5.2f1",
-      "repository": "Ambiguous-Interactive/unity-helpers",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "42745976263",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/42745976263",
-      "queuedAt": "2026-11-10T03:07:10.021Z",
-      "acquiredAt": "2026-11-10T03:07:11.898Z",
-      "expiresAt": "2026-11-10T07:07:11.898Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "129598142014"
-    }
-  ],
+  "holder": null,
+  "holders": [],
   "queue": [],
   "reservations": [
     {
@@ -46,8 +18,22 @@
       "state": "quarantine",
       "reason": "return-terminated",
       "createdAt": "2026-11-10T03:25:46.871Z"
+    },
+    {
+      "reservationId": "7079708d-537a-4ef6-9294-eb1f44f1dbdd",
+      "holderId": "Ambiguous-Interactive/unity-helpers:42745976263:unity-tests:6000.5.2f1",
+      "repository": "Ambiguous-Interactive/unity-helpers",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "42745976263",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/42745976263",
+      "runnerId": "DAD-MACHINE",
+      "state": "quarantine",
+      "reason": "scheduled stale reaping: holder run is completed",
+      "createdAt": "2026-11-10T03:27:07.086Z"
     }
   ],
   "activeIncident": null,
-  "updatedAt": "2026-11-10T03:25:46.872Z"
+  "updatedAt": "2026-11-10T03:27:07.093Z"
 }
