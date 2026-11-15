@@ -138,7 +138,18 @@ push `4bf18ba8` was the second newest record, and the newest push
   its base commit time, and accepts a run only when it started at or after that
   base existed. With the final base in place, both checkout shapes test the
   pushed tree.
+- Both threads are answered and resolved. The stale changes-requested review was
+  dismissed because CodeRabbit did not re-review after the fix.
+- The `main-pr-ci` ruleset requires resolved threads, not an approval.
 
-## Pull request
+## Merge and post-merge
 
-- #385 opened against `main`.
+- Merged #385 on `main` as `afe8e6c0b4` (squash).
+- Build lock CI run `43761221778` is green on that commit.
+- Organization Unity enrollment audit `43761221801` is green:
+  `Audited 7/7 enrolled repositories; active-jobs=133 findings=25 complete=true`.
+  The 25 findings are the consumer-side items already tracked in #113.
+- Reaper delivery audit `43761295576` is green. Build lock incident recovery
+  audit `43760613265` is green.
+- #382 is closed. Adoption is one classifier step edit per repository and adds
+  no run. No consumer change ships here.
