@@ -6,6 +6,8 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 - Credential scope (#51): inventory App and secret access; obtain owner
   authorization before scope changes.
+- Exception review (#113): re-review the eight expired registry exceptions;
+  renew only with evidence that those workflows still carry no licensed work.
 - Merge gates (#44, #255): prove required-check source binding and enforcement;
   obtain ruleset authority for changes.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer

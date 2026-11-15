@@ -625,7 +625,7 @@ edits.
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
-| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. |
+| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. When a licensed job pins an unauthorized or mutable central action, the audit reports this cause and does not judge that job's lifecycle shape. Repin first. |
 | `unbounded-unity-editor-check` | Give the editor gate a timeout of 10 minutes or less. See item 3. |
 | `unexpected-fallback-step` | Keep only the approved release action in the fallback job. See item 8. |
 | `unity-editor-check-after-credentials` | Run the editor gate before any credential reference. See item 3. |
@@ -772,6 +772,10 @@ any other `.github/` change still requires Unity validation.
 `unity-builder` is exempt: it is a fork whose paid Windows workflow is a
 controlled manual canary, so it declares no required context. Item 6 of
 Preconditions records the same policy.
+
+`qora-redux` is exempt for a different reason: it runs no Unity work, so its
+default branch has no Unity aggregate to gate. Its hosted preflight uses the
+central runner inventory, so the enrollment audit still covers it.
 
 ## Canary
 

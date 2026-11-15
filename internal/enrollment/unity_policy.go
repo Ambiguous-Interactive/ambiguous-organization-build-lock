@@ -694,7 +694,14 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		a.analyzer.add("missing-licensed-steps", workflowPath, jobName)
 		return
 	}
-	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps)
+	// Every reviewed lifecycle shape is defined on a central action at an
+	// authorized commit. When any central action in this workflow is mutable
+	// or unauthorized, no lifecycle verdict this job could produce would be
+	// trustworthy, and each downstream code would name a shape that is already
+	// present. The audit reports the one root cause instead, so the operator
+	// repins once rather than reshaping a workflow that is already correct.
+	trustedCentral, centralTrustCode := a.centralReferenceTrust(workflow)
+	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps, trustedCentral)
 	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
 	acquireCount, returnActionCount := 0, 0
 	var returnRefs []string
@@ -760,7 +767,11 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 						trustedLeafExecution(node)
 				}
 				if !jobFailurePropagates || !classifierCondition {
-					a.analyzer.add("classifier-not-always", workflowPath, jobName)
+					// An unauthorized classifier pin is named once as the pin
+					// cause. The condition verdict would rest on that identity.
+					if trustedCentral {
+						a.analyzer.add("classifier-not-always", workflowPath, jobName)
+					}
 					continue
 				}
 				classifier = index
@@ -805,6 +816,16 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			a.analyzer.add("ambiguous-lock-acquire", workflowPath, jobName)
 		}
 	}
+	if !trustedCentral {
+		// The root cause is the pin, so report it and stop. The acquire order
+		// is the only remaining check that does not rest on a reviewed action
+		// identity, and it can still be true beside an unauthorized pin.
+		if centralTrustCode != "" {
+			a.analyzer.add(centralTrustCode, workflowPath, jobName)
+		}
+		a.auditAcquireOrder(workflowPath, jobName, firstAcquire, firstActivation)
+		return
+	}
 	if returnActionCount > 1 {
 		unityReturn = -1
 		returnID = ""
@@ -840,12 +861,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			gate != len(steps)-1) {
 		a.analyzer.add("unsafe-central-return-suffix", workflowPath, jobName)
 	}
-	if firstAcquire < 0 {
-		a.analyzer.add("missing-lock-acquire", workflowPath, jobName)
-	}
-	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
-		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
-	}
+	a.auditAcquireOrder(workflowPath, jobName, firstAcquire, firstActivation)
 	if unityReturn < 0 || returnID == "" || unityReturn <= lastActivation {
 		a.analyzer.add("missing-unity-return", workflowPath, jobName)
 	} else if !returnAlways {
@@ -925,10 +941,63 @@ var unityEditorProvisioningControls = []string{
 	"uh_ensure_editor_install_timeout_seconds",
 }
 
+// auditAcquireOrder reports the acquire-position findings that rest on step
+// order alone, so an unauthorized pin cannot hide them.
+func (a *unityPolicyAnalyzer) auditAcquireOrder(
+	workflowPath, jobName string,
+	firstAcquire, firstActivation int,
+) {
+	if firstAcquire < 0 {
+		a.analyzer.add("missing-lock-acquire", workflowPath, jobName)
+	}
+	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
+		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
+	}
+}
+
+// centralReferenceTrust classifies the central action identities the workflow
+// pins. Each reviewed lifecycle shape is defined on an authorized action
+// identity, so a mutable or unauthorized pin leaves every lifecycle verdict in
+// the workflow unprovable. The returned code names the class to fix: a mutable
+// reference needs your own review, and an unauthorized commit needs a release
+// that the policy lists.
+func (a *unityPolicyAnalyzer) centralReferenceTrust(node *yaml.Node) (bool, string) {
+	if node == nil {
+		return true, ""
+	}
+	if node.Kind == yaml.MappingNode {
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			key, value := node.Content[index], node.Content[index+1]
+			if key.Kind != yaml.ScalarNode || key.Value != "uses" ||
+				value.Kind != yaml.ScalarNode {
+				continue
+			}
+			uses := strings.TrimSpace(value.Value)
+			if !strings.HasPrefix(uses, lockActionPrefix) {
+				continue
+			}
+			ref := strings.ToLower(actionRef(uses))
+			if !isSHA(ref) {
+				return false, "mutable-action-ref"
+			}
+			if !a.approved[ref] {
+				return false, "unapproved-lock-ref"
+			}
+		}
+	}
+	for _, child := range node.Content {
+		if trusted, code := a.centralReferenceTrust(child); !trusted {
+			return false, code
+		}
+	}
+	return true, ""
+}
+
 func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 	workflowPath, jobName string,
 	workflow, job *yaml.Node,
 	steps []flattenedUnityStep,
+	trustedCentral bool,
 ) {
 	credentialsAvailableBeforeSteps := containsUnityCredentialReference(strings.ToLower(
 		nodeScalarText(mappingValue(workflow, "env")) +
@@ -1021,7 +1090,13 @@ func (a *unityPolicyAnalyzer) auditUnityEditorCheck(
 	}
 
 	if gateIndex < 0 {
-		a.analyzer.add("missing-unity-editor-check", workflowPath, jobName)
+		// The gate is reported only when its identity is authorized. Without
+		// one, the workflow's pin finding already names the cause, and a
+		// missing-gate verdict would send the operator to a step that is
+		// present at the reviewed position.
+		if trustedCentral {
+			a.analyzer.add("missing-unity-editor-check", workflowPath, jobName)
+		}
 		return
 	}
 	if acquireIndex >= 0 && gateIndex >= acquireIndex {
