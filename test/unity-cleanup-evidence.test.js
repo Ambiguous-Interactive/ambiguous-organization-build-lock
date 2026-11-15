@@ -11,6 +11,7 @@ const support = require("./unity-cleanup-evidence-support.js");
 const {
   claimConsumedReturnEvidence,
   deleteClaimedReturnEvidence,
+  diagnosticCause,
   classifyEvidence,
   collectEvidence,
   environmentInputs,
@@ -1106,6 +1107,19 @@ test("the diagnostic tail cannot carry a workflow command or a control character
   assert.equal(lines.some((line) => line.startsWith("::set-output")), false);
   assert.doesNotMatch(messages.join("\n"), /\u001b/);
   assert.match(messages.join("\n"), /  \| ::set-output name=lease::held/);
+});
+
+test("a failure cause is bounded to a fixed ASCII alphabet", () => {
+  assert.equal(
+    diagnosticCause(new Error("Return evidence path contains a symbolic link.")),
+    "Return evidence path contains a symbolic link."
+  );
+  assert.equal(
+    diagnosticCause(new Error("bad\n::warning::x\u0007".repeat(40))).includes("\n"),
+    false
+  );
+  assert.ok(diagnosticCause(new Error("x".repeat(500))).length <= 200);
+  assert.equal(diagnosticCause(undefined), "unknown");
 });
 
 test("classifier rejects return-log replacement against the linked digest", (t) => {
