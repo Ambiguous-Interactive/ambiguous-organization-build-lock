@@ -10,14 +10,20 @@ or writer App. The current inventory is recorded in
 1. Audit every workflow, reusable workflow, and repository-local composite
    action in the candidate repository. Classify paid activation, synthetic
    fixtures, intentionally disabled/manual paths, and static references.
-2. Require an eligible trusted trigger: same-repository PR, protected default
-   branch, controlled dispatch, or an opted-in schedule on the protected default
-   branch. Scheduled workflows must use exactly one cron entry, at most daily.
+2. Require an eligible trusted trigger: same-repository PR, merge queue entry,
+   protected default branch, controlled dispatch, or an opted-in schedule on the
+   protected default branch. Scheduled workflows must use exactly one cron entry,
+   at most daily.
    The minute and hour must be plain integers. Date fields support numeric
    wildcards, lists, ranges, and steps. Named months or weekdays are refused.
    The registry must set `allowSchedule: true`. An absent value is false.
    Fork and Dependabot PRs must remain
-   unlicensed because organization secrets are unavailable.
+   unlicensed because organization secrets are unavailable. A merge queue entry
+   is trusted because only a user with write access can add a pull request to
+   the queue, and a writer can already run licensed work from a same-repository
+   pull request. The licensed job keeps its same-repository guard: its
+   event-name term is true for a merge group, which has no pull request payload
+   to compare.
 3. Add the candidate to the reviewed central consumer registry and continuous
    audit. That audit must read the exact default-branch commit and fail closed
    on incomplete retrieval.
@@ -567,6 +573,31 @@ that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
 step that reads other files, such as the rule-line check above.
 
+A workflow that also listens for a merge queue must pass the merge group
+revisions, because a merge group has no pull request payload:
+
+```yaml
+on:
+  pull_request:
+  merge_group:
+jobs:
+  change-classifier:
+    steps:
+      - id: classify
+        uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@APPROVED_LOCK_SHA
+        with:
+          event-name: ${{ github.event_name }}
+          base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          head-sha: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+```
+
+The classifier reads the same base-to-head diff for both triggers. On a pull
+request the first operand answers. On a merge group the pull request payload is
+absent, so the merge group operand answers. The audit refuses pull request only
+revisions in a workflow that listens for a merge group, so an unusable queue
+shape cannot pass review. A merge group diff also holds the changes from the
+queue entries ahead of it, so the classification stays conservative.
+
 ## Finding codes
 
 The scheduled audit reports every finding with one of these reason codes.
@@ -831,6 +862,10 @@ Before enforcing the aggregate as required:
     the release step's redacted `peer-timeline` output next to the failure so
     an editor-session casualty can be checked against peer lock activity in
     the same window.
+13. Confirm a required merge queue also reports the aggregate on
+    `merge_group`. A check that listens only for `pull_request` never reports
+    on a queue entry, so the queue blocks every merge. Pass the merge group
+    revisions to the change classifier as the paragraph above states.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

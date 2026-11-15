@@ -5,10 +5,10 @@ inputs:
     description: Exact GitHub event name.
     required: true
   base-sha:
-    description: Pull request base commit SHA.
+    description: Base commit SHA of the pull request or merge group.
     required: false
   head-sha:
-    description: Pull request head commit SHA.
+    description: Head commit SHA of the pull request or merge group.
     required: false
   independent-paths:
     description: >-
@@ -18,7 +18,7 @@ inputs:
     required: false
 outputs:
   unity-required:
-    description: True unless a pull request changes only central or caller-declared Unity-independent paths.
+    description: True unless a pull request or merge group changes only central or caller-declared Unity-independent paths.
 runs:
   using: node24
   main: ../../dist/classify-unity-changes.js

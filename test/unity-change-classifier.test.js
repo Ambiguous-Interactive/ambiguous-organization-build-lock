@@ -137,9 +137,13 @@ test("committed classifier runtime requires Unity on non-pull-request events", (
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-runtime-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "output.txt");
+  // Unreadable revisions prove the event gate runs before any diff: a push never reports on
+  // a revision pair, so the runtime must not try to read one.
   const result = classifierRuntime({
     GITHUB_OUTPUT: outputPath,
-    "INPUT_EVENT-NAME": "push"
+    "INPUT_EVENT-NAME": "push",
+    "INPUT_BASE-SHA": "main",
+    "INPUT_HEAD-SHA": "main"
   });
   assert.equal(result.status, 0);
   assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
@@ -180,6 +184,52 @@ test("committed classifier runtime requires Unity for a pull request touching Un
   }, workspace.directory);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=true");
+});
+
+/*
+ * A merge group has no pull request payload. GitHub reports the queue branch's base and head
+ * revisions, and the same diff answers the same question. Both outcomes are pinned through the
+ * runner input names: a skip for an independent diff and a requirement for one Unity path.
+ */
+test("committed classifier runtime classifies a merge group diff through its own revisions", () => {
+  for (const { changedPaths, expected } of [
+    { changedPaths: [".llm/context.md", "progress/s.md"], expected: "unity-required=false" },
+    { changedPaths: [".llm/context.md", "Assets/Game.cs"], expected: "unity-required=true" }
+  ]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-merge-group-"));
+    try {
+      const workspace = fixtureRepository(root, changedPaths);
+      const outputPath = path.join(root, "output.txt");
+      const result = classifierRuntime({
+        GITHUB_OUTPUT: outputPath,
+        "INPUT_EVENT-NAME": "merge_group",
+        "INPUT_BASE-SHA": workspace.baseSHA,
+        "INPUT_HEAD-SHA": workspace.headSHA
+      }, workspace.directory);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(
+        fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(),
+        expected,
+        changedPaths.join(", ")
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("committed classifier runtime fails closed on an incomplete merge group revision", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-merge-group-sha-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    "INPUT_EVENT-NAME": "merge_group",
+    "INPUT_BASE-SHA": "main",
+    "INPUT_HEAD-SHA": "main"
+  });
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(outputPath, "utf8"), "unity-required=true\n");
 });
 
 function classifierRuntime(env, cwd = undefined) {

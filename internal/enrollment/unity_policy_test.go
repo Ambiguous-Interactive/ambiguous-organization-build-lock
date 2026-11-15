@@ -3764,7 +3764,7 @@ func TestUnityEnrollmentAcceptsCanonicalFallbackCleanup(t *testing.T) {
 	}
 }
 
-func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
+func typedConditionalValidationWorkflow() string {
 	credentialValidation := `      - name: Validate Unity credentials
         uses: ` + lockActionPrefix + `validate-unity-license@` + testSHA + `
         env:
@@ -3779,7 +3779,7 @@ func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
 		credentialValidation+"      - id: acquire",
 		1,
 	)
-	workflow := `name: Unity
+	return `name: Unity
 on:
   pull_request:
   push:
@@ -3871,6 +3871,10 @@ jobs:
           fallback-result: ${{ needs.cleanup.result }}
           fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}
 `
+}
+
+func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
+	workflow := typedConditionalValidationWorkflow()
 	snapshot := unityFixture(map[string]string{
 		".github/workflows/unity.yml": workflow,
 	})
@@ -4446,6 +4450,107 @@ runs:
 			t.Fatalf("unsafe preflight guard was accepted: %#v", result.Findings)
 		}
 	})
+}
+
+func TestUnityEnrollmentAcceptsMergeGroupTrigger(t *testing.T) {
+	/*
+	   A merge group carries the same job guard as a same-repository pull request. A writer
+	   can already run licensed work from a same-repository pull request, so a queue entry
+	   adds no new trust boundary.
+	*/
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	mergeGroup := strings.Replace(base, "on:\n  pull_request:\n", "on:\n  pull_request:\n  merge_group:\n", 1)
+	if mergeGroup == base {
+		t.Fatal("the trigger fixture moved")
+	}
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": mergeGroup}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("merge group trigger produced findings: %#v", result.Findings)
+	}
+
+	// Remove the pull request trigger so the merge group alone decides eligibility.
+	unguarded := strings.Replace(mergeGroup, "  pull_request:\n", "", 1)
+	unguarded = strings.Replace(
+		unguarded,
+		"    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n",
+		"",
+		1,
+	)
+	if unguarded == mergeGroup || strings.Contains(unguarded, "pull_request") {
+		t.Fatal("the guard fixture moved")
+	}
+	result, err = AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": unguarded}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "ineligible-unity-trigger") {
+		t.Fatalf("an unguarded merge group was accepted: %#v", result.Findings)
+	}
+
+	/*
+	   The classifier must read the merge group revisions. A workflow that listens for a
+	   merge group but keeps pull request only revisions blocks every queue entry, so the
+	   static shape refuses it instead of leaving the failure to a queue run.
+	*/
+	workflow := typedConditionalValidationWorkflow()
+	classified := strings.Replace(
+		workflow,
+		"on:\n  pull_request:\n",
+		"on:\n  pull_request:\n  merge_group:\n",
+		1,
+	)
+	classified = strings.Replace(
+		classified,
+		"base-sha: ${{ github.event.pull_request.base.sha }}",
+		"base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}",
+		1,
+	)
+	classified = strings.Replace(
+		classified,
+		"head-sha: ${{ github.event.pull_request.head.sha }}",
+		"head-sha: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}",
+		1,
+	)
+	if classified == workflow {
+		t.Fatal("the classifier fixture moved")
+	}
+	result, err = AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": classified}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("merge group classifier revisions produced findings: %#v", result.Findings)
+	}
+
+	result, err = AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{
+			".github/workflows/unity.yml": strings.Replace(
+				workflow,
+				"on:\n  pull_request:\n",
+				"on:\n  pull_request:\n  merge_group:\n",
+				1,
+			),
+		}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate") {
+		t.Fatalf("pull request only classifier revisions were accepted for a merge group: %#v", result.Findings)
+	}
 }
 
 func TestUnityEnrollmentRejectsMalformedFallbackCleanup(t *testing.T) {

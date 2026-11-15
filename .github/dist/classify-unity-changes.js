@@ -117,7 +117,7 @@ function classifyUnityChanges(changedPaths, declaredPrefixes = []) {
 
 function requireSHA(value) {
   if (!/^[0-9a-f]{40}$/i.test(value)) {
-    throw new TypeError("pull request revisions must be full commit SHAs");
+    throw new TypeError("pull request or merge group revisions must be full commit SHAs");
   }
 }
 
@@ -182,8 +182,14 @@ function run({
      means should fail on the push that introduced it.
   */
   const declaredPrefixes = parseDeclaredIndependentPaths(independentPaths);
-  if (text(eventName) !== "pull_request") {
-    log("Unity validation required: event is not a pull request.");
+  /*
+     A merge group has no pull request payload. GitHub builds a temporary queue branch and
+     reports its base and head commits, so the same base/head diff answers the same question:
+     which paths does this queue entry change? Every other event still fails closed, because
+     this action has no comparable revision pair to read.
+  */
+  if (!["pull_request", "merge_group"].includes(text(eventName))) {
+    log("Unity validation required: event is not a pull request or merge group.");
     return true;
   }
   const changedPaths = findChangedPaths(text(baseSHA), text(headSHA), execute);

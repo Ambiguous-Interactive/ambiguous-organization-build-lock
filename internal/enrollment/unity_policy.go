@@ -4506,6 +4506,33 @@ func typedGateInputs(step *yaml.Node, acquireID, classifierID, releaseID string)
 	return true
 }
 
+// workflowDeclaresEvent reports whether the workflow listens to an event. The change
+// classifier needs this answer, because a merge-group trigger requires the queue
+// revisions rather than the pull request revisions.
+func workflowDeclaresEvent(workflow *yaml.Node, event string) bool {
+	on := mappingValue(workflow, "on")
+	if on == nil {
+		return false
+	}
+	switch on.Kind {
+	case yaml.ScalarNode:
+		return on.Value == event
+	case yaml.SequenceNode:
+		for _, entry := range on.Content {
+			if entry.Kind == yaml.ScalarNode && entry.Value == event {
+				return true
+			}
+		}
+	case yaml.MappingNode:
+		for index := 0; index < len(on.Content); index += 2 {
+			if on.Content[index].Kind == yaml.ScalarNode && on.Content[index].Value == event {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func eligibleUnityTrigger(
 	workflow, job *yaml.Node,
 	protectedBranches map[string]bool,
@@ -4523,6 +4550,16 @@ func eligibleUnityTrigger(
 		case "schedule":
 			return allowSchedule && len(protectedBranches) > 0 && boundedUnitySchedule(config)
 		case "pull_request":
+			return sameRepositoryPullRequestGuard(mappingValue(job, "if"))
+		case "merge_group":
+			/*
+				A merge group runs on a temporary branch of this repository, and only a
+				user with write access can add a pull request to the queue. A writer can
+				already run licensed work through a same-repository pull request from a
+				branch in this repository, so the queue adds no new trust boundary. The
+				required guard's event-name disjunct is true here, because a merge group
+				has no pull request payload to compare.
+			*/
 			return sameRepositoryPullRequestGuard(mappingValue(job, "if"))
 		case "pull_request_target":
 			return jobExcludedFromEvents(mappingValue(job, "if"), map[string]bool{event: true})
@@ -5535,6 +5572,18 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 	if len(steps) == 3 && mappingValue(checkoutWith, "sparse-checkout") != nil {
 		return false
 	}
+	/*
+	   A merge group has no pull request payload. GitHub builds a temporary queue branch and
+	   reports its own base and head revisions, so a workflow that listens for a merge group
+	   must pass those revisions. The pull request branch stays first: on a merge group it is
+	   absent, so the fallback answers, and on a pull request it answers alone.
+	*/
+	classifierBaseExpression := "github.event.pull_request.base.sha"
+	classifierHeadExpression := "github.event.pull_request.head.sha"
+	if workflowDeclaresEvent(workflow, "merge_group") {
+		classifierBaseExpression += "||github.event.merge_group.base_sha"
+		classifierHeadExpression += "||github.event.merge_group.head_sha"
+	}
 	classifyUses := stepUses(classify)
 	classifyWith := mappingValue(classify, "with")
 	classifyID := stepID(classify)
@@ -5555,11 +5604,11 @@ func (a *unityPolicyAnalyzer) validationClassifierMatches(
 		!exactExpression(mappingValue(classifyWith, "event-name"), "github.event_name") ||
 		!exactExpression(
 			mappingValue(classifyWith, "base-sha"),
-			"github.event.pull_request.base.sha",
+			classifierBaseExpression,
 		) ||
 		!exactExpression(
 			mappingValue(classifyWith, "head-sha"),
-			"github.event.pull_request.head.sha",
+			classifierHeadExpression,
 		) {
 		return false
 	}
