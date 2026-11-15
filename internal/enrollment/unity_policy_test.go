@@ -333,15 +333,20 @@ func TestUnityEnrollmentReportsOneRootCauseForAnUnauthorizedCentralPin(t *testin
 	}
 
 	t.Run("a local composite cannot hide a central pin", func(t *testing.T) {
+		// Break the return condition so the fixture also carries a lifecycle
+		// defect. On the old behavior that defect reports beside the pin.
+		steps := strings.Replace(
+			centralReturnSteps(),
+			"if: ${{ always() && steps.acquire.outputs.acquired == 'true' }}",
+			"if: success()",
+			1,
+		)
 		workflow := strings.Replace(
-			base,
+			unityWorkflow(steps, safeAggregate()),
 			"      - id: acquire\n",
 			"      - uses: ./.github/actions/wrapped-guard\n      - id: acquire\n",
 			1,
 		)
-		if workflow == base {
-			t.Fatal("mutation did not change workflow")
-		}
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 			".github/actions/wrapped-guard/action.yml": `name: Wrapped guard
@@ -356,6 +361,26 @@ runs:
 		}
 		if len(result.Findings) != 1 || result.Findings[0].Code != "unapproved-lock-ref" {
 			t.Fatalf("a composite central pin must report one root cause: %#v", result.Findings)
+		}
+	})
+
+	t.Run("coverage verdicts still report beside an own pin", func(t *testing.T) {
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			acquireActionRef(),
+			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:unity") ||
+			!strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("an own pin withheld a coverage verdict: %#v", result.Findings)
 		}
 	})
 
@@ -402,6 +427,9 @@ func TestUnityEnrollmentKeepsLicensedFindingsBesideAnUnrelatedPin(t *testing.T) 
 	if strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:unity") ||
 		strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:unity") {
 		t.Fatalf("an unrelated pin was blamed on the licensed job: %#v", result.Findings)
+	}
+	if !strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:lint") {
+		t.Fatalf("a non-paid job's pin was not reported on that job: %#v", result.Findings)
 	}
 }
 

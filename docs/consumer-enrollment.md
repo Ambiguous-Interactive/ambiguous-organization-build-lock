@@ -775,8 +775,9 @@ Preconditions records the same policy.
 
 `qora-redux` requires the two gates its default branch really enforces:
 `Godot CI` and `validate (ubuntu-latest)`. It runs Godot workflows and no Unity
-work, so it has no Unity aggregate to require. Both reviewed contexts report on
-every pull request, and its hosted preflight keeps it in the enrollment audit.
+work, so it has no Unity aggregate to require. Both gates report on every pull
+request: `godot-tests.yml` and `llm-harness.yml` have unfiltered
+`pull_request` triggers. Its hosted preflight keeps it in the enrollment audit.
 
 ## Canary
 

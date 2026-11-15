@@ -369,6 +369,14 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 			if !related {
 				continue
 			}
+			// Every job that pins a central action at a mutable or unauthorized
+			// reference is named here. The pin is a root cause on its own, and
+			// a non-paid job that carries one would otherwise stay silent.
+			// Paid jobs add the same code again; the finding set deduplicates
+			// it.
+			if trusted, code := a.centralReferenceTrust(steps); !trusted {
+				base.add(code, workflowPath, jobName)
+			}
 
 			classification := UnityInventoryNonLicensingStatic
 			if fallbackCleanup {
@@ -820,14 +828,19 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		}
 	}
 	if !trustedCentral {
-		// The pin is the root cause of every lifecycle and coverage shape this
-		// job could prove, so report it once and stop. An unapproved pin
-		// usually arrives as a group update that moves every central action,
-		// and a shape verdict would then name a step that is already present.
+		// The pin is the root cause of every lifecycle shape this job could
+		// prove, so report it once and stop. Coverage verdicts read the other
+		// jobs, so they still report unless a preflight candidate itself
+		// carries the pin, in which case its own finding names the cause.
 		if centralTrustCode != "" {
 			a.analyzer.add(centralTrustCode, workflowPath, jobName)
 		}
 		a.auditAcquireOrder(workflowPath, jobName, firstAcquire, firstActivation)
+		if !a.preflightCandidatePinned(jobs) {
+			a.auditIndependentCoverage(
+				workflow, jobs, workflowPath, jobName, job, preflightJobs, protectedBranches,
+			)
+		}
 		return
 	}
 	if returnActionCount > 1 {
@@ -957,6 +970,60 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
 		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
 	}
+}
+
+// auditIndependentCoverage reports the preflight and aggregate verdicts. They
+// read other jobs and this job's needs list, not the identity this job pins,
+// so an unauthorized pin in this job does not make them unprovable.
+func (a *unityPolicyAnalyzer) auditIndependentCoverage(
+	workflow, jobs *yaml.Node,
+	workflowPath, jobName string,
+	job *yaml.Node,
+	preflightJobs map[string]bool,
+	protectedBranches map[string]bool,
+) {
+	if selfHostedJob(job) && !needsAny(job, preflightJobs) {
+		a.analyzer.add("missing-runner-preflight", workflowPath, jobName)
+	}
+	aggregateName, aggregateJob, ok := a.hasAggregate(
+		workflow,
+		workflowPath,
+		jobs,
+		jobName,
+		job,
+		preflightJobs,
+	)
+	if !ok {
+		a.analyzer.add("missing-unity-aggregate", workflowPath, jobName)
+		return
+	}
+	a.auditAggregateGateReporting(
+		workflow,
+		workflowPath,
+		aggregateName,
+		aggregateJob,
+		protectedBranches,
+	)
+}
+
+// preflightCandidatePinned reports whether a job that names the preflight
+// action pins it at a mutable or unauthorized reference. That job receives its
+// own pin finding, so a licensed job's coverage verdict must not also name a
+// preflight that is present.
+func (a *unityPolicyAnalyzer) preflightCandidatePinned(jobs *yaml.Node) bool {
+	for index := 0; index < len(jobs.Content); index += 2 {
+		job := jobs.Content[index+1]
+		for _, step := range sequenceValues(mappingValue(job, "steps")) {
+			uses := stepUses(step)
+			if lockActionName(uses) != preflightAction {
+				continue
+			}
+			if trusted, _ := a.centralUsesTrust(uses); !trusted {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // centralReferenceTrust classifies the central action identities this job

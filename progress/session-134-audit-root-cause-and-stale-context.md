@@ -40,16 +40,20 @@ clean: the unauthorized pin is still reported, and the audit still fails.
 
 ## Change 1: name one root cause for an unauthorized or mutable pin
 
-- `internal/enrollment/unity_policy.go`: `centralReferenceTrust` scans this
-  job's flattened steps for `uses:` values that name this repository at a
-  mutable or unauthorized ref. A local composite cannot hide a pin, and another
-  job's pin cannot withhold this job's findings.
+- `internal/enrollment/unity_policy.go`: `centralReferenceTrust` scans a job's
+  flattened steps for `uses:` values that name this repository at a mutable or
+  unauthorized ref. A local composite cannot hide a pin.
+- Every related job that carries such a pin is named, including non-paid
+  preflight and lint jobs. Before this change, a non-paid job's pin was silent.
 - When the identity is untrusted, a licensed job reports the pin cause
   (`unapproved-lock-ref` or `mutable-action-ref`) and stops. It does not also
   report `missing-unity-editor-check`, `missing-cleanup-classifier`,
   `classifier-not-always`, `missing-unity-return`, `unsafe-central-return-suffix`,
   `release-inputs-not-typed`, `cleanup-gate-inputs-not-typed`,
   `missing-runner-preflight`, or `missing-unity-aggregate`.
+- Coverage verdicts read other jobs, so they still report, unless a preflight
+  candidate itself carries the pin. In that case its own pin finding names the
+  cause.
 - Findings that do not rest on this job's identity still report: runner labels,
   workflow and job queue direction, matrix fail-fast, job credentials,
   triggers, editor provisioning, release and gate `always()` checks, and
@@ -58,8 +62,8 @@ clean: the unauthorized pin is still reported, and the audit still fails.
   `unapproved-lock-ref` row.
 
 Root-cause evidence: the same snapshot reported 42 `unity-helpers` findings
-before the change and 6 after it. Four of the six name the unauthorized pin and
-two name expired reviewed exceptions.
+before the change and 9 after it. Seven name the unauthorized pin on one job
+each, and two name expired reviewed exceptions.
 
 ## Change 2: replace `qora-redux`'s stale Unity context with its real gates
 
@@ -79,16 +83,16 @@ An independent reviewer ran the analyzer on adversarial fixtures. Findings and
 dispositions:
 
 - Workflow-wide trust let an unrelated job's pin withhold a licensed job's real
-  findings and blamed the licensed job. The scan now reads this job's flattened
-  steps only, and a two-job regression test pins the behavior.
+  findings and blamed the licensed job. The scan now reads each job's flattened
+  steps, and a two-job regression test pins the behavior.
+- Non-paid jobs with an unauthorized pin stayed silent; the scan now names them.
+- The first version also withheld preflight and aggregate verdicts, which read
+  other jobs. Those verdicts now report, except when a preflight candidate
+  itself carries the pin and has its own finding.
 - The first `qora-redux` change exempted the repository and lost all gate
   coverage. The reviewed contexts now name its real live gates instead.
-- Preflight and aggregate verdicts stay inside the stop rule for a job with an
-  unauthorized pin. An unapproved pin arrives as a group update that moves every
-  central action, so those verdicts would name a preflight or aggregate that is
-  already present. The rule is stated in the code comment.
-- The trust scan now folds the repository spelling. A local composite pin is
-  covered by a regression test.
+- The trust scan folds the repository spelling, and a composite regression test
+  now breaks a lifecycle shape so it can tell the old behavior from the new.
 
 ## Validation
 
@@ -113,7 +117,7 @@ dispositions:
 
 ## Remaining monitor state
 
-- Enrollment audit after the pin fix: `unity-helpers` carries four
+- Enrollment audit after the pin fix: `unity-helpers` carries seven
   `unapproved-lock-ref` rows and two `expired-policy-exception` rows,
   `unity-builder` carries six expired exceptions, and `DoxReloaded` and
   `DxMessaging` carry the reviewed consumer shape findings. The expired
