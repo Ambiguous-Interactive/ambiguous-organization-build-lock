@@ -32,8 +32,8 @@ clean: the unauthorized pin is still reported, and the audit still fails.
    findings; the other nine findings are separate consumer shapes. Central fix,
    zero licensed churn.
 2. #255: one of five findings was unsatisfiable. `qora-redux` declares the
-   required context `Unity CI`, but the repository moved to Godot and runs no
-   Unity work, so the requirement can never report. Central data fix.
+   required context `Unity CI`, but it runs Godot workflows and no Unity work,
+   so the requirement can never report. Central data fix.
 3. Every other issue stays blocked on owner authority, ruleset authority, or
    licensed evidence, as `PLAN.md` records. #335 is still blocked: actionlint
    v1.7.12 (2026-03-30) is the newest release and still needs the old YAML API.

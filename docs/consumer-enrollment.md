@@ -773,9 +773,10 @@ any other `.github/` change still requires Unity validation.
 controlled manual canary, so it declares no required context. Item 6 of
 Preconditions records the same policy.
 
-`qora-redux` is exempt for a different reason: it runs no Unity work, so its
-default branch has no Unity aggregate to gate. Its hosted preflight uses the
-central runner inventory, so the enrollment audit still covers it.
+`qora-redux` is exempt for a different reason: it runs Godot workflows and no
+Unity work, so its default branch has no Unity aggregate to gate. Its hosted
+preflight uses the central runner inventory, so the enrollment audit still
+covers it.
 
 ## Canary
 
