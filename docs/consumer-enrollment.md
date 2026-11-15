@@ -10,14 +10,22 @@ or writer App. The current inventory is recorded in
 1. Audit every workflow, reusable workflow, and repository-local composite
    action in the candidate repository. Classify paid activation, synthetic
    fixtures, intentionally disabled/manual paths, and static references.
-2. Require an eligible trusted trigger: same-repository PR, protected default
-   branch, controlled dispatch, or an opted-in schedule on the protected default
-   branch. Scheduled workflows must use exactly one cron entry, at most daily.
+2. Require an eligible trusted trigger: same-repository PR, merge queue entry,
+   protected default branch, controlled dispatch, or an opted-in schedule on the
+   protected default branch. Scheduled workflows must use exactly one cron entry,
+   at most daily.
    The minute and hour must be plain integers. Date fields support numeric
    wildcards, lists, ranges, and steps. Named months or weekdays are refused.
    The registry must set `allowSchedule: true`. An absent value is false.
    Fork and Dependabot PRs must remain
-   unlicensed because organization secrets are unavailable.
+   unlicensed because organization secrets are unavailable. A merge queue entry
+   is different: it runs the queued diff, including a fork pull request diff,
+   with organization secrets once a writer adds it to the queue. That write
+   action is the trust boundary. A writer can already push the same commits to a
+   same-repository branch, so the trusted principals do not grow. The licensed
+   job keeps its same-repository guard, and the guard must keep its event-name
+   term: without it the job is false on a merge group, which has no pull request
+   payload to compare.
 3. Add the candidate to the reviewed central consumer registry and continuous
    audit. That audit must read the exact default-branch commit and fail closed
    on incomplete retrieval.
@@ -567,6 +575,28 @@ that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
 step that reads other files, such as the rule-line check above.
 
+A workflow that also listens for a merge queue must add `merge_group` to `on:`
+and pass the merge group revisions, because a merge group has no pull request
+payload:
+
+```yaml
+        with:
+          event-name: ${{ github.event_name }}
+          base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          head-sha: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+```
+
+The classifier reads the same base-to-head diff for both triggers. On a pull
+request the first operand answers. On a merge group the pull request payload is
+absent, so the merge group operand answers. In the five-job typed validation
+shape, the audit refuses pull request only revisions in a workflow that listens
+for a merge group, so an unusable queue shape cannot pass review. A merge group
+diff also holds the changes from the queue entries ahead of it, so the
+classification stays conservative. On the trigger, the audit admits only an
+absent filter, `types: [checks_requested]`, and `branches` that name protected
+branches. `branches-ignore` is refused, because it could keep the required
+context from a queue entry.
+
 ## Finding codes
 
 The scheduled audit reports every finding with one of these reason codes.
@@ -795,7 +825,10 @@ Before enforcing the aggregate as required:
 6. Confirm no holder, quarantine, or global incident remains after normal
    cleanup and cooldown expiry.
 7. Confirm a fork PR receives no organization credentials and follows the
-   explicit unlicensed aggregate policy.
+   explicit unlicensed aggregate policy. A queued fork PR is different: the
+   merge group run holds organization secrets once a writer enqueues it.
+   Confirm the team accepts that write-access boundary before a licensed
+   workflow enables a merge queue.
 8. Confirm the reaper can read the repository's workflow-run status and the
    policy audit can read its exact workflow commit.
 9. Confirm the exact aggregate context and issuing App in the repository
@@ -831,6 +864,10 @@ Before enforcing the aggregate as required:
     the release step's redacted `peer-timeline` output next to the failure so
     an editor-session casualty can be checked against peer lock activity in
     the same window.
+13. Confirm a required merge queue also reports the aggregate on
+    `merge_group`. A check that listens only for `pull_request` never reports
+    on a queue entry, so the queue blocks every merge. Pass the merge group
+    revisions to the change classifier as the paragraph above states.
 
 If any probe fails, narrow the diagnosis to App installation, selected-secret
 visibility, runner-group visibility, immutable pins, or workflow policy. Do not

@@ -137,9 +137,13 @@ test("committed classifier runtime requires Unity on non-pull-request events", (
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-runtime-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "output.txt");
+  // Unreadable revisions prove the event gate runs before any diff: a push never reports on
+  // a revision pair, so the runtime must not try to read one.
   const result = classifierRuntime({
     GITHUB_OUTPUT: outputPath,
-    "INPUT_EVENT-NAME": "push"
+    "INPUT_EVENT-NAME": "push",
+    "INPUT_BASE-SHA": "main",
+    "INPUT_HEAD-SHA": "main"
   });
   assert.equal(result.status, 0);
   assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
@@ -150,36 +154,53 @@ test("committed classifier runtime requires Unity on non-pull-request events", (
  * replaces spaces, never hyphens. Reading INPUT_EVENT_NAME instead is indistinguishable from an
  * absent input, so the runtime answered "not a pull request" for every pull request this action
  * has ever classified while every unit test of run() -- which is handed its arguments -- passed.
- * These two spawn the committed runtime through the env names the runner actually sets.
+ *
+ * A merge group has no pull request payload. GitHub reports the queue branch's base and head
+ * revisions, and the same base-to-head diff answers the same question. The cases run through the
+ * runner input names on both events: an independent diff skips Unity and one Unity path requires
+ * it.
  */
-test("committed classifier runtime classifies a pull request diff through runner input names", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-diff-"));
-  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const workspace = fixtureRepository(root, [".llm/context.md", "progress/session.md"]);
-  const outputPath = path.join(root, "output.txt");
-  const result = classifierRuntime({
-    GITHUB_OUTPUT: outputPath,
-    "INPUT_EVENT-NAME": "pull_request",
-    "INPUT_BASE-SHA": workspace.baseSHA,
-    "INPUT_HEAD-SHA": workspace.headSHA
-  }, workspace.directory);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=false");
+test("committed classifier runtime reads the diff for a pull request and a merge group", () => {
+  for (const eventName of ["pull_request", "merge_group"]) {
+    for (const { changedPaths, expected } of [
+      { changedPaths: [".llm/context.md", "progress/session.md"], expected: "unity-required=false" },
+      { changedPaths: [".llm/context.md", "Assets/Game.cs"], expected: "unity-required=true" }
+    ]) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-diff-"));
+      try {
+        const workspace = fixtureRepository(root, changedPaths);
+        const outputPath = path.join(root, "output.txt");
+        const result = classifierRuntime({
+          GITHUB_OUTPUT: outputPath,
+          "INPUT_EVENT-NAME": eventName,
+          "INPUT_BASE-SHA": workspace.baseSHA,
+          "INPUT_HEAD-SHA": workspace.headSHA
+        }, workspace.directory);
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(
+          fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(),
+          expected,
+          `${eventName}: ${changedPaths.join(", ")}`
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  }
 });
 
-test("committed classifier runtime requires Unity for a pull request touching Unity paths", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-unity-diff-"));
+test("committed classifier runtime fails closed on an incomplete merge group revision", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-merge-group-sha-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const workspace = fixtureRepository(root, [".llm/context.md", "Assets/Game.cs"]);
   const outputPath = path.join(root, "output.txt");
   const result = classifierRuntime({
     GITHUB_OUTPUT: outputPath,
-    "INPUT_EVENT-NAME": "pull_request",
-    "INPUT_BASE-SHA": workspace.baseSHA,
-    "INPUT_HEAD-SHA": workspace.headSHA
-  }, workspace.directory);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(outputPath, "utf8").trim().split("\n").pop(), "unity-required=true");
+    "INPUT_EVENT-NAME": "merge_group",
+    "INPUT-BASE-SHA": "main",
+    "INPUT-HEAD-SHA": "main"
+  });
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(outputPath, "utf8"), "unity-required=true\n");
 });
 
 function classifierRuntime(env, cwd = undefined) {
