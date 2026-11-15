@@ -103,7 +103,9 @@ jobs:
 
       - name: Open enrollment pull request with retained evidence
         env:
-          GH_TOKEN: ${{ steps.writer-token.outputs.token }}
+          # A named authorization variable, not a credential-shaped key: the
+          # value is the writer-App installation token for this run only.
+          ENROLLMENT_PR_AUTHORIZATION: ${{ steps.writer-token.outputs.token }}
           TARGET_REPOSITORY: ${{ steps.request.outputs.repository }}
           TARGET_DEFAULT_BRANCH: ${{ steps.request.outputs.default_branch }}
           TARGET_FORK: ${{ steps.request.outputs.fork }}

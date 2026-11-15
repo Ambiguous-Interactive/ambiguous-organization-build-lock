@@ -1664,15 +1664,16 @@ test("Unity repository onboarding opens a reviewable registry-only PR from trust
   assert.match(automation, /go run \.\/cmd\/onboard-unity-repository/);
   assert.equal(update.env.TARGET_REPOSITORY, "${{ steps.request.outputs.repository }}");
   assert.equal(update.env.TARGET_DEFAULT_BRANCH, "${{ steps.request.outputs.default_branch }}");
-  assert.equal(pullRequest.env.GH_TOKEN, "${{ steps.writer-token.outputs.token }}");
+  assert.equal(pullRequest.env.ENROLLMENT_PR_AUTHORIZATION, "${{ steps.writer-token.outputs.token }}");
   const writerToken = steps.find((step) => step.name === "Mint repository-scoped writer token");
   assert.equal(writerToken.with["app-id"], "${{ secrets.BUILD_LOCK_APP_ID }}");
   assert.equal(writerToken.with["private-key"], "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}");
   assert.equal(writerToken.with["permission-contents"], "write");
   assert.equal(writerToken.with["permission-pull-requests"], "write");
+  assert.match(automation, /GH_TOKEN="\$\{ENROLLMENT_PR_AUTHORIZATION\}" gh pr create/);
   assert.match(automation, /git add unity-enrollment-policy\.json/);
   assert.match(automation, /gh pr create/);
-  assert.match(automation, /ONBOARDING_PUSH_AUTHORIZATION="\$\{GH_TOKEN[^}]*\}"/);
+  assert.match(automation, /ONBOARDING_PUSH_AUTHORIZATION="\$\{ENROLLMENT_PR_AUTHORIZATION\}"/);
   assert.match(automation, /push origin "\$\{ONBOARDING_BRANCH\}"/);
   assert.match(text, /Mint target-scoped reader token/);
   assert.match(automation, /--validate-only/);
