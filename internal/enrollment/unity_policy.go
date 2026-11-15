@@ -5018,7 +5018,8 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 			for preflight := range requiredPreflights {
 				if needsAny(job, map[string]bool{preflight: true}) &&
 					(aggregateStepEnforces(step, licensedJob, preflight) ||
-						trustedSkipAggregateEnforces(
+						a.trustedSkipAggregateEnforces(
+							workflowPath,
 							workflow,
 							job,
 							step,
@@ -6012,7 +6013,8 @@ func aggregateStepEnforces(step *yaml.Node, licensedJob, preflightJob string) bo
 	return true
 }
 
-func trustedSkipAggregateEnforces(
+func (a *unityPolicyAnalyzer) trustedSkipAggregateEnforces(
+	workflowPath string,
 	workflow, job, step *yaml.Node,
 	licensedJob, preflightJob string,
 ) bool {
@@ -6028,12 +6030,21 @@ func trustedSkipAggregateEnforces(
 		return false
 	}
 	env := mappingValue(step, "env")
-	if !mappingHasOnlyKeys(env, map[string]bool{
+	readback := mappingValue(env, "HISTORICAL_READBACK") != nil
+	allowed := map[string]bool{
 		"RUNNER_PREFLIGHT_RESULT": true,
 		"UNITY_TESTS_RESULT":      true,
 		"FORK_PR":                 true,
 		"DEPENDABOT_PR":           true,
-	}) ||
+	}
+	if readback {
+		allowed["HISTORICAL_READBACK"] = true
+		allowed["HISTORICAL_READBACK_RESULT"] = true
+		if !a.historicalReadbackAggregateSafe(workflowPath, workflow, job, env, licensedJob, preflightJob) {
+			return false
+		}
+	}
+	if !mappingHasOnlyKeys(env, allowed) ||
 		!exactExpression(
 			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
 			"needs."+preflightJob+".result",
@@ -6074,11 +6085,89 @@ func trustedSkipAggregateEnforces(
 		`test "${UNITY_TESTS_RESULT}" = success`,
 		"fi",
 	}
+	if readback {
+		expected[1] = `elif [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`
+		expected = append([]string{
+			"set -euo pipefail",
+			`if [ "${HISTORICAL_READBACK}" = "true" ]; then`,
+			`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+			`test "${HISTORICAL_READBACK_RESULT}" = success`,
+			`test "${UNITY_TESTS_RESULT}" = skipped`,
+		}, expected[1:]...)
+	}
 	if len(lines) != len(expected) {
 		return false
 	}
 	for index := range expected {
 		if lines[index] != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// Preserve quoted text when comparing the dispatch selector. A space inside a
+// literal changes the selected event or the empty-input test.
+func exactReadbackExpression(value *yaml.Node, expression string) bool {
+	if value == nil || value.Kind != yaml.ScalarNode {
+		return false
+	}
+	var compact strings.Builder
+	quoted := false
+	for _, character := range value.Value {
+		if character == '\'' {
+			quoted = !quoted
+		}
+		if !quoted && (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
+			continue
+		}
+		compact.WriteRune(character)
+	}
+	return compact.String() == "${{"+expression+"}}"
+}
+
+// A historical capture reports diagnostics. It cannot replace licensed validation
+// on pull requests or pushes, or supply native qualification evidence.
+func (a *unityPolicyAnalyzer) historicalReadbackAggregateSafe(
+	workflowPath string,
+	workflow, aggregate, env *yaml.Node,
+	licensedJob, preflightJob string,
+) bool {
+	const captureName = "native-historical-readback"
+	const selector = "github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!=''"
+	if licensedJob == captureName || preflightJob == captureName || licensedJob == preflightJob ||
+		!exactReadbackExpression(mappingValue(env, "HISTORICAL_READBACK"), selector) ||
+		!exactReadbackExpression(mappingValue(env, "HISTORICAL_READBACK_RESULT"), "needs."+captureName+".result") ||
+		!needsAny(aggregate, map[string]bool{captureName: true}) {
+		return false
+	}
+	input := mappingValue(mappingValue(mappingValue(mappingValue(workflow, "on"), "workflow_dispatch"), "inputs"), "native-readback-run-id")
+	defaultValue := mappingValue(input, "default")
+	required := mappingValue(input, "required")
+	if scalarValue(mappingValue(input, "type")) != "string" ||
+		(defaultValue != nil && (defaultValue.Kind != yaml.ScalarNode || defaultValue.Tag != "!!str" || defaultValue.Value != "")) ||
+		(required != nil && (required.Kind != yaml.ScalarNode || required.Tag != "!!bool" || required.Value != "false")) {
+		return false
+	}
+	capture := mappingValue(mappingValue(workflow, "jobs"), captureName)
+	if capture == nil || capture.Kind != yaml.MappingNode ||
+		!needsAny(capture, map[string]bool{preflightJob: true}) ||
+		!exactReadbackExpression(mappingValue(capture, "if"), "!cancelled()&&"+selector+"&&needs."+preflightJob+".result=='success'") ||
+		!criticalNodeFailurePropagates(capture) ||
+		!validationJobIsolationSafe(workflow, capture) ||
+		mappingValue(capture, "uses") != nil {
+		return false
+	}
+	licensed, err := a.analyzer.jobLicensed(workflowPath, captureName)
+	if err != nil || licensed || containsUnityCredentialReference(strings.ToLower(nodeScalarText(capture))) {
+		return false
+	}
+	steps, err := a.flattenedSteps(sequenceValues(mappingValue(capture, "steps")), capture, make(map[string]bool), "job", nil, nil)
+	if err != nil || len(steps) == 0 {
+		return false
+	}
+	for _, step := range steps {
+		if stepActivatesUnity(step.node) || unityStepContainsCredential(step) || !criticalStepFailurePropagates(step) {
 			return false
 		}
 	}
