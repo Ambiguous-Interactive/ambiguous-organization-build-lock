@@ -58,7 +58,10 @@
       "defaultBranch": "main",
       "fork": false,
       "allowWorkflowDispatch": true,
-      "allowSchedule": false
+      "allowSchedule": false,
+      "requiredContexts": [
+        "Unity CI Success"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/DxMessaging",

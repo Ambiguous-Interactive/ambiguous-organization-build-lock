@@ -42,6 +42,7 @@ incident blocks all new admission regardless of nominal capacity.
 lock-aware perimeter. It retains this required baseline:
 
 - `Ambiguous-Interactive/DoxReloaded` <!-- enrollment-baseline -->
+- `Ambiguous-Interactive/DxAudio` <!-- enrollment-baseline -->
 - `Ambiguous-Interactive/DxMessaging` <!-- enrollment-baseline -->
 - `Ambiguous-Interactive/IshoBoy` <!-- enrollment-baseline -->
 - `Ambiguous-Interactive/qora-redux` <!-- enrollment-baseline -->

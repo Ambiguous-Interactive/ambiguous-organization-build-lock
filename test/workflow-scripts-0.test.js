@@ -220,6 +220,11 @@ for (const testCase of auditSummaryCases) {
     const auditPath = path.join(temporary, "audit.json");
     const summaryPath = path.join(temporary, "summary.md");
     const environment = { AUDIT_PATH: auditPath, GITHUB_STEP_SUMMARY: summaryPath };
+    // The denominator is the reviewed registry, not a literal count, so
+    // enrolling a repository cannot break this test.
+    const repositoryCount = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "unity-enrollment-policy.json"), "utf8")
+    ).repositories.length;
     const record = (findings, complete = true) => {
       fs.writeFileSync(summaryPath, "");
       fs.writeFileSync(
@@ -228,7 +233,7 @@ for (const testCase of auditSummaryCases) {
       );
       const result = runScript(testCase.script, "record-counts", environment);
       const summary = fs.readFileSync(summaryPath, "utf8");
-      const counts = `Repositories: 0/6\n${testCase.inventoryLabel}: 0\nFindings: ${findings.length}\nComplete: ${complete}\n`;
+      const counts = `Repositories: 0/${repositoryCount}\n${testCase.inventoryLabel}: 0\nFindings: ${findings.length}\nComplete: ${complete}\n`;
       assert.ok(summary.startsWith(counts), `counts block:\n${summary}`);
       return { result, summary };
     };
