@@ -407,7 +407,14 @@ runs:
 	})
 
 	t.Run("an unrelated pinned preflight does not withhold coverage", func(t *testing.T) {
-		workflow := unityWorkflow(centralReturnSteps(), "") + `  lint:
+		// The licensed job also carries its own pin, so the guard runs on a
+		// job whose coverage is still provable.
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			acquireActionRef(),
+			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA,
+			1,
+		) + `  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
@@ -421,6 +428,30 @@ runs:
 		codes := findingCodes(result.Findings)
 		if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
 			t.Fatalf("an unrelated preflight pin withheld a coverage verdict: %#v", result.Findings)
+		}
+	})
+
+	t.Run("an approved needed preflight settles coverage", func(t *testing.T) {
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			"    needs: preflight\n",
+			"    needs: [preflight, extra]\n",
+			1,
+		) + `  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
+`
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") ||
+			!strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:extra") {
+			t.Fatalf("a trusted preflight must settle coverage: %#v", result.Findings)
 		}
 	})
 

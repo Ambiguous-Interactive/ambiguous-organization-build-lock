@@ -836,7 +836,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			a.analyzer.add(centralTrustCode, workflowPath, jobName)
 		}
 		a.auditAcquireOrder(workflowPath, jobName, firstAcquire, firstActivation)
-		if !a.neededPreflightPinned(job, jobs) {
+		if !a.neededPreflightPinned(job, jobs, preflightJobs) {
 			a.auditIndependentCoverage(
 				workflow, jobs, workflowPath, jobName, job, preflightJobs, protectedBranches,
 			)
@@ -923,7 +923,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			a.analyzer.add("cleanup-gate-before-release", workflowPath, jobName)
 		}
 	}
-	if !a.neededPreflightPinned(job, jobs) {
+	if !a.neededPreflightPinned(job, jobs, preflightJobs) {
 		a.auditIndependentCoverage(
 			workflow, jobs, workflowPath, jobName, job, preflightJobs, protectedBranches,
 		)
@@ -990,12 +990,19 @@ func (a *unityPolicyAnalyzer) auditIndependentCoverage(
 	)
 }
 
-// neededPreflightPinned reports whether a job this job needs names the
-// preflight action at a mutable or unauthorized reference. That job receives
-// its own pin finding, so this job's coverage verdict must not also name a
-// preflight that is present. A needed job without the preflight action keeps
-// the verdict, because the preflight is genuinely absent.
-func (a *unityPolicyAnalyzer) neededPreflightPinned(job, jobs *yaml.Node) bool {
+// neededPreflightPinned reports whether this job needs a preflight job that
+// names the preflight action at a mutable or unauthorized reference. That job
+// receives its own pin finding, so this job's coverage verdict must not also
+// name a preflight that is present. A trusted preflight candidate settles
+// coverage, and a needed job without the preflight action keeps the verdict,
+// because the preflight is genuinely absent.
+func (a *unityPolicyAnalyzer) neededPreflightPinned(
+	job, jobs *yaml.Node,
+	preflightJobs map[string]bool,
+) bool {
+	if len(neededCandidates(job, preflightJobs)) > 0 {
+		return false
+	}
 	needs := mappingValue(job, "needs")
 	if needs == nil {
 		return false
