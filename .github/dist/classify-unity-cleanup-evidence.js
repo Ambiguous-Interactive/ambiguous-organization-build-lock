@@ -804,6 +804,9 @@ function diagnosticTail(returnLog) {
     .replaceAll("\r", "")
     .split("\n")
     .slice(-MAX_DIAGNOSTIC_TAIL_LINES)
+    // The `| ` after the spaces is load-bearing. The runner trims leading
+    // whitespace before it looks for `::`, so only this literal prefix keeps a
+    // consumer-written line from becoming a workflow command.
     .map((line) => `  | ${line.replace(DIAGNOSTIC_CONTROL_PATTERN, "?")}`)
     .join("\n");
 }
