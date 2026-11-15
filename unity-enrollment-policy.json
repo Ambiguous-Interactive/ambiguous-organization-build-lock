@@ -48,15 +48,24 @@
       "defaultBranch": "main",
       "fork": false,
       "allowWorkflowDispatch": true,
+      "allowSchedule": false,
       "requiredContexts": [
         "CI Success"
       ]
+    },
+    {
+      "repository": "Ambiguous-Interactive/DxAudio",
+      "defaultBranch": "main",
+      "fork": false,
+      "allowWorkflowDispatch": true,
+      "allowSchedule": false
     },
     {
       "repository": "Ambiguous-Interactive/DxMessaging",
       "defaultBranch": "master",
       "fork": false,
       "allowWorkflowDispatch": true,
+      "allowSchedule": false,
       "requiredContexts": [
         "Unity CI Success"
       ]
@@ -76,6 +85,7 @@
       "defaultBranch": "main",
       "fork": false,
       "allowWorkflowDispatch": true,
+      "allowSchedule": false,
       "requiredContexts": [
         "Unity CI"
       ]
@@ -85,13 +95,14 @@
       "defaultBranch": "main",
       "fork": true,
       "allowWorkflowDispatch": true,
-      "requiredContexts": []
+      "allowSchedule": false
     },
     {
       "repository": "Ambiguous-Interactive/unity-helpers",
       "defaultBranch": "main",
       "fork": false,
       "allowWorkflowDispatch": true,
+      "allowSchedule": false,
       "requiredContexts": [
         "Unity CI Success"
       ]
