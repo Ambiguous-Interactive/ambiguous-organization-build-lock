@@ -57,8 +57,11 @@ first.
 - A successful run of a workflow that carries the central aggregate proves
   its head tree either passed the licensed job or needed none. Both cases make
   the tree a validated baseline.
-- Unity is skipped only when every path in that delta is independent. No
-  record, a diverged branch, a truncated 300-file comparison, an unparseable
+- Unity is skipped only when every path in that delta is independent and the
+  record is at or after the current base. A base that moved past the record
+  keeps Unity required: the commits between the two bases are in neither the
+  record nor the delta, so a Unity change there would be invisible.
+- No record, a diverged branch, a truncated 300-file comparison, an unparseable
   workflow reference, a missing token, and a failed request all keep Unity
   required. The `true` output is written before any lookup, so a crash cannot
   leave a skip behind.
@@ -80,13 +83,14 @@ first.
 
 ## Tests
 
-- `test/unity-change-classifier.test.js`: one data table runs thirteen
+- `test/unity-change-classifier.test.js`: one data table runs fifteen
   outcomes through `run`: a document-only delta, a Unity path, a rename out of
-  a Unity path, an identical tree, a rewritten history, a truncated list, a
-  comparison without files, no successful run, a run on another branch, the
-  current run, a record with no commit, an unreadable history, and a failed
-  lookup. Two further cases prove the request scoping (one run-history read,
-  one comparison, both on the expected URLs), the merge group and opt-in
+  a Unity path, an identical tree, a rewritten history, a base that moved past
+  the record, a base that equals the record, a truncated list, a comparison
+  without files, no successful run, a run on another branch, the current run, a
+  record with no commit, an unreadable history, and a failed lookup. Two
+  further cases prove the request scoping (one run-history read, one base
+  check, one comparison, each on the expected URL), the merge group and opt-in
   refusals, and the workflow-reference grammar.
 - `internal/enrollment/unity_policy_test.go`: seven pairings cover one
   accepted shape and six refused shapes.
@@ -105,6 +109,15 @@ first.
   list, because the API truncates at that count.
 - `previous_filename` is compared too, so a rename out of `Assets/` cannot
   look like an independent addition.
+- CodeRabbit found that a base which advanced past the record could hide a
+  Unity change in the skipped commits. The delta comparison cannot see those
+  commits, so the action now reads the base-to-record ancestry and keeps Unity
+  required unless the record is at or after the current base. Two table cases
+  cover the accepted and refused relations.
+- CodeRabbit asked for the run-history permission to be visible. The action
+  metadata, the README, and the enrollment contract now name `actions: read`,
+  and the documented classifier job shows the permissions block. The default
+  token grants it, so no consumer gains a new secret.
 
 ## Validation
 

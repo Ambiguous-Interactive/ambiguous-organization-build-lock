@@ -367,19 +367,23 @@ async function classifyIncrementally(overrides = {}) {
     if (overrides.requestError) {
       throw overrides.requestError;
     }
-    return requestPath.includes("/actions/workflows/")
-      ? (overrides.history ?? {
+    if (requestPath.includes("/actions/workflows/")) {
+      return overrides.history ?? {
         workflow_runs: [{
           id: 1,
           head_branch: "feature",
           head_sha: VALIDATED_SHA,
           conclusion: "success"
         }]
-      })
-      : (overrides.comparison ?? {
-        status: "ahead",
-        files: [{ filename: "progress/session-1.md" }]
-      });
+      };
+    }
+    if (requestPath.includes(`${VALIDATED_SHA}?per_page=1`)) {
+      return overrides.baseRelation ?? { status: "ahead", files: [] };
+    }
+    return overrides.comparison ?? {
+      status: "ahead",
+      files: [{ filename: "progress/session-1.md" }]
+    };
   };
   const unityRequired = await run({
     eventName: overrides.eventName ?? "pull_request",
@@ -434,6 +438,16 @@ test("incremental validation skips only a delta the validated run already covers
       name: "a rewritten history",
       overrides: { comparison: { status: "diverged", files: [] } },
       expected: true
+    },
+    {
+      name: "a base that moved past the validated run",
+      overrides: { baseRelation: { status: "diverged", files: [] } },
+      expected: true
+    },
+    {
+      name: "a base that equals the validated run",
+      overrides: { baseRelation: { status: "identical", files: [] } },
+      expected: false
     },
     {
       name: "a truncated file list",
@@ -501,12 +515,13 @@ test("incremental validation skips only a delta the validated run already covers
 
 test("incremental validation reads this workflow and only under the pull request trigger", async () => {
   const pullRequest = await classifyIncrementally();
-  assert.equal(pullRequest.requests.length, 2, "one run-history read and one comparison");
+  assert.equal(pullRequest.requests.length, 3, "one run-history read, one base check, one comparison");
   assert.match(pullRequest.requests[0], /\/actions\/workflows\/build-deploy\.yml\/runs\?/);
   assert.match(pullRequest.requests[0], /branch=feature/);
   assert.match(pullRequest.requests[0], /event=pull_request/);
   assert.match(pullRequest.requests[0], /status=success/);
-  assert.equal(pullRequest.requests[1], `/repos/Ambiguous-Interactive/consumer/compare/${VALIDATED_SHA}...${"b".repeat(40)}?per_page=300`);
+  assert.equal(pullRequest.requests[1], `/repos/Ambiguous-Interactive/consumer/compare/${"a".repeat(40)}...${VALIDATED_SHA}?per_page=1`);
+  assert.equal(pullRequest.requests[2], `/repos/Ambiguous-Interactive/consumer/compare/${VALIDATED_SHA}...${"b".repeat(40)}?per_page=300`);
 
   // A merge group names no pull request branch, and the whole-diff answer stands.
   const mergeGroup = await classifyIncrementally({ eventName: "merge_group" });

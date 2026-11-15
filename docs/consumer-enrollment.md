@@ -525,15 +525,19 @@ touches a Dependabot pull request.
    that is not the current run, and compares that head with the current head
    through the comparison API. A successful run of a workflow that carries
    this aggregate proves its head tree either passed the licensed job or needed
-   none. Unity is skipped only when every path in the delta is independent.
-   No record, a diverged branch, a truncated file list, and a failed request
-   all keep Unity required. The mode is a literal on purpose: a pull request
-   cannot name its own baseline, and the audit accepts `github-token` only as
-   `${{ github.token }}`, never as a literal or another secret. A token without
-   the mode, or the mode without the token, is refused. The aggregate needs no
-   change, because it already consumes the one boolean the classifier reports.
-   A merge group keeps the whole-diff answer: it has no pull request branch to
-   read a record from.
+   none. Unity is skipped only when every path in the delta is independent and
+   the record is at or after the current base. A base that moved past the
+   record keeps Unity required, because the commits between the two bases are
+   in neither the record nor the delta. No record, a diverged branch, a
+   truncated file list, and a failed request all keep Unity required. The mode
+   is a literal on purpose: a pull request cannot name its own baseline, and
+   the audit accepts `github-token` only as `${{ github.token }}`, never as a
+   literal or another secret. A token without the mode, or the mode without the
+   token, is refused. The classifier job needs `actions: read`; the default
+   token grants it, and a workflow that narrows permissions must grant it. The
+   aggregate needs no change, because it already consumes the one boolean the
+   classifier reports. A merge group keeps the whole-diff answer: it has no
+   pull request branch to read a record from.
    An isolated Bash aggregate may skip an explicit manual historical readback.
    Keep its existing four environment bindings and trusted-skip result script.
    Use this exact job guard:
@@ -583,6 +587,11 @@ also in `approvedDarwinReturnShas`.
 jobs:
   change-classifier:
     runs-on: ubuntu-latest
+    # actions: read is the run-history lookup; contents: read is the checkout.
+    # A workflow-level permissions block must keep both.
+    permissions:
+      actions: read
+      contents: read
     outputs:
       unity-required: ${{ steps.classify.outputs.unity-required }}
     steps:

@@ -272,6 +272,7 @@ async function incrementalDecision({
   workflowRef,
   headBranch,
   runID,
+  baseSHA,
   headSHA,
   declaredPrefixes,
   request,
@@ -288,6 +289,19 @@ async function incrementalDecision({
     + `&per_page=${RECORD_RUN_LIMIT}`
   );
   const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID });
+  /*
+     The record must be at or after the CURRENT base. If the base moved past it -- a retarget,
+     a rebase onto a newer main, or a force push -- the commits between the two bases are not
+     part of the recorded tree and are not part of the delta either, so a Unity change they
+     carry would be invisible here. A plain file comparison cannot see that, so the ancestry is
+     read instead and anything but "the record is ahead of this base" keeps Unity required.
+  */
+  const baseRelation = await request(
+    `/repos/${repository}/compare/${baseSHA}...${recordSHA}?per_page=1`
+  );
+  if (baseRelation?.status !== "ahead" && baseRelation?.status !== "identical") {
+    throw failClosed("the validated run is not ahead of the current base");
+  }
   const changedPaths = await changedPathsBetween(repository, recordSHA, headSHA, request);
   if (changedPaths === null) {
     log(`Unity validation skipped: the validated run at ${recordSHA} already holds this tree.`);
@@ -363,6 +377,7 @@ async function run({
       workflowRef: text(workflowRef),
       headBranch: text(headBranch),
       runID: text(runID),
+      baseSHA: text(baseSHA),
       headSHA: text(headSHA),
       declaredPrefixes,
       request,

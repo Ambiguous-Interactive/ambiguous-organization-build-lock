@@ -107,10 +107,12 @@ Unity path still re-runs the licensed job, because that diff covers the whole
 pull request. The opt-in `incremental-validation` mode closes that gap: it reads
 the repository's own run history for the newest successful run of this workflow
 on this branch, then compares that head with the current one. When every path in
-that delta is independent, Unity is skipped. Every other answer -- no record, a
-rewritten branch, a truncated comparison, a failed request -- keeps Unity
+that delta is independent and the record is at or after the current base, Unity
+is skipped. Every other answer -- no record, a base that moved past the record,
+a rewritten branch, a truncated comparison, a failed request -- keeps Unity
 required. The mode needs `github-token: ${{ github.token }}` and a literal
-`incremental-validation: true`; the audit refuses any other pairing. Use
+`incremental-validation: true`; the audit refuses any other pairing. Its job
+needs `actions: read`, which the default token grants. Use
 `require-unity-validation` for the conditional aggregate and pass exact
 `needs` results, that classifier's boolean output, the trust decision, and the
 hosted fallback release's typed `cleanup-result`. The gate fails closed unless

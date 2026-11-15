@@ -26,7 +26,8 @@ inputs:
   github-token:
     description: >-
       Token that reads this repository's run history for incremental-validation. Use
-      ${{ github.token }}. The default read-only token is enough. Omit when the mode is off.
+      ${{ github.token }}. The job needs actions: read; the default token grants it, and a
+      workflow that narrows permissions must grant it. Omit when the mode is off.
     required: false
 outputs:
   unity-required:
