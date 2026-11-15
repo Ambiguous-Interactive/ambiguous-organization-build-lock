@@ -525,7 +525,9 @@ touches a Dependabot pull request.
    that is not the current run, and compares that head with the current head
    through the comparison API. A successful run of a workflow that carries
    this aggregate proves its head tree either passed the licensed job or needed
-   none. Unity is skipped only when every path in the delta is independent and
+   none, unless the run came from a fork or Dependabot: those runs report a
+   trusted skip, so the action refuses them as records. Unity is skipped only
+   when every path in the delta is independent and
    the record is at or after the current base. A base that moved past the
    record keeps Unity required, because the commits between the two bases are
    in neither the record nor the delta. No record, a diverged branch, a
@@ -543,7 +545,9 @@ touches a Dependabot pull request.
    `GITHUB_SHA` and compares it with the head tree of each recent successful
    pull request run of this workflow. Unity is skipped only on exact tree
    equality. A different tree, no record, and a failed lookup all keep Unity
-   required. A push needs no extra input: the mode and
+   required. A fork and a Dependabot run are refused as records for the same
+   reason on a pull request: their licensed job is a trusted skip, not a
+   validation. A push needs no extra input: the mode and
    `github-token: ${{ github.token }}` are enough, and the job's `actions: read`
    covers the tree reads.
    An isolated Bash aggregate may skip an explicit manual historical readback.

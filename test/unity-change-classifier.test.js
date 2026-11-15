@@ -373,7 +373,9 @@ async function classifyIncrementally(overrides = {}) {
           id: 1,
           head_branch: "feature",
           head_sha: VALIDATED_SHA,
-          conclusion: "success"
+          conclusion: "success",
+          head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+          actor: { login: "maintainer" }
         }]
       };
     }
@@ -473,7 +475,43 @@ test("incremental validation skips only a delta the validated run already covers
       name: "a successful run of another branch",
       overrides: {
         history: {
-          workflow_runs: [{ id: 1, head_branch: "other", head_sha: VALIDATED_SHA }]
+          workflow_runs: [{
+            id: 1,
+            head_branch: "other",
+            head_sha: VALIDATED_SHA,
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "maintainer" }
+          }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "a successful run from a fork",
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 1,
+            head_branch: "feature",
+            head_sha: VALIDATED_SHA,
+            head_repository: { full_name: "someone/consumer" },
+            actor: { login: "someone" }
+          }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "a successful Dependabot run",
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 1,
+            head_branch: "dependabot/nuget/x",
+            head_sha: VALIDATED_SHA,
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "dependabot[bot]" }
+          }]
         }
       },
       expected: true
@@ -482,7 +520,13 @@ test("incremental validation skips only a delta the validated run already covers
       name: "the current run",
       overrides: {
         history: {
-          workflow_runs: [{ id: 2, head_branch: "feature", head_sha: VALIDATED_SHA }]
+          workflow_runs: [{
+            id: 2,
+            head_branch: "feature",
+            head_sha: VALIDATED_SHA,
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "maintainer" }
+          }]
         }
       },
       expected: true
@@ -491,7 +535,13 @@ test("incremental validation skips only a delta the validated run already covers
       name: "a run record with no commit",
       overrides: {
         history: {
-          workflow_runs: [{ id: 1, head_branch: "feature", head_sha: "main" }]
+          workflow_runs: [{
+            id: 1,
+            head_branch: "feature",
+            head_sha: "main",
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "maintainer" }
+          }]
         }
       },
       expected: true
@@ -576,7 +626,13 @@ async function classifyPush(overrides = {}) {
     }
     if (requestPath.includes("/actions/workflows/")) {
       return overrides.history ?? {
-        workflow_runs: [{ id: 1, head_sha: overrides.recordSHA ?? RECORD_PR_SHA }]
+        workflow_runs: [{
+          id: 1,
+          head_sha: overrides.recordSHA ?? RECORD_PR_SHA,
+          head_branch: "feature",
+          head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+          actor: { login: "maintainer" }
+        }]
       };
     }
     const commit = /\/git\/commits\/([0-9a-f]{40})$/.exec(requestPath);
@@ -646,8 +702,20 @@ test("push incremental validation skips only a tree a successful pull request ru
       overrides: {
         history: {
           workflow_runs: [
-            { id: 1, head_sha: RECORD_PR_SHA },
-            { id: 3, head_sha: SECOND_RECORD_SHA }
+            {
+              id: 1,
+              head_sha: RECORD_PR_SHA,
+              head_branch: "feature",
+              head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+              actor: { login: "maintainer" }
+            },
+            {
+              id: 3,
+              head_sha: SECOND_RECORD_SHA,
+              head_branch: "feature",
+              head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+              actor: { login: "maintainer" }
+            }
           ]
         },
         treeErrors: new Set([RECORD_PR_SHA]),
@@ -665,12 +733,64 @@ test("push incremental validation skips only a tree a successful pull request ru
     },
     {
       name: "the current run is not a record",
-      overrides: { history: { workflow_runs: [{ id: 2, head_sha: RECORD_PR_SHA }] } },
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 2,
+            head_sha: RECORD_PR_SHA,
+            head_branch: "feature",
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "maintainer" }
+          }]
+        }
+      },
       expected: true
     },
     {
       name: "a record without a commit",
-      overrides: { history: { workflow_runs: [{ id: 1, head_sha: "main" }] } },
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 1,
+            head_sha: "main",
+            head_branch: "feature",
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "maintainer" }
+          }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "a successful run from a fork",
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 1,
+            head_sha: RECORD_PR_SHA,
+            head_branch: "feature",
+            head_repository: { full_name: "someone/consumer" },
+            actor: { login: "someone" }
+          }]
+        },
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
+      expected: true
+    },
+    {
+      name: "a successful Dependabot run",
+      overrides: {
+        history: {
+          workflow_runs: [{
+            id: 1,
+            head_sha: RECORD_PR_SHA,
+            head_branch: "dependabot/nuget/x",
+            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+            actor: { login: "dependabot[bot]" }
+          }]
+        },
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
       expected: true
     },
     {

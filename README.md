@@ -109,8 +109,10 @@ pull request it reads the repository's own run history for the newest
 successful run of this workflow on this branch, then compares that head with
 the current one; on a push it compares the pushed tree with the head tree of
 each recent successful pull request run. A push whose tree a successful run
-already holds is skipped. When every path in a pull request delta is
-independent and the record is at or after the current base, Unity is skipped.
+already holds is skipped. A run from a fork or Dependabot is refused as a
+record, because its licensed job is a trusted skip. When every path in a pull
+request delta is independent and the record is at or after the current base,
+Unity is skipped.
 Every other answer -- no record, a different tree, a base that moved past the
 record, a rewritten branch, a truncated comparison, a failed request -- keeps
 Unity required. The mode needs `github-token: ${{ github.token }}` and a literal

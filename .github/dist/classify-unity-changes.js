@@ -230,7 +230,26 @@ function workflowFile(reference, repository) {
   return name;
 }
 
-function validationRecord(runs, { headBranch, runID }) {
+/*
+ * A successful run of this workflow does not always prove licensed work: a fork pull request and
+ * a Dependabot pull request both report a trusted skip, and the aggregate accepts that skip. A
+ * run from another repository's head, or from Dependabot, therefore cannot make a tree a
+ * validated baseline. Same-repository non-Dependabot runs do run the licensed job when the
+ * classifier requires it, or needed none when it does not.
+ */
+function validatesLicensedWork(record, repository) {
+  if (record === null || typeof record !== "object") {
+    return false;
+  }
+  if (text(record.head_repository?.full_name).toLowerCase() !== repository.toLowerCase()) {
+    return false;
+  }
+  const actor = text(record.actor?.login).toLowerCase();
+  const branch = text(record.head_branch).toLowerCase();
+  return actor !== "dependabot[bot]" && !branch.startsWith("dependabot/");
+}
+
+function validationRecord(runs, { headBranch, runID, repository }) {
   if (!Array.isArray(runs)) {
     throw failClosed("the run history is not a list");
   }
@@ -238,7 +257,8 @@ function validationRecord(runs, { headBranch, runID }) {
     run !== null && typeof run === "object" &&
     run.head_branch === headBranch &&
     String(run.id) !== runID &&
-    typeof run.head_sha === "string" && /^[0-9a-f]{40}$/i.test(run.head_sha)
+    typeof run.head_sha === "string" && /^[0-9a-f]{40}$/i.test(run.head_sha) &&
+    validatesLicensedWork(run, repository)
   );
   if (record === undefined) {
     throw failClosed("no completed successful run of this workflow and branch");
@@ -302,7 +322,7 @@ async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID
     throw failClosed("the run history is not a list");
   }
   for (const record of history.workflow_runs.slice(0, PUSH_RECORD_RUN_LIMIT)) {
-    if (record === null || typeof record !== "object" || String(record.id) === runID) {
+    if (String(record?.id) === runID || !validatesLicensedWork(record, repository)) {
       continue;
     }
     const sha = typeof record.head_sha === "string" ? record.head_sha.toLowerCase() : "";
@@ -350,7 +370,7 @@ async function incrementalDecision({
     + `?branch=${encodeURIComponent(headBranch)}&event=pull_request&status=success`
     + `&per_page=${RECORD_RUN_LIMIT}`
   );
-  const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID });
+  const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID, repository });
   /*
      The record must be at or after the CURRENT base. If the base moved past it -- a retarget,
      a rebase onto a newer main, or a force push -- the commits between the two bases are not
