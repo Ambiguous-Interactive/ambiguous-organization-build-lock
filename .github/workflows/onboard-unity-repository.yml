@@ -9,8 +9,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: onboard-unity-repository
@@ -88,9 +87,23 @@ jobs:
         shell: bash
         run: bash tools/workflows/onboard-unity-repository.sh update-policy
 
+      - name: Mint repository-scoped writer token
+        id: writer-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          # The workflow token cannot open a pull request here: the organization
+          # forbids GitHub Actions from creating pull requests (#244). The writer
+          # App is installed only on this repository.
+          app-id: ${{ secrets.BUILD_LOCK_APP_ID }}
+          private-key: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Open enrollment pull request with retained evidence
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.writer-token.outputs.token }}
           TARGET_REPOSITORY: ${{ steps.request.outputs.repository }}
           TARGET_DEFAULT_BRANCH: ${{ steps.request.outputs.default_branch }}
           TARGET_FORK: ${{ steps.request.outputs.fork }}

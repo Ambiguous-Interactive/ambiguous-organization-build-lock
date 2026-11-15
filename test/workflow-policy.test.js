@@ -1646,8 +1646,9 @@ test("Unity repository onboarding opens a reviewable registry-only PR from trust
   assert.equal(workflowHasTrigger(requestText, "workflow_dispatch"), true);
   assert.equal(workflowHasTrigger(requestText, "workflow_run"), false);
   assert.equal(workflowHasTrigger(text, "pull_request"), false);
-  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), true);
-  assert.equal(hasEffectivePermission(text, job.text, "pull-requests", "write"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "read"), true);
+  assert.equal(hasEffectivePermission(text, job.text, "contents", "write"), false);
+  assert.equal(hasEffectivePermission(text, job.text, "pull-requests", "write"), false);
   assert.equal(hasEffectivePermission(text, job.text, "actions", "read"), true);
   assert.doesNotMatch(requestText, /secrets\.|contents:\s*write|pull-requests:\s*write/);
   const requestCheckout = workflowJobStepMaps(requestText, "request")
@@ -1663,7 +1664,12 @@ test("Unity repository onboarding opens a reviewable registry-only PR from trust
   assert.match(automation, /go run \.\/cmd\/onboard-unity-repository/);
   assert.equal(update.env.TARGET_REPOSITORY, "${{ steps.request.outputs.repository }}");
   assert.equal(update.env.TARGET_DEFAULT_BRANCH, "${{ steps.request.outputs.default_branch }}");
-  assert.equal(pullRequest.env.GH_TOKEN, "${{ github.token }}");
+  assert.equal(pullRequest.env.GH_TOKEN, "${{ steps.writer-token.outputs.token }}");
+  const writerToken = steps.find((step) => step.name === "Mint repository-scoped writer token");
+  assert.equal(writerToken.with["app-id"], "${{ secrets.BUILD_LOCK_APP_ID }}");
+  assert.equal(writerToken.with["private-key"], "${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}");
+  assert.equal(writerToken.with["permission-contents"], "write");
+  assert.equal(writerToken.with["permission-pull-requests"], "write");
   assert.match(automation, /git add unity-enrollment-policy\.json/);
   assert.match(automation, /gh pr create/);
   assert.match(automation, /ONBOARDING_PUSH_AUTHORIZATION="\$\{GH_TOKEN[^}]*\}"/);
