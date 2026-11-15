@@ -441,7 +441,14 @@ touches a Dependabot pull request.
    or a missing serial is not proof. The one exception is the measured
    shared-seat handoff (issue #83): the ULF success line with a `400006` seat
    response and a completed command is `confirmed/healthy`, because the peer
-   already released the seat. Supplemental evidence is classified but
+   already released the seat. The return action redacts the log before it
+   writes it, so a verdict other than `cleanup-confirmed` prints a bounded
+   redacted tail of that log to the job log. A classification failure prints
+   its bounded cause and reports `cleanup-evidence-unknown`;
+   `return-log-truncated` stays reserved for a completed read whose capture was
+   incomplete. The final cleanup gate states the seat and the lock as separate
+   facts, so a freed seat with an unwritten lock record does not read like a
+   held seat. Supplemental evidence is classified but
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
    return/classifier/release/gate suffix.
