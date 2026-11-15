@@ -168,15 +168,18 @@ function appendOutput(outputPath, unityRequired) {
 /*
  * INCREMENTAL VALIDATION. The base-to-head diff answers "does this pull request touch Unity?".
  * It cannot answer "did the last push touch Unity?", so every follow-up push that changes a
- * document re-runs the licensed job over a tree the previous run already validated.
+ * document re-runs the licensed job over a tree the previous run already validated. A
+ * push-to-main run has no diff at all: a squash merge writes a tree a pull request run may
+ * already hold.
  *
  * The record of the previous validation is the repository's own run history, read through the
  * Actions API; a pull request cannot write it. The newest successful run of THIS workflow on
  * THIS branch that is not this run is the record. A successful run of a workflow that carries
  * the central aggregate proves one of two things about its head tree: the licensed job passed,
  * or the trusted classifier proved the tree needed no licensed job. Both make the tree a
- * validated baseline. A run in progress, a failed run, and a run of another workflow prove
- * nothing and are skipped.
+ * validated baseline. A fork or Dependabot run is a trusted skip, so it is refused: it proves no
+ * licensed work. A run in progress, a failed run, and a run of another workflow prove nothing
+ * and are skipped.
  *
  * The comparison is the API's own base-to-head file list, so the runtime keeps its single
  * tree-only git call. Every uncertain answer -- no record, a diverged branch, a truncated file
@@ -185,6 +188,7 @@ function appendOutput(outputPath, unityRequired) {
  */
 const MAX_COMPARED_FILES = 300;
 const RECORD_RUN_LIMIT = 20;
+const PUSH_RECORD_RUN_LIMIT = 20;
 
 function failClosed(reason) {
   return new TypeError(`incremental validation unavailable: ${reason}`);
@@ -227,7 +231,26 @@ function workflowFile(reference, repository) {
   return name;
 }
 
-function validationRecord(runs, { headBranch, runID }) {
+/*
+ * A successful run of this workflow does not always prove licensed work: a fork pull request and
+ * a Dependabot pull request both report a trusted skip, and the aggregate accepts that skip. A
+ * run from another repository's head, or from Dependabot, therefore cannot make a tree a
+ * validated baseline. Same-repository non-Dependabot runs do run the licensed job when the
+ * classifier requires it, or needed none when it does not.
+ */
+function validatesLicensedWork(record, repository) {
+  if (record === null || typeof record !== "object") {
+    return false;
+  }
+  if (text(record.head_repository?.full_name).toLowerCase() !== repository.toLowerCase()) {
+    return false;
+  }
+  const actor = text(record.actor?.login).toLowerCase();
+  const branch = text(record.head_branch).toLowerCase();
+  return actor !== "dependabot[bot]" && !branch.startsWith("dependabot/");
+}
+
+function validationRecord(runs, { headBranch, runID, repository }) {
   if (!Array.isArray(runs)) {
     throw failClosed("the run history is not a list");
   }
@@ -235,7 +258,8 @@ function validationRecord(runs, { headBranch, runID }) {
     run !== null && typeof run === "object" &&
     run.head_branch === headBranch &&
     String(run.id) !== runID &&
-    typeof run.head_sha === "string" && /^[0-9a-f]{40}$/i.test(run.head_sha)
+    typeof run.head_sha === "string" && /^[0-9a-f]{40}$/i.test(run.head_sha) &&
+    validatesLicensedWork(run, repository)
   );
   if (record === undefined) {
     throw failClosed("no completed successful run of this workflow and branch");
@@ -267,6 +291,95 @@ async function changedPathsBetween(repository, baseSHA, headSHA, request) {
   return paths;
 }
 
+async function commitTree(repository, sha, request) {
+  const commit = await request(`/repos/${repository}/git/commits/${sha}`);
+  const tree = text(commit?.tree?.sha).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(tree)) {
+    throw failClosed("the validated commit tree is unreadable");
+  }
+  return tree;
+}
+
+/*
+ * A PUSH HAS NO PULL REQUEST DIFF. A squash merge writes the merged tree to the branch, so a push
+ * whose tree equals a pull request head tree repeats work only when the licensed run tested that
+ * tree. Two facts make that true: the tree is equal, and the run started at or after the merged
+ * pull request base existed. The second fact is needed because a pull request checks out either
+ * its head or its merge ref; with the final base in place, both are that head tree whenever the
+ * final merge result equals the head tree. A run that started before the base moved tested a
+ * different tree, so it is not a record. The associated merged pull request names the base; a
+ * direct push names none and keeps Unity required.
+ */
+async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID, request, log }) {
+  if (!/^[0-9a-f]{40}$/i.test(headSHA)) {
+    throw failClosed("the pushed revision is not a full commit SHA");
+  }
+  const name = workflowFile(workflowRef, repository);
+  const pushedTree = await commitTree(repository, headSHA, request);
+  const pulls = await request(`/repos/${repository}/commits/${headSHA}/pulls`);
+  if (!Array.isArray(pulls)) {
+    throw failClosed("the pushed commit's pull requests are not a list");
+  }
+  const pull = pulls.find((candidate) =>
+    text(candidate?.merged_at) !== "" &&
+    text(candidate?.merge_commit_sha).toLowerCase() === headSHA.toLowerCase()
+  );
+  if (pull === undefined) {
+    throw failClosed("the pushed commit is not a merged pull request");
+  }
+  const pullHeadSHA = text(pull?.head?.sha).toLowerCase();
+  const baseSHA = text(pull?.base?.sha).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(pullHeadSHA) || !/^[0-9a-f]{40}$/.test(baseSHA)) {
+    throw failClosed("the merged pull request has no full revisions");
+  }
+  const base = await request(`/repos/${repository}/git/commits/${baseSHA}`);
+  const baseTime = Date.parse(text(base?.committer?.date));
+  if (Number.isNaN(baseTime)) {
+    throw failClosed("the merged pull request base has no commit time");
+  }
+  const history = await request(
+    `/repos/${repository}/actions/workflows/${encodeURIComponent(name)}/runs`
+    + `?event=pull_request&status=success&per_page=${PUSH_RECORD_RUN_LIMIT}`
+  );
+  if (!Array.isArray(history?.workflow_runs)) {
+    throw failClosed("the run history is not a list");
+  }
+  for (const record of history.workflow_runs.slice(0, PUSH_RECORD_RUN_LIMIT)) {
+    if (String(record?.id) === runID || !validatesLicensedWork(record, repository)) {
+      continue;
+    }
+    const sha = typeof record.head_sha === "string" ? record.head_sha.toLowerCase() : "";
+    if (!/^[0-9a-f]{40}$/.test(sha) || sha !== pullHeadSHA) {
+      continue;
+    }
+    /*
+       A run that started before the merged base existed tested an earlier merge tree. It cannot
+       prove the pushed tree, even when its head tree matches.
+    */
+    const started = Date.parse(text(record.run_started_at) || text(record.created_at));
+    if (Number.isNaN(started) || started < baseTime) {
+      continue;
+    }
+    let tree;
+    try {
+      tree = await commitTree(repository, sha, request);
+    } catch (error) {
+      /*
+         An unreadable record proves nothing, so it cannot justify a skip. A later record that
+         does match still can, so one deleted or unreachable commit does not disable the mode.
+      */
+      log(`Unity validation required: the record at ${sha} could not be read.`);
+      continue;
+    }
+    if (tree === pushedTree) {
+      log(`Unity validation skipped: the validated run at ${sha} holds the pushed tree.`);
+      return false;
+    }
+  }
+  log("Unity validation required: no run after the merged base holds the pushed tree.");
+  return true;
+}
+
 async function incrementalDecision({
   repository,
   workflowRef,
@@ -288,7 +401,7 @@ async function incrementalDecision({
     + `?branch=${encodeURIComponent(headBranch)}&event=pull_request&status=success`
     + `&per_page=${RECORD_RUN_LIMIT}`
   );
-  const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID });
+  const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID, repository });
   /*
      The record must be at or after the CURRENT base. If the base moved past it -- a retarget,
      a rebase onto a newer main, or a force push -- the commits between the two bases are not
@@ -330,6 +443,7 @@ async function run({
   workflowRef = "",
   headBranch = "",
   runID = "",
+  githubSHA = "",
   request = (path) => requestJson(`https://api.github.com${path}`, githubToken, fetch),
   execute = childProcess.execFileSync,
   log = console.log
@@ -345,12 +459,47 @@ async function run({
   /*
      A merge group has no pull request payload. GitHub builds a temporary queue branch and
      reports its base and head commits, so the same base/head diff answers the same question:
-     which paths does this queue entry change? Every other event still fails closed, because
+     which paths does this queue entry change? A push has no revision pair to diff either, so it
+     reads its own tree against the run records instead. Every other event fails closed, because
      this action has no comparable revision pair to read.
   */
-  if (!["pull_request", "merge_group"].includes(text(eventName))) {
-    log("Unity validation required: event is not a pull request or merge group.");
+  const event = text(eventName);
+  if (!["pull_request", "merge_group", "push"].includes(event)) {
+    log("Unity validation required: event is not a pull request, merge group, or push.");
     return true;
+  }
+  if (event === "push") {
+    /*
+       The push tree is the pushed commit itself. The runner's own GITHUB_SHA is the only source:
+       a pull request expression is empty on a push, and a caller-supplied revision must not name
+       a tree the push did not write. A value that is not a full commit SHA fails closed before
+       any lookup.
+    */
+    if (text(incrementalValidation) !== "true") {
+      log("Unity validation required: a push has no pull request diff to classify.");
+      return true;
+    }
+    try {
+      const unityRequired = await pushIncrementalDecision({
+        repository: text(repository),
+        workflowRef: text(workflowRef),
+        headSHA: text(githubSHA),
+        runID: text(runID),
+        request,
+        log
+      });
+      if (!unityRequired) {
+        appendOutput(outputPath, false);
+      }
+      return unityRequired;
+    } catch (error) {
+      log(
+        "Unity validation required: "
+        + (text(error?.message).replace(/\s+/g, " ") || "the push lookup failed")
+        + "."
+      );
+      return true;
+    }
   }
   const changedPaths = findChangedPaths(text(baseSHA), text(headSHA), execute);
   if (!classifyUnityChanges(changedPaths, declaredPrefixes)) {
@@ -420,6 +569,7 @@ function main(environment = process.env) {
     workflowRef: text(environment.GITHUB_WORKFLOW_REF),
     headBranch: text(environment.GITHUB_HEAD_REF),
     runID: text(environment.GITHUB_RUN_ID),
+    githubSHA: text(environment.GITHUB_SHA),
     outputPath: environment.GITHUB_OUTPUT || ""
   }).catch(() => {
     console.error("::error title=Unity change classification failed::Classification failed closed.");

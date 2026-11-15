@@ -31,6 +31,3 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
   shape.
 - Merge queue adoption (#379): repin DoxReloaded, add `merge_group`, and enable
   the queue after the next authorized release.
-- Incremental Unity skip (#382): the pull request mode ships behind an opt-in
-  flag; measure the push-to-main half before building it, and adopt the mode
-  one consumer at a time.

@@ -5,10 +5,10 @@ inputs:
     description: Exact GitHub event name.
     required: true
   base-sha:
-    description: Base commit SHA of the pull request or merge group.
+    description: Base commit SHA of the pull request or merge group. It is empty on a push, which has no revision pair.
     required: false
   head-sha:
-    description: Head commit SHA of the pull request or merge group.
+    description: Head commit SHA of the pull request or merge group. It is empty on a push; the pushed commit comes from GITHUB_SHA.
     required: false
   independent-paths:
     description: >-
@@ -19,19 +19,21 @@ inputs:
   incremental-validation:
     description: >-
       Literal true to skip a follow-up pull request push that changes no Unity path since the
-      newest successful run of this workflow on this branch. The record is read from the
+      newest successful run of this workflow on this branch, or a push whose tree a successful
+      pull request run for the merged base already holds. The record is read from the
       repository's own run history, so this needs github-token. Any lookup failure keeps Unity
       required. Absent or any other value keeps the whole-diff answer.
     required: false
   github-token:
     description: >-
-      Token that reads this repository's run history for incremental-validation. Use
-      ${{ github.token }}. The job needs actions: read; the default token grants it, and a
-      workflow that narrows permissions must grant it. Omit when the mode is off.
+      Token that reads this repository's run history, commit trees, and merged pull request for
+      incremental-validation. Use ${{ github.token }}. The job needs actions: read,
+      contents: read, and pull-requests: read; the default token grants them, and a workflow that
+      narrows permissions must grant them. Omit when the mode is off.
     required: false
 outputs:
   unity-required:
-    description: True unless a pull request or merge group changes only central or caller-declared Unity-independent paths, or an incremental record proves the current tree needs no licensed run.
+    description: True unless a pull request or merge group changes only central or caller-declared Unity-independent paths, a follow-up pull request push changes no Unity path, or a push holds a tree a successful pull request run already validated.
 runs:
   using: node24
   main: ../../dist/classify-unity-changes.js
