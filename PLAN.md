@@ -26,3 +26,6 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Cancellation attribution (#277): obtain actor evidence beyond run records.
 - Linter compatibility (#335): move actionlint's YAML dependency only after
   the pinned linter supports the newer API and passes validation.
+- Dependabot pin drift (#375): decide between consumer Dependabot
+  configuration and a new central pull-request gate; both need a reviewed
+  shape.
