@@ -658,7 +658,7 @@ edits.
 
 A scheduled central audit compares each enrolled default branch with the
 reviewed expectations in `merge-policy-expectations.json`. The expectations
-name the always-reporting Unity aggregate contexts that the branch must
+name the always-reporting aggregate contexts that the branch must
 require before merge, the expected source App ID for each context, and every
 bypass actor that review accepted. The repository set and default branches
 must match `unity-enrollment-policy.json`; the audit refuses to run when they
@@ -773,10 +773,10 @@ any other `.github/` change still requires Unity validation.
 controlled manual canary, so it declares no required context. Item 6 of
 Preconditions records the same policy.
 
-`qora-redux` is exempt for a different reason: it runs Godot workflows and no
-Unity work, so its default branch has no Unity aggregate to gate. Its hosted
-preflight uses the central runner inventory, so the enrollment audit still
-covers it.
+`qora-redux` requires the two gates its default branch really enforces:
+`Godot CI` and `validate (ubuntu-latest)`. It runs Godot workflows and no Unity
+work, so it has no Unity aggregate to require. Both reviewed contexts report on
+every pull request, and its hosted preflight keeps it in the enrollment audit.
 
 ## Canary
 

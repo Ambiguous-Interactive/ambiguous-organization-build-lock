@@ -695,12 +695,15 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		return
 	}
 	// Every reviewed lifecycle shape is defined on a central action at an
-	// authorized commit. When any central action in this workflow is mutable
-	// or unauthorized, no lifecycle verdict this job could produce would be
+	// authorized commit. When this job pins a central action to a mutable or
+	// unauthorized reference, no lifecycle verdict it could produce would be
 	// trustworthy, and each downstream code would name a shape that is already
 	// present. The audit reports the one root cause instead, so the operator
 	// repins once rather than reshaping a workflow that is already correct.
-	trustedCentral, centralTrustCode := a.centralReferenceTrust(workflow, steps)
+	// The scan reads this job's flattened steps, so a local composite cannot
+	// hide a central pin and another job's pin cannot withhold this job's
+	// defects.
+	trustedCentral, centralTrustCode := a.centralReferenceTrust(steps)
 	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps, trustedCentral)
 	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
 	acquireCount, returnActionCount := 0, 0
@@ -817,9 +820,10 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 		}
 	}
 	if !trustedCentral {
-		// The root cause is the pin, so report it and stop. The acquire order
-		// is the only remaining check that does not rest on a reviewed action
-		// identity, and it can still be true beside an unauthorized pin.
+		// The pin is the root cause of every lifecycle and coverage shape this
+		// job could prove, so report it once and stop. An unapproved pin
+		// usually arrives as a group update that moves every central action,
+		// and a shape verdict would then name a step that is already present.
 		if centralTrustCode != "" {
 			a.analyzer.add(centralTrustCode, workflowPath, jobName)
 		}
@@ -955,22 +959,15 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 	}
 }
 
-// centralReferenceTrust classifies the central action identities the workflow
+// centralReferenceTrust classifies the central action identities this job
 // pins. Each reviewed lifecycle shape is defined on an authorized action
-// identity, so a mutable or unauthorized pin leaves every lifecycle verdict in
-// the workflow unprovable. The returned code names the class to fix: a mutable
+// identity, so a mutable or unauthorized pin leaves every lifecycle verdict for
+// the job unprovable. The returned code names the class to fix: a mutable
 // reference needs your own review, and an unauthorized commit needs a release
 // that the policy lists.
-//
-// The walk covers every `uses:` key in the workflow and the flattened steps of
-// the audited job, so a local composite action cannot hide a central pin.
 func (a *unityPolicyAnalyzer) centralReferenceTrust(
-	workflow *yaml.Node,
 	steps []flattenedUnityStep,
 ) (bool, string) {
-	if trusted, code := a.centralNodeTrust(workflow); !trusted {
-		return false, code
-	}
 	for _, step := range steps {
 		if trusted, code := a.centralUsesTrust(stepUses(step.node)); !trusted {
 			return false, code
@@ -979,33 +976,10 @@ func (a *unityPolicyAnalyzer) centralReferenceTrust(
 	return true, ""
 }
 
-func (a *unityPolicyAnalyzer) centralNodeTrust(node *yaml.Node) (bool, string) {
-	if node == nil {
-		return true, ""
-	}
-	if node.Kind == yaml.MappingNode {
-		for index := 0; index+1 < len(node.Content); index += 2 {
-			key, value := node.Content[index], node.Content[index+1]
-			if key.Kind != yaml.ScalarNode || key.Value != "uses" ||
-				value.Kind != yaml.ScalarNode {
-				continue
-			}
-			if trusted, code := a.centralUsesTrust(value.Value); !trusted {
-				return false, code
-			}
-		}
-	}
-	for _, child := range node.Content {
-		if trusted, code := a.centralNodeTrust(child); !trusted {
-			return false, code
-		}
-	}
-	return true, ""
-}
-
 func (a *unityPolicyAnalyzer) centralUsesTrust(uses string) (bool, string) {
 	uses = strings.TrimSpace(uses)
-	if !strings.HasPrefix(uses, lockActionPrefix) {
+	if len(uses) < len(lockActionPrefix) ||
+		!strings.EqualFold(uses[:len(lockActionPrefix)], lockActionPrefix) {
 		return true, ""
 	}
 	ref := strings.ToLower(actionRef(uses))

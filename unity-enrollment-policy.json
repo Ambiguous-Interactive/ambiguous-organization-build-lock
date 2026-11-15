@@ -89,7 +89,10 @@
       "fork": false,
       "allowWorkflowDispatch": true,
       "allowSchedule": false,
-      "requiredContexts": []
+      "requiredContexts": [
+        "Godot CI",
+        "validate (ubuntu-latest)"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/unity-builder",

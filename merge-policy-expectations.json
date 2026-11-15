@@ -39,8 +39,9 @@
     {
       "repository": "Ambiguous-Interactive/qora-redux",
       "defaultBranch": "main",
-      "requiredContexts": [],
-      "requireAdminEnforcement": false,
+      "requiredContexts": ["Godot CI", "validate (ubuntu-latest)"],
+      "requiredContextAppId": 15368,
+      "requireAdminEnforcement": true,
       "allowedBypassActors": []
     },
     {

@@ -381,6 +381,30 @@ func acquireActionRef() string {
 	return lockActionPrefix + "acquire-build-lock@" + testSHA
 }
 
+// A central pin in another job must not withhold this job's own defects or
+// name this job as the offender.
+func TestUnityEnrollmentKeepsLicensedFindingsBesideAnUnrelatedPin(t *testing.T) {
+	workflow := unityWorkflow(centralReturnSteps(), "") + `  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `require-current-pr-head@main
+`
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := findingCodes(result.Findings)
+	if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+		t.Fatalf("an unrelated pin withheld a licensed finding: %#v", result.Findings)
+	}
+	if strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:unity") ||
+		strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:unity") {
+		t.Fatalf("an unrelated pin was blamed on the licensed job: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentRejectsLicensedJobWithoutSelfHostedRunner(t *testing.T) {
 	base := unityWorkflow(centralReturnSteps(), safeAggregate())
 	selfHostedRunsOn := "runs-on: [self-hosted, Windows]"
@@ -4202,12 +4226,6 @@ jobs:
 				t.Fatal(err)
 			}
 			codes := findingCodes(result.Findings)
-			// An unauthorized validation pin is reported as its own root
-			// cause. The aggregate codes then describe shapes whose evidence
-			// rests on that pin, so the audit stops at the pin.
-			if strings.Contains(codes, "unapproved-lock-ref") {
-				return
-			}
 			if !strings.Contains(codes, "missing-unity-aggregate") ||
 				!strings.Contains(codes, "missing-fallback-aggregate") {
 				t.Fatalf("unsafe typed validation gate was accepted: %#v", result.Findings)

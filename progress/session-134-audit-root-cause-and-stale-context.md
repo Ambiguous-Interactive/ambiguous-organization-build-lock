@@ -40,18 +40,20 @@ clean: the unauthorized pin is still reported, and the audit still fails.
 
 ## Change 1: name one root cause for an unauthorized or mutable pin
 
-- `internal/enrollment/unity_policy.go`: `centralReferenceTrust` scans the
-  audited workflow for `uses:` values that name this repository at a mutable or
-  unauthorized ref.
+- `internal/enrollment/unity_policy.go`: `centralReferenceTrust` scans this
+  job's flattened steps for `uses:` values that name this repository at a
+  mutable or unauthorized ref. A local composite cannot hide a pin, and another
+  job's pin cannot withhold this job's findings.
 - When the identity is untrusted, a licensed job reports the pin cause
-  (`unapproved-lock-ref` or `mutable-action-ref`) and stops. It no longer also
-  reports `missing-unity-editor-check`, `missing-cleanup-classifier`,
+  (`unapproved-lock-ref` or `mutable-action-ref`) and stops. It does not also
+  report `missing-unity-editor-check`, `missing-cleanup-classifier`,
   `classifier-not-always`, `missing-unity-return`, `unsafe-central-return-suffix`,
   `release-inputs-not-typed`, `cleanup-gate-inputs-not-typed`,
   `missing-runner-preflight`, or `missing-unity-aggregate`.
-- Findings that do not rest on a reviewed identity still report: runner labels,
+- Findings that do not rest on this job's identity still report: runner labels,
   workflow and job queue direction, matrix fail-fast, job credentials,
-  triggers, editor provisioning, and acquire position.
+  triggers, editor provisioning, release and gate `always()` checks, and
+  acquire position.
 - `docs/consumer-enrollment.md` states the rule in the
   `unapproved-lock-ref` row.
 
@@ -59,24 +61,43 @@ Root-cause evidence: the same snapshot reported 42 `unity-helpers` findings
 before the change and 6 after it. Four of the six name the unauthorized pin and
 two name expired reviewed exceptions.
 
-## Change 2: exempt `qora-redux` from a Unity required context
+## Change 2: replace `qora-redux`'s stale Unity context with its real gates
 
 - `qora-redux` has no Unity workflow at the audited commit `17f8580c`. The
-  enrollment inventory holds two `non-licensing-static` preflight jobs only, and
-  its classic branch protection requires `Godot CI` and `validate (ubuntu-latest)`.
-- `unity-enrollment-policy.json` and `merge-policy-expectations.json` now carry
-  an empty `requiredContexts` list for it, the reviewed exemption the parser
-  documents. The enrollment audit still covers the repository and its central
-  runner preflight.
-- `docs/consumer-enrollment.md` records why the repository is exempt.
+  enrollment inventory holds two `non-licensing-static` preflight jobs only.
+- Its classic branch protection requires `Godot CI` (and `Godot CI` reports on
+  every pull request from an unfiltered `pull_request` trigger) and
+  `validate (ubuntu-latest)`. Both are posted by App ID 15368.
+- `unity-enrollment-policy.json` and `merge-policy-expectations.json` now
+  record those two contexts instead of the impossible `Unity CI`. The audit
+  keeps a real gate instead of exempting the repository.
+- `docs/consumer-enrollment.md` records the reason.
+
+## Adversarial review
+
+An independent reviewer ran the analyzer on adversarial fixtures. Findings and
+dispositions:
+
+- Workflow-wide trust let an unrelated job's pin withhold a licensed job's real
+  findings and blamed the licensed job. The scan now reads this job's flattened
+  steps only, and a two-job regression test pins the behavior.
+- The first `qora-redux` change exempted the repository and lost all gate
+  coverage. The reviewed contexts now name its real live gates instead.
+- Preflight and aggregate verdicts stay inside the stop rule for a job with an
+  unauthorized pin. An unapproved pin arrives as a group update that moves every
+  central action, so those verdicts would name a preflight or aggregate that is
+  already present. The rule is stated in the code comment.
+- The trust scan now folds the repository spelling. A local composite pin is
+  covered by a regression test.
 
 ## Validation
 
 - Live merge-policy audit with the reviewed token:
   `7/7 repositories; active-contexts=25 findings=4 complete=true`. The
-  `qora-redux missing-required-context` finding is gone. The four remaining
-  findings are `unexpected-required-check-source` reads that need ruleset
-  authority.
+  `qora-redux missing-required-context` finding is gone, and its inventory rows
+  record `Godot CI` and `validate (ubuntu-latest)` at App ID 15368. The four
+  remaining findings are `unexpected-required-check-source` reads that need
+  ruleset authority.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`: pass.
 - `node --test test/*.test.js`: 1034 tests, 1008 pass, 23 fail. The same 23
   fail on an untouched `HEAD` worktree in this environment: 19 cleanup-evidence
