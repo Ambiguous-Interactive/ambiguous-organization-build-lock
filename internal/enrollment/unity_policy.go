@@ -6170,6 +6170,15 @@ func (a *unityPolicyAnalyzer) historicalReadbackAggregateSafe(
 		if stepActivatesUnity(step.node) || unityStepContainsCredential(step) || !criticalStepFailurePropagates(step) {
 			return false
 		}
+		for _, command := range powerShellCommands(scalarValue(mappingValue(step.node, "run"))) {
+			shell := strings.Fields(strings.ToLower(scalarValue(mappingValue(step.node, "shell"))))
+			if len(shell) == 0 || (shell[0] != "pwsh" && shell[0] != "powershell") {
+				command = "& " + command
+			}
+			if commandInvokesUnityExecutable(command) || commandInvokesNamedExecutable(command, "unity") {
+				return false
+			}
+		}
 	}
 	return true
 }

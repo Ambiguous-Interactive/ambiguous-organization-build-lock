@@ -20,6 +20,8 @@ func historicalReadbackWorkflow() string {
             test "${UNITY_TESTS_RESULT}" = skipped
           elif [ "${FORK_PR}"`, 1)
 	workflow := unityWorkflow(centralReturnSteps(), aggregate)
+	licensedGuard := "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
+	workflow = strings.Replace(workflow, "    if: "+licensedGuard+"\n", "    if: ${{ !("+readbackSelector+") && ("+licensedGuard+") }}\n", 1)
 	workflow = strings.Replace(workflow, "  workflow_dispatch:\n", `  workflow_dispatch:
     inputs:
       native-readback-run-id:
@@ -38,6 +40,14 @@ func historicalReadbackWorkflow() string {
 
 func TestUnityEnrollmentHistoricalReadbackAggregate(t *testing.T) {
 	base := historicalReadbackWorkflow()
+	var parsed yaml.Node
+	if err := yaml.Unmarshal([]byte(base), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	licensed := mappingValue(mappingValue(parsed.Content[0], "jobs"), "unity")
+	if !exactReadbackExpression(mappingValue(licensed, "if"), "!(github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!='')&&(github.event_name!='pull_request'||github.event.pull_request.head.repo.full_name==github.repository)") {
+		t.Fatal("licensed fixture must skip readback dispatch and retain the ordinary trust guard")
+	}
 	tests := []struct{ name, from, to string }{
 		{name: "accepted"},
 		{"quoted selector whitespace", "HISTORICAL_READBACK: ${{ " + readbackSelector + " }}", "HISTORICAL_READBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ' ' }}"},
@@ -58,6 +68,12 @@ func TestUnityEnrollmentHistoricalReadbackAggregate(t *testing.T) {
 		{"capture suppressed failure", "  native-historical-readback:\n", "  native-historical-readback:\n    continue-on-error: true\n"},
 		{"capture step suppressed failure", "      - run: echo read-original-artifacts", "      - continue-on-error: true\n        run: echo read-original-artifacts"},
 		{"capture activates editor", "echo read-original-artifacts", "unity-editor -batchmode"},
+		{"capture returns license", "echo read-original-artifacts", "Unity.exe -returnlicense"},
+		{"capture returns license through Unix binary", "echo read-original-artifacts", "Unity -returnlicense"},
+		{"capture returns license through macOS bundle", "echo read-original-artifacts", "/Applications/Unity.app/Contents/MacOS/Unity -returnlicense"},
+		{"capture returns license through path", "echo read-original-artifacts", "|\n          & 'C:\\Unity\\Editor\\Unity.exe' -returnlicense"},
+		{"capture returns license through Start-Process", "echo read-original-artifacts", `Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' -ArgumentList '-returnlicense'`},
+		{"capture returns license through editor alias", "echo read-original-artifacts", "unity-editor -returnlicense"},
 		{"capture credential", "echo read-original-artifacts", `echo "${{ secrets.UNITY_SERIAL }}"`},
 		{"capture acquire", "      - run: echo read-original-artifacts", "      - uses: " + lockActionPrefix + "acquire-build-lock@" + testSHA},
 		{"input absent", "      native-readback-run-id:", "      different-input:"},
@@ -157,8 +173,14 @@ func TestUnityEnrollmentHistoricalReadbackCompositeBoundary(t *testing.T) {
 		accepted   bool
 	}{
 		{"inert local composite", "    - run: echo redact-original-artifacts\n      shell: bash\n", true},
+		{"artifact text mentions Unity", "    - run: echo Unity.exe -returnlicense\n      shell: pwsh\n", true},
 		{"nested acquire", "    - uses: " + lockActionPrefix + "acquire-build-lock@" + testSHA + "\n", false},
 		{"nested activation", "    - run: unity-editor -batchmode\n      shell: bash\n", false},
+		{"nested return", "    - run: Unity.exe -returnlicense\n      shell: pwsh\n", false},
+		{"quoted Bash Windows executable", "    - run: '\"C:/Unity/Editor/Unity.exe\" -returnlicense'\n      shell: bash\n", false},
+		{"quoted Bash Unix executable", "    - run: '\"/opt/unity/Editor/Unity\" -returnlicense'\n      shell: bash\n", false},
+		{"quoted sh macOS executable", "    - run: '\"/Applications/Unity.app/Contents/MacOS/Unity\" -returnlicense'\n      shell: sh\n", false},
+		{"PowerShell inert executable string", "    - run: \"'Unity.exe'\"\n      shell: pwsh\n", true},
 		{"nested credential", "    - run: echo redact\n      shell: bash\n      env:\n        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}\n", false},
 		{"nested suppression", "    - continue-on-error: true\n      run: echo redact\n      shell: bash\n", false},
 	} {

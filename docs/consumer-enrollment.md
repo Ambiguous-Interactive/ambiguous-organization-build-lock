@@ -547,7 +547,8 @@ touches a Dependabot pull request.
 
    Missing, failed, skipped, or cancelled capture and failed preflight all fail
    this branch. Pull requests and pushes retain the existing result checks.
-   Exclude capture-only dispatch from any final native qualification context.
+   Exclude capture-only dispatch from each licensed job and any final native
+   qualification context. Keep each licensed job's ordinary trust guard.
 11. Cancel superseded runs for every workflow scope that can terminate a job
     after acquire: a literal `cancel-in-progress: true` on the workflow
     concurrency group. A queued superseded run wastes a paid self-hosted
