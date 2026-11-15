@@ -33,6 +33,15 @@ const LICENSING_CODES_PRECEDENCE = [
 const ZERO_DIGEST = "0".repeat(64);
 const EVIDENCE_SUFFIX_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const WINDOWS_SYSTEM_ROOT = "C:\\Windows";
+// A failed classification must be readable from the job log alone (#360). The
+// return action redacts the log before it writes it, so this classifier may
+// print a bounded tail of the exact bytes it already verified. The cause and
+// the tail are sanitized to one fixed alphabet so neither can carry a
+// workflow command or a control character.
+const MAX_DIAGNOSTIC_CAUSE_CHARS = 200;
+const MAX_DIAGNOSTIC_TAIL_BYTES = 4096;
+const MAX_DIAGNOSTIC_TAIL_LINES = 40;
+const DIAGNOSTIC_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
 function parseBoolean(name, raw) {
   if (raw !== "true" && raw !== "false") {
@@ -780,6 +789,25 @@ function appendOutputs(outputPath, values) {
   fs.appendFileSync(outputPath, `${lines.join("\n")}\n`, { encoding: "utf8" });
 }
 
+function diagnosticCause(error) {
+  const message = error && typeof error.message === "string" ? error.message : "unknown";
+  return message
+    .replace(/[^A-Za-z0-9 ._:(),'/\\-]/g, "?")
+    .slice(0, MAX_DIAGNOSTIC_CAUSE_CHARS);
+}
+
+function diagnosticTail(returnLog) {
+  const text = Buffer.from(returnLog)
+    .subarray(-MAX_DIAGNOSTIC_TAIL_BYTES)
+    .toString("utf8");
+  return text
+    .replaceAll("\r", "")
+    .split("\n")
+    .slice(-MAX_DIAGNOSTIC_TAIL_LINES)
+    .map((line) => `  | ${line.replace(DIAGNOSTIC_CONTROL_PATTERN, "?")}`)
+    .join("\n");
+}
+
 function run({
   inputs,
   outputPath,
@@ -794,7 +822,10 @@ function run({
     resourceSafe: false,
     cleanupStatus: "unknown",
     health: "healthy",
-    reason: "return-log-truncated",
+    // A failure before a verdict proves nothing about the return log. Reserve
+    // `return-log-truncated` for a completed read whose capture was incomplete
+    // (#360), and name an unclassified failure for what it is.
+    reason: "cleanup-evidence-unknown",
     licensingCodesChecked: LICENSING_CODES_CHECKED,
     licensingCodeMatched: "none",
     classificationComplete: false,
@@ -848,6 +879,14 @@ function run({
   };
   appendOutputs(outputPath, completed);
   log(`Unity cleanup evidence classified: reason=${result.reason} evidence-digest=${evidence.digest}`);
+  if (result.reason !== "cleanup-confirmed") {
+    // The return action redacted these bytes before it wrote them, and the
+    // digest above proves they are the bytes that action reported. Print only
+    // the bounded tail: the head of a Unity log is noise and the tail carries
+    // the licensing verdict.
+    log(`::warning title=Unity cleanup was not confirmed::reason=${result.reason} redacted-return-log-tail:`);
+    log(diagnosticTail(evidence.returnLog));
+  }
   return completed;
 }
 
@@ -872,8 +911,10 @@ function main() {
       inputs: environmentInputs(),
       outputPath: process.env.GITHUB_OUTPUT || ""
     });
-  } catch {
-    console.error("::error title=Unity cleanup evidence unavailable::Classification failed closed.");
+  } catch (error) {
+    console.error(
+      `::error title=Unity cleanup evidence unavailable::Classification failed closed: ${diagnosticCause(error)}`
+    );
     process.exitCode = 1;
   }
 }
@@ -891,6 +932,8 @@ module.exports = {
   classifyEvidence,
   collectEvidence,
   deleteClaimedReturnEvidence,
+  diagnosticCause,
+  diagnosticTail,
   environmentInputs,
   identityBoundDeleteWindows,
   inspectReturnEvidenceTarget,

@@ -431,6 +431,33 @@ test("evidence overflow requests process termination only once", async (t) => {
   assert.equal(killed, 1);
 });
 
+test("an evidence overflow names its cause before the generic failure", async (t) => {
+  const item = fixture(t, "#!/bin/sh\nexit 0\n");
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    process.nextTick(() => {
+      child.stdout.emit("data", Buffer.alloc(MAX_EVIDENCE_BYTES + 1));
+      child.exitCode = 0;
+      child.emit("close", 0, null);
+    });
+    return child;
+  };
+  const warnings = [];
+  await assert.rejects(run({
+    env: item.env,
+    platform: "linux",
+    spawnImpl,
+    verifyEditor: async () => {},
+    log() {},
+    warn: (message) => warnings.push(message)
+  }), /did not complete/);
+  assert.match(warnings.join("\n"), /title=Unity return log exceeded capture limit/);
+});
+
 test("symlinked editor is rejected without exposing credentials", async (t) => {
   if (process.platform === "win32") {
     t.skip("symlink setup requires elevated Windows privileges");

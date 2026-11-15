@@ -163,10 +163,43 @@ function appendOutput(outputPath, safe) {
   fs.appendFileSync(outputPath, `cleanup-safe=${safe ? "true" : "false"}\n`, "utf8");
 }
 
+// A consumer must be able to tell a held seat from a lock record that could
+// not be written (#360). State each fact on its own: the seat depends on the
+// return proof, and the lock depends on the central release result.
+function describeResourceState(values) {
+  if (text(values.acquired) === "false") {
+    return "Seat: not applicable because no licensed work ran. Lock: this run held no capacity.";
+  }
+  const cleanupProven = text(values.cleanupStatus) === "confirmed"
+    && text(values.cleanupReason) === "cleanup-confirmed";
+  const seat = cleanupProven
+    ? "Seat: the return log proves the license was returned."
+    : "Seat: no return proof was established, so treat the seat as possibly held.";
+  if (text(values.released) !== "true") {
+    return `${seat} Lock: holder ownership removal was not confirmed.`;
+  }
+  const result = text(values.cleanupResult);
+  let capacity;
+  if (result === "released") {
+    capacity = "released directly";
+  } else if (result === "cooldown-started") {
+    capacity = "held for the release cooldown";
+  } else if (result === "quarantined" || result === "global-quarantined") {
+    capacity = "quarantined";
+  } else if (result === UNRECORDED_RELEASE_RESULT) {
+    capacity = "unknown because the lock-state file was unreachable";
+  } else if (result === "queue-cleaned" || result === "noop") {
+    capacity = "unchanged because this run held no capacity";
+  } else {
+    capacity = "in an unreported state";
+  }
+  return `${seat} Lock: holder ownership was removed; capacity is ${capacity}.`;
+}
+
 function run({ values, outputPath, log = console.log, error = console.error }) {
   appendOutput(outputPath, false);
   const result = evaluateCleanupGate(values);
-  const diagnostic = formatDiagnostic(values, result.failures);
+  const diagnostic = `${describeResourceState(values)} ${formatDiagnostic(values, result.failures)}`;
   if (!result.safe) {
     error(`::error title=Licensed Unity cleanup is not safe::${diagnostic}`);
     return result;
@@ -232,6 +265,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  describeResourceState,
   environmentValues,
   evaluateCleanupGate,
   formatDiagnostic,

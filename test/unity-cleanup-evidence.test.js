@@ -1060,6 +1060,54 @@ test("missing central digest fails closed and preserves return evidence", (t) =>
   assert.doesNotMatch(fs.readFileSync(item.outputPath, "utf8"), /classification-complete=true/);
 });
 
+test("an unclassified failure names its own reason, not a truncated log", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-unclassified-");
+  const inputs = centralInputs(item);
+  delete inputs["return-log-digest"];
+  assert.throws(() => runClassifier({
+    inputs,
+    outputPath: item.outputPath,
+    environment: item.environment,
+    log: () => {}
+  }), /return-log-digest is required/);
+  const outputs = fs.readFileSync(item.outputPath, "utf8");
+  assert.match(outputs, /^resource-reason=cleanup-evidence-unknown$/m);
+  assert.doesNotMatch(outputs, /^resource-reason=return-log-truncated$/m);
+  assert.match(outputs, /^classification-complete=false$/m);
+});
+
+test("an unconfirmed verdict prints a bounded redacted return-log tail", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-tail-");
+  fs.writeFileSync(item.returnLog, "Exiting batchmode successfully now!\n");
+  const messages = [];
+  const result = runClassifier({
+    inputs: centralInputs(item),
+    outputPath: item.outputPath,
+    environment: item.environment,
+    log: (message) => messages.push(message)
+  });
+  assert.equal(result.reason, "return-missing-positive-evidence");
+  const output = messages.join("\n");
+  assert.match(output, /title=Unity cleanup was not confirmed::reason=return-missing-positive-evidence/);
+  assert.match(output, /  \| Exiting batchmode successfully now!/);
+});
+
+test("the diagnostic tail cannot carry a workflow command or a control character", (t) => {
+  const item = centralEvidenceFixture(t, "unity-cleanup-tail-sanitize-");
+  fs.writeFileSync(item.returnLog, "::set-output name=lease::held\n\u001b[31mred\n");
+  const messages = [];
+  runClassifier({
+    inputs: centralInputs(item),
+    outputPath: item.outputPath,
+    environment: item.environment,
+    log: (message) => messages.push(message)
+  });
+  const lines = messages.join("\n").split("\n");
+  assert.equal(lines.some((line) => line.startsWith("::set-output")), false);
+  assert.doesNotMatch(messages.join("\n"), /\u001b/);
+  assert.match(messages.join("\n"), /  \| ::set-output name=lease::held/);
+});
+
 test("classifier rejects return-log replacement against the linked digest", (t) => {
   const item = centralEvidenceFixture(t, "unity-cleanup-digest-");
   const digest = crypto.createHash("sha256").update(PROOF).digest("hex");

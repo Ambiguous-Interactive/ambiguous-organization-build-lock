@@ -8,6 +8,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  describeResourceState,
   environmentValues,
   evaluateCleanupGate,
   formatDiagnostic
@@ -166,6 +167,37 @@ test("gate names an unrecorded release instead of reporting an unknown lock stat
   assert.match(diagnostic, /release=failure\/lock-release-unreachable/);
   assert.match(diagnostic, /released=false release-health=healthy release-reason=cleanup-confirmed/);
   assert.doesNotMatch(diagnostic, /invalid/);
+});
+
+test("gate states the seat and the lock as separate facts", () => {
+  // Issue #360: a consumer must tell a held seat from a lock record that could
+  // not be written.
+  const confirmed = describeResourceState(safeCooldown);
+  assert.match(confirmed, /Seat: the return log proves the license was returned\./);
+  assert.match(confirmed, /Lock: holder ownership was removed; capacity is held for the release cooldown\./);
+
+  const unrecordedRelease = describeResourceState({
+    ...safeCooldown,
+    releaseOutcome: "failure",
+    cleanupResult: "lock-release-unreachable",
+    released: "false"
+  });
+  assert.match(unrecordedRelease, /Seat: the return log proves the license was returned\./);
+  assert.match(unrecordedRelease, /Lock: holder ownership removal was not confirmed\./);
+
+  const unprovenReturn = describeResourceState({
+    ...safeCooldown,
+    cleanupStatus: "unknown",
+    cleanupReason: "cleanup-evidence-unknown",
+    releaseReason: "cleanup-evidence-unknown",
+    cleanupResult: "quarantined"
+  });
+  assert.match(unprovenReturn, /Seat: no return proof was established, so treat the seat as possibly held\./);
+  assert.match(unprovenReturn, /Lock: holder ownership was removed; capacity is quarantined\./);
+
+  const notAcquired = describeResourceState({ acquired: "false" });
+  assert.match(notAcquired, /Seat: not applicable because no licensed work ran\./);
+  assert.match(notAcquired, /Lock: this run held no capacity\./);
 });
 
 test("gate diagnostic contains only allowlisted typed values and escapes commands", () => {
