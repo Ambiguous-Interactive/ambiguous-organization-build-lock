@@ -505,50 +505,23 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
-   An isolated Bash aggregate may also report a manual historical readback.
-   This branch reports diagnostics only. It does not qualify native Unity work.
-   The aggregate still uses `if: always()`, one Bash step, and the existing
-   exact fork, Dependabot, preflight, and licensed-result mappings. Add only:
+   An isolated Bash aggregate may skip an explicit manual historical readback.
+   Keep its existing four environment bindings and trusted-skip result script.
+   Use this exact job guard:
 
    ```yaml
-   HISTORICAL_READBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != '' }}
-   HISTORICAL_READBACK_RESULT: ${{ needs.native-historical-readback.result }}
+   if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != '') && (always()) }}
    ```
 
-   Declare `native-readback-run-id` as a string dispatch input. Omit its default
-   or use an empty string. Omit `required` or set it to `false`. Include the
-   distinct `native-historical-readback` job in aggregate `needs`. That job
-   must depend on the same preflight and use this exact guard:
-
-   ```yaml
-   if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != '' && needs.runner-preflight.result == 'success' }}
-   ```
-
-   Replace `runner-preflight` with the actual preflight job ID. The capture
-   cannot acquire a license, invoke Unity, reference Unity credentials, or
-   suppress failures, including inside local composite actions. It cannot use
-   a matrix, reusable workflow, or workflow/job execution-environment overrides.
-   Add the diagnostic branch before the existing fork and Dependabot branch:
-
-   ```bash
-   set -euo pipefail
-   if [ "${HISTORICAL_READBACK}" = "true" ]; then
-     test "${RUNNER_PREFLIGHT_RESULT}" = success
-     test "${HISTORICAL_READBACK_RESULT}" = success
-     test "${UNITY_TESTS_RESULT}" = skipped
-   elif [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
-     test "${RUNNER_PREFLIGHT_RESULT}" = skipped
-     test "${UNITY_TESTS_RESULT}" = skipped
-   else
-     test "${RUNNER_PREFLIGHT_RESULT}" = success
-     test "${UNITY_TESTS_RESULT}" = success
-   fi
-   ```
-
-   Missing, failed, skipped, or cancelled capture and failed preflight all fail
-   this branch. Pull requests and pushes retain the existing result checks.
-   Exclude capture-only dispatch from each licensed job and any final native
-   qualification context. Keep each licensed job's ordinary trust guard.
+   Declare `native-readback-run-id` as an optional string dispatch input.
+   Omit its default or use an empty string. Omit `required` or set it to `false`.
+   Pull requests, pushes, and ordinary manual dispatch retain `always()` and
+   the existing result checks, including failed or cancelled dependencies.
+   Only manual dispatch with a nonempty readback input skips this aggregate.
+   This skipped qualification status does not certify capture success or
+   qualify native Unity work. The diagnostic capture job reports its own result.
+   Exclude readback dispatch from licensed jobs and final native qualification
+   gates. Keep each licensed job's ordinary trust guard.
 11. Cancel superseded runs for every workflow scope that can terminate a job
     after acquire: a literal `cancel-in-progress: true` on the workflow
     concurrency group. A queued superseded run wastes a paid self-hosted

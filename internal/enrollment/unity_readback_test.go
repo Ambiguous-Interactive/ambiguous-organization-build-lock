@@ -10,87 +10,60 @@ import (
 )
 
 const readbackSelector = "github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ''"
+const readbackAggregateGuard = "${{ !(" + readbackSelector + ") && (always()) }}"
 
 func historicalReadbackWorkflow() string {
-	aggregate := strings.Replace(trustedSkipAggregate(), "needs: [preflight, unity]", "needs: [preflight, unity, native-historical-readback]", 1)
-	aggregate = strings.Replace(aggregate, "        run: |", "          HISTORICAL_READBACK: ${{ "+readbackSelector+" }}\n          HISTORICAL_READBACK_RESULT: ${{ needs.native-historical-readback.result }}\n        run: |", 1)
-	aggregate = strings.Replace(aggregate, `if [ "${FORK_PR}"`, `if [ "${HISTORICAL_READBACK}" = "true" ]; then
-            test "${RUNNER_PREFLIGHT_RESULT}" = success
-            test "${HISTORICAL_READBACK_RESULT}" = success
-            test "${UNITY_TESTS_RESULT}" = skipped
-          elif [ "${FORK_PR}"`, 1)
+	aggregate := strings.Replace(trustedSkipAggregate(), "if: always()", "if: "+readbackAggregateGuard, 1)
 	workflow := unityWorkflow(centralReturnSteps(), aggregate)
 	licensedGuard := "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
 	workflow = strings.Replace(workflow, "    if: "+licensedGuard+"\n", "    if: ${{ !("+readbackSelector+") && ("+licensedGuard+") }}\n", 1)
-	workflow = strings.Replace(workflow, "  workflow_dispatch:\n", `  workflow_dispatch:
+	return strings.Replace(workflow, "  workflow_dispatch:\n", `  workflow_dispatch:
     inputs:
       native-readback-run-id:
         type: string
         required: false
         default: ""
 `, 1)
-	return workflow + `  native-historical-readback:
-    needs: preflight
-    if: ${{ !cancelled() && ` + readbackSelector + ` && needs.preflight.result == 'success' }}
-    runs-on: [self-hosted, Windows]
-    steps:
-      - run: echo read-original-artifacts
-`
 }
 
 func TestUnityEnrollmentHistoricalReadbackAggregate(t *testing.T) {
 	base := historicalReadbackWorkflow()
-	var parsed yaml.Node
-	if err := yaml.Unmarshal([]byte(base), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	licensed := mappingValue(mappingValue(parsed.Content[0], "jobs"), "unity")
-	if !exactReadbackExpression(mappingValue(licensed, "if"), "!(github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!='')&&(github.event_name!='pull_request'||github.event.pull_request.head.repo.full_name==github.repository)") {
-		t.Fatal("licensed fixture must skip readback dispatch and retain the ordinary trust guard")
-	}
-	tests := []struct{ name, from, to string }{
-		{name: "accepted"},
-		{"quoted selector whitespace", "HISTORICAL_READBACK: ${{ " + readbackSelector + " }}", "HISTORICAL_READBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ' ' }}"},
-		{"quoted capture whitespace", "!cancelled() && " + readbackSelector + " && needs.preflight.result == 'success'", "!cancelled() && github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ' ' && needs.preflight.result == 'success'"},
-		{"capture matrix", "  native-historical-readback:\n", "  native-historical-readback:\n    strategy:\n      matrix:\n        lane: [one]\n"},
-		{"aggregate matrix", "  aggregate:\n", "  aggregate:\n    strategy:\n      matrix:\n        lane: [one]\n"},
-		{"capture depends on wrong preflight", "    needs: preflight\n    if: ${{ !cancelled()", "    needs: unity\n    if: ${{ !cancelled()"},
-		{"job env", "  aggregate:\n", "  aggregate:\n    env:\n      BASH_ENV: ./bad.sh\n"},
-		{"spoofed licensed result", "UNITY_TESTS_RESULT: ${{ needs.unity.result }}", "UNITY_TESTS_RESULT: success"},
-		{"spoofed fork", "FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}", "FORK_PR: true"},
-		{"spoofed Dependabot", "DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}", "DEPENDABOT_PR: true"},
-		{"unscoped selection", "HISTORICAL_READBACK: ${{ " + readbackSelector + " }}", "HISTORICAL_READBACK: ${{ inputs.native-readback-run-id != '' }}"},
-		{"constant selection", "HISTORICAL_READBACK: ${{ " + readbackSelector + " }}", "HISTORICAL_READBACK: true"},
-		{"wrong result", "HISTORICAL_READBACK_RESULT: ${{ needs.native-historical-readback.result }}", "HISTORICAL_READBACK_RESULT: ${{ needs.preflight.result }}"},
-		{"missing dependency", "needs: [preflight, unity, native-historical-readback]", "needs: [preflight, unity]"},
-		{"missing capture", "  native-historical-readback:", "  other-capture:"},
-		{"wrong capture guard", "!cancelled() && " + readbackSelector + " && needs.preflight.result == 'success'", "always()"},
-		{"capture suppressed failure", "  native-historical-readback:\n", "  native-historical-readback:\n    continue-on-error: true\n"},
-		{"capture step suppressed failure", "      - run: echo read-original-artifacts", "      - continue-on-error: true\n        run: echo read-original-artifacts"},
-		{"capture activates editor", "echo read-original-artifacts", "unity-editor -batchmode"},
-		{"capture returns license", "echo read-original-artifacts", "Unity.exe -returnlicense"},
-		{"capture returns license through Unix binary", "echo read-original-artifacts", "Unity -returnlicense"},
-		{"capture returns license through macOS bundle", "echo read-original-artifacts", "/Applications/Unity.app/Contents/MacOS/Unity -returnlicense"},
-		{"capture returns license through path", "echo read-original-artifacts", "|\n          & 'C:\\Unity\\Editor\\Unity.exe' -returnlicense"},
-		{"capture returns license through Start-Process", "echo read-original-artifacts", `Start-Process -FilePath 'C:\Unity\Editor\Unity.exe' -ArgumentList '-returnlicense'`},
-		{"capture returns license through editor alias", "echo read-original-artifacts", "unity-editor -returnlicense"},
-		{"capture credential", "echo read-original-artifacts", `echo "${{ secrets.UNITY_SERIAL }}"`},
-		{"capture acquire", "      - run: echo read-original-artifacts", "      - uses: " + lockActionPrefix + "acquire-build-lock@" + testSHA},
-		{"input absent", "      native-readback-run-id:", "      different-input:"},
-		{"input boolean", "type: string", "type: boolean"},
-		{"input nonempty default", `default: ""`, `default: "123"`},
-		{"input expression default", `default: ""`, `default: "${{ github.run_id }}"`},
-		{"input required", "required: false", "required: true"},
-		{"extra env", "          HISTORICAL_READBACK:", "          BASH_ENV: ./unsafe.sh\n          HISTORICAL_READBACK:"},
-		{"extra step", "      - shell: bash", "      - run: echo extra\n      - shell: bash"},
-		{"step failure suppressed", "      - shell: bash", "      - continue-on-error: true\n        shell: bash"},
-		{"aggregate failure suppressed", "  aggregate:\n", "  aggregate:\n    continue-on-error: true\n"},
-		{"conditional aggregate", "  aggregate:\n    if: always()", "  aggregate:\n    if: success()"},
-		{"capture result weakened", `test "${HISTORICAL_READBACK_RESULT}" = success`, `test "${HISTORICAL_READBACK_RESULT}" != failure`},
-		{"preflight result weakened", `test "${RUNNER_PREFLIGHT_RESULT}" = success`, `test "${RUNNER_PREFLIGHT_RESULT}" = skipped`},
-		{"licensed result weakened", `test "${UNITY_TESTS_RESULT}" = success`, `test "${UNITY_TESTS_RESULT}" != failure`},
-	}
-	for _, tc := range tests {
+	for _, tc := range []struct {
+		name, from, to string
+		accepted       bool
+	}{
+		{name: "exact diagnostic exclusion", accepted: true},
+		{"implicit optional empty input", "        required: false\n        default: \"\"\n", "", true},
+		{"ordinary always aggregate", "if: " + readbackAggregateGuard, "if: always()", true},
+		{"outer expression whitespace", "if: " + readbackAggregateGuard, "if: ${{  !( github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != '' ) && ( always() )  }}", true},
+		{"missing always", "if: " + readbackAggregateGuard, "if: ${{ !(" + readbackSelector + ") }}", false},
+		{"success instead of always", "if: " + readbackAggregateGuard, "if: ${{ !(" + readbackSelector + ") && (success()) }}", false},
+		{"all manual dispatch excluded", "if: " + readbackAggregateGuard, "if: ${{ github.event_name != 'workflow_dispatch' && always() }}", false},
+		{"unscoped input exclusion", "if: " + readbackAggregateGuard, "if: ${{ inputs.native-readback-run-id == '' && always() }}", false},
+		{"wrong event literal", "if: " + readbackAggregateGuard, "if: ${{ !(github.event_name == 'pull_request' && inputs.native-readback-run-id != '') && (always()) }}", false},
+		{"quoted event whitespace", "if: " + readbackAggregateGuard, "if: ${{ !(github.event_name == 'workflow_ dispatch' && inputs.native-readback-run-id != '') && (always()) }}", false},
+		{"quoted empty literal whitespace", "if: " + readbackAggregateGuard, "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ' ') && (always()) }}", false},
+		{"input absent", "      native-readback-run-id:", "      different-input:", false},
+		{"input boolean", "type: string", "type: boolean", false},
+		{"input required", "required: false", "required: true", false},
+		{"input quoted required", "required: false", "required: 'false'", false},
+		{"input nonempty default", `default: ""`, `default: "123"`, false},
+		{"input null default", `default: ""`, "default: null", false},
+		{"input expression default", `default: ""`, `default: "${{ github.run_id }}"`, false},
+		{"missing licensed dependency", "needs: [preflight, unity]", "needs: [preflight]", false},
+		{"missing preflight dependency", "needs: [preflight, unity]", "needs: [unity]", false},
+		{"aggregate matrix", "  aggregate:\n", "  aggregate:\n    strategy:\n      matrix:\n        lane: [one]\n", false},
+		{"job env", "  aggregate:\n", "  aggregate:\n    env:\n      BASH_ENV: ./bad.sh\n", false},
+		{"extra step", "      - shell: bash", "      - run: echo extra\n      - shell: bash", false},
+		{"extra historical success env", "          FORK_PR:", "          HISTORICAL_READBACK: true\n          FORK_PR:", false},
+		{"spoofed licensed result", "UNITY_TESTS_RESULT: ${{ needs.unity.result }}", "UNITY_TESTS_RESULT: success", false},
+		{"spoofed fork", "FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}", "FORK_PR: true", false},
+		{"spoofed Dependabot", "DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}", "DEPENDABOT_PR: true", false},
+		{"step failure suppressed", "      - shell: bash", "      - continue-on-error: true\n        shell: bash", false},
+		{"aggregate failure suppressed", "  aggregate:\n", "  aggregate:\n    continue-on-error: true\n", false},
+		{"preflight result weakened", `test "${RUNNER_PREFLIGHT_RESULT}" = success`, `test "${RUNNER_PREFLIGHT_RESULT}" = skipped`, false},
+		{"licensed result weakened", `test "${UNITY_TESTS_RESULT}" = success`, `test "${UNITY_TESTS_RESULT}" != failure`, false},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			workflow := base
 			if tc.from != "" {
@@ -104,46 +77,88 @@ func TestUnityEnrollmentHistoricalReadbackAggregate(t *testing.T) {
 				t.Fatal(err)
 			}
 			rejected := strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate")
-			if tc.from == "" {
-				if len(result.Findings) != 0 {
-					t.Fatalf("safe readback rejected: %#v", result.Findings)
-				}
-			} else if !rejected {
-				t.Fatalf("unsafe readback admitted: %#v", result.Findings)
+			if rejected == tc.accepted || (tc.accepted && len(result.Findings) != 0) {
+				t.Fatalf("accepted=%t, findings=%#v", tc.accepted, result.Findings)
 			}
 		})
 	}
 }
 
-func TestHistoricalReadbackAggregateShellResults(t *testing.T) {
+func TestHistoricalReadbackAggregateQualificationEvents(t *testing.T) {
 	var workflow yaml.Node
 	if err := yaml.Unmarshal([]byte(historicalReadbackWorkflow()), &workflow); err != nil {
 		t.Fatal(err)
 	}
 	job := mappingValue(mappingValue(workflow.Content[0], "jobs"), "aggregate")
-	script := scalarValue(mappingValue(sequenceValues(mappingValue(job, "steps"))[0], "run"))
-	for _, mode := range []string{"readback", "normal", "fork", "dependabot"} {
-		for _, preflight := range []string{"", "success", "failure", "skipped", "cancelled"} {
-			for _, licensed := range []string{"", "success", "failure", "skipped", "cancelled"} {
-				for _, capture := range []string{"", "success", "failure", "skipped", "cancelled"} {
-					t.Run(mode+"/"+preflight+"/"+licensed+"/"+capture, func(t *testing.T) {
-						command := exec.Command("bash", "-c", script)
-						command.Env = append(os.Environ(), "RUNNER_PREFLIGHT_RESULT="+preflight, "UNITY_TESTS_RESULT="+licensed, "HISTORICAL_READBACK_RESULT="+capture, "HISTORICAL_READBACK="+boolText(mode == "readback"), "FORK_PR="+boolText(mode == "fork"), "DEPENDABOT_PR="+boolText(mode == "dependabot"))
-						expected := preflight == "success" && licensed == "success"
-						if mode == "readback" {
-							expected = preflight == "success" && licensed == "skipped" && capture == "success"
-						}
-						if mode == "fork" || mode == "dependabot" {
-							expected = preflight == "skipped" && licensed == "skipped"
-						}
-						err := command.Run()
-						if (err == nil) != expected {
-							t.Fatalf("success=%t, expected=%t: %v", err == nil, expected, err)
-						}
-					})
-				}
+	condition := scalarValue(mappingValue(job, "if"))
+	condition = strings.TrimSuffix(strings.TrimPrefix(condition, "${{"), "}}")
+	// Evaluate the fixed guard's boolean operators with shell string comparisons.
+	condition = strings.NewReplacer("github.event_name", `"${EVENT_NAME}"`, "inputs.native-readback-run-id", `"${READBACK_RUN_ID}"`, "always()", "true").Replace(condition)
+	for _, event := range []string{"pull_request", "push", "workflow_dispatch", "merge_group"} {
+		for _, input := range []string{"", "123", " "} {
+			for _, result := range []string{"success", "failure", "skipped", "cancelled"} {
+				t.Run(event+"/input="+input+"/needs="+result, func(t *testing.T) {
+					command := exec.Command("bash", "-c", "[[ "+condition+" ]]")
+					command.Env = append(os.Environ(), "EVENT_NAME="+event, "READBACK_RUN_ID="+input, "RUNNER_PREFLIGHT_RESULT="+result, "UNITY_TESTS_RESULT="+result)
+					wantRun := event != "workflow_dispatch" || input == ""
+					if err := command.Run(); (err == nil) != wantRun {
+						t.Fatalf("run=%t, want=%t: %v", err == nil, wantRun, err)
+					}
+				})
 			}
 		}
+	}
+}
+
+func TestHistoricalReadbackAggregateKeepsTrustedSkipScript(t *testing.T) {
+	var workflow yaml.Node
+	if err := yaml.Unmarshal([]byte(historicalReadbackWorkflow()), &workflow); err != nil {
+		t.Fatal(err)
+	}
+	job := mappingValue(mappingValue(workflow.Content[0], "jobs"), "aggregate")
+	step := sequenceValues(mappingValue(job, "steps"))[0]
+	if env := mappingValue(step, "env"); env == nil || len(env.Content) != 8 {
+		t.Fatal("diagnostic exclusion must keep the four original environment bindings")
+	}
+	script := scalarValue(mappingValue(step, "run"))
+	for _, mode := range []string{"normal", "fork", "dependabot"} {
+		for _, preflight := range []string{"", "success", "failure", "skipped", "cancelled"} {
+			for _, licensed := range []string{"", "success", "failure", "skipped", "cancelled"} {
+				t.Run(mode+"/"+preflight+"/"+licensed, func(t *testing.T) {
+					command := exec.Command("bash", "-c", script)
+					command.Env = append(os.Environ(), "RUNNER_PREFLIGHT_RESULT="+preflight, "UNITY_TESTS_RESULT="+licensed, "FORK_PR="+boolText(mode == "fork"), "DEPENDABOT_PR="+boolText(mode == "dependabot"))
+					expected := preflight == "success" && licensed == "success"
+					if mode != "normal" {
+						expected = preflight == "skipped" && licensed == "skipped"
+					}
+					if err := command.Run(); (err == nil) != expected {
+						t.Fatalf("success=%t, expected=%t: %v", err == nil, expected, err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestUnityEnrollmentHistoricalReadbackExclusionRejectsOtherAggregateShapes(t *testing.T) {
+	base := historicalReadbackWorkflow()
+	direct := strings.Replace(safeAggregate(), "if: always()", "if: "+readbackAggregateGuard, 1)
+	start := strings.Index(base, "  aggregate:\n")
+	typed := strings.Replace(typedConditionalValidationWorkflow(), "  aggregate:\n    if: always()", "  aggregate:\n    if: "+readbackAggregateGuard, 1)
+	typed = strings.Replace(typed, "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs:\n      native-readback-run-id:\n        type: string\n", 1)
+	for _, tc := range []struct{ name, workflow string }{
+		{"direct", base[:start] + direct},
+		{"typed", typed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{".github/workflows/unity.yml": tc.workflow}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate") {
+				t.Fatalf("aggregate received trusted-skip exclusion: %#v", result.Findings)
+			}
+		})
 	}
 }
 
@@ -152,51 +167,4 @@ func boolText(value bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func TestUnityEnrollmentHistoricalReadbackOptionalInputFields(t *testing.T) {
-	workflow := strings.Replace(historicalReadbackWorkflow(), "        required: false\n        default: \"\"\n", "", 1)
-	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
-		".github/workflows/unity.yml": workflow,
-	}), unityAuditPolicy())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Findings) != 0 {
-		t.Fatalf("implicit optional empty string rejected: %#v", result.Findings)
-	}
-}
-
-func TestUnityEnrollmentHistoricalReadbackCompositeBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		name, step string
-		accepted   bool
-	}{
-		{"inert local composite", "    - run: echo redact-original-artifacts\n      shell: bash\n", true},
-		{"artifact text mentions Unity", "    - run: echo Unity.exe -returnlicense\n      shell: pwsh\n", true},
-		{"nested acquire", "    - uses: " + lockActionPrefix + "acquire-build-lock@" + testSHA + "\n", false},
-		{"nested activation", "    - run: unity-editor -batchmode\n      shell: bash\n", false},
-		{"nested return", "    - run: Unity.exe -returnlicense\n      shell: pwsh\n", false},
-		{"quoted Bash Windows executable", "    - run: '\"C:/Unity/Editor/Unity.exe\" -returnlicense'\n      shell: bash\n", false},
-		{"quoted Bash Unix executable", "    - run: '\"/opt/unity/Editor/Unity\" -returnlicense'\n      shell: bash\n", false},
-		{"quoted sh macOS executable", "    - run: '\"/Applications/Unity.app/Contents/MacOS/Unity\" -returnlicense'\n      shell: sh\n", false},
-		{"PowerShell inert executable string", "    - run: \"'Unity.exe'\"\n      shell: pwsh\n", true},
-		{"nested credential", "    - run: echo redact\n      shell: bash\n      env:\n        UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}\n", false},
-		{"nested suppression", "    - continue-on-error: true\n      run: echo redact\n      shell: bash\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			workflow := strings.Replace(historicalReadbackWorkflow(), "      - run: echo read-original-artifacts", "      - uses: ./.github/actions/readback", 1)
-			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
-				".github/workflows/unity.yml":         workflow,
-				".github/actions/readback/action.yml": "name: Readback\nruns:\n  using: composite\n  steps:\n" + tc.step,
-			}), unityAuditPolicy())
-			if err != nil {
-				t.Fatal(err)
-			}
-			rejected := strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate")
-			if rejected == tc.accepted {
-				t.Fatalf("accepted=%t, findings=%#v", tc.accepted, result.Findings)
-			}
-		})
-	}
 }
