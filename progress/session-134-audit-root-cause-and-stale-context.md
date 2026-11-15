@@ -116,6 +116,11 @@ dispositions:
   `bash tools/workflows/ci.sh javascript`, and
   `go run ./cmd/workflow-credential-audit .`: pass.
 - `golangci-lint` and `shellcheck` are not installed on this macOS host.
+- Merged on `main`: #374 at `8dd77d7696`. Build lock CI and both audits are
+  green on that commit.
+- Post-merge scheduled runs: merge-policy audit `43680866953` is complete with
+  4 findings and 25 active checks. Enrollment audit `43680866970` is complete
+  with 32 findings and 126 active rows.
 
 ## Remaining monitor state
 
@@ -140,7 +145,9 @@ match the code.
 
 ## Disposition
 
-- #113: central part complete. The remaining findings are consumer merges and
-  one owner re-review of expired exceptions.
+- #113: central part complete in #374 at `8dd77d7696`. The remaining findings
+  are consumer merges and one owner re-review of expired exceptions.
 - #255: the unsatisfiable finding is removed. Four real findings stay open and
   need ruleset authority.
+- Follow-up #375 records the Dependabot pin class for a consumer or central
+  decision.
