@@ -3983,6 +3983,44 @@ func TestUnityEnrollmentAcceptsTypedConditionalValidationGate(t *testing.T) {
 		}
 	}
 
+	/*
+		Incremental validation is opt-in and needs exactly one credential: the workflow's own
+		default token. The mode and its token are a pair -- the mode without a token cannot read
+		the record, and a token without the mode widens the credential surface for nothing.
+	*/
+	classifierInputs := "          head-sha: ${{ github.event.pull_request.head.sha }}\n"
+	for _, incremental := range []struct {
+		name     string
+		inputs   string
+		accepted bool
+	}{
+		{"mode with the default token", "          incremental-validation: true\n          github-token: ${{ github.token }}\n", true},
+		{"mode with a caller-computed token", "          incremental-validation: true\n          github-token: ${{ secrets.GITHUB_TOKEN }}\n", false},
+		{"mode with a literal token", "          incremental-validation: true\n          github-token: ghp_example\n", false},
+		{"mode without a token", "          incremental-validation: true\n", false},
+		{"token without the mode", "          github-token: ${{ github.token }}\n", false},
+		{"mode from an expression", "          incremental-validation: ${{ github.event_name == 'pull_request' }}\n          github-token: ${{ github.token }}\n", false},
+		{"mode set to false", "          incremental-validation: false\n          github-token: ${{ github.token }}\n", false},
+	} {
+		incrementalWorkflow := strings.Replace(
+			workflow,
+			classifierInputs,
+			classifierInputs+incremental.inputs,
+			1,
+		)
+		incrementalResult, err := AnalyzeUnityEnrollment(
+			unityFixture(map[string]string{".github/workflows/unity.yml": incrementalWorkflow}),
+			unityAuditPolicy(),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accepted := len(incrementalResult.Findings) == 0; accepted != incremental.accepted {
+			t.Fatalf("incremental validation %q accepted=%v, want %v: %#v",
+				incremental.name, accepted, incremental.accepted, incrementalResult.Findings)
+		}
+	}
+
 	tests := []struct {
 		name   string
 		mutate func(string) string

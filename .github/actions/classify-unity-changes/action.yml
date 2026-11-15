@@ -16,9 +16,22 @@ inputs:
       its own Unity build. Unioned with the central allowlist, never narrowing it. Assets/,
       Packages/, ProjectSettings/ and .github/workflows/ are refused. Any other syntax fails closed.
     required: false
+  incremental-validation:
+    description: >-
+      Literal true to skip a follow-up pull request push that changes no Unity path since the
+      newest successful run of this workflow on this branch. The record is read from the
+      repository's own run history, so this needs github-token. Any lookup failure keeps Unity
+      required. Absent or any other value keeps the whole-diff answer.
+    required: false
+  github-token:
+    description: >-
+      Token that reads this repository's run history for incremental-validation. Use
+      ${{ github.token }}. The job needs actions: read; the default token grants it, and a
+      workflow that narrows permissions must grant it. Omit when the mode is off.
+    required: false
 outputs:
   unity-required:
-    description: True unless a pull request or merge group changes only central or caller-declared Unity-independent paths.
+    description: True unless a pull request or merge group changes only central or caller-declared Unity-independent paths, or an incremental record proves the current tree needs no licensed run.
 runs:
   using: node24
   main: ../../dist/classify-unity-changes.js

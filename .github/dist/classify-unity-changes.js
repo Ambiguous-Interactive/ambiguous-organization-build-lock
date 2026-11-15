@@ -165,12 +165,172 @@ function appendOutput(outputPath, unityRequired) {
   );
 }
 
-function run({
+/*
+ * INCREMENTAL VALIDATION. The base-to-head diff answers "does this pull request touch Unity?".
+ * It cannot answer "did the last push touch Unity?", so every follow-up push that changes a
+ * document re-runs the licensed job over a tree the previous run already validated.
+ *
+ * The record of the previous validation is the repository's own run history, read through the
+ * Actions API; a pull request cannot write it. The newest successful run of THIS workflow on
+ * THIS branch that is not this run is the record. A successful run of a workflow that carries
+ * the central aggregate proves one of two things about its head tree: the licensed job passed,
+ * or the trusted classifier proved the tree needed no licensed job. Both make the tree a
+ * validated baseline. A run in progress, a failed run, and a run of another workflow prove
+ * nothing and are skipped.
+ *
+ * The comparison is the API's own base-to-head file list, so the runtime keeps its single
+ * tree-only git call. Every uncertain answer -- no record, a diverged branch, a truncated file
+ * list, a failed request -- keeps Unity required. The mode only ever REMOVES a run it can
+ * justify; it cannot make a run appear.
+ */
+const MAX_COMPARED_FILES = 300;
+const RECORD_RUN_LIMIT = 20;
+
+function failClosed(reason) {
+  return new TypeError(`incremental validation unavailable: ${reason}`);
+}
+
+async function requestJson(url, token, fetchImpl) {
+  const response = await fetchImpl(url, {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "x-github-api-version": "2022-11-28"
+    },
+    // A slow lookup must not hold a hosted classifier job open for its whole timeout.
+    signal: AbortSignal.timeout(20_000)
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub API responded ${response.status}`);
+  }
+  return response.json();
+}
+
+/*
+ * GITHUB_WORKFLOW_REF is `<owner>/<repository>/<path>@<ref>`, so the file name is the last
+ * segment of the path and the repository prefix must be THIS repository. A value that does not
+ * parse would otherwise select runs of a workflow that never validated anything.
+ */
+function workflowFile(reference, repository) {
+  const at = reference.lastIndexOf("@");
+  const segments = (at === -1 ? reference : reference.slice(0, at)).split("/");
+  const name = segments.length === 5 &&
+    segments[0].toLowerCase() === repository.split("/")[0].toLowerCase() &&
+    segments[1].toLowerCase() === repository.split("/")[1].toLowerCase() &&
+    segments[2] === ".github" &&
+    segments[3] === "workflows"
+    ? segments[4]
+    : "";
+  if (!/^[A-Za-z0-9._-]+\.ya?ml$/.test(name)) {
+    throw failClosed("the workflow reference is not a workflow in this repository");
+  }
+  return name;
+}
+
+function validationRecord(runs, { headBranch, runID }) {
+  if (!Array.isArray(runs)) {
+    throw failClosed("the run history is not a list");
+  }
+  const record = runs.slice(0, RECORD_RUN_LIMIT).find((run) =>
+    run !== null && typeof run === "object" &&
+    run.head_branch === headBranch &&
+    String(run.id) !== runID &&
+    typeof run.head_sha === "string" && /^[0-9a-f]{40}$/i.test(run.head_sha)
+  );
+  if (record === undefined) {
+    throw failClosed("no completed successful run of this workflow and branch");
+  }
+  return record.head_sha.toLowerCase();
+}
+
+async function changedPathsBetween(repository, baseSHA, headSHA, request) {
+  const comparison = await request(
+    `/repos/${repository}/compare/${baseSHA}...${headSHA}?per_page=${MAX_COMPARED_FILES}`
+  );
+  if (comparison?.status === "identical") {
+    return null;
+  }
+  if (comparison?.status !== "ahead" || !Array.isArray(comparison.files)) {
+    throw failClosed(`the branch comparison is ${text(comparison?.status) || "unknown"}`);
+  }
+  if (comparison.files.length >= MAX_COMPARED_FILES) {
+    throw failClosed("the branch comparison is truncated");
+  }
+  const paths = [];
+  for (const file of comparison.files) {
+    for (const candidate of [file?.filename, file?.previous_filename]) {
+      if (typeof candidate === "string" && candidate !== "") {
+        paths.push(candidate);
+      }
+    }
+  }
+  return paths;
+}
+
+async function incrementalDecision({
+  repository,
+  workflowRef,
+  headBranch,
+  runID,
+  baseSHA,
+  headSHA,
+  declaredPrefixes,
+  request,
+  log
+}) {
+  const name = workflowFile(workflowRef, repository);
+  /*
+     `status=success` is the only filter this needs: a run that is queued, in progress,
+     cancelled, or failed is not a record, and the API excludes each of those.
+  */
+  const history = await request(
+    `/repos/${repository}/actions/workflows/${encodeURIComponent(name)}/runs`
+    + `?branch=${encodeURIComponent(headBranch)}&event=pull_request&status=success`
+    + `&per_page=${RECORD_RUN_LIMIT}`
+  );
+  const recordSHA = validationRecord(history?.workflow_runs, { headBranch, runID });
+  /*
+     The record must be at or after the CURRENT base. If the base moved past it -- a retarget,
+     a rebase onto a newer main, or a force push -- the commits between the two bases are not
+     part of the recorded tree and are not part of the delta either, so a Unity change they
+     carry would be invisible here. A plain file comparison cannot see that, so the ancestry is
+     read instead and anything but "the record is ahead of this base" keeps Unity required.
+  */
+  const baseRelation = await request(
+    `/repos/${repository}/compare/${baseSHA}...${recordSHA}?per_page=1`
+  );
+  if (baseRelation?.status !== "ahead" && baseRelation?.status !== "identical") {
+    throw failClosed("the validated run is not ahead of the current base");
+  }
+  const changedPaths = await changedPathsBetween(repository, recordSHA, headSHA, request);
+  if (changedPaths === null) {
+    log(`Unity validation skipped: the validated run at ${recordSHA} already holds this tree.`);
+    return false;
+  }
+  if (!classifyUnityChanges(changedPaths, declaredPrefixes)) {
+    log(
+      `Unity validation skipped: ${changedPaths.length} independent path(s) changed since the`
+      + ` validated run at ${recordSHA}.`
+    );
+    return false;
+  }
+  log(`Unity validation required: ${changedPaths.length} path(s) changed since ${recordSHA}.`);
+  return true;
+}
+
+async function run({
   eventName,
   baseSHA,
   headSHA,
   independentPaths,
   outputPath,
+  incrementalValidation = "",
+  githubToken = "",
+  repository = "",
+  workflowRef = "",
+  headBranch = "",
+  runID = "",
+  request = (path) => requestJson(`https://api.github.com${path}`, githubToken, fetch),
   execute = childProcess.execFileSync,
   log = console.log
 }) {
@@ -193,15 +353,48 @@ function run({
     return true;
   }
   const changedPaths = findChangedPaths(text(baseSHA), text(headSHA), execute);
-  const unityRequired = classifyUnityChanges(changedPaths, declaredPrefixes);
-  appendOutput(outputPath, unityRequired);
-  log(
-    unityRequired
-      ? "Unity validation required: relevant or unclassified paths changed."
-      : `Unity validation skipped: ${changedPaths.length} independent path(s) changed`
-        + ` (central allowlist${declaredPrefixes.length === 0 ? "" : `, plus declared ${declaredPrefixes.join(", ")}`}).`
-  );
-  return unityRequired;
+  if (!classifyUnityChanges(changedPaths, declaredPrefixes)) {
+    appendOutput(outputPath, false);
+    log(
+      `Unity validation skipped: ${changedPaths.length} independent path(s) changed`
+      + ` (central allowlist${declaredPrefixes.length === 0 ? "" : `, plus declared ${declaredPrefixes.join(", ")}`}).`
+    );
+    return false;
+  }
+  /*
+     The incremental record is a pull request only shape: it names runs of this branch, and only
+     a pull request has one. A merge group keeps the whole-diff answer. A lookup that fails in
+     any way leaves the `true` written above in place, so this cannot turn an unknown into a
+     skip.
+  */
+  if (text(incrementalValidation) !== "true" || text(eventName) !== "pull_request") {
+    log("Unity validation required: relevant or unclassified paths changed.");
+    return true;
+  }
+  try {
+    const unityRequired = await incrementalDecision({
+      repository: text(repository),
+      workflowRef: text(workflowRef),
+      headBranch: text(headBranch),
+      runID: text(runID),
+      baseSHA: text(baseSHA),
+      headSHA: text(headSHA),
+      declaredPrefixes,
+      request,
+      log
+    });
+    if (!unityRequired) {
+      appendOutput(outputPath, false);
+    }
+    return unityRequired;
+  } catch (error) {
+    log(
+      "Unity validation required: "
+      + (text(error?.message).replace(/\s+/g, " ") || "the incremental lookup failed")
+      + "."
+    );
+    return true;
+  }
 }
 
 /*
@@ -216,18 +409,22 @@ function input(environment, name) {
 }
 
 function main(environment = process.env) {
-  try {
-    run({
-      eventName: input(environment, "event-name"),
-      baseSHA: input(environment, "base-sha"),
-      headSHA: input(environment, "head-sha"),
-      independentPaths: input(environment, "independent-paths"),
-      outputPath: environment.GITHUB_OUTPUT || ""
-    });
-  } catch {
+  return run({
+    eventName: input(environment, "event-name"),
+    baseSHA: input(environment, "base-sha"),
+    headSHA: input(environment, "head-sha"),
+    independentPaths: input(environment, "independent-paths"),
+    incrementalValidation: input(environment, "incremental-validation"),
+    githubToken: input(environment, "github-token"),
+    repository: text(environment.GITHUB_REPOSITORY),
+    workflowRef: text(environment.GITHUB_WORKFLOW_REF),
+    headBranch: text(environment.GITHUB_HEAD_REF),
+    runID: text(environment.GITHUB_RUN_ID),
+    outputPath: environment.GITHUB_OUTPUT || ""
+  }).catch(() => {
     console.error("::error title=Unity change classification failed::Classification failed closed.");
     process.exitCode = 1;
-  }
+  });
 }
 
 if (require.main === module) {
@@ -240,5 +437,6 @@ module.exports = {
   input,
   isUnityIndependent,
   parseDeclaredIndependentPaths,
-  run
+  run,
+  workflowFile
 };

@@ -440,8 +440,12 @@ test("central Unity cleanup actions expose exact Node 24 policy contracts", () =
      * Its grammar is deliberately the narrowest one that expresses the need -- `dir/**` only, with
      * Assets/, Packages/, ProjectSettings/ and .github/workflows/ refused by name -- so the
      * reviewable question stays "is that directory inert to that repository's Unity build".
+     *
+     * `incremental-validation` and `github-token` are the opt-in record mode. They are listed
+     * here for the same reason: a credential cannot appear on a security gate without a reviewed
+     * entry. The token is restricted to `${{ github.token }}` by the enrollment audit.
      */
-    ["event-name", "base-sha", "head-sha", "independent-paths"]
+    ["event-name", "base-sha", "head-sha", "independent-paths", "incremental-validation", "github-token"]
   );
   assert.deepEqual(
     yamlRequiredTopLevelMappingKeys(

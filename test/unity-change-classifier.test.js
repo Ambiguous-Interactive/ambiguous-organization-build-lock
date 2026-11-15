@@ -116,11 +116,11 @@ test("committed classifier runtime makes exactly one tree-only git call", () => 
   );
 });
 
-test("classifier defaults output true before any fallible pull request work", () => {
+test("classifier defaults output true before any fallible pull request work", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "output.txt");
-  assert.throws(() => run({
+  await assert.rejects(run({
     eventName: "pull_request",
     baseSHA: "a".repeat(40),
     headSHA: "b".repeat(40),
@@ -345,4 +345,236 @@ test("committed classifier runtime fails CLOSED on an unparseable declaration", 
   }, workspace.directory);
   assert.equal(result.status, 1);
   assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
+});
+
+/*
+ * INCREMENTAL VALIDATION. A follow-up pull request push that changes no Unity path still runs the
+ * licensed job today, because the classifier diffs the whole pull request. The record of the last
+ * validated tree is the repository's run history: the newest successful run of this workflow on
+ * this branch. The comparison is the API's own file list between that run's head and the current
+ * head. Every uncertain answer keeps Unity required, and the recorded run must belong to this
+ * workflow, this branch, and a finished successful run that is not the current one.
+ */
+const VALIDATED_SHA = "1".repeat(40);
+
+async function classifyIncrementally(overrides = {}) {
+  const requests = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-incremental-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, "output.txt");
+  const request = async (requestPath) => {
+    requests.push(requestPath);
+    if (overrides.requestError) {
+      throw overrides.requestError;
+    }
+    if (requestPath.includes("/actions/workflows/")) {
+      return overrides.history ?? {
+        workflow_runs: [{
+          id: 1,
+          head_branch: "feature",
+          head_sha: VALIDATED_SHA,
+          conclusion: "success"
+        }]
+      };
+    }
+    if (requestPath.includes(`${VALIDATED_SHA}?per_page=1`)) {
+      return overrides.baseRelation ?? { status: "ahead", files: [] };
+    }
+    return overrides.comparison ?? {
+      status: "ahead",
+      files: [{ filename: "progress/session-1.md" }]
+    };
+  };
+  const unityRequired = await run({
+    eventName: overrides.eventName ?? "pull_request",
+    baseSHA: "a".repeat(40),
+    headSHA: "b".repeat(40),
+    outputPath,
+    incrementalValidation: overrides.incrementalValidation ?? "true",
+    githubToken: "token",
+    repository: "Ambiguous-Interactive/consumer",
+    workflowRef: overrides.workflowRef ?? "Ambiguous-Interactive/consumer/.github/workflows/build-deploy.yml@refs/heads/main",
+    headBranch: "feature",
+    runID: "2",
+    execute: () => (overrides.changedPaths ?? ["Assets/Game.cs"]).map((changedPath) => `${changedPath}\0`).join(""),
+    request,
+    log: () => {}
+  });
+  return {
+    unityRequired,
+    requests,
+    written: fs.readFileSync(outputPath, "utf8").trim().split("\n").pop()
+  };
+}
+
+test("incremental validation skips only a delta the validated run already covers", async () => {
+  for (const { name, overrides, expected } of [
+    {
+      name: "a document-only delta",
+      overrides: { comparison: { status: "ahead", files: [{ filename: "progress/session-1.md" }] } },
+      expected: false
+    },
+    {
+      name: "a Unity path in the delta",
+      overrides: { comparison: { status: "ahead", files: [{ filename: "Assets/Game.cs" }] } },
+      expected: true
+    },
+    {
+      name: "a rename out of a Unity path",
+      overrides: {
+        comparison: {
+          status: "ahead",
+          files: [{ filename: "README.md", previous_filename: "Assets/Game.cs" }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "an unchanged tree",
+      overrides: { comparison: { status: "identical", files: [] } },
+      expected: false
+    },
+    {
+      name: "a rewritten history",
+      overrides: { comparison: { status: "diverged", files: [] } },
+      expected: true
+    },
+    {
+      name: "a base that moved past the validated run",
+      overrides: { baseRelation: { status: "diverged", files: [] } },
+      expected: true
+    },
+    {
+      name: "a base that equals the validated run",
+      overrides: { baseRelation: { status: "identical", files: [] } },
+      expected: false
+    },
+    {
+      name: "a truncated file list",
+      overrides: {
+        comparison: {
+          status: "ahead",
+          files: Array.from({ length: 300 }, (unused, index) => ({ filename: `docs/${index}.md` }))
+        }
+      },
+      expected: true
+    },
+    {
+      name: "a comparison without files",
+      overrides: { comparison: { status: "ahead" } },
+      expected: true
+    },
+    {
+      name: "no successful run of this workflow",
+      overrides: { history: { workflow_runs: [] } },
+      expected: true
+    },
+    {
+      name: "a successful run of another branch",
+      overrides: {
+        history: {
+          workflow_runs: [{ id: 1, head_branch: "other", head_sha: VALIDATED_SHA }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "the current run",
+      overrides: {
+        history: {
+          workflow_runs: [{ id: 2, head_branch: "feature", head_sha: VALIDATED_SHA }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "a run record with no commit",
+      overrides: {
+        history: {
+          workflow_runs: [{ id: 1, head_branch: "feature", head_sha: "main" }]
+        }
+      },
+      expected: true
+    },
+    {
+      name: "an unreadable history",
+      overrides: { history: {} },
+      expected: true
+    },
+    {
+      name: "a failed lookup",
+      overrides: { requestError: new Error("GitHub API responded 503") },
+      expected: true
+    }
+  ]) {
+    const { unityRequired, written } = await classifyIncrementally(overrides);
+    assert.equal(unityRequired, expected, name);
+    assert.equal(written, `unity-required=${expected}`, name);
+  }
+});
+
+test("incremental validation reads this workflow and only under the pull request trigger", async () => {
+  const pullRequest = await classifyIncrementally();
+  assert.equal(pullRequest.requests.length, 3, "one run-history read, one base check, one comparison");
+  assert.match(pullRequest.requests[0], /\/actions\/workflows\/build-deploy\.yml\/runs\?/);
+  assert.match(pullRequest.requests[0], /branch=feature/);
+  assert.match(pullRequest.requests[0], /event=pull_request/);
+  assert.match(pullRequest.requests[0], /status=success/);
+  assert.equal(pullRequest.requests[1], `/repos/Ambiguous-Interactive/consumer/compare/${"a".repeat(40)}...${VALIDATED_SHA}?per_page=1`);
+  assert.equal(pullRequest.requests[2], `/repos/Ambiguous-Interactive/consumer/compare/${VALIDATED_SHA}...${"b".repeat(40)}?per_page=300`);
+
+  // A merge group names no pull request branch, and the whole-diff answer stands.
+  const mergeGroup = await classifyIncrementally({ eventName: "merge_group" });
+  assert.equal(mergeGroup.unityRequired, true);
+  assert.deepEqual(mergeGroup.requests, []);
+
+  // The mode is opt-in: an absent flag keeps the whole-diff answer and reads nothing.
+  const off = await classifyIncrementally({ incrementalValidation: "" });
+  assert.equal(off.unityRequired, true);
+  assert.deepEqual(off.requests, []);
+
+  // A whole-diff skip needs no record at all.
+  const independent = await classifyIncrementally({ changedPaths: ["progress/session.md"] });
+  assert.equal(independent.unityRequired, false);
+  assert.deepEqual(independent.requests, []);
+});
+
+test("incremental validation refuses a workflow reference that names another repository", async () => {
+  for (const workflowRef of [
+    "other/repository/.github/workflows/build-deploy.yml@refs/heads/main",
+    "Ambiguous-Interactive/consumer/.github/workflows/../workflow.yml@refs/heads/main",
+    "Ambiguous-Interactive/consumer/.github/actions/classify/action.yml@refs/heads/main",
+    "",
+    "build-deploy.yml"
+  ]) {
+    const { unityRequired } = await classifyIncrementally({ workflowRef });
+    assert.equal(unityRequired, true, workflowRef);
+  }
+});
+
+/*
+ * The mode is read through the runner input name, like every other input. This runs the committed
+ * runtime with an unparseable workflow reference, so no request leaves the runner: the case proves
+ * the flag reached the action and that its first failure keeps Unity required.
+ */
+test("committed classifier runtime keeps Unity required when the record lookup cannot start", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-record-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = fixtureRepository(root, ["Assets/Game.cs"]);
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    GITHUB_REPOSITORY: "Ambiguous-Interactive/consumer",
+    GITHUB_WORKFLOW_REF: "not-a-workflow-reference",
+    GITHUB_HEAD_REF: "feature",
+    GITHUB_RUN_ID: "2",
+    "INPUT_EVENT-NAME": "pull_request",
+    "INPUT_BASE-SHA": workspace.baseSHA,
+    "INPUT_HEAD-SHA": workspace.headSHA,
+    "INPUT_INCREMENTAL-VALIDATION": "true",
+    "INPUT_GITHUB-TOKEN": "token"
+  }, workspace.directory);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
+  assert.match(result.stdout, /incremental validation unavailable/);
 });
