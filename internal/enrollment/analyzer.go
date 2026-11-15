@@ -259,7 +259,7 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 			continue
 		}
 		if strings.HasPrefix(uses, "./") {
-			actionIsLicensed, err := a.actionLicensed(strings.TrimPrefix(uses, "./"))
+			actionIsLicensed, err := a.actionLicensed(a.localActionPath(uses, job))
 			if err != nil {
 				return false, err
 			}
@@ -269,6 +269,43 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 
 	a.jobMemo[key] = licensed
 	return licensed, nil
+}
+
+// localActionPath maps a workspace-relative action path through a checkout of
+// this repository at a path prefix. GitHub resolves `./main/.github/...`
+// against that checkout, so the snapshot contains the same bytes one level
+// down. A checkout that names another repository is not evidence for this
+// snapshot and is left unresolved.
+func (a *analyzer) localActionPath(uses string, job *yaml.Node) string {
+	local := strings.TrimPrefix(uses, "./")
+	longest := ""
+	for _, step := range sequenceValues(mappingValue(job, "steps")) {
+		candidate := stepUses(step)
+		at := strings.LastIndex(candidate, "@")
+		if at < 0 || !strings.EqualFold(candidate[:at], "actions/checkout") {
+			continue
+		}
+		with := mappingValue(step, "with")
+		repository := scalarValue(mappingValue(with, "repository"))
+		if repository != "" && !strings.EqualFold(repository, a.snapshot.Repository) {
+			continue
+		}
+		prefix := strings.Trim(
+			strings.ReplaceAll(scalarValue(mappingValue(with, "path")), "\\", "/"),
+			"/",
+		)
+		if prefix == "" || prefix == "." || strings.HasPrefix(prefix, "/") ||
+			strings.Contains("/"+prefix+"/", "/../") {
+			continue
+		}
+		if (local == prefix || strings.HasPrefix(local, prefix+"/")) && len(prefix) > len(longest) {
+			longest = prefix
+		}
+	}
+	if longest == "" {
+		return local
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(local, longest), "/")
 }
 
 // validateActionOwnership keeps organization-owned action files centralized.
@@ -347,7 +384,7 @@ func (a *analyzer) validatePRJobGuards(workflowPath, jobName string, prEvents ma
 		a.add(guardFindingCode(steps[0], "missing-initial-current-head-guard"), workflowPath, jobName)
 	}
 	for index, step := range steps {
-		entry, localAction, err := a.licensedEntry(step)
+		entry, localAction, err := a.licensedEntry(step, job)
 		if err != nil {
 			return fmt.Errorf("%s:%s step %d: %w", workflowPath, jobName, index+1, err)
 		}
@@ -389,7 +426,7 @@ func (a *analyzer) validateCompositeGuards(actionPath string) error {
 	}
 	steps := sequenceValues(mappingValue(mappingValue(manifest, "runs"), "steps"))
 	for index, step := range steps {
-		entry, localAction, err := a.licensedEntry(step)
+		entry, localAction, err := a.licensedEntry(step, nil)
 		if err != nil {
 			return fmt.Errorf("%s runs.steps entry %d: %w", manifestPath, index+1, err)
 		}
@@ -415,7 +452,7 @@ func (a *analyzer) validateCompositeGuards(actionPath string) error {
 	return nil
 }
 
-func (a *analyzer) licensedEntry(step *yaml.Node) (bool, string, error) {
+func (a *analyzer) licensedEntry(step *yaml.Node, job *yaml.Node) (bool, string, error) {
 	usesNode := mappingValue(step, "uses")
 	if usesNode == nil {
 		return false, "", nil
@@ -431,6 +468,9 @@ func (a *analyzer) licensedEntry(step *yaml.Node) (bool, string, error) {
 		return false, "", nil
 	}
 	localAction := strings.TrimPrefix(uses, "./")
+	if job != nil {
+		localAction = a.localActionPath(uses, job)
+	}
 	licensed, err := a.actionLicensed(localAction)
 	if err != nil {
 		return false, "", err

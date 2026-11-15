@@ -346,6 +346,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 			}
 			steps, err := a.flattenedSteps(
 				sequenceValues(mappingValue(job, "steps")),
+				job,
 				make(map[string]bool),
 				"job",
 				nil,
@@ -585,6 +586,7 @@ func (a *unityPolicyAnalyzer) sourceAcquireMatches(
 	}
 	steps, err := a.flattenedSteps(
 		sequenceValues(mappingValue(job, "steps")),
+		job,
 		make(map[string]bool),
 		"job",
 		nil,
@@ -633,6 +635,7 @@ func (a *unityPolicyAnalyzer) paidSourceJob(
 	text := strings.ToLower(nodeScalarText(mappingValue(workflow, "env")) + nodeScalarText(job))
 	steps, err := a.flattenedSteps(
 		sequenceValues(mappingValue(job, "steps")),
+		job,
 		make(map[string]bool),
 		"job",
 		nil,
@@ -3536,6 +3539,7 @@ func requiredBoundedTimeout(node *yaml.Node, maximum int) bool {
 
 func (a *unityPolicyAnalyzer) flattenedSteps(
 	steps []*yaml.Node,
+	job *yaml.Node,
 	visiting map[string]bool,
 	scope string,
 	enclosingConditions []*yaml.Node,
@@ -3554,6 +3558,9 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 			continue
 		}
 		actionPath := strings.TrimPrefix(uses, "./")
+		if job != nil {
+			actionPath = a.analyzer.localActionPath(uses, job)
+		}
 		manifestPath, err := a.analyzer.actionManifest(actionPath)
 		if err != nil {
 			return nil, err
@@ -3588,6 +3595,7 @@ func (a *unityPolicyAnalyzer) flattenedSteps(
 		nestedEnclosingSteps = append(nestedEnclosingSteps, step)
 		nested, err := a.flattenedSteps(
 			sequenceValues(mappingValue(runs, "steps")),
+			nil,
 			visiting,
 			fmt.Sprintf("%s/%d", scope, index),
 			nestedConditions,
@@ -5559,6 +5567,7 @@ func (a *unityPolicyAnalyzer) validationLockActionEnvironmentsSafe(job *yaml.Nod
 	}
 	steps, err := a.flattenedSteps(
 		sequenceValues(mappingValue(job, "steps")),
+		job,
 		make(map[string]bool),
 		"validation",
 		nil,
