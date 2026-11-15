@@ -573,18 +573,11 @@ that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
 step that reads other files, such as the rule-line check above.
 
-A workflow that also listens for a merge queue must pass the merge group
-revisions, because a merge group has no pull request payload:
+A workflow that also listens for a merge queue must add `merge_group` to `on:`
+and pass the merge group revisions, because a merge group has no pull request
+payload:
 
 ```yaml
-on:
-  pull_request:
-  merge_group:
-jobs:
-  change-classifier:
-    steps:
-      - id: classify
-        uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/classify-unity-changes@APPROVED_LOCK_SHA
         with:
           event-name: ${{ github.event_name }}
           base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
