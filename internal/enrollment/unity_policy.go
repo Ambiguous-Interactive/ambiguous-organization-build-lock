@@ -4508,29 +4508,59 @@ func typedGateInputs(step *yaml.Node, acquireID, classifierID, releaseID string)
 
 // workflowDeclaresEvent reports whether the workflow listens to an event. The change
 // classifier needs this answer, because a merge-group trigger requires the queue
-// revisions rather than the pull request revisions.
+// revisions rather than the pull request revisions. It reuses the one `on:`
+// traversal so the two readers cannot drift.
 func workflowDeclaresEvent(workflow *yaml.Node, event string) bool {
-	on := mappingValue(workflow, "on")
-	if on == nil {
+	configs, err := pullRequestEventConfigs(workflow)
+	if err != nil {
 		return false
 	}
-	switch on.Kind {
-	case yaml.ScalarNode:
-		return on.Value == event
-	case yaml.SequenceNode:
-		for _, entry := range on.Content {
-			if entry.Kind == yaml.ScalarNode && entry.Value == event {
-				return true
-			}
-		}
-	case yaml.MappingNode:
-		for index := 0; index < len(on.Content); index += 2 {
-			if on.Content[index].Kind == yaml.ScalarNode && on.Content[index].Value == event {
-				return true
-			}
+	for _, config := range configs {
+		if config.name == event {
+			return true
 		}
 	}
 	return false
+}
+
+// mergeGroupTriggerEligible reads a merge_group trigger configuration. An
+// unfiltered trigger runs for every queue entry. Only the checks_requested
+// activity type exists, and a branch filter must name only protected branches.
+func mergeGroupTriggerEligible(config *yaml.Node, protectedBranches map[string]bool) bool {
+	if config == nil || (config.Kind == yaml.ScalarNode && config.Tag == "!!null") {
+		return true
+	}
+	if config.Kind != yaml.MappingNode ||
+		!mappingHasOnlyKeys(config, map[string]bool{"types": true, "branches": true}) {
+		return false
+	}
+	if types := mappingValue(config, "types"); types != nil {
+		values := sequenceValues(types)
+		if types.Kind == yaml.ScalarNode {
+			values = []*yaml.Node{types}
+		}
+		if len(values) != 1 || values[0].Kind != yaml.ScalarNode ||
+			values[0].Value != "checks_requested" {
+			return false
+		}
+	}
+	branches := mappingValue(config, "branches")
+	if branches == nil {
+		return true
+	}
+	values := sequenceValues(branches)
+	if branches.Kind == yaml.ScalarNode {
+		values = []*yaml.Node{branches}
+	}
+	if len(values) == 0 {
+		return false
+	}
+	for _, branch := range values {
+		if branch.Kind != yaml.ScalarNode || !protectedBranches[branch.Value] {
+			return false
+		}
+	}
+	return true
 }
 
 func eligibleUnityTrigger(
@@ -4553,14 +4583,16 @@ func eligibleUnityTrigger(
 			return sameRepositoryPullRequestGuard(mappingValue(job, "if"))
 		case "merge_group":
 			/*
-				A merge group runs on a temporary branch of this repository, and only a
-				user with write access can add a pull request to the queue. A writer can
-				already run licensed work through a same-repository pull request from a
-				branch in this repository, so the queue adds no new trust boundary. The
-				required guard's event-name disjunct is true here, because a merge group
-				has no pull request payload to compare.
+				A merge group runs on a temporary branch of this repository. Only a
+				user with write access can add a pull request to the queue, and that
+				run holds organization secrets for the queued diff, including a fork
+				pull request diff. The write action is the trust boundary: a writer
+				can already push those commits to a same-repository branch and open a
+				pull request. The job guard must keep its event-name term, because a
+				merge group has no pull request payload to compare.
 			*/
-			return sameRepositoryPullRequestGuard(mappingValue(job, "if"))
+			return mergeGroupTriggerEligible(config, protectedBranches) &&
+				mergeGroupJobGuard(mappingValue(job, "if"))
 		case "pull_request_target":
 			return jobExcludedFromEvents(mappingValue(job, "if"), map[string]bool{event: true})
 		case "push":
@@ -6053,13 +6085,36 @@ func trustedSkipAggregateEnforces(
 	return true
 }
 
-func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
+// normalizedCondition folds a job condition the way every guard reader compares
+// it: lower case, no whitespace, and no expression wrapper.
+func normalizedCondition(condition *yaml.Node) (string, bool) {
 	if condition == nil || condition.Kind != yaml.ScalarNode {
-		return false
+		return "", false
 	}
 	value := strings.ToLower(strings.Join(strings.Fields(condition.Value), ""))
 	value = strings.TrimPrefix(value, "${{")
 	value = strings.TrimSuffix(value, "}}")
+	return value, true
+}
+
+/*
+mergeGroupJobGuard requires the same repository guard with its event-name term.
+The repository comparison alone is false on a merge group, because there is no
+pull request payload, so that shape would skip every queue entry. The event-name
+term keeps the job running, and the queue itself already requires write access.
+*/
+func mergeGroupJobGuard(condition *yaml.Node) bool {
+	value, ok := normalizedCondition(condition)
+	return ok &&
+		strings.Contains(value, "github.event_name!='pull_request'||") &&
+		sameRepositoryPullRequestGuard(condition)
+}
+
+func sameRepositoryPullRequestGuard(condition *yaml.Node) bool {
+	value, ok := normalizedCondition(condition)
+	if !ok {
+		return false
+	}
 	direct := "github.event.pull_request.head.repo.full_name==github.repository"
 	reverse := "github.repository==github.event.pull_request.head.repo.full_name"
 	eventGuard := "github.event_name!='pull_request'||"

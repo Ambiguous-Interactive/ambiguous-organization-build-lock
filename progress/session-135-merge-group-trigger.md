@@ -54,40 +54,71 @@ release after #358, #361, and #362.
 ## Change 2: admit the trigger and pin the classifier inputs
 
 - `internal/enrollment/unity_policy.go`: `eligibleUnityTrigger` accepts
-  `merge_group` under the same job guard as `pull_request`. The guard's
-  event-name term is true for a merge group, which has no pull request payload.
-- Only a user with write access can add a pull request to a merge queue. A
-  writer can already run licensed work through a same-repository pull request,
-  so the queue adds no new trust boundary.
+  `merge_group` under the same job guard as `pull_request`. The guard must keep
+  its event-name term. The bare repository comparison is false on a merge
+  group, because there is no pull request payload, so that shape would skip
+  every queue entry.
+- Only a user with write access can add a pull request to a merge queue. The
+  queue entry runs the queued diff, including a fork pull request diff, with
+  organization secrets once that writer adds it. The write action is the trust
+  boundary, and a writer can already push the same commits to a
+  same-repository branch. No new principal gains access.
+- The trigger configuration is read. `types` must be absent or exactly
+  `checks_requested`. `branches` must name only protected branches.
+  `branches-ignore` and every other key are refused, so an eligible trigger
+  provably reports on a protected branch.
 - A workflow that listens for a merge group must pass
   `github.event.pull_request.base.sha || github.event.merge_group.base_sha`
   and the matching head expression. The audit refuses pull request only
-  revisions for such a workflow, because every queue entry would block. A
-  workflow without a merge group trigger keeps the old exact expressions, so no
-  enrolled consumer changes.
-- `docs/consumer-enrollment.md` records the trigger, the trust reason, the
-  classifier expression, and a canary check for a required merge queue.
+  revisions for such a workflow in the typed validation shape, because every
+  queue entry would block. A workflow without a merge group trigger keeps the
+  old exact expressions, so no enrolled consumer changes.
+- `docs/consumer-enrollment.md` records the trigger, the write-access trust
+  boundary and its fork consequence, the classifier expression, and a canary
+  check for a required merge queue.
 
 ## Tests
 
-- `test/unity-change-classifier.test.js`: a merge group diff of independent
-  paths returns `unity-required=false`, a diff with `Assets/` returns `true`,
-  and an incomplete revision pair fails closed. The push case now passes
-  unreadable revisions, which proves the event gate runs before any diff.
-- `internal/enrollment/unity_policy_test.go`: a guarded merge group is clean,
-  an unguarded merge group is `ineligible-unity-trigger`, a merge group with
-  the documented revisions is clean, and pull request only revisions are
-  `missing-unity-aggregate`.
+- `test/unity-change-classifier.test.js`: one data table runs both
+  `pull_request` and `merge_group` through the runner input names. An
+  independent diff returns `unity-required=false`, a diff with `Assets/`
+  returns `true`, and an incomplete merge group revision pair fails closed.
+  The push case passes unreadable revisions, which proves the event gate runs
+  before any diff.
+- `internal/enrollment/unity_policy_test.go`: table-driven cases cover an
+  unfiltered merge group, a `types` and `branches` filter, and a sequence
+  trigger. Refused cases cover a missing guard, a bare repository guard, an
+  unprotected branch, `branches-ignore`, and an unknown activity type. The
+  classifier cases cover both trigger spellings, and pull request only
+  revisions produce `missing-unity-aggregate`.
 - The conditional validation fixture moved to
   `typedConditionalValidationWorkflow()` so both tests read one source shape.
+
+## Adversarial review
+
+- The first version said a queue entry adds no new trust boundary. That was
+  wrong: a writer can enqueue a fork pull request, and the merge group run
+  holds organization secrets for that diff. The code comment and both docs now
+  name the write action as the boundary and the fork consequence. The canary
+  step for fork PRs now covers a queued fork PR.
+- The first version reused the bare repository guard. That guard is false on a
+  merge group, so the licensed job would skip and the queue would stall. The
+  guard now must contain the event-name term.
+- The first version ignored the trigger configuration. It now checks `types`
+  and `branches`, so a filter that never fires for a protected branch is
+  refused.
+- `workflowDeclaresEvent` now reuses the one `on:` traversal instead of a
+  second copy.
+- Test cases became subtests with names, and the duplicate classifier diff
+  tests became one table.
 
 ## Validation
 
 - `go test ./...`, `go test -race ./internal/enrollment ./cmd/audit-unity-enrollment`,
   `go vet ./...`: pass.
 - `node --test test/unity-change-classifier.test.js test/action-manifests.test.js`:
-  71 tests pass.
-- `node --test test/*.test.js`: 1036 tests, 1010 pass, 23 fail. They are the
+  69 tests pass.
+- `node --test test/*.test.js`: 1034 tests, 1008 pass, 23 fail. They are the
   same 23 cases on the baseline commit; this change adds no failure.
 - `node tools/llm-harness.mjs check`, both `go mod verify` runs, both
   `go mod tidy -diff` runs, `bash tools/workflows/ci.sh javascript`, and

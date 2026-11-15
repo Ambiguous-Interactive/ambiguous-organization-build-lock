@@ -19,11 +19,13 @@ or writer App. The current inventory is recorded in
    The registry must set `allowSchedule: true`. An absent value is false.
    Fork and Dependabot PRs must remain
    unlicensed because organization secrets are unavailable. A merge queue entry
-   is trusted because only a user with write access can add a pull request to
-   the queue, and a writer can already run licensed work from a same-repository
-   pull request. The licensed job keeps its same-repository guard: its
-   event-name term is true for a merge group, which has no pull request payload
-   to compare.
+   is different: it runs the queued diff, including a fork pull request diff,
+   with organization secrets once a writer adds it to the queue. That write
+   action is the trust boundary. A writer can already push the same commits to a
+   same-repository branch, so the trusted principals do not grow. The licensed
+   job keeps its same-repository guard, and the guard must keep its event-name
+   term: without it the job is false on a merge group, which has no pull request
+   payload to compare.
 3. Add the candidate to the reviewed central consumer registry and continuous
    audit. That audit must read the exact default-branch commit and fail closed
    on incomplete retrieval.
@@ -586,10 +588,14 @@ payload:
 
 The classifier reads the same base-to-head diff for both triggers. On a pull
 request the first operand answers. On a merge group the pull request payload is
-absent, so the merge group operand answers. The audit refuses pull request only
-revisions in a workflow that listens for a merge group, so an unusable queue
-shape cannot pass review. A merge group diff also holds the changes from the
-queue entries ahead of it, so the classification stays conservative.
+absent, so the merge group operand answers. In the five-job typed validation
+shape, the audit refuses pull request only revisions in a workflow that listens
+for a merge group, so an unusable queue shape cannot pass review. A merge group
+diff also holds the changes from the queue entries ahead of it, so the
+classification stays conservative. On the trigger, the audit admits only an
+absent filter, `types: [checks_requested]`, and `branches` that name protected
+branches. `branches-ignore` is refused, because it could keep the required
+context from a queue entry.
 
 ## Finding codes
 
@@ -819,7 +825,10 @@ Before enforcing the aggregate as required:
 6. Confirm no holder, quarantine, or global incident remains after normal
    cleanup and cooldown expiry.
 7. Confirm a fork PR receives no organization credentials and follows the
-   explicit unlicensed aggregate policy.
+   explicit unlicensed aggregate policy. A queued fork PR is different: the
+   merge group run holds organization secrets once a writer enqueues it.
+   Confirm the team accepts that write-access boundary before a licensed
+   workflow enables a merge queue.
 8. Confirm the reaper can read the repository's workflow-run status and the
    policy audit can read its exact workflow commit.
 9. Confirm the exact aggregate context and issuing App in the repository
