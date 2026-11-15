@@ -649,8 +649,8 @@ async function classifyPush(overrides = {}) {
   const unityRequired = await run({
     eventName: "push",
     baseSHA: "",
-    headSHA: overrides.headSHA ?? PUSHED_SHA,
-    githubSHA: overrides.githubSHA ?? "",
+    headSHA: overrides.headSHA ?? "",
+    githubSHA: overrides.githubSHA ?? PUSHED_SHA,
     outputPath,
     incrementalValidation: overrides.incrementalValidation ?? "true",
     githubToken: "token",
@@ -687,6 +687,15 @@ test("push incremental validation skips only a tree a successful pull request ru
       name: "GITHUB_SHA supplies the pushed revision",
       overrides: {
         headSHA: "",
+        githubSHA: PUSHED_SHA,
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
+      expected: false
+    },
+    {
+      name: "a caller-supplied head revision is ignored",
+      overrides: {
+        headSHA: SECOND_RECORD_SHA,
         githubSHA: PUSHED_SHA,
         trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },

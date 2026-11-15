@@ -439,9 +439,10 @@ async function run({
   }
   if (event === "push") {
     /*
-       The push tree is the pushed commit itself. A caller supplies no head revision on a push,
-       so the runner's own GITHUB_SHA answers; a value that is not a full commit SHA fails closed
-       before any lookup.
+       The push tree is the pushed commit itself. The runner's own GITHUB_SHA is the only source:
+       a pull request expression is empty on a push, and a caller-supplied revision must not name
+       a tree the push did not write. A value that is not a full commit SHA fails closed before
+       any lookup.
     */
     if (text(incrementalValidation) !== "true") {
       log("Unity validation required: a push has no pull request diff to classify.");
@@ -451,7 +452,7 @@ async function run({
       const unityRequired = await pushIncrementalDecision({
         repository: text(repository),
         workflowRef: text(workflowRef),
-        headSHA: text(headSHA) || text(githubSHA),
+        headSHA: text(githubSHA),
         runID: text(runID),
         request,
         log

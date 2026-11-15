@@ -89,14 +89,15 @@ push `4bf18ba8` was the second newest record, and the newest push
 
 ## Tests
 
-- `test/unity-change-classifier.test.js`: a data table covers twelve push
-  outcomes: a matching tree, a different tree, the `GITHUB_SHA` fallback, no
-  revision, the current run, a record without a commit, a fork record, a
-  Dependabot record, an unreadable history, a failed lookup, and an unreadable
-  record before and after a later match. The pull request table adds the same
-  fork and Dependabot refusals. A further case proves the request shape and
-  that the mode is opt-in. A committed-runtime case proves the mode reaches the
-  action and fails closed before any request.
+- `test/unity-change-classifier.test.js`: a data table covers thirteen push
+  outcomes: a matching tree, a different tree, the `GITHUB_SHA` fallback, a
+  caller-supplied head revision that is ignored, no revision, the current run,
+  a record without a commit, a fork record, a Dependabot record, an unreadable
+  history, a failed lookup, and an unreadable record before and after a later
+  match. The pull request table adds the same fork and Dependabot refusals. A
+  further case proves the request shape and that the mode is opt-in. A
+  committed-runtime case proves the mode reaches the action and fails closed
+  before any request.
 - `node --test test/unity-change-classifier.test.js test/action-manifests.test.js`:
   76 tests pass.
 
