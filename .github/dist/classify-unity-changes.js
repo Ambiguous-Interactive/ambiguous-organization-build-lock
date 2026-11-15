@@ -177,8 +177,9 @@ function appendOutput(outputPath, unityRequired) {
  * THIS branch that is not this run is the record. A successful run of a workflow that carries
  * the central aggregate proves one of two things about its head tree: the licensed job passed,
  * or the trusted classifier proved the tree needed no licensed job. Both make the tree a
- * validated baseline. A run in progress, a failed run, and a run of another workflow prove
- * nothing and are skipped.
+ * validated baseline. A fork or Dependabot run is a trusted skip, so it is refused: it proves no
+ * licensed work. A run in progress, a failed run, and a run of another workflow prove nothing
+ * and are skipped.
  *
  * The comparison is the API's own base-to-head file list, so the runtime keeps its single
  * tree-only git call. Every uncertain answer -- no record, a diverged branch, a truncated file
@@ -303,10 +304,9 @@ async function commitTree(repository, sha, request) {
  * A PUSH HAS NO PULL REQUEST DIFF. A squash merge writes the pull request head tree to the
  * branch, so a push whose tree is identical to a tree a successful pull request run already
  * holds repeats work that run proved unnecessary. The record is still the repository's own run
- * history: any successful pull request run of this workflow validates its head tree, because a
- * successful run either passed the licensed job or proved the tree needed none. Tree equality is
- * exact, so no base or delta reasoning is needed; a different tree, no record, or any failed
- * lookup keeps Unity required.
+ * history: a successful same-repository non-Dependabot pull request run proves its head tree
+ * either passed the licensed job or needed none. Tree equality is exact, so no base or delta
+ * reasoning is needed; a different tree, no record, or any failed lookup keeps Unity required.
  */
 async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID, request, log }) {
   if (!/^[0-9a-f]{40}$/i.test(headSHA)) {
