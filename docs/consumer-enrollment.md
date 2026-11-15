@@ -521,7 +521,9 @@ touches a Dependabot pull request.
    This skipped qualification status does not certify capture success or
    qualify native Unity work. The diagnostic capture job reports its own result.
    Exclude readback dispatch from licensed jobs and final native qualification
-   gates. Keep each licensed job's ordinary trust guard.
+   gates. Each licensed job must include the same exact negated selector as a
+   top-level `&&` term. Central admission checks each licensed job covered by
+   this aggregate exclusion. Keep each licensed job's ordinary trust guard.
 11. Cancel superseded runs for every workflow scope that can terminate a job
     after acquire: a literal `cancel-in-progress: true` on the workflow
     concurrency group. A queued superseded run wastes a paid self-hosted

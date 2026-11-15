@@ -162,6 +162,75 @@ func TestUnityEnrollmentHistoricalReadbackExclusionRejectsOtherAggregateShapes(t
 	}
 }
 
+func TestUnityEnrollmentHistoricalReadbackRequiresLicensedExclusion(t *testing.T) {
+	const trustGuard = "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
+	const licensedGuard = "${{ !(" + readbackSelector + ") && (" + trustGuard + ") }}"
+	for _, tc := range []struct {
+		name, guard string
+		accepted    bool
+	}{
+		{"exact exclusion", licensedGuard, true},
+		{"exclusion after trust guard", "${{ (" + trustGuard + ") && !(" + readbackSelector + ") }}", true},
+		{"additional result guard", "${{ !cancelled() && !(" + readbackSelector + ") && (" + trustGuard + ") && needs.preflight.result == 'success' }}", true},
+		{"original licensed guard", trustGuard, false},
+		{"wrong input", "${{ !(github.event_name == 'workflow_dispatch' && inputs.other-readback-id != '') && (" + trustGuard + ") }}", false},
+		{"quoted empty literal whitespace", "${{ !(github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != ' ') && (" + trustGuard + ") }}", false},
+		{"quoted event whitespace", "${{ !(github.event_name == 'workflow_ dispatch' && inputs.native-readback-run-id != '') && (" + trustGuard + ") }}", false},
+		{"top level OR bypass", "${{ !(" + readbackSelector + ") && (" + trustGuard + ") || true }}", false},
+		{"nested OR bypass", "${{ (!(" + readbackSelector + ") || true) && (" + trustGuard + ") }}", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workflow := strings.Replace(historicalReadbackWorkflow(), "if: "+licensedGuard, "if: "+tc.guard, 1)
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{".github/workflows/unity.yml": workflow}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			rejected := strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate")
+			if rejected == tc.accepted || (tc.accepted && len(result.Findings) != 0) {
+				t.Fatalf("accepted=%t, findings=%#v", tc.accepted, result.Findings)
+			}
+		})
+	}
+}
+
+func TestUnityEnrollmentHistoricalReadbackRequiresEachLicensedLaneExclusion(t *testing.T) {
+	const trustGuard = "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository"
+	const licensedGuard = "${{ !(" + readbackSelector + ") && (" + trustGuard + ") }}"
+	base := historicalReadbackWorkflow()
+	licensedStart := strings.Index(base, "  unity:\n")
+	aggregateStart := strings.Index(base, "  aggregate:\n")
+	otherLicensed := strings.Replace(base[licensedStart:aggregateStart], "  unity:\n", "  other-unity:\n", 1)
+	otherAggregate := strings.NewReplacer("  aggregate:\n", "  other-aggregate:\n", "needs: [preflight, unity]", "needs: [preflight, other-unity]", "needs.unity.result", "needs.other-unity.result").Replace(base[aggregateStart:])
+	for _, missing := range []bool{false, true} {
+		t.Run("other-lane-missing="+boolText(missing), func(t *testing.T) {
+			other := otherLicensed
+			if missing {
+				other = strings.Replace(other, "if: "+licensedGuard, "if: "+trustGuard, 1)
+			}
+			workflow := base + other + otherAggregate
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{".github/workflows/unity.yml": workflow}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !missing && len(result.Findings) != 0 {
+				t.Fatalf("guarded lanes rejected: %#v", result.Findings)
+			}
+			found := false
+			for _, finding := range result.Findings {
+				if finding.Code == "missing-unity-aggregate" {
+					if finding.Job != "other-unity" {
+						t.Fatalf("wrong licensed lane rejected: %#v", result.Findings)
+					}
+					found = true
+				}
+			}
+			if found != missing {
+				t.Fatalf("unguarded=%t, findings=%#v", missing, result.Findings)
+			}
+		})
+	}
+}
+
 func boolText(value bool) string {
 	if value {
 		return "true"

@@ -5010,6 +5010,7 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 		job := jobs.Content[index+1]
 		always := conditionIsSafeAlways(mappingValue(job, "if"))
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
+			(!always && !historicalReadbackLicensedJobExcluded(licensedJobNode)) ||
 			unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 			!criticalNodeFailurePropagates(job) {
 			continue
@@ -6104,6 +6105,25 @@ func exactReadbackExpression(value *yaml.Node, expression string) bool {
 		compact.WriteRune(character)
 	}
 	return compact.String() == "${{"+expression+"}}"
+}
+
+// A diagnostic aggregate cannot hide licensed work that still runs on readback.
+func historicalReadbackLicensedJobExcluded(job *yaml.Node) bool {
+	condition := mappingValue(job, "if")
+	if condition == nil || condition.Kind != yaml.ScalarNode {
+		return false
+	}
+	terms, topLevelOr := conditionTerms(condition.Value)
+	if topLevelOr {
+		return false
+	}
+	const exclusion = "!(github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!='')"
+	for _, term := range terms {
+		if normalizeConditionTerm(term) == exclusion {
+			return true
+		}
+	}
+	return false
 }
 
 // Only explicit diagnostic dispatch can skip an otherwise always-running gate.
