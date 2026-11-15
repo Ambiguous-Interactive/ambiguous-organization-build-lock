@@ -1,26 +1,38 @@
 {
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
-  "holder": null,
-  "holders": [],
-  "queue": [],
-  "reservations": [
+  "holder": {
+    "holderId": "Ambiguous-Interactive/IshoBoy:43748372249:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "43748372249",
+    "runAttempt": "1",
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/43748372249",
+    "queuedAt": "2026-11-15T18:53:15.178Z",
+    "acquiredAt": "2026-11-15T18:53:17.725Z",
+    "expiresAt": "2026-11-15T22:53:17.725Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "132916690001"
+  },
+  "holders": [
     {
-      "reservationId": "c95056b1-a2ce-4817-be0c-ef973819520a",
-      "holderId": "Ambiguous-Interactive/DoxReloaded:43748747537:unity-tests:unity-tests",
-      "repository": "Ambiguous-Interactive/DoxReloaded",
-      "workflow": "Build and Deploy",
-      "job": "unity-tests",
-      "runId": "43748747537",
+      "holderId": "Ambiguous-Interactive/IshoBoy:43748372249:unity-validation:isho-ci",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Unity CI Validation",
+      "job": "unity-validation",
+      "runId": "43748372249",
       "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DoxReloaded/actions/runs/43748747537",
-      "runnerId": "ELI-MACHINE",
-      "state": "cooldown",
-      "reason": "cleanup-confirmed",
-      "createdAt": "2026-11-15T18:53:07.103Z",
-      "availableAt": "2026-11-15T18:53:08.103Z"
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/43748372249",
+      "queuedAt": "2026-11-15T18:53:15.178Z",
+      "acquiredAt": "2026-11-15T18:53:17.725Z",
+      "expiresAt": "2026-11-15T22:53:17.725Z",
+      "runnerId": "DAD-MACHINE",
+      "jobId": "132916690001"
     }
   ],
+  "queue": [],
+  "reservations": [],
   "activeIncident": null,
-  "updatedAt": "2026-11-15T18:53:07.104Z"
+  "updatedAt": "2026-11-15T18:53:17.726Z"
 }
