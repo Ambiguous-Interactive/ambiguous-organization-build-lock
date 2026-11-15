@@ -384,6 +384,46 @@ runs:
 		}
 	})
 
+	t.Run("a pinned needed preflight owns the cause", func(t *testing.T) {
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			preflightActionRef,
+			lockActionPrefix+"check-unity-runner-availability@"+unapprovedSHA,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:preflight") {
+			t.Fatalf("the pinned preflight was not named: %#v", result.Findings)
+		}
+		if strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("a pinned preflight must not also read as a missing one: %#v", result.Findings)
+		}
+	})
+
+	t.Run("an unrelated pinned preflight does not withhold coverage", func(t *testing.T) {
+		workflow := unityWorkflow(centralReturnSteps(), "") + `  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
+`
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("an unrelated preflight pin withheld a coverage verdict: %#v", result.Findings)
+		}
+	})
+
 	t.Run("independent findings still report", func(t *testing.T) {
 		workflow := strings.Replace(base, acquireActionRef(),
 			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA, 1)

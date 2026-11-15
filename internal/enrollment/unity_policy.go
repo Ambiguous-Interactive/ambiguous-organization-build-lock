@@ -836,7 +836,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			a.analyzer.add(centralTrustCode, workflowPath, jobName)
 		}
 		a.auditAcquireOrder(workflowPath, jobName, firstAcquire, firstActivation)
-		if !a.preflightCandidatePinned(jobs) {
+		if !a.neededPreflightPinned(job, jobs) {
 			a.auditIndependentCoverage(
 				workflow, jobs, workflowPath, jobName, job, preflightJobs, protectedBranches,
 			)
@@ -923,25 +923,9 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 			a.analyzer.add("cleanup-gate-before-release", workflowPath, jobName)
 		}
 	}
-	if selfHostedJob(job) && !needsAny(job, preflightJobs) {
-		a.analyzer.add("missing-runner-preflight", workflowPath, jobName)
-	}
-	if aggregateName, aggregateJob, ok := a.hasAggregate(
-		workflow,
-		workflowPath,
-		jobs,
-		jobName,
-		job,
-		preflightJobs,
-	); !ok {
-		a.analyzer.add("missing-unity-aggregate", workflowPath, jobName)
-	} else {
-		a.auditAggregateGateReporting(
-			workflow,
-			workflowPath,
-			aggregateName,
-			aggregateJob,
-			protectedBranches,
+	if !a.neededPreflightPinned(job, jobs) {
+		a.auditIndependentCoverage(
+			workflow, jobs, workflowPath, jobName, job, preflightJobs, protectedBranches,
 		)
 	}
 }
@@ -1006,14 +990,33 @@ func (a *unityPolicyAnalyzer) auditIndependentCoverage(
 	)
 }
 
-// preflightCandidatePinned reports whether a job that names the preflight
-// action pins it at a mutable or unauthorized reference. That job receives its
-// own pin finding, so a licensed job's coverage verdict must not also name a
-// preflight that is present.
-func (a *unityPolicyAnalyzer) preflightCandidatePinned(jobs *yaml.Node) bool {
-	for index := 0; index < len(jobs.Content); index += 2 {
-		job := jobs.Content[index+1]
-		for _, step := range sequenceValues(mappingValue(job, "steps")) {
+// neededPreflightPinned reports whether a job this job needs names the
+// preflight action at a mutable or unauthorized reference. That job receives
+// its own pin finding, so this job's coverage verdict must not also name a
+// preflight that is present. A needed job without the preflight action keeps
+// the verdict, because the preflight is genuinely absent.
+func (a *unityPolicyAnalyzer) neededPreflightPinned(job, jobs *yaml.Node) bool {
+	needs := mappingValue(job, "needs")
+	if needs == nil {
+		return false
+	}
+	candidates := make([]string, 0, 1)
+	switch needs.Kind {
+	case yaml.ScalarNode:
+		candidates = append(candidates, needs.Value)
+	case yaml.SequenceNode:
+		for _, value := range needs.Content {
+			if value.Kind == yaml.ScalarNode {
+				candidates = append(candidates, value.Value)
+			}
+		}
+	}
+	for _, name := range candidates {
+		candidate := mappingValue(jobs, name)
+		if candidate == nil {
+			continue
+		}
+		for _, step := range sequenceValues(mappingValue(candidate, "steps")) {
 			uses := stepUses(step)
 			if lockActionName(uses) != preflightAction {
 				continue

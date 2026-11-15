@@ -625,7 +625,7 @@ edits.
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
-| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. When a licensed job pins an unauthorized or mutable central action, the audit reports this cause and does not judge that job's lifecycle shape. Repin first. |
+| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. Every related job that pins a central action at an unauthorized or mutable reference is named. A licensed job also stops the shape checks that rest on that identity. |
 | `unbounded-unity-editor-check` | Give the editor gate a timeout of 10 minutes or less. See item 3. |
 | `unexpected-fallback-step` | Keep only the approved release action in the fallback job. See item 8. |
 | `unity-editor-check-after-credentials` | Run the editor gate before any credential reference. See item 3. |

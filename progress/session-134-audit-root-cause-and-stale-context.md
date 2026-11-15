@@ -52,7 +52,7 @@ clean: the unauthorized pin is still reported, and the audit still fails.
   `release-inputs-not-typed`, `cleanup-gate-inputs-not-typed`,
   `missing-runner-preflight`, or `missing-unity-aggregate`.
 - Coverage verdicts read other jobs, so they still report, unless a preflight
-  candidate itself carries the pin. In that case its own pin finding names the
+  job this job needs carries the pin. In that case its own pin finding names the
   cause.
 - Findings that do not rest on this job's identity still report: runner labels,
   workflow and job queue direction, matrix fail-fast, job credentials,
@@ -87,8 +87,9 @@ dispositions:
   steps, and a two-job regression test pins the behavior.
 - Non-paid jobs with an unauthorized pin stayed silent; the scan now names them.
 - The first version also withheld preflight and aggregate verdicts, which read
-  other jobs. Those verdicts now report, except when a preflight candidate
-  itself carries the pin and has its own finding.
+  other jobs. Those verdicts now report, except when a preflight job this job
+  needs carries the pin and has its own finding. A regression test covers both
+  the needed and the unrelated preflight case.
 - The first `qora-redux` change exempted the repository and lost all gate
   coverage. The reviewed contexts now name its real live gates instead.
 - The trust scan folds the repository spelling, and a composite regression test
