@@ -49,8 +49,7 @@ clean: the unauthorized pin is still reported, and the audit still fails.
   (`unapproved-lock-ref` or `mutable-action-ref`) and stops. It does not also
   report `missing-unity-editor-check`, `missing-cleanup-classifier`,
   `classifier-not-always`, `missing-unity-return`, `unsafe-central-return-suffix`,
-  `release-inputs-not-typed`, `cleanup-gate-inputs-not-typed`,
-  `missing-runner-preflight`, or `missing-unity-aggregate`.
+  `release-inputs-not-typed`, or `cleanup-gate-inputs-not-typed`.
 - Coverage verdicts read other jobs, so they still report. They are withheld
   only when a needed job pins the preflight action and no trusted preflight
   candidate settles coverage. That job's own pin finding names the cause.

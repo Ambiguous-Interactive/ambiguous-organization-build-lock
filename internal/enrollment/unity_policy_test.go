@@ -432,8 +432,9 @@ runs:
 	})
 
 	t.Run("an approved needed preflight settles coverage", func(t *testing.T) {
+		base := unityWorkflow(centralReturnSteps(), "")
 		workflow := strings.Replace(
-			unityWorkflow(centralReturnSteps(), ""),
+			base,
 			"    needs: preflight\n",
 			"    needs: [preflight, extra]\n",
 			1,
@@ -442,6 +443,9 @@ runs:
     steps:
       - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
 `
+		if !strings.Contains(workflow, "    needs: [preflight, extra]\n") {
+			t.Fatal("mutation did not change workflow")
+		}
 		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 			".github/workflows/unity.yml": workflow,
 		}), unityAuditPolicy())
