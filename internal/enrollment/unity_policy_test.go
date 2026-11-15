@@ -332,6 +332,33 @@ func TestUnityEnrollmentReportsOneRootCauseForAnUnauthorizedCentralPin(t *testin
 		})
 	}
 
+	t.Run("a local composite cannot hide a central pin", func(t *testing.T) {
+		workflow := strings.Replace(
+			base,
+			"      - id: acquire\n",
+			"      - uses: ./.github/actions/wrapped-guard\n      - id: acquire\n",
+			1,
+		)
+		if workflow == base {
+			t.Fatal("mutation did not change workflow")
+		}
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			".github/actions/wrapped-guard/action.yml": `name: Wrapped guard
+runs:
+  using: composite
+  steps:
+    - uses: ` + lockActionPrefix + `require-current-pr-head@` + unapprovedSHA + `
+`,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Findings) != 1 || result.Findings[0].Code != "unapproved-lock-ref" {
+			t.Fatalf("a composite central pin must report one root cause: %#v", result.Findings)
+		}
+	})
+
 	t.Run("independent findings still report", func(t *testing.T) {
 		workflow := strings.Replace(base, acquireActionRef(),
 			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA, 1)

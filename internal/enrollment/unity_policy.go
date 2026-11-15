@@ -700,7 +700,7 @@ func (a *unityPolicyAnalyzer) auditPaidJob(
 	// trustworthy, and each downstream code would name a shape that is already
 	// present. The audit reports the one root cause instead, so the operator
 	// repins once rather than reshaping a workflow that is already correct.
-	trustedCentral, centralTrustCode := a.centralReferenceTrust(workflow)
+	trustedCentral, centralTrustCode := a.centralReferenceTrust(workflow, steps)
 	a.auditUnityEditorCheck(workflowPath, jobName, workflow, job, steps, trustedCentral)
 	firstAcquire, firstActivation, lastActivation, unityReturn := -1, -1, -1, -1
 	acquireCount, returnActionCount := 0, 0
@@ -961,7 +961,25 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 // the workflow unprovable. The returned code names the class to fix: a mutable
 // reference needs your own review, and an unauthorized commit needs a release
 // that the policy lists.
-func (a *unityPolicyAnalyzer) centralReferenceTrust(node *yaml.Node) (bool, string) {
+//
+// The walk covers every `uses:` key in the workflow and the flattened steps of
+// the audited job, so a local composite action cannot hide a central pin.
+func (a *unityPolicyAnalyzer) centralReferenceTrust(
+	workflow *yaml.Node,
+	steps []flattenedUnityStep,
+) (bool, string) {
+	if trusted, code := a.centralNodeTrust(workflow); !trusted {
+		return false, code
+	}
+	for _, step := range steps {
+		if trusted, code := a.centralUsesTrust(stepUses(step.node)); !trusted {
+			return false, code
+		}
+	}
+	return true, ""
+}
+
+func (a *unityPolicyAnalyzer) centralNodeTrust(node *yaml.Node) (bool, string) {
 	if node == nil {
 		return true, ""
 	}
@@ -972,23 +990,30 @@ func (a *unityPolicyAnalyzer) centralReferenceTrust(node *yaml.Node) (bool, stri
 				value.Kind != yaml.ScalarNode {
 				continue
 			}
-			uses := strings.TrimSpace(value.Value)
-			if !strings.HasPrefix(uses, lockActionPrefix) {
-				continue
-			}
-			ref := strings.ToLower(actionRef(uses))
-			if !isSHA(ref) {
-				return false, "mutable-action-ref"
-			}
-			if !a.approved[ref] {
-				return false, "unapproved-lock-ref"
+			if trusted, code := a.centralUsesTrust(value.Value); !trusted {
+				return false, code
 			}
 		}
 	}
 	for _, child := range node.Content {
-		if trusted, code := a.centralReferenceTrust(child); !trusted {
+		if trusted, code := a.centralNodeTrust(child); !trusted {
 			return false, code
 		}
+	}
+	return true, ""
+}
+
+func (a *unityPolicyAnalyzer) centralUsesTrust(uses string) (bool, string) {
+	uses = strings.TrimSpace(uses)
+	if !strings.HasPrefix(uses, lockActionPrefix) {
+		return true, ""
+	}
+	ref := strings.ToLower(actionRef(uses))
+	if !isSHA(ref) {
+		return false, "mutable-action-ref"
+	}
+	if !a.approved[ref] {
+		return false, "unapproved-lock-ref"
 	}
 	return true, ""
 }
