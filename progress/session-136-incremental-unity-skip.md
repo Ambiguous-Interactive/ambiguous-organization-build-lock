@@ -125,13 +125,40 @@ first.
   `go mod tidy -diff` runs: pass.
 - `node --test test/action-manifests.test.js test/unity-change-classifier.test.js`:
   72 tests pass.
-- `node --test test/*.test.js`: 1037 tests, 1011 pass, 23 fail. The 23 are
+- `node --test test/*.test.js`: 1038 tests, 1012 pass, 23 fail. The 23 are
   the same baseline cases; this change adds none.
 - `node tools/llm-harness.mjs check`, `bash tools/workflows/ci.sh syntax`,
   `bash tools/workflows/ci.sh javascript`, and
   `go run ./cmd/workflow-credential-audit .`: pass.
 - `actionlint`, `golangci-lint`, and `shellcheck` are not installed on this
   macOS host.
+
+## Review
+
+- CodeRabbit requested two changes. The first was the run-history permission;
+  the action metadata, README, and enrollment contract now name `actions: read`,
+  and the documented classifier job shows the permissions block. The second was
+  the base ancestry; the action now keeps Unity required unless the record is at
+  or after the current base, and two table cases cover it.
+- One CodeRabbit claim was corrected in the thread: the default `GITHUB_TOKEN`
+  already includes `actions: read`, so only a workflow that narrows
+  `permissions` must grant it. The docs state that.
+- CodeRabbit was rate limited after the fix and could not re-review. Its stale
+  changes-requested review was dismissed with that reason. The `main-pr-ci`
+  ruleset requires resolved threads, not an approval.
+- Both threads are answered and resolved.
+
+## Merge and post-merge
+
+- Merged #383 on `main` as `ae7c49a43d` (squash).
+- Build lock CI run `43745004138` is green on that commit.
+- Reap stale build locks `43745058166`, Reaper delivery audit `43745075335`,
+  and Build lock incident recovery audit `43745301559` are green.
+- Organization Unity enrollment audit `43745004131` is green:
+  `Audited 7/7 enrolled repositories; active-jobs=128 findings=25 complete=true`.
+  The 25 findings are the consumer-side items already tracked in #113.
+- No consumer change ships here. Adoption is one classifier step edit per
+  repository, and it does not add a run.
 
 ## Follow-up
 
