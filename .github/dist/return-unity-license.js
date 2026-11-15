@@ -738,6 +738,14 @@ async function run(options = {}) {
     result.terminatedBySignal ||
     result.timedOut
   ) {
+    // An overflow writes no digest and no capture attestation, so the
+    // classifier can only report `cleanup-evidence-unknown`. Name the cause
+    // here, where the return action still knows it (#360).
+    if (result.evidenceOverflow) {
+      (options.warn || console.warn)(
+        "::warning title=Unity return log exceeded capture limit::No digest was written, so the return evidence is incomplete."
+      );
+    }
     throw new Error("Unity return did not complete with bounded successful evidence.");
   }
   if (result.exitCode === 0) {
