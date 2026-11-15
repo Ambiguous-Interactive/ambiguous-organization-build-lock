@@ -102,7 +102,15 @@ safety or a documented no-change path may accept a skipped licensed job.
 Use `classify-unity-changes` in a failure-propagating hosted classifier job; it
 skips licensed work only when every pull-request path is in the central
 Unity-independent allowlist or a caller-declared `independent-paths` prefix,
-and otherwise defaults to requiring Unity. Use
+and otherwise defaults to requiring Unity. A follow-up push that changes no
+Unity path still re-runs the licensed job, because that diff covers the whole
+pull request. The opt-in `incremental-validation` mode closes that gap: it reads
+the repository's own run history for the newest successful run of this workflow
+on this branch, then compares that head with the current one. When every path in
+that delta is independent, Unity is skipped. Every other answer -- no record, a
+rewritten branch, a truncated comparison, a failed request -- keeps Unity
+required. The mode needs `github-token: ${{ github.token }}` and a literal
+`incremental-validation: true`; the audit refuses any other pairing. Use
 `require-unity-validation` for the conditional aggregate and pass exact
 `needs` results, that classifier's boolean output, the trust decision, and the
 hosted fallback release's typed `cleanup-result`. The gate fails closed unless

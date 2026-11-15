@@ -505,6 +505,35 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
+   A pull request keeps one licensed run per tree it validates. Its
+   base-to-head diff covers the whole pull request, so a follow-up push that
+   changes no Unity path repeats a licensed run the previous run already
+   proved unnecessary. The opt-in `incremental-validation` mode removes that
+   repeat without widening what a pull request can claim:
+
+   ```yaml
+       with:
+         event-name: ${{ github.event_name }}
+         base-sha: ${{ github.event.pull_request.base.sha }}
+         head-sha: ${{ github.event.pull_request.head.sha }}
+         incremental-validation: true
+         github-token: ${{ github.token }}
+   ```
+
+   The record is the repository's own run history, not a pull request input.
+   The action reads the newest successful run of this workflow on this branch
+   that is not the current run, and compares that head with the current head
+   through the comparison API. A successful run of a workflow that carries
+   this aggregate proves its head tree either passed the licensed job or needed
+   none. Unity is skipped only when every path in the delta is independent.
+   No record, a diverged branch, a truncated file list, and a failed request
+   all keep Unity required. The mode is a literal on purpose: a pull request
+   cannot name its own baseline, and the audit accepts `github-token` only as
+   `${{ github.token }}`, never as a literal or another secret. A token without
+   the mode, or the mode without the token, is refused. The aggregate needs no
+   change, because it already consumes the one boolean the classifier reports.
+   A merge group keeps the whole-diff answer: it has no pull request branch to
+   read a record from.
    An isolated Bash aggregate may skip an explicit manual historical readback.
    Keep its existing four environment bindings and trusted-skip result script.
    Use this exact job guard:
@@ -592,7 +621,10 @@ The classifier reads commits and trees, and no file contents. So its checkout
 may add `filter: blob:none` and `sparse-checkout: .github`, each with exactly
 that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
-step that reads other files, such as the rule-line check above.
+step that reads other files, such as the rule-line check above. With
+`incremental-validation` the action also reads this repository's run history
+and one comparison through the API. That read stays outside the checkout, so
+the sparse clone still serves it, and the action still reads no file contents.
 
 A workflow that also listens for a merge queue must add `merge_group` to `on:`
 and pass the merge group revisions, because a merge group has no pull request
