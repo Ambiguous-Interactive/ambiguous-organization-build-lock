@@ -121,6 +121,8 @@ the text match the code.
   The enrollment audit (`43675412968`) reports no DxAudio finding at that
   commit, and the merge-policy audit (`43675382033`) is complete with no
   DxAudio finding.
-- Follow-up: #369 records the analyzer false positive that keeps the enrollment
-  audit incomplete for a local action under a checkout `path:`.
+- Follow-up: #369 is fixed by #372 at `abe0f0a907`. The enrollment audit
+  (`43676607331`) is now complete with `complete=true` and no DxAudio finding.
+- DxAudio `main` advanced to `ffea43cb` after the merge, and its `Unity Tests`
+  run on that head passed. Onboarding is live, not just merged.
 
