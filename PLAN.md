@@ -29,3 +29,5 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Dependabot pin drift (#375): decide between consumer Dependabot
   configuration and a new central pull-request gate; both need a reviewed
   shape.
+- Merge queue adoption (#379): repin DoxReloaded, add `merge_group`, and enable
+  the queue after the next authorized release.

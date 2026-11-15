@@ -125,8 +125,26 @@ release after #358, #361, and #362.
   `go run ./cmd/workflow-credential-audit .`: pass.
 - `golangci-lint` and `shellcheck` are not installed on this macOS host.
 
+## Review
+
+- CodeRabbit requested two changes. The docs snippet became only the inputs
+  to replace. The merge group guard now requires the event-name term. Both
+  threads are resolved.
+- No other review comment remained.
+
+## Merge and post-merge
+
+- Merged #378 on `main` as `9c4fab47e2`.
+- Build lock CI run `43687521938` is green on that commit.
+- Enrollment audit run `43687521912` is green: 32 findings over 129 active
+  rows. No merge group finding appears, because no consumer adopted the
+  trigger yet.
+- `Auto release` runs weekly. Its next run cuts the release and opens the
+  authorization pull request. The release authorization stays a reviewed
+  human decision.
+- #377 is closed. #379 tracks consumer adoption after that release.
+
 ## Follow-up
 
 - Consumer adoption: DoxReloaded still has to add `merge_group` to its licensed
-  workflow and pass the merge group revisions. That is a consumer change after
-  the next authorized central release, not central work.
+  workflow and pass the merge group revisions. #379 records the exact steps.
