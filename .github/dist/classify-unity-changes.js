@@ -301,12 +301,14 @@ async function commitTree(repository, sha, request) {
 }
 
 /*
- * A PUSH HAS NO PULL REQUEST DIFF. A squash merge writes the pull request head tree to the
- * branch, so a push whose tree is identical to a tree a successful pull request run already
- * holds repeats work that run proved unnecessary. The record is still the repository's own run
- * history: a successful same-repository non-Dependabot pull request run proves its head tree
- * either passed the licensed job or needed none. Tree equality is exact, so no base or delta
- * reasoning is needed; a different tree, no record, or any failed lookup keeps Unity required.
+ * A PUSH HAS NO PULL REQUEST DIFF. A squash merge writes the merged tree to the branch, so a push
+ * whose tree equals a pull request head tree repeats work only when the licensed run tested that
+ * tree. Two facts make that true: the tree is equal, and the run started at or after the merged
+ * pull request base existed. The second fact is needed because a pull request checks out either
+ * its head or its merge ref; with the final base in place, both are that head tree whenever the
+ * final merge result equals the head tree. A run that started before the base moved tested a
+ * different tree, so it is not a record. The associated merged pull request names the base; a
+ * direct push names none and keeps Unity required.
  */
 async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID, request, log }) {
   if (!/^[0-9a-f]{40}$/i.test(headSHA)) {
@@ -314,6 +316,27 @@ async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID
   }
   const name = workflowFile(workflowRef, repository);
   const pushedTree = await commitTree(repository, headSHA, request);
+  const pulls = await request(`/repos/${repository}/commits/${headSHA}/pulls`);
+  if (!Array.isArray(pulls)) {
+    throw failClosed("the pushed commit's pull requests are not a list");
+  }
+  const pull = pulls.find((candidate) =>
+    text(candidate?.merged_at) !== "" &&
+    text(candidate?.merge_commit_sha).toLowerCase() === headSHA.toLowerCase()
+  );
+  if (pull === undefined) {
+    throw failClosed("the pushed commit is not a merged pull request");
+  }
+  const pullHeadSHA = text(pull?.head?.sha).toLowerCase();
+  const baseSHA = text(pull?.base?.sha).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(pullHeadSHA) || !/^[0-9a-f]{40}$/.test(baseSHA)) {
+    throw failClosed("the merged pull request has no full revisions");
+  }
+  const base = await request(`/repos/${repository}/git/commits/${baseSHA}`);
+  const baseTime = Date.parse(text(base?.committer?.date));
+  if (Number.isNaN(baseTime)) {
+    throw failClosed("the merged pull request base has no commit time");
+  }
   const history = await request(
     `/repos/${repository}/actions/workflows/${encodeURIComponent(name)}/runs`
     + `?event=pull_request&status=success&per_page=${PUSH_RECORD_RUN_LIMIT}`
@@ -326,7 +349,15 @@ async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID
       continue;
     }
     const sha = typeof record.head_sha === "string" ? record.head_sha.toLowerCase() : "";
-    if (!/^[0-9a-f]{40}$/.test(sha)) {
+    if (!/^[0-9a-f]{40}$/.test(sha) || sha !== pullHeadSHA) {
+      continue;
+    }
+    /*
+       A run that started before the merged base existed tested an earlier merge tree. It cannot
+       prove the pushed tree, even when its head tree matches.
+    */
+    const started = Date.parse(text(record.run_started_at) || text(record.created_at));
+    if (Number.isNaN(started) || started < baseTime) {
       continue;
     }
     let tree;
@@ -345,7 +376,7 @@ async function pushIncrementalDecision({ repository, workflowRef, headSHA, runID
       return false;
     }
   }
-  log("Unity validation required: no successful run holds the pushed tree.");
+  log("Unity validation required: no run after the merged base holds the pushed tree.");
   return true;
 }
 

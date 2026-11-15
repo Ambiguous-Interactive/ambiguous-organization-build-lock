@@ -107,17 +107,20 @@ Unity path still re-runs the licensed job, because that diff covers the whole
 pull request. The opt-in `incremental-validation` mode closes that gap: on a
 pull request it reads the repository's own run history for the newest
 successful run of this workflow on this branch, then compares that head with
-the current one; on a push it compares the pushed tree with the head tree of
-each recent successful pull request run. A push whose tree a successful run
-already holds is skipped. A run from a fork or Dependabot is refused as a
-record, because its licensed job is a trusted skip. When every path in a pull
-request delta is independent and the record is at or after the current base,
-Unity is skipped.
+the current one; on a push it finds the merged pull request and compares the
+pushed tree with the head tree of each recent successful pull request run. A
+push whose tree a successful run already holds is skipped only when that run
+started at or after the merged base existed. A run from a fork or Dependabot is
+refused as a record, because its licensed job is a trusted skip. When every path
+in a pull request delta is independent and the record is at or after the current
+base, Unity is skipped.
 Every other answer -- no record, a different tree, a base that moved past the
-record, a rewritten branch, a truncated comparison, a failed request -- keeps
-Unity required. The mode needs `github-token: ${{ github.token }}` and a literal
-`incremental-validation: true`; the audit refuses any other pairing. Its job
-needs `actions: read`, which the default token grants. Use
+record, a direct push, a rewritten branch, a truncated comparison, a failed
+request -- keeps Unity required. The mode needs `github-token:
+${{ github.token }}` and a literal `incremental-validation: true`; the audit
+refuses any other pairing. Its job needs `actions: read` for run history,
+`contents: read` for commit trees, and `pull-requests: read` for the merged pull
+request lookup. The default token grants all three. Use
 `require-unity-validation` for the conditional aggregate and pass exact
 `needs` results, that classifier's boolean output, the trust decision, and the
 hosted fallback release's typed `cleanup-result`. The gate fails closed unless

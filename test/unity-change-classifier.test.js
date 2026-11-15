@@ -603,41 +603,68 @@ test("incremental validation refuses a workflow reference that names another rep
 });
 
 /*
- * A PUSH HAS NO DIFF. A squash merge writes the pull request head tree to the branch, so a push
- * whose tree equals a successful pull request run's head tree repeats work that run already
- * proved unnecessary. The record is the run history, and exact tree equality is the whole
- * question: no base, no delta, and no file list.
+ * A PUSH HAS NO DIFF. A squash merge writes the merged tree to the branch. A run proves that tree
+ * only when its tree matches and it started at or after the merged base existed, because a pull
+ * request checkout may be the merge ref. The associated merged pull request names the base, and
+ * the run history supplies the timing.
  */
 const PUSHED_SHA = "3".repeat(40);
 const RECORD_PR_SHA = "4".repeat(40);
 const SECOND_RECORD_SHA = "7".repeat(40);
+const BASE_SHA = "8".repeat(40);
 const PUSHED_TREE = "5".repeat(40);
 const OTHER_TREE = "6".repeat(40);
+const BASE_TIME = "2026-11-15T09:00:00Z";
+const RUN_TIME = "2026-11-15T17:00:00Z";
+
+function pushRecord(sha, id = 1, extra = {}) {
+  return {
+    id,
+    head_sha: sha,
+    head_branch: "feature",
+    head_repository: { full_name: "Ambiguous-Interactive/consumer" },
+    actor: { login: "maintainer" },
+    run_started_at: RUN_TIME,
+    ...extra
+  };
+}
 
 async function classifyPush(overrides = {}) {
   const requests = [];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-push-"));
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const outputPath = path.join(root, "output.txt");
+  const pullHeadSHA = overrides.pullHeadSHA ?? RECORD_PR_SHA;
+  const pull = {
+    merged_at: RUN_TIME,
+    merge_commit_sha: PUSHED_SHA,
+    head: { sha: pullHeadSHA },
+    base: { sha: BASE_SHA },
+    ...overrides.pull
+  };
   const request = async (requestPath) => {
     requests.push(requestPath);
     if (overrides.requestError) {
       throw overrides.requestError;
     }
     if (requestPath.includes("/actions/workflows/")) {
-      return overrides.history ?? {
-        workflow_runs: [{
-          id: 1,
-          head_sha: overrides.recordSHA ?? RECORD_PR_SHA,
-          head_branch: "feature",
-          head_repository: { full_name: "Ambiguous-Interactive/consumer" },
-          actor: { login: "maintainer" }
-        }]
-      };
+      return overrides.history ?? { workflow_runs: [pushRecord(pullHeadSHA)] };
+    }
+    if (/\/commits\/[0-9a-f]{40}\/pulls$/.test(requestPath)) {
+      return overrides.pulls ?? [pull];
     }
     const commit = /\/git\/commits\/([0-9a-f]{40})$/.exec(requestPath);
     if (commit === null) {
       throw new Error(`unexpected request ${requestPath}`);
+    }
+    if (commit[1] === BASE_SHA) {
+      if (overrides.baseError) {
+        throw new Error("GitHub API responded 404");
+      }
+      return {
+        committer: { date: overrides.baseTime === undefined ? BASE_TIME : overrides.baseTime },
+        tree: { sha: OTHER_TREE }
+      };
     }
     if (overrides.treeErrors?.has(commit[1])) {
       throw new Error("GitHub API responded 404");
@@ -671,22 +698,21 @@ async function classifyPush(overrides = {}) {
   };
 }
 
-test("push incremental validation skips only a tree a successful pull request run holds", async () => {
+test("push incremental validation skips only a tree the merged base and run both cover", async () => {
   for (const { name, overrides, expected } of [
     {
-      name: "a pushed tree a successful pull request run holds",
+      name: "a pushed tree a run after the merged base holds",
       overrides: { trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE } },
       expected: false
     },
     {
-      name: "a pushed tree no successful pull request run holds",
+      name: "a pushed tree no run holds",
       overrides: { trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: OTHER_TREE } },
       expected: true
     },
     {
       name: "GITHUB_SHA supplies the pushed revision",
       overrides: {
-        headSHA: "",
         githubSHA: PUSHED_SHA,
         trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },
@@ -703,34 +729,37 @@ test("push incremental validation skips only a tree a successful pull request ru
     },
     {
       name: "no pushed revision",
-      overrides: { headSHA: "", githubSHA: "" },
+      overrides: { githubSHA: "" },
       expected: true
     },
     {
-      name: "an unreadable record does not hide a later match",
+      name: "a run that started before the merged base",
+      overrides: {
+        baseTime: "2026-11-15T18:00:00Z",
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
+      expected: true
+    },
+    {
+      name: "a later run that started after the merged base",
       overrides: {
         history: {
           workflow_runs: [
-            {
-              id: 1,
-              head_sha: RECORD_PR_SHA,
-              head_branch: "feature",
-              head_repository: { full_name: "Ambiguous-Interactive/consumer" },
-              actor: { login: "maintainer" }
-            },
-            {
-              id: 3,
-              head_sha: SECOND_RECORD_SHA,
-              head_branch: "feature",
-              head_repository: { full_name: "Ambiguous-Interactive/consumer" },
-              actor: { login: "maintainer" }
-            }
+            pushRecord(RECORD_PR_SHA, 1, { run_started_at: "2026-11-15T08:00:00Z" }),
+            pushRecord(RECORD_PR_SHA, 3)
           ]
         },
-        treeErrors: new Set([RECORD_PR_SHA]),
-        trees: { [PUSHED_SHA]: PUSHED_TREE, [SECOND_RECORD_SHA]: PUSHED_TREE }
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },
       expected: false
+    },
+    {
+      name: "a run without a start time",
+      overrides: {
+        history: { workflow_runs: [pushRecord(RECORD_PR_SHA, 1, { run_started_at: "", created_at: "" })] },
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
+      expected: true
     },
     {
       name: "only an unreadable record",
@@ -743,30 +772,16 @@ test("push incremental validation skips only a tree a successful pull request ru
     {
       name: "the current run is not a record",
       overrides: {
-        history: {
-          workflow_runs: [{
-            id: 2,
-            head_sha: RECORD_PR_SHA,
-            head_branch: "feature",
-            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
-            actor: { login: "maintainer" }
-          }]
-        }
+        history: { workflow_runs: [pushRecord(RECORD_PR_SHA, 2)] },
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },
       expected: true
     },
     {
-      name: "a record without a commit",
+      name: "a record on another head",
       overrides: {
-        history: {
-          workflow_runs: [{
-            id: 1,
-            head_sha: "main",
-            head_branch: "feature",
-            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
-            actor: { login: "maintainer" }
-          }]
-        }
+        history: { workflow_runs: [pushRecord(SECOND_RECORD_SHA)] },
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [SECOND_RECORD_SHA]: PUSHED_TREE }
       },
       expected: true
     },
@@ -774,13 +789,10 @@ test("push incremental validation skips only a tree a successful pull request ru
       name: "a successful run from a fork",
       overrides: {
         history: {
-          workflow_runs: [{
-            id: 1,
-            head_sha: RECORD_PR_SHA,
-            head_branch: "feature",
+          workflow_runs: [pushRecord(RECORD_PR_SHA, 1, {
             head_repository: { full_name: "someone/consumer" },
             actor: { login: "someone" }
-          }]
+          })]
         },
         trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },
@@ -790,16 +802,48 @@ test("push incremental validation skips only a tree a successful pull request ru
       name: "a successful Dependabot run",
       overrides: {
         history: {
-          workflow_runs: [{
-            id: 1,
-            head_sha: RECORD_PR_SHA,
+          workflow_runs: [pushRecord(RECORD_PR_SHA, 1, {
             head_branch: "dependabot/nuget/x",
-            head_repository: { full_name: "Ambiguous-Interactive/consumer" },
             actor: { login: "dependabot[bot]" }
-          }]
+          })]
         },
         trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
       },
+      expected: true
+    },
+    {
+      name: "no associated merged pull request",
+      overrides: { pulls: [] },
+      expected: true
+    },
+    {
+      name: "an unmerged pull request",
+      overrides: { pull: { merged_at: "" } },
+      expected: true
+    },
+    {
+      name: "a push that is not the pull request merge commit",
+      overrides: { pull: { merge_commit_sha: SECOND_RECORD_SHA } },
+      expected: true
+    },
+    {
+      name: "a merged pull request without full revisions",
+      overrides: { pull: { base: { sha: "main" } } },
+      expected: true
+    },
+    {
+      name: "a merged pull request base without a commit time",
+      overrides: { baseTime: "not-a-date" },
+      expected: true
+    },
+    {
+      name: "an unreadable merged base",
+      overrides: { baseError: true },
+      expected: true
+    },
+    {
+      name: "a pull request payload that is not a list",
+      overrides: { pulls: {} },
       expected: true
     },
     {
@@ -819,16 +863,18 @@ test("push incremental validation skips only a tree a successful pull request ru
   }
 });
 
-test("push incremental validation reads this workflow and no diff", async () => {
+test("push incremental validation reads this workflow, the merge base, and no diff", async () => {
   const matching = await classifyPush({
     trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
   });
-  assert.equal(matching.requests.length, 3, "one run-history read and two commit trees");
+  assert.equal(matching.requests.length, 5, "two commit trees, the pull request, the base, and the history");
   assert.equal(matching.requests[0], `/repos/Ambiguous-Interactive/consumer/git/commits/${PUSHED_SHA}`);
-  assert.match(matching.requests[1], /\/actions\/workflows\/build-deploy\.yml\/runs\?/);
-  assert.match(matching.requests[1], /event=pull_request/);
-  assert.match(matching.requests[1], /status=success/);
-  assert.equal(matching.requests[2], `/repos/Ambiguous-Interactive/consumer/git/commits/${RECORD_PR_SHA}`);
+  assert.equal(matching.requests[1], `/repos/Ambiguous-Interactive/consumer/commits/${PUSHED_SHA}/pulls`);
+  assert.equal(matching.requests[2], `/repos/Ambiguous-Interactive/consumer/git/commits/${BASE_SHA}`);
+  assert.match(matching.requests[3], /\/actions\/workflows\/build-deploy\.yml\/runs\?/);
+  assert.match(matching.requests[3], /event=pull_request/);
+  assert.match(matching.requests[3], /status=success/);
+  assert.equal(matching.requests[4], `/repos/Ambiguous-Interactive/consumer/git/commits/${RECORD_PR_SHA}`);
 
   // The mode is opt-in: an absent flag keeps Unity required and reads nothing.
   const off = await classifyPush({ incrementalValidation: "" });

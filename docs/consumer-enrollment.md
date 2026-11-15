@@ -535,21 +535,25 @@ touches a Dependabot pull request.
    is a literal on purpose: a pull request cannot name its own baseline, and
    the audit accepts `github-token` only as `${{ github.token }}`, never as a
    literal or another secret. A token without the mode, or the mode without the
-   token, is refused. The classifier job needs `actions: read`; the default
-   token grants it, and a workflow that narrows permissions must grant it. The
+   token, is refused. The classifier job needs `actions: read` for run history,
+   `contents: read` for commit trees, and `pull-requests: read` for the merged
+   pull request lookup. The default token grants all three, and a workflow that
+   narrows permissions must keep them. The
    aggregate needs no change, because it already consumes the one boolean the
    classifier reports. A merge group keeps the whole-diff answer: it has no
    pull request branch to read a record from.
-   A push has no pull request diff. A squash merge writes the pull request head
-   tree to the branch, so the same mode reads the pushed tree from
-   `GITHUB_SHA` and compares it with the head tree of each recent successful
-   pull request run of this workflow. Unity is skipped only on exact tree
-   equality. A different tree, no record, and a failed lookup all keep Unity
+   A push has no pull request diff. A squash merge writes the merged tree to
+   the branch, so the same mode reads the pushed tree from `GITHUB_SHA`, finds
+   the merged pull request that wrote it, and compares the tree with the head
+   tree of each recent successful pull request run of this workflow. Unity is
+   skipped only when the trees are equal and the run started at or after the
+   merged pull request base existed. A run that started before the base moved
+   tested a different merge tree, so it is refused. A different tree, a direct
+   push with no merged pull request, and a failed lookup all keep Unity
    required. A fork and a Dependabot run are refused as records for the same
    reason on a pull request: their licensed job is a trusted skip, not a
-   validation. A push needs no extra input: the mode and
-   `github-token: ${{ github.token }}` are enough, and the job's `actions: read`
-   covers the tree reads.
+   validation. A push needs no extra input: the mode, `github-token:
+   ${{ github.token }}`, and those three read scopes are enough.
    An isolated Bash aggregate may skip an explicit manual historical readback.
    Keep its existing four environment bindings and trusted-skip result script.
    Use this exact job guard:
@@ -599,11 +603,13 @@ also in `approvedDarwinReturnShas`.
 jobs:
   change-classifier:
     runs-on: ubuntu-latest
-    # actions: read is the run-history lookup; contents: read is the checkout.
-    # A workflow-level permissions block must keep both.
+    # actions: read is run history, contents: read is the checkout and commit
+    # trees, and pull-requests: read is the merged pull request lookup.
+    # A workflow-level permissions block must keep all three.
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       unity-required: ${{ steps.classify.outputs.unity-required }}
     steps:
@@ -644,7 +650,7 @@ that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
 step that reads other files, such as the rule-line check above. With
 `incremental-validation` the action also reads this repository's run history,
-one pull request comparison or the pushed tree's commit objects, through the
+commit trees, and the pushed commit's merged pull request and base, through the
 API. That read stays outside the checkout, so the sparse clone still serves
 it, and the action still reads no file contents.
 

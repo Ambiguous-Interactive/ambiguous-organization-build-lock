@@ -54,23 +54,30 @@ The production window was checked against real data. The successful record for
 push `4bf18ba8` was the second newest record, and the newest push
 `2e6a6bcd` had no matching record.
 
-## Change: read the pushed tree against the run records
+## Change: read the pushed tree against a run that covered the merged base
 
 - `.github/dist/classify-unity-changes.js`: on `push`, the incremental mode
-  reads the pushed commit tree from `GITHUB_SHA`, lists the newest 20 successful
-  `pull_request` runs of the same workflow, and compares each run's head tree.
-  Unity is skipped only on exact tree equality.
-- A malformed pushed revision, an unreadable history, and no matching record
+  reads the pushed commit tree from `GITHUB_SHA`, finds the merged pull request
+  whose `merge_commit_sha` is that commit, and reads its base commit time.
+- It lists the newest 20 successful `pull_request` runs of the same workflow.
+  Unity is skipped only when all of these hold: the run started at or after the
+  merged base existed, its head is the merged pull request head, its tree equals
+  the pushed tree, and it comes from this repository and a non-Dependabot actor.
+- The base-time proof covers both checkout shapes. With the final base in
+  place, a run that checks out the head tests the pushed tree. A run that checks
+  out the merge ref tests the same tree, because the pushed squash tree equals
+  the head tree and the final base is an ancestor of that head tree.
+- A malformed pushed revision, a direct push with no merged pull request, an
+  unreadable history, a run before the merged base, and no matching record all
   keep Unity required. An unreadable record cannot justify a skip; a later
   readable record still can.
-- The push path makes no git call. It reads commit objects through the API, so
-  the runtime still reads no file contents and the blobless checkout still
-  works.
-- `incremental-validation` still requires `github-token: ${{ github.token }}`.
-  The enrollment analyzer already accepts that pairing on a workflow that
-  declares `push`.
+- The push path makes no git call. It reads commit objects and the pull request
+  through the API, so the runtime still reads no file contents and the blobless
+  checkout still works.
+- The mode needs `actions: read` for run history, `contents: read` for commit
+  trees, and `pull-requests: read` for the merged pull request lookup.
 - The action metadata, README, and consumer enrollment contract describe both
-  halves.
+  halves and the three scopes.
 
 ## Adversarial review
 
@@ -89,17 +96,20 @@ push `4bf18ba8` was the second newest record, and the newest push
 
 ## Tests
 
-- `test/unity-change-classifier.test.js`: a data table covers thirteen push
-  outcomes: a matching tree, a different tree, the `GITHUB_SHA` fallback, a
-  caller-supplied head revision that is ignored, no revision, the current run,
-  a record without a commit, a fork record, a Dependabot record, an unreadable
-  history, a failed lookup, and an unreadable record before and after a later
-  match. The pull request table adds the same fork and Dependabot refusals. A
+- `test/unity-change-classifier.test.js`: a data table covers twenty-two push
+  outcomes: a matching tree, a different tree, the `GITHUB_SHA` fallback, an
+  ignored caller-supplied head revision, no revision, a run before and after the
+  merged base, a run without a start time, an unreadable record, the current
+  run, a record on another head, a fork record, a Dependabot record, no merged
+  pull request, an unmerged pull request, a push that is not the merge commit,
+  an incomplete revision pair, a base without a commit time, an unreadable base,
+  a pull request payload that is not a list, an unreadable history, and a failed
+  lookup. The pull request table adds the same fork and Dependabot refusals. A
   further case proves the request shape and that the mode is opt-in. A
   committed-runtime case proves the mode reaches the action and fails closed
   before any request.
-- `node --test test/unity-change-classifier.test.js test/action-manifests.test.js`:
-  76 tests pass.
+- `node --test test/unity-change-classifier.test.js test/action-manifests.test.js
+  test/documentation-policy.test.js`: 90 tests pass.
 
 ## Validation
 
@@ -110,10 +120,24 @@ push `4bf18ba8` was the second newest record, and the newest push
   `go run ./cmd/workflow-credential-audit .`: pass.
 - `node --test test/*.test.js`: 1041 tests, 1015 pass, 23 fail. The 23 are the
   same baseline cases; this change adds none.
+- `go test -race ./...` and `go -C tools/actionlint run ... actionlint`: pass.
 - End-to-end on real data: push `4bf18ba8` returns `unity-required=false` and
   push `2e6a6bcd` returns `unity-required=true`.
-- `actionlint`, `golangci-lint`, and `shellcheck` are not installed on this
-  macOS host.
+- `golangci-lint` and `shellcheck` are not installed on this macOS host.
+
+## Review
+
+- CodeRabbit requested changes for two reasons.
+- The first was the token scope. A commit-tree read needs `contents: read`, not
+  only `actions: read`; the merged pull request lookup needs
+  `pull-requests: read`. The action metadata, README, and consumer contract now
+  name all three, and the documented classifier job grants them.
+- The second was the record's merge-ref evidence. A successful pull request run
+  may have checked out the merge ref, and a base move could make its tree differ
+  from the pushed tree. The push path now finds the merged pull request, reads
+  its base commit time, and accepts a run only when it started at or after that
+  base existed. With the final base in place, both checkout shapes test the
+  pushed tree.
 
 ## Pull request
 
