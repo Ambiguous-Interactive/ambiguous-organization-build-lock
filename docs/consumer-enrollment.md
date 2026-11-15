@@ -505,6 +505,25 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails.
+   An isolated Bash aggregate may skip an explicit manual historical readback.
+   Keep its existing four environment bindings and trusted-skip result script.
+   Use this exact job guard:
+
+   ```yaml
+   if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.native-readback-run-id != '') && (always()) }}
+   ```
+
+   Declare `native-readback-run-id` as an optional string dispatch input.
+   Omit its default or use an empty string. Omit `required` or set it to `false`.
+   Pull requests, pushes, and ordinary manual dispatch retain `always()` and
+   the existing result checks, including failed or cancelled dependencies.
+   Only manual dispatch with a nonempty readback input skips this aggregate.
+   This skipped qualification status does not certify capture success or
+   qualify native Unity work. The diagnostic capture job reports its own result.
+   Exclude readback dispatch from licensed jobs and final native qualification
+   gates. Each licensed job must include the same exact negated selector as a
+   top-level `&&` term. Central admission checks each licensed job covered by
+   this aggregate exclusion. Keep each licensed job's ordinary trust guard.
 11. Cancel superseded runs for every workflow scope that can terminate a job
     after acquire: a literal `cancel-in-progress: true` on the workflow
     concurrency group. A queued superseded run wastes a paid self-hosted

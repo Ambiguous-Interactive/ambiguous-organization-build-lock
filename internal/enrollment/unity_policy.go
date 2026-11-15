@@ -5008,8 +5008,9 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName := jobs.Content[index].Value
 		job := jobs.Content[index+1]
+		always := conditionIsSafeAlways(mappingValue(job, "if"))
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
-			!conditionIsSafeAlways(mappingValue(job, "if")) ||
+			(!always && !historicalReadbackLicensedJobExcluded(licensedJobNode)) ||
 			unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
 			!criticalNodeFailurePropagates(job) {
 			continue
@@ -5017,7 +5018,7 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 		for _, step := range sequenceValues(mappingValue(job, "steps")) {
 			for preflight := range requiredPreflights {
 				if needsAny(job, map[string]bool{preflight: true}) &&
-					(aggregateStepEnforces(step, licensedJob, preflight) ||
+					((always && aggregateStepEnforces(step, licensedJob, preflight)) ||
 						trustedSkipAggregateEnforces(
 							workflow,
 							job,
@@ -5025,7 +5026,7 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 							licensedJob,
 							preflight,
 						) ||
-						a.typedValidationGateEnforces(
+						(always && a.typedValidationGateEnforces(
 							workflow,
 							jobs,
 							job,
@@ -5034,7 +5035,7 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 							preflight,
 							"",
 							workflowPath,
-						)) {
+						))) {
 					return jobName, job, true
 				}
 			}
@@ -6017,7 +6018,8 @@ func trustedSkipAggregateEnforces(
 	licensedJob, preflightJob string,
 ) bool {
 	steps := sequenceValues(mappingValue(job, "steps"))
-	if len(steps) != 1 || steps[0] != step ||
+	if (!conditionIsSafeAlways(mappingValue(job, "if")) && !historicalReadbackAggregateExcluded(workflow, job)) ||
+		len(steps) != 1 || steps[0] != step ||
 		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
 		!validationJobIsolationSafe(workflow, job) ||
 		mappingValue(job, "environment") != nil ||
@@ -6083,6 +6085,60 @@ func trustedSkipAggregateEnforces(
 		}
 	}
 	return true
+}
+
+// Preserve quoted text when comparing the dispatch selector. A space inside a
+// literal changes the selected event or the empty-input test.
+func exactReadbackExpression(value *yaml.Node, expression string) bool {
+	if value == nil || value.Kind != yaml.ScalarNode {
+		return false
+	}
+	var compact strings.Builder
+	quoted := false
+	for _, character := range value.Value {
+		if character == '\'' {
+			quoted = !quoted
+		}
+		if !quoted && (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
+			continue
+		}
+		compact.WriteRune(character)
+	}
+	return compact.String() == "${{"+expression+"}}"
+}
+
+// A diagnostic aggregate cannot hide licensed work that still runs on readback.
+func historicalReadbackLicensedJobExcluded(job *yaml.Node) bool {
+	condition := mappingValue(job, "if")
+	if condition == nil || condition.Kind != yaml.ScalarNode {
+		return false
+	}
+	terms, topLevelOr := conditionTerms(condition.Value)
+	if topLevelOr {
+		return false
+	}
+	const exclusion = "!(github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!='')"
+	for _, term := range terms {
+		if normalizeConditionTerm(term) == exclusion {
+			return true
+		}
+	}
+	return false
+}
+
+// Only explicit diagnostic dispatch can skip an otherwise always-running gate.
+// The capture job reports its own result; this exclusion does not qualify Unity.
+func historicalReadbackAggregateExcluded(workflow, aggregate *yaml.Node) bool {
+	const condition = "!(github.event_name=='workflow_dispatch'&&inputs.native-readback-run-id!='')&&(always())"
+	if !exactReadbackExpression(mappingValue(aggregate, "if"), condition) {
+		return false
+	}
+	input := mappingValue(mappingValue(mappingValue(mappingValue(workflow, "on"), "workflow_dispatch"), "inputs"), "native-readback-run-id")
+	defaultValue := mappingValue(input, "default")
+	required := mappingValue(input, "required")
+	return scalarValue(mappingValue(input, "type")) == "string" &&
+		(defaultValue == nil || (defaultValue.Kind == yaml.ScalarNode && defaultValue.Tag == "!!str" && defaultValue.Value == "")) &&
+		(required == nil || (required.Kind == yaml.ScalarNode && required.Tag == "!!bool" && required.Value == "false"))
 }
 
 // normalizedCondition folds a job condition the way every guard reader compares
