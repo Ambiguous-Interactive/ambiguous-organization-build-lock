@@ -4116,6 +4116,31 @@ jobs:
 		})
 	}
 
+	t.Run("local action under a repository checkout path is analyzed", func(t *testing.T) {
+		mutatedWorkflow := strings.Replace(
+			workflow,
+			"    runs-on: [self-hosted, Windows]\n    steps:\n",
+			"    runs-on: [self-hosted, Windows]\n    steps:\n"+
+				"      - uses: actions/checkout@"+testSHA+"\n"+
+				"        with:\n"+
+				"          path: main\n"+
+				"      - uses: ./main/.github/actions/benign\n",
+			1,
+		)
+		mutated := unityFixture(map[string]string{
+			".github/workflows/unity.yml": mutatedWorkflow,
+			".github/actions/benign/action.yml": `name: Benign
+runs:
+  using: composite
+  steps:
+    - run: echo ok
+`,
+		})
+		if _, err := AnalyzeUnityEnrollment(mutated, unityAuditPolicy()); err != nil {
+			t.Fatalf("a local action under this repository's checkout path must resolve: %v", err)
+		}
+	})
+
 	t.Run("direct composite caller preloads central lock action", func(t *testing.T) {
 		mutatedWorkflow := strings.Replace(
 			workflow,

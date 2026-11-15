@@ -905,3 +905,34 @@ func TestCancellationPolicyFailsClosedOnMalformedGraphs(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalActionUnderRepositoryCheckoutPathResolves(t *testing.T) {
+	snapshot := fixture(map[string]string{
+		".github/workflows/fixture.yml": "name: Fixture\non: {pull_request: {}}\n" +
+			safeWorkflowConcurrency +
+			"jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" +
+			"      - uses: actions/checkout@" + testSHA + "\n" +
+			"        with:\n          path: main\n" +
+			"      - uses: ./main/.github/actions/licensed\n",
+		".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + acquireStep("    "),
+	})
+	if _, err := AnalyzePolicy(snapshot, Policy{}); err != nil {
+		t.Fatalf("a local action under this repository's checkout path must resolve: %v", err)
+	}
+}
+
+func TestLocalActionUnderForeignCheckoutPathDoesNotResolve(t *testing.T) {
+	snapshot := fixture(map[string]string{
+		".github/workflows/fixture.yml": "name: Fixture\non: {pull_request: {}}\n" +
+			safeWorkflowConcurrency +
+			"jobs:\n  unity:\n    runs-on: ubuntu-latest\n    steps:\n" +
+			"      - uses: actions/checkout@" + testSHA + "\n" +
+			"        with:\n          repository: someone/else\n          path: main\n" +
+			"      - uses: ./main/.github/actions/licensed\n",
+		".github/actions/licensed/action.yml": "runs:\n  using: composite\n  steps:\n" + acquireStep("    "),
+	})
+	_, err := AnalyzePolicy(snapshot, Policy{})
+	if err == nil || !strings.Contains(err.Error(), "snapshot does not contain main/.github/actions/licensed") {
+		t.Fatalf("a foreign checkout path must not resolve against this snapshot: %v", err)
+	}
+}
