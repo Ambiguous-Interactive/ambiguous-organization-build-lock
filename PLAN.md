@@ -4,12 +4,11 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 ## Future work and blockers
 
-- Credential scope (#51): inventory App and secret access; obtain owner
-  authorization before scope changes.
-- Exception review (#113): re-review the eight expired registry exceptions;
-  renew only with evidence that those workflows still carry no licensed work.
-- Merge gates (#44, #255): prove required-check source binding and enforcement;
-  obtain ruleset authority for changes.
+- Credential scope (#51): the owner keeps both Apps installed org-wide. The
+  remaining work is the org-secret repository scope and the permission probe.
+- Enrollment drift (#113): 22 findings remain. Fourteen are DxMessaging workflow
+  shape findings; eight are expired unity-builder and unity-helpers exceptions.
+  DoxReloaded is complete.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.
 - Shared-seat capacity (#83): prove independent returnable identities and both
@@ -26,8 +25,7 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Cancellation attribution (#277): obtain actor evidence beyond run records.
 - Linter compatibility (#335): move actionlint's YAML dependency only after
   the pinned linter supports the newer API and passes validation.
-- Dependabot pin drift (#375): decide between consumer Dependabot
-  configuration and a new central pull-request gate; both need a reviewed
-  shape.
+- Dependabot pin drift (#375): DoxReloaded ignores the central actions.
+  Apply the same consumer configuration to the other six enrolled repositories.
 - Merge queue adoption (#379): repin DoxReloaded, add `merge_group`, and enable
   the queue after the next authorized release.
