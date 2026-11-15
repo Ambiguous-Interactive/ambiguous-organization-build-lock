@@ -5553,17 +5553,15 @@ func optionalScalarIs(mapping *yaml.Node, key, want string) bool {
 	return value == nil || (value.Kind == yaml.ScalarNode && value.Value == want)
 }
 
-/*
-	incrementalValidationInputSafe admits the opt-in mode only with the evidence it needs.
-
-	A literal true makes the action read this repository's run history and its own comparison
-	API, so the step needs a token. The token must be the workflow's own default token, which
-	cannot outlive the run and carries only this repository's read access. A caller-supplied
-	literal token, a reference to another secret, or a token with the mode switched off is
-	refused, because each one widens the credential surface without the evidence the mode needs.
-	The mode is a literal on purpose: a pull request cannot supply a baseline tree, and this
-	input stays outside the pull request payload on the same terms as `independent-paths`.
-*/
+// incrementalValidationInputSafe admits the opt-in mode only with the evidence it needs.
+//
+// A literal true makes the action read this repository's run history and its own comparison
+// API, so the step needs a token. The token must be the workflow's own default token, which
+// cannot outlive the run and carries only this repository's read access. A caller-supplied
+// literal token, a reference to another secret, or a token with the mode switched off is
+// refused, because each one widens the credential surface without the evidence the mode needs.
+// The mode is a literal on purpose: a pull request cannot supply a baseline tree, and this
+// input stays outside the pull request payload on the same terms as `independent-paths`.
 func incrementalValidationInputSafe(mapping *yaml.Node) bool {
 	mode := mappingValue(mapping, "incremental-validation")
 	token := mappingValue(mapping, "github-token")
