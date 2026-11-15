@@ -538,6 +538,14 @@ touches a Dependabot pull request.
    aggregate needs no change, because it already consumes the one boolean the
    classifier reports. A merge group keeps the whole-diff answer: it has no
    pull request branch to read a record from.
+   A push has no pull request diff. A squash merge writes the pull request head
+   tree to the branch, so the same mode reads the pushed tree from
+   `GITHUB_SHA` and compares it with the head tree of each recent successful
+   pull request run of this workflow. Unity is skipped only on exact tree
+   equality. A different tree, no record, and a failed lookup all keep Unity
+   required. A push needs no extra input: the mode and
+   `github-token: ${{ github.token }}` are enough, and the job's `actions: read`
+   covers the tree reads.
    An isolated Bash aggregate may skip an explicit manual historical readback.
    Keep its existing four environment bindings and trusted-skip result script.
    Use this exact job guard:
@@ -631,9 +639,10 @@ may add `filter: blob:none` and `sparse-checkout: .github`, each with exactly
 that value. Without blobs, a large history clones much faster: one consumer
 measured 53.1 s against 2.2 s. Keep the full working tree if the job runs a
 step that reads other files, such as the rule-line check above. With
-`incremental-validation` the action also reads this repository's run history
-and one comparison through the API. That read stays outside the checkout, so
-the sparse clone still serves it, and the action still reads no file contents.
+`incremental-validation` the action also reads this repository's run history,
+one pull request comparison or the pushed tree's commit objects, through the
+API. That read stays outside the checkout, so the sparse clone still serves
+it, and the action still reads no file contents.
 
 A workflow that also listens for a merge queue must add `merge_group` to `on:`
 and pass the merge group revisions, because a merge group has no pull request

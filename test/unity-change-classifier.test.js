@@ -553,6 +553,180 @@ test("incremental validation refuses a workflow reference that names another rep
 });
 
 /*
+ * A PUSH HAS NO DIFF. A squash merge writes the pull request head tree to the branch, so a push
+ * whose tree equals a successful pull request run's head tree repeats work that run already
+ * proved unnecessary. The record is the run history, and exact tree equality is the whole
+ * question: no base, no delta, and no file list.
+ */
+const PUSHED_SHA = "3".repeat(40);
+const RECORD_PR_SHA = "4".repeat(40);
+const SECOND_RECORD_SHA = "7".repeat(40);
+const PUSHED_TREE = "5".repeat(40);
+const OTHER_TREE = "6".repeat(40);
+
+async function classifyPush(overrides = {}) {
+  const requests = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-push-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, "output.txt");
+  const request = async (requestPath) => {
+    requests.push(requestPath);
+    if (overrides.requestError) {
+      throw overrides.requestError;
+    }
+    if (requestPath.includes("/actions/workflows/")) {
+      return overrides.history ?? {
+        workflow_runs: [{ id: 1, head_sha: overrides.recordSHA ?? RECORD_PR_SHA }]
+      };
+    }
+    const commit = /\/git\/commits\/([0-9a-f]{40})$/.exec(requestPath);
+    if (commit === null) {
+      throw new Error(`unexpected request ${requestPath}`);
+    }
+    if (overrides.treeErrors?.has(commit[1])) {
+      throw new Error("GitHub API responded 404");
+    }
+    const tree = overrides.trees?.[commit[1]] ??
+      (commit[1] === PUSHED_SHA ? PUSHED_TREE : OTHER_TREE);
+    return { tree: { sha: tree } };
+  };
+  const unityRequired = await run({
+    eventName: "push",
+    baseSHA: "",
+    headSHA: overrides.headSHA ?? PUSHED_SHA,
+    githubSHA: overrides.githubSHA ?? "",
+    outputPath,
+    incrementalValidation: overrides.incrementalValidation ?? "true",
+    githubToken: "token",
+    repository: "Ambiguous-Interactive/consumer",
+    workflowRef: overrides.workflowRef ?? "Ambiguous-Interactive/consumer/.github/workflows/build-deploy.yml@refs/heads/main",
+    headBranch: "",
+    runID: "2",
+    execute: () => {
+      throw new Error("a push must not read a diff");
+    },
+    request,
+    log: () => {}
+  });
+  return {
+    unityRequired,
+    requests,
+    written: fs.readFileSync(outputPath, "utf8").trim().split("\n").pop()
+  };
+}
+
+test("push incremental validation skips only a tree a successful pull request run holds", async () => {
+  for (const { name, overrides, expected } of [
+    {
+      name: "a pushed tree a successful pull request run holds",
+      overrides: { trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE } },
+      expected: false
+    },
+    {
+      name: "a pushed tree no successful pull request run holds",
+      overrides: { trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: OTHER_TREE } },
+      expected: true
+    },
+    {
+      name: "GITHUB_SHA supplies the pushed revision",
+      overrides: {
+        headSHA: "",
+        githubSHA: PUSHED_SHA,
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+      },
+      expected: false
+    },
+    {
+      name: "no pushed revision",
+      overrides: { headSHA: "", githubSHA: "" },
+      expected: true
+    },
+    {
+      name: "an unreadable record does not hide a later match",
+      overrides: {
+        history: {
+          workflow_runs: [
+            { id: 1, head_sha: RECORD_PR_SHA },
+            { id: 3, head_sha: SECOND_RECORD_SHA }
+          ]
+        },
+        treeErrors: new Set([RECORD_PR_SHA]),
+        trees: { [PUSHED_SHA]: PUSHED_TREE, [SECOND_RECORD_SHA]: PUSHED_TREE }
+      },
+      expected: false
+    },
+    {
+      name: "only an unreadable record",
+      overrides: {
+        treeErrors: new Set([RECORD_PR_SHA]),
+        trees: { [PUSHED_SHA]: PUSHED_TREE }
+      },
+      expected: true
+    },
+    {
+      name: "the current run is not a record",
+      overrides: { history: { workflow_runs: [{ id: 2, head_sha: RECORD_PR_SHA }] } },
+      expected: true
+    },
+    {
+      name: "a record without a commit",
+      overrides: { history: { workflow_runs: [{ id: 1, head_sha: "main" }] } },
+      expected: true
+    },
+    {
+      name: "an unreadable history",
+      overrides: { history: {} },
+      expected: true
+    },
+    {
+      name: "a failed lookup",
+      overrides: { requestError: new Error("GitHub API responded 503") },
+      expected: true
+    }
+  ]) {
+    const { unityRequired, written } = await classifyPush(overrides);
+    assert.equal(unityRequired, expected, name);
+    assert.equal(written, `unity-required=${expected}`, name);
+  }
+});
+
+test("push incremental validation reads this workflow and no diff", async () => {
+  const matching = await classifyPush({
+    trees: { [PUSHED_SHA]: PUSHED_TREE, [RECORD_PR_SHA]: PUSHED_TREE }
+  });
+  assert.equal(matching.requests.length, 3, "one run-history read and two commit trees");
+  assert.equal(matching.requests[0], `/repos/Ambiguous-Interactive/consumer/git/commits/${PUSHED_SHA}`);
+  assert.match(matching.requests[1], /\/actions\/workflows\/build-deploy\.yml\/runs\?/);
+  assert.match(matching.requests[1], /event=pull_request/);
+  assert.match(matching.requests[1], /status=success/);
+  assert.equal(matching.requests[2], `/repos/Ambiguous-Interactive/consumer/git/commits/${RECORD_PR_SHA}`);
+
+  // The mode is opt-in: an absent flag keeps Unity required and reads nothing.
+  const off = await classifyPush({ incrementalValidation: "" });
+  assert.equal(off.unityRequired, true);
+  assert.deepEqual(off.requests, []);
+});
+
+test("committed classifier runtime keeps Unity required when the push record lookup cannot start", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "unity-change-classifier-push-record-"));
+  test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outputPath = path.join(root, "output.txt");
+  const result = classifierRuntime({
+    GITHUB_OUTPUT: outputPath,
+    GITHUB_REPOSITORY: "Ambiguous-Interactive/consumer",
+    GITHUB_WORKFLOW_REF: "not-a-workflow-reference",
+    GITHUB_SHA: PUSHED_SHA,
+    GITHUB_RUN_ID: "2",
+    "INPUT_EVENT-NAME": "push",
+    "INPUT_INCREMENTAL-VALIDATION": "true",
+    "INPUT_GITHUB-TOKEN": "token"
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(outputPath, "utf8").trim(), "unity-required=true");
+  assert.match(result.stdout, /incremental validation unavailable/);
+});
+
+/*
  * The mode is read through the runner input name, like every other input. This runs the committed
  * runtime with an unparseable workflow reference, so no request leaves the runner: the case proves
  * the flag reached the action and that its first failure keeps Unity required.
