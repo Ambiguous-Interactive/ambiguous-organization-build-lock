@@ -27,7 +27,7 @@ jobs:
           GH_TOKEN: ${{ steps.reader.outputs.token }}
         run: |
           set -euo pipefail
-          gh api "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=Ambiguous-Interactive/DxAudio&per_page=100" > groups.json
+          gh api "/orgs/Ambiguous-Interactive/actions/runner-groups?visible_to_repository=DxAudio&per_page=100" > groups.json
           jq -r '.runner_groups[] | "\(.id) \(.name) visibility=\(.visibility) selected=\(.selected_repositories_url // "")"' groups.json
           jq -r '.runner_groups[].id' groups.json | while read -r id; do
             echo "== group $id"
