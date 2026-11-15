@@ -625,7 +625,7 @@ edits.
 | `stale-policy-exception` | Remove the registry exception whose protected path no longer needs it. |
 | `stale-repin-exception` | Remove the `repinExceptions` entry whose protected file no longer exists. |
 | `unapproved-acquire-ref` | Use an acquire SHA listed in `approvedLockShas`. See Release authorization. |
-| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. |
+| `unapproved-lock-ref` | Pin central actions to a SHA listed in the reviewed policy lists. See Release authorization. Every related job that pins a central action at an unauthorized or mutable reference is named. A licensed job also stops the shape checks that rest on that identity. |
 | `unbounded-unity-editor-check` | Give the editor gate a timeout of 10 minutes or less. See item 3. |
 | `unexpected-fallback-step` | Keep only the approved release action in the fallback job. See item 8. |
 | `unity-editor-check-after-credentials` | Run the editor gate before any credential reference. See item 3. |
@@ -658,7 +658,7 @@ edits.
 
 A scheduled central audit compares each enrolled default branch with the
 reviewed expectations in `merge-policy-expectations.json`. The expectations
-name the always-reporting Unity aggregate contexts that the branch must
+name the always-reporting aggregate contexts that the branch must
 require before merge, the expected source App ID for each context, and every
 bypass actor that review accepted. The repository set and default branches
 must match `unity-enrollment-policy.json`; the audit refuses to run when they
@@ -772,6 +772,12 @@ any other `.github/` change still requires Unity validation.
 `unity-builder` is exempt: it is a fork whose paid Windows workflow is a
 controlled manual canary, so it declares no required context. Item 6 of
 Preconditions records the same policy.
+
+`qora-redux` requires the two gates its default branch really enforces:
+`Godot CI` and `validate (ubuntu-latest)`. It runs Godot workflows and no Unity
+work, so it has no Unity aggregate to require. Both gates report on every pull
+request: `godot-tests.yml` and `llm-harness.yml` have unfiltered
+`pull_request` triggers. Its hosted preflight keeps it in the enrollment audit.
 
 ## Canary
 

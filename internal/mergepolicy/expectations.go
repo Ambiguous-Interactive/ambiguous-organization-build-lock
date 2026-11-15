@@ -84,7 +84,7 @@ type BypassActor struct {
 }
 
 // RepositoryExpectation is the reviewed merge policy for one consumer
-// repository. RequiredContexts lists the always-reporting Unity aggregates
+// repository. RequiredContexts lists the always-reporting aggregate contexts
 // that the default branch must require before a merge. An empty list means
 // the repository is exempt; the audit then only proves the settings remain
 // readable. AllowedBypassActors scopes ruleset bypass identities that

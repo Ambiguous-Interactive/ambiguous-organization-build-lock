@@ -288,6 +288,226 @@ func TestUnityEnrollmentAcceptsCompleteLifecycle(t *testing.T) {
 	}
 }
 
+// A workflow whose central action identity is not reviewed cannot support any
+// lifecycle verdict. The audit must name the pin once, and must not also report
+// the downstream shapes that a repin alone makes correct.
+func TestUnityEnrollmentReportsOneRootCauseForAnUnauthorizedCentralPin(t *testing.T) {
+	const unapprovedSHA = "abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	tests := []struct {
+		name string
+		from string
+		to   string
+		code string
+	}{
+		{
+			name: "unauthorized commit",
+			from: acquireActionRef(),
+			to:   lockActionPrefix + "acquire-build-lock@" + unapprovedSHA,
+			code: "unapproved-lock-ref",
+		},
+		{
+			name: "mutable reference",
+			from: editorActionRef,
+			to:   lockActionPrefix + "ensure-unity-editor@main",
+			code: "mutable-action-ref",
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			workflow := strings.Replace(base, testCase.from, testCase.to, 1)
+			if workflow == base {
+				t.Fatal("mutation did not change workflow")
+			}
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/unity.yml": workflow,
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Findings) != 1 || result.Findings[0].Code != testCase.code ||
+				result.Findings[0].Job != "unity" {
+				t.Fatalf("an untrusted central pin must report one root cause: %#v", result.Findings)
+			}
+		})
+	}
+
+	t.Run("a local composite cannot hide a central pin", func(t *testing.T) {
+		// Break the return condition so the fixture also carries a lifecycle
+		// defect. On the old behavior that defect reports beside the pin.
+		steps := strings.Replace(
+			centralReturnSteps(),
+			"if: ${{ always() && steps.acquire.outputs.acquired == 'true' }}",
+			"if: success()",
+			1,
+		)
+		workflow := strings.Replace(
+			unityWorkflow(steps, safeAggregate()),
+			"      - id: acquire\n",
+			"      - uses: ./.github/actions/wrapped-guard\n      - id: acquire\n",
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+			".github/actions/wrapped-guard/action.yml": `name: Wrapped guard
+runs:
+  using: composite
+  steps:
+    - uses: ` + lockActionPrefix + `require-current-pr-head@` + unapprovedSHA + `
+`,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Findings) != 1 || result.Findings[0].Code != "unapproved-lock-ref" {
+			t.Fatalf("a composite central pin must report one root cause: %#v", result.Findings)
+		}
+	})
+
+	t.Run("coverage verdicts still report beside an own pin", func(t *testing.T) {
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			acquireActionRef(),
+			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:unity") ||
+			!strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("an own pin withheld a coverage verdict: %#v", result.Findings)
+		}
+	})
+
+	t.Run("a pinned needed preflight owns the cause", func(t *testing.T) {
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			preflightActionRef,
+			lockActionPrefix+"check-unity-runner-availability@"+unapprovedSHA,
+			1,
+		)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:preflight") {
+			t.Fatalf("the pinned preflight was not named: %#v", result.Findings)
+		}
+		if strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("a pinned preflight must not also read as a missing one: %#v", result.Findings)
+		}
+	})
+
+	t.Run("an unrelated pinned preflight does not withhold coverage", func(t *testing.T) {
+		// The licensed job also carries its own pin, so the guard runs on a
+		// job whose coverage is still provable.
+		workflow := strings.Replace(
+			unityWorkflow(centralReturnSteps(), ""),
+			acquireActionRef(),
+			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA,
+			1,
+		) + `  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
+`
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+			t.Fatalf("an unrelated preflight pin withheld a coverage verdict: %#v", result.Findings)
+		}
+	})
+
+	t.Run("an approved needed preflight settles coverage", func(t *testing.T) {
+		base := unityWorkflow(centralReturnSteps(), "")
+		workflow := strings.Replace(
+			base,
+			"    needs: preflight\n",
+			"    needs: [preflight, extra]\n",
+			1,
+		) + `  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `check-unity-runner-availability@main
+`
+		if !strings.Contains(workflow, "    needs: [preflight, extra]\n") {
+			t.Fatal("mutation did not change workflow")
+		}
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") ||
+			!strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:extra") {
+			t.Fatalf("a trusted preflight must settle coverage: %#v", result.Findings)
+		}
+	})
+
+	t.Run("independent findings still report", func(t *testing.T) {
+		workflow := strings.Replace(base, acquireActionRef(),
+			lockActionPrefix+"acquire-build-lock@"+unapprovedSHA, 1)
+		workflow = strings.Replace(workflow, "cancel-in-progress: true", "cancel-in-progress: false", 1)
+		result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+			".github/workflows/unity.yml": workflow,
+		}), unityAuditPolicy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		codes := findingCodes(result.Findings)
+		if !strings.Contains(codes, "unapproved-lock-ref") ||
+			!strings.Contains(codes, "unsafe-workflow-queue") {
+			t.Fatalf("an untrusted pin must not hide an independent finding: %#v", result.Findings)
+		}
+	})
+}
+
+func acquireActionRef() string {
+	return lockActionPrefix + "acquire-build-lock@" + testSHA
+}
+
+// A central pin in another job must not withhold this job's own defects or
+// name this job as the offender.
+func TestUnityEnrollmentKeepsLicensedFindingsBesideAnUnrelatedPin(t *testing.T) {
+	workflow := unityWorkflow(centralReturnSteps(), "") + `  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + lockActionPrefix + `require-current-pr-head@main
+`
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := findingCodes(result.Findings)
+	if !strings.Contains(codes, "missing-unity-aggregate:.github/workflows/unity.yml:unity") {
+		t.Fatalf("an unrelated pin withheld a licensed finding: %#v", result.Findings)
+	}
+	if strings.Contains(codes, "unapproved-lock-ref:.github/workflows/unity.yml:unity") ||
+		strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:unity") {
+		t.Fatalf("an unrelated pin was blamed on the licensed job: %#v", result.Findings)
+	}
+	if !strings.Contains(codes, "mutable-action-ref:.github/workflows/unity.yml:lint") {
+		t.Fatalf("a non-paid job's pin was not reported on that job: %#v", result.Findings)
+	}
+}
+
 func TestUnityEnrollmentRejectsLicensedJobWithoutSelfHostedRunner(t *testing.T) {
 	base := unityWorkflow(centralReturnSteps(), safeAggregate())
 	selfHostedRunsOn := "runs-on: [self-hosted, Windows]"
@@ -1047,7 +1267,7 @@ func TestUnityEnrollmentRejectsCentralEditorActionMutations(t *testing.T) {
 		to   string
 		code string
 	}{
-		{name: "unapproved action SHA", from: editorActionRef, to: lockActionPrefix + "ensure-unity-editor@89abcdef0123456789abcdef0123456789abcdef", code: "missing-unity-editor-check"},
+		{name: "unapproved action SHA", from: editorActionRef, to: lockActionPrefix + "ensure-unity-editor@89abcdef0123456789abcdef0123456789abcdef", code: "unapproved-lock-ref"},
 		{name: "foreign action", from: editorActionRef, to: "attacker/repository/ensure-unity-editor@" + testSHA, code: "missing-unity-editor-check"},
 		{name: "missing version", from: "          unity-version: 6000.5.2f1\n", to: "", code: "missing-unity-editor-check"},
 		{name: "non-final version", from: "6000.5.2f1", to: "6000.5.2b1", code: "missing-unity-editor-check"},
