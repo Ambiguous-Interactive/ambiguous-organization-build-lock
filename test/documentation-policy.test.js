@@ -107,6 +107,7 @@ test("steady-state runbook reports the registered release and consumer inventory
   );
   const requiredBaseline = [
     "Ambiguous-Interactive/DoxReloaded",
+    "Ambiguous-Interactive/DxAudio",
     "Ambiguous-Interactive/DxMessaging",
     "Ambiguous-Interactive/IshoBoy",
     "Ambiguous-Interactive/qora-redux",

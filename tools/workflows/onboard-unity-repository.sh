@@ -69,15 +69,16 @@ update_policy() {
 }
 
 open_pr() {
+  : "${ENROLLMENT_PR_AUTHORIZATION:?ENROLLMENT_PR_AUTHORIZATION is required}"
   git config user.name "github-actions[bot]"
   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
   git checkout -b "${ONBOARDING_BRANCH:?ONBOARDING_BRANCH is required}"
   git add unity-enrollment-policy.json
   git commit -m "chore: enroll ${TARGET_REPOSITORY:?TARGET_REPOSITORY is required} in Unity audit"
   # The checkout persists no credentials, so the branch push carries the
-  # workflow token through a command-scoped credential helper. The helper
+  # writer-App token through a command-scoped credential helper. The helper
   # lives only for this push and never lands in the stored git config.
-  ONBOARDING_PUSH_AUTHORIZATION="${GH_TOKEN:?GH_TOKEN is required}" git \
+  ONBOARDING_PUSH_AUTHORIZATION="${ENROLLMENT_PR_AUTHORIZATION}" git \
     -c credential.helper= \
     -c 'credential.helper=!f() { printf "username=github-actions[bot]\npassword=%s\n" "${ONBOARDING_PUSH_AUTHORIZATION}"; }; f' \
     push origin "${ONBOARDING_BRANCH}"
@@ -93,13 +94,12 @@ open_pr() {
       "- Reader App installation and Contents-read access: verified" \
       "- Evidence run: ${EVIDENCE_RUN_URL:?EVIDENCE_RUN_URL is required}"
   )"
-  gh pr create \
+  GH_TOKEN="${ENROLLMENT_PR_AUTHORIZATION}" gh pr create \
     --base main \
     --head "${ONBOARDING_BRANCH}" \
     --title "chore: enroll ${TARGET_REPOSITORY} in Unity audit" \
     --body "${body}"
 }
-
 case "${1:-}" in
   reject-untrusted-request) reject_untrusted_request ;;
   validate-request) validate_request ;;

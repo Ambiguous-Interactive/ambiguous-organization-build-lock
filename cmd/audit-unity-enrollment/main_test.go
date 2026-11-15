@@ -26,6 +26,10 @@ func TestRunFailsClosedAndWritesSanitizedArtifactWhenRepositoriesAreMissing(t *t
 	if err := os.WriteFile(policyPath, policy, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	registry, err := enrollment.ParseUnityEnrollmentRegistry(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	exit := run([]string{
 		"--policy", policyPath,
@@ -43,7 +47,7 @@ func TestRunFailsClosedAndWritesSanitizedArtifactWhenRepositoriesAreMissing(t *t
 	if err := json.Unmarshal(content, &audit); err != nil {
 		t.Fatal(err)
 	}
-	if audit.Complete || len(audit.Repositories) != 0 || len(audit.Findings) != 6 {
+	if audit.Complete || len(audit.Repositories) != 0 || len(audit.Findings) != len(registry.Repositories) {
 		t.Fatalf("unexpected audit: %#v", audit)
 	}
 	for _, finding := range audit.Findings {
