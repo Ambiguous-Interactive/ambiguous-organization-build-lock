@@ -144,6 +144,16 @@ const releaseOutputNames = [
 
 const reapOutputNames = ["reaped", "state-sha"];
 
+// Issue #387: the read-only status contract a consumer can branch on.
+const statusOutputNames = [
+  "admission",
+  "blocking-cause",
+  "incident-id",
+  "blocking-reservation-ids",
+  "free-capacity",
+  "last-reaper-at"
+];
+
 async function withActionEnv(values, callback) {
   const previous = Object.fromEntries(actionEnvNames.map((name) => [name, process.env[name]]));
   for (const name of actionEnvNames) {
@@ -515,6 +525,7 @@ module.exports = {
   acquireOutputNames,
   releaseOutputNames,
   reapOutputNames,
+  statusOutputNames,
   withActionEnv,
   withEnvironment,
   withImmediateTimers,

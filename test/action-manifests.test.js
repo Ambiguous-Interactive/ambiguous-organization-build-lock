@@ -371,6 +371,35 @@ test("reaper exposes exact confirmed reservation and incident recovery inputs", 
   assert.match(reaper, /resource-safe:[\s\S]*?default:\s*"false"/);
 });
 
+// Issue #387: the read-only status contract a consumer branches on must be part
+// of the published action contract, not only of the runtime.
+test("reaper publishes the read-only status operation and its outputs", () => {
+  const reaper = readActionManifest("reap-stale-locks");
+  const outputs = yamlRequiredTopLevelMappingKeys(reaper, "outputs", "reap-stale-locks/action.yml");
+  for (const name of [
+    "admission",
+    "blocking-cause",
+    "incident-id",
+    "blocking-reservation-ids",
+    "free-capacity",
+    "last-reaper-at"
+  ]) {
+    assert.ok(outputs.includes(name), `reap-stale-locks must expose ${name}`);
+  }
+  const inputs = yamlRequiredTopLevelMappingKeys(reaper, "inputs", "reap-stale-locks/action.yml");
+  assert.ok(inputs.includes("github-token"), "status names the reaper run through an optional token");
+  assert.match(
+    reaper,
+    /^ {2}operation:\n {4}description: "[^"]*read-only status[^"]*"$/m,
+    "the operation input must document status as read-only"
+  );
+  assert.match(
+    reaper,
+    /^ {2}github-token:\n(?: {4}.*\n)*? {6}without a credential and never writes\.$/m,
+    "the token input must state that status reads without a credential and never writes"
+  );
+});
+
 test("runner registration action requires reader App auth and fail-closed label sets", () => {
   const manifest = readActionManifest("check-unity-runner-availability");
   const inputs = yamlRequiredTopLevelMappingKeys(

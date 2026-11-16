@@ -72,6 +72,10 @@ const LOCK_NAME = "wallstop-organization-builds";
 const LOCK_REPOSITORY = "Ambiguous-Interactive/ambiguous-organization-build-lock";
 const LOCK_REPOSITORY_ID = "1244796436";
 const STATE_BRANCH = "lock-state";
+// A read-only query of canonical lock state. It is the only reap-mode operation a
+// consumer repository may run, and it never takes a write credential.
+const STATUS_OPERATION = "status";
+const REAP_WORKFLOW_FILE = "reap-stale-locks.yml";
 // Temporary compatibility fallback only. The dedicated reader App token covers
 // every repository on its selected-repository installation, so new consumers do
 // not require a code release here.
@@ -542,7 +546,13 @@ function canonicalId(name, value) {
   return normalized;
 }
 
-function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH, mode = MODE }) {
+function authorizeCaller({
+  lockName,
+  lockRepository,
+  stateBranch = STATE_BRANCH,
+  mode = MODE,
+  operation = ""
+}) {
   if (lockName !== LOCK_NAME) {
     throw new Error(`lock-name is not authorized; expected ${LOCK_NAME}.`);
   }
@@ -565,7 +575,7 @@ function authorizeCaller({ lockName, lockRepository, stateBranch = STATE_BRANCH,
   if (repository === LOCK_REPOSITORY && repositoryId !== LOCK_REPOSITORY_ID) {
     throw new Error("The lock repository ID is not authorized.");
   }
-  if (mode === "reap" && repository !== LOCK_REPOSITORY) {
+  if (mode === "reap" && repository !== LOCK_REPOSITORY && operation !== STATUS_OPERATION) {
     throw new Error("Only the lock repository may run the scheduled reaper.");
   }
   if (mode !== "reap" && repository === LOCK_REPOSITORY) {
@@ -1101,14 +1111,19 @@ function apiRetryExhaustedError(method, path, attempts, lastFailure, deadlineRea
 }
 
 async function fetchApi(method, path, body, authToken, options = {}) {
+  // A read-only public path (status) passes no credential. Sending
+  // `Authorization: Bearer null` would turn that read into a 401.
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
   const response = await fetch(`${API_ROOT}${path}`, {
     method,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${authToken}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: options.signal
   });
@@ -1766,13 +1781,16 @@ async function writeState(config, previousSha, state, message, options = {}) {
   }
 }
 
-function normalizeMaxHolders(raw, sourcePath) {
+function normalizeMaxHolders(raw, sourcePath, options = {}) {
   if (raw === undefined || raw === null) {
     return DEFAULT_MAX_HOLDERS;
   }
   const value =
     typeof raw === "string" && /^[0-9]+$/.test(raw.trim()) ? Number.parseInt(raw.trim(), 10) : raw;
   if (!Number.isInteger(value) || value < 1 || value > MAX_HOLDERS_CAP) {
+    if (options.strict) {
+      return null;
+    }
     console.log(
       `::warning::Ignoring invalid maxHolders=${JSON.stringify(raw)} in ${sourcePath}; ` +
         `expected an integer between 1 and ${MAX_HOLDERS_CAP}. Using max-holders=${DEFAULT_MAX_HOLDERS}.`
@@ -1858,7 +1876,8 @@ function configReadCanFailClosed(error, options = {}) {
 // Per-lock parallelism lives in locks/<lock-name>.config.json on the lock repository's
 // DEFAULT branch (not the state branch): one PR-reviewable source of truth for every
 // consumer repo. Missing or invalid config fails closed to a single holder, which can
-// never over-run a license.
+// never over-run a license. Admission may proceed on those safe defaults, but a
+// reporting path sets `requireProof`: it must not publish an unverified capacity.
 async function readLockConfig(config, options = {}) {
   const { owner, repo } = config.lockRepo;
   const configPath = config.configPath || `locks/${config.lockName}.config.json`;
@@ -1873,6 +1892,9 @@ async function readLockConfig(config, options = {}) {
     if (error.status === 404) {
       return defaultLockConfig();
     }
+    if (options.requireProof) {
+      throw new Error(`Cannot prove lock config at ${configPath}: ${oneLine(error.message)}`);
+    }
     if (configReadCanFailClosed(error, options)) {
       console.log(
         `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
@@ -1882,6 +1904,13 @@ async function readLockConfig(config, options = {}) {
     }
     throw error;
   }
+  // A reporting path must not publish safe defaults as if it had read them.
+  const unproven = (reason) => {
+    if (options.requireProof) {
+      throw new Error(`Cannot prove lock config at ${configPath}: ${reason}.`);
+    }
+    return defaultLockConfig();
+  };
   let parsed;
   try {
     parsed = JSON.parse(base64Decode(data.content));
@@ -1890,7 +1919,7 @@ async function readLockConfig(config, options = {}) {
       `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("it is not valid JSON");
   }
   const runnerSerialization = normalizeBooleanConfig(
     parsed && parsed.runnerSerialization,
@@ -1898,32 +1927,38 @@ async function readLockConfig(config, options = {}) {
     configPath
   );
   if (runnerSerialization === null) {
-    return defaultLockConfig();
+    return unproven("runnerSerialization is invalid");
   }
   const resourceLifecycle = normalizeBooleanConfig(parsed && parsed.resourceLifecycle, "resourceLifecycle", configPath);
   if (resourceLifecycle === null) {
-    return defaultLockConfig();
+    return unproven("resourceLifecycle is invalid");
   }
   if (resourceLifecycle && !runnerSerialization) {
     console.log(
       `::warning::Ignoring resourceLifecycle=true in ${configPath}; runnerSerialization must also be true; ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("resourceLifecycle requires runnerSerialization");
   }
   const accountHealth = normalizeBooleanConfig(parsed && parsed.accountHealth, "accountHealth", configPath);
   if (accountHealth === null) {
-    return defaultLockConfig();
+    return unproven("accountHealth is invalid");
   }
   if (accountHealth && !resourceLifecycle) {
     console.log(
       `::warning::Ignoring accountHealth=true in ${configPath}; resourceLifecycle must also be true; ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("accountHealth requires resourceLifecycle");
+  }
+  const maxHolders = normalizeMaxHolders(parsed && parsed.maxHolders, configPath, {
+    strict: Boolean(options.requireProof)
+  });
+  if (maxHolders === null) {
+    return unproven("maxHolders is invalid");
   }
   return {
-    maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath),
+    maxHolders,
     runnerSerialization,
     resourceLifecycle,
     accountHealth,
@@ -4313,11 +4348,182 @@ async function retryReapCheckpoint(config, message, apiOptions, applyProvenChang
   throw new Error(`Failed to checkpoint reap of ${config.lockName} after repeated CAS conflicts.`);
 }
 
+// Issue #387: consumers and operators need to ask whether an incident or a
+// quarantine blocks admission without dispatching a write. The lock-state branch
+// of this public repository already holds that evidence, so status reads it with
+// GET requests only, mints no token, and never creates or writes the branch.
+function statusHolderLine(holder) {
+  return [
+    `holder=${oneLine(holder.holderId)}`,
+    `repository=${oneLine(holder.repository)}`,
+    `workflow=${oneLine(holder.workflow)}`,
+    `job=${oneLine(holder.job)}`,
+    `run=${oneLine(holder.runId)}`,
+    `attempt=${oneLine(holder.runAttempt)}`,
+    `runner=${oneLine(holder.runnerId)}`,
+    `acquired-at=${oneLine(holder.acquiredAt)}`,
+    `expires-at=${oneLine(holder.expiresAt)}`,
+    `source=${oneLine(holder.runUrl)}`
+  ].join(" ");
+}
+
+function statusReservationLine(reservation) {
+  return [
+    `reservation=${oneLine(reservation.reservationId)}`,
+    `runner=${oneLine(reservation.runnerId)}`,
+    `repository=${oneLine(reservation.repository)}`,
+    `workflow=${oneLine(reservation.workflow)}`,
+    `job=${oneLine(reservation.job)}`,
+    `run=${oneLine(reservation.runId)}`,
+    `attempt=${oneLine(reservation.runAttempt)}`,
+    `created-at=${oneLine(reservation.createdAt)}`,
+    ...(reservation.availableAt ? [`available-at=${oneLine(reservation.availableAt)}`] : []),
+    `reason=${oneLine(reservation.reason)}`,
+    `source=${oneLine(reservation.runUrl)}`
+  ].join(" ");
+}
+
+function statusQueueLine(entry) {
+  return [
+    `queued=${oneLine(entry.holderId)}`,
+    `repository=${oneLine(entry.repository)}`,
+    `workflow=${oneLine(entry.workflow)}`,
+    `job=${oneLine(entry.job)}`,
+    `run=${oneLine(entry.runId)}`,
+    `attempt=${oneLine(entry.runAttempt)}`,
+    `runner=${oneLine(entry.runnerId)}`,
+    `queued-at=${oneLine(entry.queuedAt)}`,
+    `source=${oneLine(entry.runUrl)}`
+  ].join(" ");
+}
+
+// The last successful *scheduled* reaper run is published by the Actions API, not
+// by lock state, because the reaper writes state only when it changes something.
+// A failed or rate-limited read leaves the fact unproven; it never fails the report.
+async function lastSuccessfulReaperRun(config) {
+  const { owner, repo } = config.lockRepo;
+  try {
+    const data = await api(
+      "GET",
+      `/repos/${owner}/${repo}/actions/workflows/${REAP_WORKFLOW_FILE}/runs?per_page=1&status=success&event=schedule`,
+      undefined,
+      config.githubToken || null
+    );
+    const run = data && Array.isArray(data.workflow_runs) ? data.workflow_runs[0] : null;
+    if (!run || run.conclusion !== "success" || run.event !== "schedule" || !parseTime(run.created_at)) {
+      return { proven: false, at: "", detail: "no successful scheduled reaper run is published" };
+    }
+    return {
+      proven: true,
+      at: String(run.created_at),
+      detail: `run ${oneLine(run.id)} at ${oneLine(run.created_at)}` +
+        `${run.html_url ? ` (${oneLine(run.html_url)})` : ""}`
+    };
+  } catch (error) {
+    return { proven: false, at: "", detail: `unproven: ${oneLine(error.message)}` };
+  }
+}
+
+// readState treats a missing lock-state file as an empty lock. An unreadable
+// repository also answers 404 without a credential, so status must prove the
+// repository is readable before it may report an empty lock as open.
+async function proveStatusSourceReadable(config) {
+  const { owner, repo } = config.lockRepo;
+  try {
+    await api("GET", `/repos/${owner}/${repo}`, undefined, null);
+  } catch (error) {
+    throw new Error(
+      `Status cannot prove that ${owner}/${repo} is readable (${oneLine(error.message)}); ` +
+        "it will not report an unproven lock state as open."
+    );
+  }
+}
+
+async function reportLockStatus(config) {
+  console.log(`::group::Build lock status ${config.lockName}`);
+  await proveStatusSourceReadable(config);
+  const { state, sha } = await readState(config);
+  const lockConfig = await readLockConfig(config, { requireProof: true });
+  const expiredCooldowns = pruneExpiredCooldowns(state);
+  const holders = state.holders;
+  const reservations = state.reservations || [];
+  const quarantines = reservations.filter((reservation) => reservation.state === "quarantine");
+  const cooldowns = reservations.filter((reservation) => reservation.state === "cooldown");
+  const incident = state.activeIncident || null;
+  const freeCapacity = lockConfig.maxHolders - holders.length - reservations.length;
+  const blockingCause = incident ? "incident" : freeCapacity <= 0 ? "capacity" : "none";
+  // Recovery accepts a quarantine only, so a cooldown is never named as the thing
+  // an operator could recover.
+  const blockingQuarantines = blockingCause === "capacity" ? quarantines : [];
+  const lastReap = await lastSuccessfulReaperRun(config);
+
+  const admission =
+    blockingCause === "none"
+      ? "open; no incident blocks admission and at least one slot is free"
+      : blockingCause === "incident"
+        ? `blocked by global account incident ${oneLine(incident.incidentId)} ` +
+          `(reason ${oneLine(incident.reason)}, reported ${oneLine(incident.reportedAt)} by ` +
+          `${oneLine(incident.repository)} run ${oneLine(incident.runId)} on runner ${oneLine(incident.runnerId)})`
+        : `blocked; holders and reservations consume every slot (max-holders=${lockConfig.maxHolders})`;
+  const lines = [
+    `Lock ${oneLine(config.lockName)}; schema ${state.schemaVersion}; ` +
+      `state ${sha ? `sha ${oneLine(sha)}` : "file not published yet"}; ` +
+      `updated ${oneLine(state.updatedAt)}`,
+    `Capacity max-holders=${lockConfig.maxHolders} holders=${holders.length} ` +
+      `reservations=${reservations.length} free=${freeCapacity}`,
+    `Admission ${admission}`,
+    incident
+      ? `Incident ${oneLine(incident.incidentId)}; reason ${oneLine(incident.reason)}; ` +
+        `repository ${oneLine(incident.repository)}; workflow ${oneLine(incident.workflow)}; ` +
+        `job ${oneLine(incident.job)}; run ${oneLine(incident.runId)}; ` +
+        `attempt ${oneLine(incident.runAttempt)}; runner ${oneLine(incident.runnerId)}; ` +
+        `reported-at ${oneLine(incident.reportedAt)}; source ${oneLine(incident.runUrl)}`
+      : "Incident none",
+    ...(quarantines.length
+      ? quarantines.map((reservation) => `Quarantine ${statusReservationLine(reservation)}`)
+      : ["Quarantine none"]),
+    ...(cooldowns.length
+      ? cooldowns.map((reservation) => `Cooldown ${statusReservationLine(reservation)}`)
+      : []),
+    ...(holders.length
+      ? holders.map((holder) => `Holder ${statusHolderLine(holder)}`)
+      : ["Holder none"]),
+    `Queue ${state.queue.length} waiting` +
+      (state.queue.length ? `; next ${statusQueueLine(state.queue[0])}` : ""),
+    `Last-reaper ${lastReap.detail}`,
+    ...(expiredCooldowns.length
+      ? [`Expired-cooldowns ${expiredCooldowns.length} aged out and hold no capacity`]
+      : [])
+  ];
+  for (const line of lines) {
+    console.log(line);
+  }
+  console.log("::endgroup::");
+
+  writeOutput("admission", blockingCause === "none" ? "open" : "blocked");
+  writeOutput("blocking-cause", blockingCause);
+  writeOutput("incident-id", incident ? incident.incidentId : "");
+  writeOutput(
+    "blocking-reservation-ids",
+    blockingQuarantines.map((reservation) => reservation.reservationId).join(",")
+  );
+  writeOutput("free-capacity", String(freeCapacity));
+  writeOutput("last-reaper-at", lastReap.at);
+  appendSummary(
+    `### Build lock status for ${summaryCell(config.lockName)}\n\n` +
+      lines.map((line) => `- ${summaryCell(line)}`).join("\n")
+  );
+}
+
 async function reap(config, options = {}) {
   validateLockName(config.lockName);
   config.operation = config.operation || "reap";
+  if (config.operation === STATUS_OPERATION) {
+    await reportLockStatus(config);
+    return;
+  }
   if (config.operation !== "reap" && config.operation !== "recover" && config.operation !== "recover-incident") {
-    throw new Error("operation must be reap, recover, or recover-incident.");
+    throw new Error("operation must be reap, status, recover, or recover-incident.");
   }
   const scheduledReap = config.operation === "reap";
   const reapBudgets = reapDeadlineBudgets();
@@ -4817,12 +5023,14 @@ function config() {
   );
   const stateBranch = input("state-branch", STATE_BRANCH);
   validateLockName(lockName);
-  authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE });
+  const operation = input("operation", "reap");
+  authorizeCaller({ lockName, lockRepository, stateBranch, mode: MODE, operation });
   const lockRepo = parseRepository(lockRepository);
   const holderIdSuffix = holderIdSuffixInput();
   const releaseRetryDeadlineSeconds = releaseRetryDeadlineInput();
-  const token = credential(lockRepo);
-  const operation = input("operation", "reap");
+  // Status reads public lock state only. It mints no token, so it cannot write.
+  const readOnlyStatus = MODE === "reap" && operation === STATUS_OPERATION;
+  const token = readOnlyStatus ? null : credential(lockRepo);
   const resourceReportResolution = MODE === "release"
     ? resolveReleaseReport({
       resourceSafe: rawInput("resource-safe"),
@@ -4939,6 +5147,7 @@ module.exports = {
   releaseRetryApiOptions,
   reap,
   reapDeadlineBudgets,
+  reportLockStatus,
   resolveCurrentJob,
   resolveReleaseReport,
   run,
