@@ -6,8 +6,9 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 - Credential scope (#51): the owner keeps both Apps installed org-wide. The
   remaining work is the org-secret repository scope and the permission probe.
-- Enrollment drift (#113): 22 findings remain. Fourteen are DxMessaging workflow
-  shape findings; eight are expired unity-builder and unity-helpers exceptions.
+- Enrollment drift (#113): 27 findings remain. Five are DxAudio findings (fixed
+  by this session's consumer pull request), 14 are DxMessaging workflow shape
+  findings, and 8 are expired unity-builder and unity-helpers exceptions.
   DoxReloaded is complete.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.
@@ -26,8 +27,11 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Linter compatibility (#335): the pinned linter still fails to build against
   YAML v4.0.0, which no longer exports `yaml.ParserError`. Move the dependency
   only after a linter release supports the newer API.
-- Merge queue adoption (#379): repin DoxReloaded, add `merge_group`, and enable
-  the queue after the next authorized release.
-- Status adoption (#390): the central token default and the consumer shape are
-  decided. A consumer adopts the step, outside every licensed job, after the
-  next authorized release publishes a pin.
+- Aggregate coverage (#397): the reviewed aggregate shapes cover one licensed
+  job, so a workflow with several licensed jobs cannot pass. DxMessaging and
+  unity-helpers findings wait on that decision.
+- Merge queue adoption (#379): v1.18.0 publishes an approved pin. Repin
+  DoxReloaded, add `merge_group`, and enable the queue after the owner
+  authorizes it.
+- Status adoption (#390): v1.18.0 publishes an approved pin. A consumer adopts
+  the reporting step outside every licensed job.
