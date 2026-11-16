@@ -23,10 +23,11 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Consumer failure (#278): collect consumer test and retry evidence; recorded
   lock cleanup was clean.
 - Cancellation attribution (#277): obtain actor evidence beyond run records.
-- Linter compatibility (#335): move actionlint's YAML dependency only after
-  the pinned linter supports the newer API and passes validation.
+- Linter compatibility (#335): the pinned linter still fails to build against
+  YAML v4.0.0, which no longer exports `yaml.ParserError`. Move the dependency
+  only after a linter release supports the newer API.
 - Merge queue adoption (#379): repin DoxReloaded, add `merge_group`, and enable
   the queue after the next authorized release.
-- Status adoption (#390): decide the consumer shape for the read-only status
-  operation, and decide whether a consumer passes its own token for the
-  `last-reaper-at` read.
+- Status adoption (#390): the central token default and the consumer shape are
+  decided. A consumer adopts the step, outside every licensed job, after the
+  next authorized release publishes a pin.

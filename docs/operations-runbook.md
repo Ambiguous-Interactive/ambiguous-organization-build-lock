@@ -592,8 +592,36 @@ cannot prove the repository or the lock config, it fails red instead of
 reporting a guess. `admission=open` describes the lock, not one caller:
 runner serialization and FIFO order still apply. Use it before you attest a
 recovery, and after a failed Unity job to separate a global block from a local
-one. The same operation runs as the `reap-stale-locks` action with
-`operation: status`, which a consumer job can call without secrets.
+one.
+
+The `reap-stale-locks` action runs the same operation with `operation: status`,
+and any enrolled repository may call it with no secret. A step with
+`if: failure()` sees only the steps of its own job, so report after a licensed
+job with a separate job:
+
+```yaml
+report-build-lock:
+  needs: unity-tests
+  if: failure()
+  runs-on: ubuntu-latest
+  steps:
+    - name: Report the build lock condition
+      uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/reap-stale-locks@IMMUTABLE_COMMIT_SHA
+      with:
+        lock-name: wallstop-organization-builds
+        operation: status
+```
+
+`last-reaper-at` costs one Actions read of this repository. A caller token can
+read that history only when the token has Actions read on this repository, so a
+consumer token does not help: `status` then reads anonymously, and GitHub's
+anonymous read limit can leave the fact unproven. A refused token read retries
+anonymously, and no failed read fails the report. The fact is then `unproven`
+and every other fact stays correct. Only that Actions read may use a token. The
+lock-state and lock-config reads stay anonymous.
+
+Keep a status step outside every licensed job. A step inside a licensed job
+changes that job's audited shape. Do not add a required check for status.
 
 Never edit or delete `lock-state` JSON directly. A recovery with a wrong ID,
 missing portal proof, or incomplete run-status evidence must fail closed.
