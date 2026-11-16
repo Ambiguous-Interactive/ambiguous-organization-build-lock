@@ -115,7 +115,18 @@ An independent adversarial review found these issues. All are fixed.
 
 ## Validation
 
-Pending. Recorded after the checks run.
+- `node tools/llm-harness.mjs check`: pass.
+- `node --test test/*.test.js`: 1051 total, 1025 pass, 23 fail, 3 skipped. The
+  failure set is the documented macOS baseline set; it is unchanged by this
+  change.
+- `go test ./...`, `go vet ./...`, `go mod verify`, both `mod tidy -diff`
+  checks: pass.
+- `bash tools/workflows/ci.sh javascript`: pass. `shellcheck` is not installed
+  on this host; CI runs it.
+- actionlint over every workflow: no findings.
+- `go run ./cmd/workflow-credential-audit .`: pass.
+- `cmd/audit-unity-enrollment -validate-policy-only`: the registry is valid.
+- `golangci-lint` is not installed on this host; CI runs it.
 
 ## Merge and post-merge evidence
 
