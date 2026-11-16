@@ -6,8 +6,9 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 - Credential scope (#51): the owner keeps both Apps installed org-wide. The
   remaining work is the org-secret repository scope and the permission probe.
-- Enrollment drift (#113): 22 findings remain. Fourteen are DxMessaging workflow
-  shape findings; eight are expired unity-builder and unity-helpers exceptions.
+- Enrollment drift (#113): 27 findings remain. Five are DxAudio findings (fixed
+  by this session's consumer pull request), 14 are DxMessaging workflow shape
+  findings, and 8 are expired unity-builder and unity-helpers exceptions.
   DoxReloaded is complete.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.

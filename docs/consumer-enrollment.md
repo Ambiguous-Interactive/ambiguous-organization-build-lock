@@ -396,7 +396,10 @@ touches a Dependabot pull request.
    absent because inherited values can preload the Node runtime before the
    immutable action begins. The optional current-head guard, editor action, and
    acquire omit `if`, preserving GitHub's implicit `success()` chain;
-   `always()` is prohibited on this prefix. Checked-in PowerShell remains
+   `always()` is prohibited on this prefix. Any `if` there is refused, because
+   a conditional step cannot prove that chain; the guard reports current
+   without an API call when no pull request is in scope, so a push or scheduled
+   run needs no `if`. Checked-in PowerShell remains
    audited for hidden editor provisioning but cannot satisfy the mandatory
    central action gate.
 
@@ -429,6 +432,9 @@ touches a Dependabot pull request.
    not cleanup authority. It reports a dedicated run-scoped log path,
    command-completed state, signed exit code,
    capture-complete attestation, and SHA-256 of the exact redacted log bytes.
+   Keep `evidence-suffix` literal (`[A-Za-z0-9._-]`, no `${{ }}` expression).
+   An expression leaves the return step untyped, so the audit reports
+   `missing-unity-return` and the return-suffix and classifier codes with it.
    A completed command with a complete capture does not fail this step only
    because its exit code is nonzero. The classifier decides what that code and
    log prove. Timeouts, signals, and incomplete capture still fail the step.
@@ -504,7 +510,9 @@ touches a Dependabot pull request.
    `cleanup-result`. It accepts only an exact untrusted skip, an exact
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
-   residue-bearing execution fails.
+   residue-bearing execution fails. One exact-shape aggregate covers one
+   licensed job, so a second licensed lane, such as a nightly editor matrix,
+   belongs in its own workflow file.
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already
