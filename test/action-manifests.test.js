@@ -395,8 +395,13 @@ test("reaper publishes the read-only status operation and its outputs", () => {
   );
   assert.match(
     reaper,
-    /^ {2}github-token:\n(?: {4}.*\n)*? {6}without a credential and never writes\.$/m,
+    /^ {2}github-token:\n(?: {4}.*\n)*? {6}.*without a credential and never writes\.$/m,
     "the token input must state that status reads without a credential and never writes"
+  );
+  assert.doesNotMatch(
+    reaper,
+    /^ {2}github-token:\n(?: {4}.*\n)*? {4}default:/m,
+    "a caller token cannot read another repository's Actions history, so status must not default one"
   );
 });
 

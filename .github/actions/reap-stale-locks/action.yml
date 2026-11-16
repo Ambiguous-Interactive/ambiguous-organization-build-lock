@@ -32,9 +32,11 @@ inputs:
     default: "false"
   github-token:
     description: >-
-      Optional token with Actions read access. Status uses it only to name the
-      last successful scheduled reaper run. Status reads the public lock state
-      without a credential and never writes.
+      Optional token with Actions read access on the lock repository. Status
+      uses it only to name the last successful scheduled reaper run. A caller
+      token from another repository cannot read that history, so status also
+      reads anonymously, within GitHub's anonymous read limit. Status reads the
+      public lock state without a credential and never writes.
     required: false
 outputs:
   reaped:

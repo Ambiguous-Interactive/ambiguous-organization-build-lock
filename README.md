@@ -587,6 +587,10 @@ Operator `recover` and `recover-incident` operations do not inspect workflow
 runs and therefore do not require reader credentials. The read-only `status`
 operation reads the public lock state with no credential at all, and it uses an
 optional `github-token` only to name the last successful scheduled reaper run.
+A token can read that history only when it has Actions read on the lock
+repository, so a consumer reads anonymously within GitHub's anonymous read
+limit. A refused token read retries anonymously, and a failed read leaves the
+fact unproven without failing the report.
 
 Legacy `BUILD_LOCK_TOKEN` authentication is rejected. Old pinned runs must drain
 before the state-writer App key is rotated.

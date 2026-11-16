@@ -4400,28 +4400,44 @@ function statusQueueLine(entry) {
 // The last successful *scheduled* reaper run is published by the Actions API, not
 // by lock state, because the reaper writes state only when it changes something.
 // A failed or rate-limited read leaves the fact unproven; it never fails the report.
+// A caller token removes GitHub's anonymous read limit only when it can read this
+// repository's Actions history. A refused token is retried anonymously, so a
+// mis-scoped credential never leaves the fact less proven than no token at all.
 async function lastSuccessfulReaperRun(config) {
   const { owner, repo } = config.lockRepo;
-  try {
-    const data = await api(
-      "GET",
-      `/repos/${owner}/${repo}/actions/workflows/${REAP_WORKFLOW_FILE}/runs?per_page=1&status=success&event=schedule`,
-      undefined,
-      config.githubToken || null
-    );
-    const run = data && Array.isArray(data.workflow_runs) ? data.workflow_runs[0] : null;
-    if (!run || run.conclusion !== "success" || run.event !== "schedule" || !parseTime(run.created_at)) {
-      return { proven: false, at: "", detail: "no successful scheduled reaper run is published" };
+  const path = `/repos/${owner}/${repo}/actions/workflows/${REAP_WORKFLOW_FILE}` +
+    "/runs?per_page=1&status=success&event=schedule";
+  const credentials = config.githubToken ? [config.githubToken, null] : [null];
+  const failures = [];
+  for (const credential of credentials) {
+    try {
+      const data = await api("GET", path, undefined, credential);
+      const run = data && Array.isArray(data.workflow_runs) ? data.workflow_runs[0] : null;
+      if (!run || run.conclusion !== "success" || run.event !== "schedule" || !parseTime(run.created_at)) {
+        return { proven: false, at: "", detail: "no successful scheduled reaper run is published" };
+      }
+      return {
+        proven: true,
+        at: String(run.created_at),
+        detail: `run ${oneLine(run.id)} at ${oneLine(run.created_at)}` +
+          `${run.html_url ? ` (${oneLine(run.html_url)})` : ""}`
+      };
+    } catch (error) {
+      failures.push(oneLine(error.message));
+      // Only a refused credential can be answered by dropping it. A transient
+      // failure already spent its bounded retry budget, so it stops here.
+      if (![401, 403, 404].includes(error.status)) {
+        break;
+      }
     }
-    return {
-      proven: true,
-      at: String(run.created_at),
-      detail: `run ${oneLine(run.id)} at ${oneLine(run.created_at)}` +
-        `${run.html_url ? ` (${oneLine(run.html_url)})` : ""}`
-    };
-  } catch (error) {
-    return { proven: false, at: "", detail: `unproven: ${oneLine(error.message)}` };
   }
+  return {
+    proven: false,
+    at: "",
+    detail: failures.length > 1
+      ? `unproven: ${failures[0]} (anonymous retry: ${failures[1]})`
+      : `unproven: ${failures[0]}`
+  };
 }
 
 // readState treats a missing lock-state file as an empty lock. An unreadable

@@ -653,6 +653,89 @@ test("status uses its optional token only for the reaper-run read", async () => 
   assert.equal(authorized[0].authorization, "Bearer actions-read-token");
 });
 
+// Issue #390: a caller token can read the lock repository's Actions history only
+// when its scope allows it. A refused token must retry anonymously, so a
+// mis-scoped credential never leaves the fact less proven than no token at all.
+test("status retries the reaper-run read anonymously when the token is refused", async () => {
+  const requests = [];
+  const outputFile = await withTempFile(async (file) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: file }, async () =>
+      withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        requests.push({ path: parsed.pathname, authorization: options.headers.Authorization });
+        if (parsed.pathname === "/repos/o/r") {
+          return jsonResponse(200, { full_name: "o/r", default_branch: "main" });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          return base64Content(accountHealthState([], [], []), "state-sha");
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 1 }, "cfg");
+        }
+        if (parsed.pathname === "/repos/o/r/actions/workflows/reap-stale-locks.yml/runs") {
+          if (options.headers.Authorization) {
+            return jsonResponse(403, { message: "Resource not accessible by integration" });
+          }
+          return jsonResponse(200, {
+            workflow_runs: [{
+              id: 4242,
+              conclusion: "success",
+              event: "schedule",
+              created_at: "2026-06-06T00:05:00.000Z"
+            }]
+          });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async () => {
+        await reap(semaphoreConfig({ operation: "status", token: null, githubToken: "actions-read-token" }));
+      })
+    );
+    return readEnvironmentFile(file);
+  });
+  const reaperReads = requests.filter((request) => request.path.endsWith("/runs"));
+  assert.deepEqual(
+    reaperReads.map((request) => request.authorization || null),
+    ["Bearer actions-read-token", null],
+    "a refused token read must retry anonymously"
+  );
+  assert.equal(outputFile["last-reaper-at"], "2026-06-06T00:05:00.000Z");
+});
+
+test("status names both refused reaper-run reads and still reports", async () => {
+  const requests = [];
+  const outputFile = await withTempFile(async (file) => {
+    await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: file }, async () =>
+      withMockedFetch(async (url, options = {}) => {
+        const parsed = new URL(url);
+        requests.push({ path: parsed.pathname, authorization: options.headers.Authorization });
+        if (parsed.pathname === "/repos/o/r") {
+          return jsonResponse(200, { full_name: "o/r", default_branch: "main" });
+        }
+        if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+          return base64Content(accountHealthState([], [], []), "state-sha");
+        }
+        if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+          return base64Content({ maxHolders: 1 }, "cfg");
+        }
+        if (parsed.pathname === "/repos/o/r/actions/workflows/reap-stale-locks.yml/runs") {
+          return jsonResponse(options.headers.Authorization ? 403 : 404, { message: "Not accessible" });
+        }
+        return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+      }, async (logs) => {
+        await reap(semaphoreConfig({ operation: "status", token: null, githubToken: "actions-read-token" }));
+        assert.ok(
+          logs.some((line) => line.includes("(anonymous retry:")),
+          "the report must name both refused reads"
+        );
+      })
+    );
+    return readEnvironmentFile(file);
+  });
+  assert.equal(requests.filter((request) => request.path.endsWith("/runs")).length, 2);
+  assert.equal(outputFile["last-reaper-at"], "");
+  assert.equal(outputFile.admission, "open", "an unproven reaper run never fails the status report");
+});
+
 // The README states that status mints no token. config() is the only place that
 // decides that, so prove it from a real reap-mode entrypoint with no App key.
 test("the committed status entrypoint needs no App credential", () => {
