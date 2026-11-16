@@ -595,15 +595,21 @@ recovery, and after a failed Unity job to separate a global block from a local
 one.
 
 The `reap-stale-locks` action runs the same operation with `operation: status`,
-and any enrolled repository may call it with no secret:
+and any enrolled repository may call it with no secret. A step with
+`if: failure()` sees only the steps of its own job, so report after a licensed
+job with a separate job:
 
 ```yaml
-- name: Report the build lock condition
+report-build-lock:
+  needs: unity-tests
   if: failure()
-  uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/reap-stale-locks@IMMUTABLE_COMMIT_SHA
-  with:
-    lock-name: wallstop-organization-builds
-    operation: status
+  runs-on: ubuntu-latest
+  steps:
+    - name: Report the build lock condition
+      uses: Ambiguous-Interactive/ambiguous-organization-build-lock/.github/actions/reap-stale-locks@IMMUTABLE_COMMIT_SHA
+      with:
+        lock-name: wallstop-organization-builds
+        operation: status
 ```
 
 `last-reaper-at` costs one Actions read of this repository. A caller token can
