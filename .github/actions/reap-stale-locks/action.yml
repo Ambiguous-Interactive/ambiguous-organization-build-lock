@@ -38,19 +38,26 @@ inputs:
     required: false
 outputs:
   reaped:
-    description: "true when stale state was handled or a reservation recovery completed."
+    description: "true when stale state was handled or a reservation recovery completed. Status writes no value."
   state-sha:
-    description: Lock-state file SHA after reaping.
+    description: Lock-state file SHA after reaping. Status writes no value.
   admission:
-    description: "Status only: open when at least one slot is free and no incident blocks admission, otherwise blocked."
+    description: >-
+      Status only: open when no incident blocks admission and at least one slot is
+      free, otherwise blocked. It describes the lock-wide condition, not the outcome
+      for one caller.
   blocking-cause:
     description: "Status only: none, incident, or capacity."
   incident-id:
     description: "Status only: active global incident ID, or empty when none is active."
   blocking-reservation-ids:
-    description: "Status only: comma-separated reservations that consume the last free capacity."
+    description: >-
+      Status only: comma-separated quarantine reservations that consume free capacity.
+      A cooldown is not named because recovery does not accept it.
   free-capacity:
-    description: "Status only: max-holders minus holders minus reservations."
+    description: >-
+      Status only: max-holders minus holders minus reservations. It is negative when a
+      reviewed max-holders reduction left the state over capacity.
   last-reaper-at:
     description: "Status only: creation time of the last successful scheduled reaper run, or empty when unproven."
 runs:

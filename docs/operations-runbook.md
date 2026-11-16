@@ -586,8 +586,11 @@ triggers are recorded in
 needs no confirmation input. It names the active global incident or the
 quarantine that blocks admission, or it says that neither does. It also prints
 the holders, the free capacity, the waiting queue, and the last successful
-reaper run. It reads the public `lock-state` branch with GET requests and mints
-no write credential, so it cannot change admission. Use it before you attest a
+scheduled reaper run. It reads the public `lock-state` files and the lock config
+with GET requests and mints no credential, so it cannot change admission. If it
+cannot prove the repository or the lock config, it fails red instead of
+reporting a guess. `admission=open` describes the lock, not one caller:
+runner serialization and FIFO order still apply. Use it before you attest a
 recovery, and after a failed Unity job to separate a global block from a local
 one. The same operation runs as the `reap-stale-locks` action with
 `operation: status`, which a consumer job can call without secrets.

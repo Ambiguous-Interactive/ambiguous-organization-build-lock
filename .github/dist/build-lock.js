@@ -1781,13 +1781,16 @@ async function writeState(config, previousSha, state, message, options = {}) {
   }
 }
 
-function normalizeMaxHolders(raw, sourcePath) {
+function normalizeMaxHolders(raw, sourcePath, options = {}) {
   if (raw === undefined || raw === null) {
     return DEFAULT_MAX_HOLDERS;
   }
   const value =
     typeof raw === "string" && /^[0-9]+$/.test(raw.trim()) ? Number.parseInt(raw.trim(), 10) : raw;
   if (!Number.isInteger(value) || value < 1 || value > MAX_HOLDERS_CAP) {
+    if (options.strict) {
+      return null;
+    }
     console.log(
       `::warning::Ignoring invalid maxHolders=${JSON.stringify(raw)} in ${sourcePath}; ` +
         `expected an integer between 1 and ${MAX_HOLDERS_CAP}. Using max-holders=${DEFAULT_MAX_HOLDERS}.`
@@ -1873,7 +1876,8 @@ function configReadCanFailClosed(error, options = {}) {
 // Per-lock parallelism lives in locks/<lock-name>.config.json on the lock repository's
 // DEFAULT branch (not the state branch): one PR-reviewable source of truth for every
 // consumer repo. Missing or invalid config fails closed to a single holder, which can
-// never over-run a license.
+// never over-run a license. Admission may proceed on those safe defaults, but a
+// reporting path sets `requireProof`: it must not publish an unverified capacity.
 async function readLockConfig(config, options = {}) {
   const { owner, repo } = config.lockRepo;
   const configPath = config.configPath || `locks/${config.lockName}.config.json`;
@@ -1888,6 +1892,9 @@ async function readLockConfig(config, options = {}) {
     if (error.status === 404) {
       return defaultLockConfig();
     }
+    if (options.requireProof) {
+      throw new Error(`Cannot prove lock config at ${configPath}: ${oneLine(error.message)}`);
+    }
     if (configReadCanFailClosed(error, options)) {
       console.log(
         `::warning::Unable to read lock config at ${configPath}: ${oneLine(error.message)}; ` +
@@ -1897,6 +1904,13 @@ async function readLockConfig(config, options = {}) {
     }
     throw error;
   }
+  // A reporting path must not publish safe defaults as if it had read them.
+  const unproven = (reason) => {
+    if (options.requireProof) {
+      throw new Error(`Cannot prove lock config at ${configPath}: ${reason}.`);
+    }
+    return defaultLockConfig();
+  };
   let parsed;
   try {
     parsed = JSON.parse(base64Decode(data.content));
@@ -1905,7 +1919,7 @@ async function readLockConfig(config, options = {}) {
       `::warning::Lock config at ${configPath} is not valid JSON (${oneLine(error.message)}); ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("it is not valid JSON");
   }
   const runnerSerialization = normalizeBooleanConfig(
     parsed && parsed.runnerSerialization,
@@ -1913,32 +1927,38 @@ async function readLockConfig(config, options = {}) {
     configPath
   );
   if (runnerSerialization === null) {
-    return defaultLockConfig();
+    return unproven("runnerSerialization is invalid");
   }
   const resourceLifecycle = normalizeBooleanConfig(parsed && parsed.resourceLifecycle, "resourceLifecycle", configPath);
   if (resourceLifecycle === null) {
-    return defaultLockConfig();
+    return unproven("resourceLifecycle is invalid");
   }
   if (resourceLifecycle && !runnerSerialization) {
     console.log(
       `::warning::Ignoring resourceLifecycle=true in ${configPath}; runnerSerialization must also be true; ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("resourceLifecycle requires runnerSerialization");
   }
   const accountHealth = normalizeBooleanConfig(parsed && parsed.accountHealth, "accountHealth", configPath);
   if (accountHealth === null) {
-    return defaultLockConfig();
+    return unproven("accountHealth is invalid");
   }
   if (accountHealth && !resourceLifecycle) {
     console.log(
       `::warning::Ignoring accountHealth=true in ${configPath}; resourceLifecycle must also be true; ` +
         `using safe defaults (${defaultLockConfigSummary()}).`
     );
-    return defaultLockConfig();
+    return unproven("accountHealth requires resourceLifecycle");
+  }
+  const maxHolders = normalizeMaxHolders(parsed && parsed.maxHolders, configPath, {
+    strict: Boolean(options.requireProof)
+  });
+  if (maxHolders === null) {
+    return unproven("maxHolders is invalid");
   }
   return {
-    maxHolders: normalizeMaxHolders(parsed && parsed.maxHolders, configPath),
+    maxHolders,
     runnerSerialization,
     resourceLifecycle,
     accountHealth,
@@ -4377,20 +4397,20 @@ function statusQueueLine(entry) {
   ].join(" ");
 }
 
-// The last successful scheduled reaper run is published by the Actions API, not by
-// lock state, because the reaper writes state only when it changes something. A
-// failed or rate-limited read leaves the fact unproven; it never fails the report.
+// The last successful *scheduled* reaper run is published by the Actions API, not
+// by lock state, because the reaper writes state only when it changes something.
+// A failed or rate-limited read leaves the fact unproven; it never fails the report.
 async function lastSuccessfulReaperRun(config) {
   const { owner, repo } = config.lockRepo;
   try {
     const data = await api(
       "GET",
-      `/repos/${owner}/${repo}/actions/workflows/${REAP_WORKFLOW_FILE}/runs?per_page=1&status=success`,
+      `/repos/${owner}/${repo}/actions/workflows/${REAP_WORKFLOW_FILE}/runs?per_page=1&status=success&event=schedule`,
       undefined,
       config.githubToken || null
     );
     const run = data && Array.isArray(data.workflow_runs) ? data.workflow_runs[0] : null;
-    if (!run || run.conclusion !== "success" || !parseTime(run.created_at)) {
+    if (!run || run.conclusion !== "success" || run.event !== "schedule" || !parseTime(run.created_at)) {
       return { proven: false, at: "", detail: "no successful scheduled reaper run is published" };
     }
     return {
@@ -4413,7 +4433,7 @@ async function proveStatusSourceReadable(config) {
     await api("GET", `/repos/${owner}/${repo}`, undefined, null);
   } catch (error) {
     throw new Error(
-      `Status cannot read ${owner}/${repo} without a credential (${oneLine(error.message)}); ` +
+      `Status cannot prove that ${owner}/${repo} is readable (${oneLine(error.message)}); ` +
         "it will not report an unproven lock state as open."
     );
   }
@@ -4423,7 +4443,7 @@ async function reportLockStatus(config) {
   console.log(`::group::Build lock status ${config.lockName}`);
   await proveStatusSourceReadable(config);
   const { state, sha } = await readState(config);
-  const lockConfig = await readLockConfig(config);
+  const lockConfig = await readLockConfig(config, { requireProof: true });
   const expiredCooldowns = pruneExpiredCooldowns(state);
   const holders = state.holders;
   const reservations = state.reservations || [];
@@ -4432,7 +4452,9 @@ async function reportLockStatus(config) {
   const incident = state.activeIncident || null;
   const freeCapacity = lockConfig.maxHolders - holders.length - reservations.length;
   const blockingCause = incident ? "incident" : freeCapacity <= 0 ? "capacity" : "none";
-  const blockingReservations = blockingCause === "capacity" ? reservations : [];
+  // Recovery accepts a quarantine only, so a cooldown is never named as the thing
+  // an operator could recover.
+  const blockingQuarantines = blockingCause === "capacity" ? quarantines : [];
   const lastReap = await lastSuccessfulReaperRun(config);
 
   const admission =
@@ -4483,13 +4505,13 @@ async function reportLockStatus(config) {
   writeOutput("incident-id", incident ? incident.incidentId : "");
   writeOutput(
     "blocking-reservation-ids",
-    blockingReservations.map((reservation) => reservation.reservationId).join(",")
+    blockingQuarantines.map((reservation) => reservation.reservationId).join(",")
   );
   writeOutput("free-capacity", String(freeCapacity));
   writeOutput("last-reaper-at", lastReap.at);
   appendSummary(
     `### Build lock status for ${summaryCell(config.lockName)}\n\n` +
-      lines.map((line) => `- ${line}`).join("\n")
+      lines.map((line) => `- ${summaryCell(line)}`).join("\n")
   );
 }
 

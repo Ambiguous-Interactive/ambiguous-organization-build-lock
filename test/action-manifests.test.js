@@ -386,8 +386,18 @@ test("reaper publishes the read-only status operation and its outputs", () => {
   ]) {
     assert.ok(outputs.includes(name), `reap-stale-locks must expose ${name}`);
   }
-  assert.match(reaper, /operation:[\s\S]*?read-only status/);
-  assert.match(reaper, /github-token:[\s\S]*?never writes/);
+  const inputs = yamlRequiredTopLevelMappingKeys(reaper, "inputs", "reap-stale-locks/action.yml");
+  assert.ok(inputs.includes("github-token"), "status names the reaper run through an optional token");
+  assert.match(
+    reaper,
+    /^ {2}operation:\n {4}description: "[^"]*read-only status[^"]*"$/m,
+    "the operation input must document status as read-only"
+  );
+  assert.match(
+    reaper,
+    /^ {2}github-token:\n(?: {4}.*\n)*? {6}without a credential and never writes\.$/m,
+    "the token input must state that status reads without a credential and never writes"
+  );
 });
 
 test("runner registration action requires reader App auth and fail-closed label sets", () => {

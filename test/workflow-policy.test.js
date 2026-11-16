@@ -3137,6 +3137,10 @@ test("recovery workflow offers a read-only status operation", () => {
   assert.match(text, /^\s{10}- recover-incident\s*$/m);
   assert.match(text, /^\s{10}- status\s*$/m);
   assert.equal(recoverActionStep.with["github-token"], "${{ github.token }}");
+  assert.ok(
+    hasEffectivePermission(text, jobSections(text)[0].text, "actions", "read"),
+    "the status read of the last reaper run needs actions: read"
+  );
 });
 
 test("reaper delivery audit is independent, least privilege, and fail-closed", () => {
