@@ -432,7 +432,8 @@ touches a Dependabot pull request.
    not cleanup authority. It reports a dedicated run-scoped log path,
    command-completed state, signed exit code,
    capture-complete attestation, and SHA-256 of the exact redacted log bytes.
-   Keep `evidence-suffix` literal (`[A-Za-z0-9._-]`, no `${{ }}` expression).
+   Keep `evidence-suffix` literal: an alphanumeric first character, then
+   `[A-Za-z0-9._-]`, at most 64 characters, and no `${{ }}` expression.
    An expression leaves the return step untyped, so the audit reports
    `missing-unity-return` and the return-suffix and classifier codes with it.
    A completed command with a complete capture does not fail this step only
