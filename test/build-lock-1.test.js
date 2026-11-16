@@ -848,6 +848,13 @@ test("authorization separates lock-repository reaping from consumer lock operati
       }),
       /Only the lock repository/
     );
+    // Issue #387: status is read-only, so a consumer may run it.
+    assert.doesNotThrow(() => authorizeCaller({
+      lockName: "wallstop-organization-builds",
+      lockRepository: "Ambiguous-Interactive/ambiguous-organization-build-lock",
+      mode: "reap",
+      operation: "status"
+    }));
   });
   await withActionEnv({
     GITHUB_REPOSITORY: "Ambiguous-Interactive/ambiguous-organization-build-lock",

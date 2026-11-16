@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Recover a confirmed quarantine or global incident
+        description: Recover a confirmed quarantine or global incident, or report read-only status
         required: true
         type: choice
         options:
           - recover
           - recover-incident
+          - status
       reservation-id:
         description: Exact quarantine reservation ID (recover only)
         required: false
@@ -31,6 +32,8 @@ on:
 
 permissions:
   contents: read
+  # Status reads the last successful scheduled reaper run. It never writes.
+  actions: read
 
 jobs:
   recover:
@@ -52,6 +55,7 @@ jobs:
           resource-safe: ${{ inputs['resource-safe'] || false }}
           incident-id: ${{ inputs['incident-id'] || '' }}
           portal-cleanup-confirmed: ${{ inputs['portal-cleanup-confirmed'] || false }}
+          github-token: ${{ github.token }}
         env:
           BUILD_LOCK_APP_ID: ${{ secrets.BUILD_LOCK_APP_ID }}
           BUILD_LOCK_APP_PRIVATE_KEY: ${{ secrets.BUILD_LOCK_APP_PRIVATE_KEY }}

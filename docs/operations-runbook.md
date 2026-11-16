@@ -580,6 +580,18 @@ provides stronger evidence. The bounded investigation and revalidation
 triggers are recorded in
 [Unity 20111 Incident Outcomes](../.llm/research/20111-incident-outcomes-2026-07-29.md).
 
+### Read-only status
+
+`Recover build lock` also accepts `operation=status`. It is read-only and it
+needs no confirmation input. It names the active global incident or the
+quarantine that blocks admission, or it says that neither does. It also prints
+the holders, the free capacity, the waiting queue, and the last successful
+reaper run. It reads the public `lock-state` branch with GET requests and mints
+no write credential, so it cannot change admission. Use it before you attest a
+recovery, and after a failed Unity job to separate a global block from a local
+one. The same operation runs as the `reap-stale-locks` action with
+`operation: status`, which a consumer job can call without secrets.
+
 Never edit or delete `lock-state` JSON directly. A recovery with a wrong ID,
 missing portal proof, or incomplete run-status evidence must fail closed.
 

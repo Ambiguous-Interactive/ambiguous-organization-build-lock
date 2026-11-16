@@ -584,7 +584,9 @@ token from a legacy broad writer installation when reader credentials are
 absent. Steady-state deployment must not rely on it: the writer App remains
 lock-repository-only and missing reader credentials fail the scheduled reaper.
 Operator `recover` and `recover-incident` operations do not inspect workflow
-runs and therefore do not require reader credentials.
+runs and therefore do not require reader credentials. The read-only `status`
+operation reads the public lock state with no credential at all, and it uses an
+optional `github-token` only to name the last successful scheduled reaper run.
 
 Legacy `BUILD_LOCK_TOKEN` authentication is rejected. Old pinned runs must drain
 before the state-writer App key is rotated.
@@ -878,6 +880,16 @@ Unity portal inventory is reconciled. Supplying the exact incident ID is
 recommended; when it is omitted, the action binds to the one active incident
 from its canonical lock-state read and still compares that immutable ID before
 the CAS write. A wrong ID, no active incident, or missing proof fails closed.
+
+Before either attestation, `operation=status` answers the same question without
+a write. It names the blocking incident, the quarantine that consumes the last
+slot, or neither. It also reports the holders, the free capacity, the waiting
+queue, and the last successful reaper run. It reads the public `lock-state`
+branch with GET requests only and mints no write credential. It publishes
+`admission`, `blocking-cause`, `incident-id`, `blocking-reservation-ids`,
+`free-capacity`, and `last-reaper-at`, so a consumer job can branch on the
+result. A consumer calls the same operation through the `reap-stale-locks`
+action with `operation: status`, and it needs no secret.
 
 Operators do not have to read `lock-state` to find that ID. The independent
 `Build lock incident recovery audit` reads committed lock state every ten

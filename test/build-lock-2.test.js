@@ -33,6 +33,7 @@ const {
   acquireOutputNames,
   releaseOutputNames,
   reapOutputNames,
+  statusOutputNames,
   withActionEnv,
   withEnvironment,
   withImmediateTimers,
@@ -405,6 +406,156 @@ test("scheduled reap checkpoints stale-holder recovery before inspecting queued 
   assert.deepEqual(state.queue, [queued], "unscanned queue entries remain in their original FIFO order");
 });
 
+
+// Issue #387: a consumer's failed run needs to name the incident or quarantine
+// that blocks admission without a write, an attestation, or a credential.
+test("status reports admission evidence with reads only", async () => {
+  const incident = accountIncident();
+  const quarantine = lifecycleReservation(withRunner(semaphoreHolder("holder/repo", "123", "editmode"), "runner-a"));
+  const expiredCooldown = lifecycleReservation(
+    withRunner(semaphoreHolder("holder/repo", "456", "editmode"), "runner-b"),
+    { reservationId: "reservation-expired", state: "cooldown", availableAt: "2026-06-06T00:02:00.000Z" }
+  );
+  const cases = [
+    {
+      name: "an active global incident blocks every caller",
+      state: accountHealthState([], [], [], incident),
+      admission: "blocked",
+      cause: "incident",
+      incidentId: incident.incidentId,
+      blockingReservations: "",
+      freeCapacity: "1"
+    },
+    {
+      name: "a quarantine that fills the last slot blocks capacity",
+      state: accountHealthState([], [], [quarantine]),
+      admission: "blocked",
+      cause: "capacity",
+      incidentId: "",
+      blockingReservations: quarantine.reservationId,
+      freeCapacity: "0"
+    },
+    {
+      name: "an aged-out cooldown holds no capacity",
+      state: accountHealthState([], [], [expiredCooldown]),
+      admission: "open",
+      cause: "none",
+      incidentId: "",
+      blockingReservations: "",
+      freeCapacity: "1"
+    }
+  ];
+
+  for (const testCase of cases) {
+    await withTempFile(async (outputFile) => {
+      const requests = [];
+      await withActionEnv({ ...semaphoreActionEnv, GITHUB_OUTPUT: outputFile }, async () => {
+        await withMockedFetch(async (url, options = {}) => {
+          const parsed = new URL(url);
+          requests.push({
+            method: options.method || "GET",
+            path: parsed.pathname,
+            authorization: options.headers.Authorization
+          });
+          if (parsed.pathname === "/repos/o/r") {
+            return jsonResponse(200, { full_name: "o/r", default_branch: "main" });
+          }
+          if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+            return base64Content(testCase.state, "state-sha");
+          }
+          if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+            return base64Content({ maxHolders: 1, runnerSerialization: true, resourceLifecycle: true, accountHealth: true }, "cfg");
+          }
+          if (parsed.pathname === "/repos/o/r/actions/workflows/reap-stale-locks.yml/runs") {
+            return jsonResponse(200, {
+              workflow_runs: [{
+                id: 4242,
+                conclusion: "success",
+                created_at: "2026-06-06T00:05:00.000Z",
+                html_url: "https://github.com/o/r/actions/runs/4242"
+              }]
+            });
+          }
+          return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+        }, async () => {
+          await reap(semaphoreConfig({ operation: "status", token: null }));
+        });
+      });
+
+      const outputs = readEnvironmentFile(outputFile);
+      assertOutputContract(outputs, statusOutputNames);
+      assert.equal(outputs.admission, testCase.admission, testCase.name);
+      assert.equal(outputs["blocking-cause"], testCase.cause, testCase.name);
+      assert.equal(outputs["incident-id"], testCase.incidentId, testCase.name);
+      assert.equal(outputs["blocking-reservation-ids"], testCase.blockingReservations, testCase.name);
+      assert.equal(outputs["free-capacity"], testCase.freeCapacity, testCase.name);
+      assert.equal(outputs["last-reaper-at"], "2026-06-06T00:05:00.000Z", testCase.name);
+      assert.deepEqual(
+        requests.filter((request) => request.method !== "GET"),
+        [],
+        `${testCase.name}: status must never send a write request`
+      );
+      assert.deepEqual(
+        requests.map((request) => request.authorization).filter(Boolean),
+        [],
+        `${testCase.name}: status must read the public state without a credential`
+      );
+    });
+  }
+});
+
+test("status names the blocking evidence in its published text", async () => {
+  const incident = accountIncident();
+  const logs = await withActionEnv(semaphoreActionEnv, async () =>
+    withMockedFetch(async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/repos/o/r") {
+        return jsonResponse(200, { full_name: "o/r", default_branch: "main" });
+      }
+      if (parsed.pathname === SEMAPHORE_STATE_PATH) {
+        return base64Content(accountHealthState([], [], [], incident), "state-sha");
+      }
+      if (parsed.pathname === SEMAPHORE_CONFIG_PATH) {
+        return base64Content({ maxHolders: 1, resourceLifecycle: true, accountHealth: true }, "cfg");
+      }
+      if (parsed.pathname === "/repos/o/r/actions/workflows/reap-stale-locks.yml/runs") {
+        return jsonResponse(200, { workflow_runs: [] });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async (captured) => {
+      await reap(semaphoreConfig({ operation: "status", token: null }));
+      return captured;
+    })
+  );
+  const text = logs.join("\n");
+  assert.match(text, new RegExp(`Admission blocked by global account incident ${incident.incidentId}`));
+  assert.match(text, /reason unity-account-limit-20111/);
+  assert.match(text, /Last-reaper no successful scheduled reaper run is published/);
+  assert.doesNotMatch(text, /serials|token/i, "status text must stay free of credential-like material");
+});
+
+test("status fails closed when it cannot prove the state source", async () => {
+  let wrote = false;
+  await withActionEnv(semaphoreActionEnv, async () =>
+    withMockedFetch(async (url, options = {}) => {
+      const parsed = new URL(url);
+      if (options.method === "PUT") {
+        wrote = true;
+      }
+      if (parsed.pathname === "/repos/o/r") {
+        return jsonResponse(404, { message: "Not Found" });
+      }
+      return jsonResponse(404, { message: `unexpected path ${parsed.pathname}` });
+    }, async () => {
+      await assert.rejects(
+        () => reap(semaphoreConfig({ operation: "status", token: null })),
+        /will not report an unproven lock state as open/,
+        "an unreadable source must never read as an open lock"
+      );
+    })
+  );
+  assert.equal(wrote, false);
+});
 
 test("scheduled reap reserves bounded checkpoint time before the workflow timeout", () => {
   const workflow = fs.readFileSync(

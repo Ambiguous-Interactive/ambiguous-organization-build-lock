@@ -1,5 +1,5 @@
 name: Reap stale build locks
-description: Clear stale holders and completed queue entries from a build lock.
+description: Clear stale holders and completed queue entries from a build lock, report read-only status, or recover a confirmed quarantine or incident.
 inputs:
   lock-name:
     description: Lock name to inspect.
@@ -13,7 +13,7 @@ inputs:
     required: false
     default: lock-state
   operation:
-    description: "reap, recover a runner quarantine, or recover-incident after portal cleanup."
+    description: "reap, read-only status, recover a runner quarantine, or recover-incident after portal cleanup."
     required: false
     default: reap
   reservation-id:
@@ -30,11 +30,29 @@ inputs:
     description: Explicit proof that Unity portal cleanup was completed.
     required: false
     default: "false"
+  github-token:
+    description: >-
+      Optional token with Actions read access. Status uses it only to name the
+      last successful scheduled reaper run. Status reads the public lock state
+      without a credential and never writes.
+    required: false
 outputs:
   reaped:
     description: "true when stale state was handled or a reservation recovery completed."
   state-sha:
     description: Lock-state file SHA after reaping.
+  admission:
+    description: "Status only: open when at least one slot is free and no incident blocks admission, otherwise blocked."
+  blocking-cause:
+    description: "Status only: none, incident, or capacity."
+  incident-id:
+    description: "Status only: active global incident ID, or empty when none is active."
+  blocking-reservation-ids:
+    description: "Status only: comma-separated reservations that consume the last free capacity."
+  free-capacity:
+    description: "Status only: max-holders minus holders minus reservations."
+  last-reaper-at:
+    description: "Status only: creation time of the last successful scheduled reaper run, or empty when unproven."
 runs:
   using: node24
   main: ../../dist/reap.js
