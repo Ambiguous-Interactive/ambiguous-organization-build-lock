@@ -76,3 +76,15 @@ An independent adversarial review found these issues. All are fixed.
 - #335 stays blocked: `go -C tools/actionlint run` against YAML v4.0.0 fails
   with `undefined: yaml.ParserError` in actionlint v1.7.12. The dependency was
   restored.
+
+## Merge and post-merge evidence
+
+- PR #393 merged at `3b7204b6`.
+- CodeRabbit asked for a job-level status example. Commit `a5c9ed9c` adds the
+  reporting job with `needs` and a job-level `if: failure()`. The bot approved
+  the same commit.
+- `main` runs at `3b7204b6`: `Build lock CI` success, `Organization Unity
+  enrollment audit` success, `Reaper delivery audit` success, `Reap stale build
+  locks` success, `Build lock incident recovery audit` success.
+- #390 keeps the consumer adoption step, which needs the next release pin.
+- #335 has the fresh compiler evidence.
