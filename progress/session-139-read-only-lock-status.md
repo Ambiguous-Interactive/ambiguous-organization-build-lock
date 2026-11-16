@@ -103,3 +103,23 @@ One dependency remains: #335 waits for upstream actionlint support.
 - #390 opened for the remaining consumer adoption and the anonymous
   `last-reaper-at` read.
 
+## Live status evidence
+
+Run `43793037908` dispatched `Recover build lock` with `operation=status` from
+`main` at `dea5338`. It passed. Its log reports:
+
+```
+Lock wallstop-organization-builds; schema 5; state sha a460bc1...; updated 2026-11-16T02:28:57.575Z
+Capacity max-holders=2 holders=1 reservations=0 free=1
+Admission open; no incident blocks admission and at least one slot is free
+Incident none
+Quarantine none
+Holder holder=Ambiguous-Interactive/IshoBoy:43792245075:unity-validation:isho-ci ... run=43792245075 runner=ELI-MACHINE
+Queue 0 waiting
+Last-reaper run 43792718389 at 2026-11-16T02:31:45Z
+```
+
+The only `lock-state` commit in the window of that run is a consumer
+`Acquire` at 02:35:52, after the status read at 02:35:02. Status wrote no state.
+The workflow token resolved `last-reaper-at` to the last scheduled reaper run.
+
