@@ -59,3 +59,32 @@ action.
 - `bash tools/workflows/ci.sh javascript`: pass.
 - shellcheck is not installed on this macOS host and its installer needs
   `sha256sum`. The change adds no shell code.
+
+## Review findings and dispositions
+
+An independent adversarial review found these issues. All are fixed in
+`744e8fa`.
+
+- Unproven lock config: status published the safe default `max-holders=1` as a
+  fact when the config read failed. `readLockConfig` now has a `requireProof`
+  mode that fails red. Status uses it.
+- Anonymous probe diagnosis: the error claimed a credential problem for every
+  failure. It now names the failed proof only.
+- Empty-lock proof: a repository 404 already failed closed. A new test pins the
+  other side: a readable repository with no state file reports a proven empty
+  lock.
+- Cooldown in `blocking-reservation-ids`: recovery accepts a quarantine only,
+  so status now names quarantines only.
+- Reaper run proof: the query now filters `event=schedule`, and the code
+  rejects a run that is not a scheduled run. CodeRabbit asked for the same fix.
+- Token scope: a new test proves that the optional token is used for the
+  Actions read only, and that every contents read stays anonymous.
+- Token minting: a child-process test proves that the real reap entrypoint
+  with `operation=status` needs no App key. It returns a null token and a null
+  reader token.
+- Step summary rendering: peer-written values now use `summaryCell`.
+- Contract tests: the manifest inputs are parsed instead of matched as loose
+  prose, and the recover job's `actions: read` permission is asserted.
+
+One dependency remains: #335 waits for upstream actionlint support.
+
