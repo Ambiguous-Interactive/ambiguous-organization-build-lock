@@ -88,3 +88,18 @@ An independent adversarial review found these issues. All are fixed in
 
 One dependency remains: #335 waits for upstream actionlint support.
 
+## Merge and post-merge evidence
+
+- PR #389 merged at `bc467f95a2`.
+- `main` runs at that commit: `Build lock CI` success, `Organization Unity
+  enrollment audit` success, `Build lock incident recovery audit` success,
+  `Reaper delivery audit` success.
+- CodeRabbit requested one change: filter the last-reaper lookup to scheduled
+  runs. Commit `744e8fa` makes that change. The bot was rate limited, so the
+  owner dismissed the stale review after the reply.
+- #387 closed by the merge.
+- #375 closed: all seven enrolled repositories ignore the central actions or
+  have no Dependabot configuration. IshoBoy #1701 merged at `05a5485`.
+- #390 opened for the remaining consumer adoption and the anonymous
+  `last-reaper-at` read.
+
