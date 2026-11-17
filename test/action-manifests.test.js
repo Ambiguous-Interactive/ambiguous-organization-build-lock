@@ -175,6 +175,61 @@ function yamlTopLevelBlockText(text, blockName, manifestName) {
   return lines.slice(start, end).join("\n");
 }
 
+/*
+ * The runner evaluates `${{ }}` in action metadata. The `github` and `env`
+ * contexts are absent there, so one expression in an input description stops
+ * the whole action loading ("Unrecognized named-value"). Two places may hold an
+ * expression: the `runs` block and an `outputs.*.value`.
+ */
+function manifestExpressionViolations(text) {
+  const violations = [];
+  let block = null;
+  const keys = [];
+
+  for (const line of text.split(/\r?\n/)) {
+    if (isYamlBlankOrComment(line)) {
+      continue;
+    }
+    const indent = lineIndent(line);
+    const key = /^\s*([A-Za-z0-9_-]+):/.exec(line)?.[1];
+    if (indent === 0) {
+      block = key ?? null;
+      keys.length = 0;
+    } else {
+      while (keys.length > 0 && keys[keys.length - 1].indent >= indent) {
+        keys.pop();
+      }
+      if (key) {
+        keys.push({ indent, key });
+      }
+    }
+    if (!line.includes("${{") || block === "runs") {
+      continue;
+    }
+    if (block === "outputs" && keys.some((entry) => entry.key === "value")) {
+      continue;
+    }
+    violations.push(line.trim());
+  }
+
+  return violations;
+}
+
+test("no action manifest interpolates an expression in metadata", () => {
+  let manifestCount = 0;
+  for (const manifest of actionManifests) {
+    const manifestName = path.relative(actionsRoot, manifest);
+    manifestCount++;
+    const violations = manifestExpressionViolations(fs.readFileSync(manifest, "utf8"));
+    assert.deepEqual(
+      violations,
+      [],
+      `${manifestName} interpolates an expression where the runner has no context, so the action cannot load`
+    );
+  }
+  assert.ok(manifestCount > 0, "expected at least one action manifest to guard");
+});
+
 test("all JavaScript actions target the supported GitHub Actions runtime", async (t) => {
   assert.ok(actionManifests.length > 0, "expected at least one local action manifest");
 
