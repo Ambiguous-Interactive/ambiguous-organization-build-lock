@@ -130,4 +130,16 @@ An independent adversarial review found these issues. All are fixed.
 
 ## Merge and post-merge evidence
 
-Pending.
+- Ambiguous-Interactive/DxAudio#49 merged at `03ae61a344` (squash). Both Unity
+  EditMode legs passed, and `Unity CI Success` passed. `CI` is green on that
+  commit, and so is `Unity Tests` on the merge commit.
+- Central #396 merged at `5202eabe68` (squash). Runs at that commit: `Build lock
+  CI`, `Organization Unity enrollment audit`, `Organization merge-policy audit`,
+  `Build lock incident recovery audit`, and `Reaper delivery audit` all succeed;
+  the scheduled reaper run succeeds.
+- Enrollment audit run `43976368511` at `5202eabe68`:
+  `Audited 7/7 enrolled repositories; active-jobs=140 findings=22 complete=true`.
+  The artifact holds no DxAudio finding and 6 DxAudio inventory rows.
+- The remaining 22 findings are 14 DxMessaging findings and 8 expired policy
+  exceptions. Both wait on separate review.
+- #397 records the aggregate limit that blocks the DxMessaging class.
