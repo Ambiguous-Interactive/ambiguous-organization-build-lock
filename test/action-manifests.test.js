@@ -175,6 +175,106 @@ function yamlTopLevelBlockText(text, blockName, manifestName) {
   return lines.slice(start, end).join("\n");
 }
 
+/*
+ * The runner evaluates `${{ }}` in action metadata. The `github` and `env`
+ * contexts are absent there, so one expression in an input description stops
+ * the whole action loading ("Unrecognized named-value"). Two places may hold an
+ * expression: a composite `runs.steps` entry and an `outputs.*.value`.
+ *
+ * A block scalar (`>-`, `|`) holds every deeper line as text. Its lines may
+ * start with `#`, so they are never read as comments or keys, and its inline
+ * `#` is text, not a comment.
+ */
+function manifestExpressionViolations(text) {
+  const violations = [];
+  let block = null;
+  let scalarIndent = null;
+  const keys = [];
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (rawLine.trim() === "") {
+      continue;
+    }
+    const indent = lineIndent(rawLine);
+    const inScalar = scalarIndent !== null && indent > scalarIndent;
+    const line = inScalar ? rawLine : stripYamlComment(rawLine);
+
+    if (!inScalar) {
+      scalarIndent = null;
+      if (line === "") {
+        continue;
+      }
+      const key = /^\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*:/.exec(line);
+      const keyName = key ? key[1] || key[2] || key[3] : null;
+      if (indent === 0) {
+        block = keyName;
+        keys.length = 0;
+      } else {
+        while (keys.length > 0 && keys[keys.length - 1].indent >= indent) {
+          keys.pop();
+        }
+        if (keyName) {
+          keys.push({ indent, key: keyName });
+        }
+      }
+      if (/:\s*[>|][+-]?\d*\s*$/.test(line)) {
+        scalarIndent = indent;
+      }
+    }
+
+    if (!line.includes("${{")) {
+      continue;
+    }
+    const innermostKey = keys.length > 0 ? keys[keys.length - 1].key : null;
+    const allowed =
+      (block === "runs" && keys.some((entry) => entry.key === "steps")) ||
+      (block === "outputs" && keys.length === 2 && innermostKey === "value");
+    if (!allowed) {
+      violations.push(line.trim());
+    }
+  }
+
+  return violations;
+}
+
+test("the manifest expression guard reads metadata shapes correctly", () => {
+  const cases = [
+    ["top-level description", "name: x\ndescription: uses ${{ github.token }}\n", true],
+    ["folded input description", "inputs:\n  t:\n    description: >-\n      see ${{ github.token }}\n", true],
+    ["folded line that starts with a hash", "inputs:\n  t:\n    description: >-\n      # use ${{ github.token }}\n", true],
+    ["expression after a marker", "inputs:\n  t:\n    description: >-\n      see ${{ github.token }}\n      more\n", true],
+    ["inline comment is not metadata", "inputs:\n  t:\n    description: plain # see ${{ github.token }}\n", false],
+    ["output named value keeps its description guarded", "outputs:\n  value:\n    description: use ${{ github.token }}\n", true],
+    ["value key inside a description", "outputs:\n  a:\n    description: >-\n      value: use ${{ github.token }}\n", true],
+    ["quoted output key stays guarded", 'outputs:\n  "x":\n    description: use ${{ github.token }}\n', true],
+    ["javascript runtime path", "runs:\n  using: node24\n  main: ${{ github.token }}\n", true],
+    ["quoted runs key stays allowed", '"runs":\n  using: composite\n  steps:\n    - run: echo\n', false],
+    ["composite step input", "runs:\n  using: composite\n  steps:\n    - uses: x\n      with:\n        token: ${{ inputs.token }}\n", false],
+    ["output value", "outputs:\n  a:\n    value: ${{ steps.a.outputs.b }}\n", false],
+    ["folded output value", "outputs:\n  a:\n    value: >-\n      ${{ steps.a.outputs.b }}\n", false]
+  ];
+
+  for (const [name, manifest, expectViolation] of cases) {
+    const violations = manifestExpressionViolations(manifest);
+    assert.equal(violations.length > 0, expectViolation, `${name}: ${JSON.stringify(violations)}`);
+  }
+});
+
+test("no action manifest interpolates an expression in metadata", () => {
+  let manifestCount = 0;
+  for (const manifest of actionManifests) {
+    const manifestName = path.relative(actionsRoot, manifest);
+    manifestCount++;
+    const violations = manifestExpressionViolations(fs.readFileSync(manifest, "utf8"));
+    assert.deepEqual(
+      violations,
+      [],
+      `${manifestName} interpolates an expression where the runner has no context, so the action cannot load`
+    );
+  }
+  assert.ok(manifestCount > 0, "expected at least one action manifest to guard");
+});
+
 test("all JavaScript actions target the supported GitHub Actions runtime", async (t) => {
   assert.ok(actionManifests.length > 0, "expected at least one local action manifest");
 
