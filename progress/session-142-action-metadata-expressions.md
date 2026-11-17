@@ -102,6 +102,21 @@ An independent adversarial review found these. All are fixed.
 
 ## Follow-up
 
-The fix reaches consumers only in a new patch release. The next release must be
-authorized in `unity-enrollment-policy.json` before a consumer can adopt it.
-IshoBoy#1090 waits on that authorization.
+v1.18.1 is authorized, so a consumer can move off v1.17.1. IshoBoy#1090 waits on
+that consumer pin change.
+
+## Merge and post-merge evidence
+
+- #400 merged at `720ef47f9a` (squash). Runs at that commit: `Build lock CI`,
+  `Organization Unity enrollment audit`, `Build lock incident recovery audit`,
+  and `Reaper delivery audit` all succeed.
+- `Auto release` run `44025095872` published v1.18.1 at `720ef47f9a`. Its tag
+  holds the fixed description at `action.yml:30`.
+- The manifest test passes with the released tag file in place: 61 tests, 61
+  pass.
+- #401 (the release authorization) merged at `d09f58f735`. Runs at that commit:
+  `Build lock CI`, `Organization Unity enrollment audit`,
+  `Organization merge-policy audit`, `Build lock incident recovery audit`, and
+  `Reaper delivery audit` all succeed.
+- `approvedLockShas` and `approvedReturnShas` now list `720ef47f9a`. Consumers
+  can move off v1.17.1.

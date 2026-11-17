@@ -29,10 +29,8 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Aggregate coverage (#397): the reviewed aggregate shapes cover one licensed
   job, so a workflow with several licensed jobs cannot pass. DxMessaging and
   unity-helpers findings wait on that decision.
-- Release authorization (#399): v1.18.0 carries an expression in an input
-  description, so it cannot load the classifier. Authorize v1.18.1 after the
-  fix merges; consumers stay on v1.17.1 until then.
-- Merge queue adoption (#379): repin DoxReloaded at the authorized release, add
-  `merge_group`, and enable the queue after the owner authorizes it.
-- Status adoption (#390): a consumer adopts the reporting step outside every
-  licensed job, at the authorized release.
+- Merge queue adoption (#379): v1.18.1 publishes an approved pin. Repin
+  DoxReloaded, add `merge_group`, and enable the queue after the owner
+  authorizes it.
+- Status adoption (#390): v1.18.1 publishes an approved pin. A consumer adopts
+  the reporting step outside every licensed job.
