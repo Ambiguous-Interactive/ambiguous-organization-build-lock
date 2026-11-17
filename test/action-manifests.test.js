@@ -228,7 +228,7 @@ function manifestExpressionViolations(text) {
     const innermostKey = keys.length > 0 ? keys[keys.length - 1].key : null;
     const allowed =
       (block === "runs" && keys.some((entry) => entry.key === "steps")) ||
-      (block === "outputs" && innermostKey === "value");
+      (block === "outputs" && keys.length === 2 && innermostKey === "value");
     if (!allowed) {
       violations.push(line.trim());
     }
@@ -245,6 +245,7 @@ test("the manifest expression guard reads metadata shapes correctly", () => {
     ["expression after a marker", "inputs:\n  t:\n    description: >-\n      see ${{ github.token }}\n      more\n", true],
     ["inline comment is not metadata", "inputs:\n  t:\n    description: plain # see ${{ github.token }}\n", false],
     ["output named value keeps its description guarded", "outputs:\n  value:\n    description: use ${{ github.token }}\n", true],
+    ["value key inside a description", "outputs:\n  a:\n    description: >-\n      value: use ${{ github.token }}\n", true],
     ["quoted output key stays guarded", 'outputs:\n  "x":\n    description: use ${{ github.token }}\n', true],
     ["javascript runtime path", "runs:\n  using: node24\n  main: ${{ github.token }}\n", true],
     ["quoted runs key stays allowed", '"runs":\n  using: composite\n  steps:\n    - run: echo\n', false],

@@ -54,7 +54,7 @@ where they are valid.
   `runs.steps` entry and an `outputs.*.value`. It reads block scalars as text,
   so a `#` line inside a folded description is checked, and an inline comment is
   not.
-- A data-driven table pins 12 manifest shapes, both flagged and allowed.
+- A data-driven table pins 13 manifest shapes, both flagged and allowed.
 - `PLAN.md` names the release authorization as the next action.
 
 ## Evidence
@@ -74,7 +74,9 @@ An independent adversarial review found these. All are fixed.
 - Miss: a `#` line inside a folded description was read as a comment, so its
   expression passed. Block scalars are now tracked by indent and read as text.
 - Miss: an output literally named `value` exempted its own `description` from
-  the rule. The guard now checks the innermost key.
+  the rule. The guard now allows the exact `outputs.<name>.value` key path only.
+  A review comment asked for the path form and a `value` key inside a folded
+  description; both are in.
 - Miss: the whole `runs` block was exempt, so `runs.main` with an expression
   passed. Only a composite `runs.steps` entry is exempt now.
 - False alarm: quoted keys were not recognized, though the file's other helper
@@ -83,7 +85,7 @@ An independent adversarial review found these. All are fixed.
   stripped before the check, except inside a block scalar.
 - Stale plan: `PLAN.md` still told consumers to adopt v1.18.0. It now names the
   v1.18.1 authorization.
-- Untested heuristics: a 12-shape table now covers every shape above.
+- Untested heuristics: a 13-shape table now covers every shape above.
 
 ## Validation
 
