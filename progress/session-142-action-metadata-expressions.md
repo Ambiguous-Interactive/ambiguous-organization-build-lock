@@ -120,3 +120,9 @@ that consumer pin change.
   `Reaper delivery audit` all succeed.
 - `approvedLockShas` and `approvedReturnShas` now list `720ef47f9a`. Consumers
   can move off v1.17.1.
+- #402 merged at `298d8b6ec6`. `Build lock CI` succeeds there.
+- #403 bumped the two indirect linter modules that have compatible releases:
+  `golang.org/x/sync` v0.25.0 and `golang.org/x/sys` v0.50.0. `go.yaml.in/yaml/v4`
+  stays at v4.0.0-rc.3, because #335 shows the linter does not build against
+  v4.0.0. #403 merged at `59a37fa9a0`, where `Build lock CI`, the reaper, and
+  the incident recovery audit succeed.
