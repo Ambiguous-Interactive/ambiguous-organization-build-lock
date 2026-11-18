@@ -36,3 +36,6 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
   authorizes it.
 - Status adoption (#390): v1.18.1 publishes an approved pin. A consumer adopts
   the reporting step outside every licensed job.
+- Private callee reads (#408): the audit reads callee workflows anonymously.
+  Decide whether the reader App covers a private callee, or keep the reviewed
+  public-callee rule.
