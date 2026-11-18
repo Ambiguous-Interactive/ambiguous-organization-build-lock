@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -71,6 +72,7 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 		requiredAcquireSHA: policy.RequiredAcquireSHA,
 		findings:           make([]Finding, 0),
 		findingSet:         make(map[string]bool),
+		reusableMemo:       make(map[string]bool),
 	}
 	workflowPaths := make([]string, 0)
 	for file := range snapshot.Files {
@@ -145,6 +147,13 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 	return a.findings, nil
 }
 
+// ReusableWorkflowSource resolves the exact bytes of one remote reusable
+// workflow at the immutable commit a caller pins. The organization audit
+// supplies it from the callee repository, and tests supply it directly. A nil
+// source leaves every remote call unresolved, which stays the fail-closed
+// verdict.
+type ReusableWorkflowSource func(repository, path, sha string) ([]byte, error)
+
 type analyzer struct {
 	snapshot           Snapshot
 	nodes              map[string]*yaml.Node
@@ -155,6 +164,8 @@ type analyzer struct {
 	guardAction        map[string]bool
 	requiredGuardSHA   string
 	requiredAcquireSHA string
+	reusableSource     ReusableWorkflowSource
+	reusableMemo       map[string]bool
 	findings           []Finding
 	findingSet         map[string]bool
 }
@@ -223,9 +234,15 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 			at := strings.LastIndex(call, "@")
 			if at < 0 || !isSHA(call[at+1:]) {
 				a.add("mutable-reusable-ref", workflowPath, jobName)
+			} else if licensed, resolved := a.reusableWorkflowLicensed(
+				call[:at],
+				call[at+1:],
+			); resolved && okReusableCaller(job) {
+				a.jobMemo[key] = licensed
+				return licensed, nil
 			}
-			// Until the snapshot graph supplies this exact remote tree, conservatively
-			// treat the call as license-capable so caller cancellation cannot pass.
+			// Until the callee tree proves otherwise, conservatively treat the
+			// call as license-capable so caller cancellation cannot pass.
 			a.add("unresolved-reusable-workflow", workflowPath, jobName)
 			licensed = true
 		default:
@@ -269,6 +286,212 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 
 	a.jobMemo[key] = licensed
 	return licensed, nil
+}
+
+// okReusableCaller keeps a resolved call conservative when the caller hands
+// organization credentials to it. A remote reusable workflow can only receive
+// the values a caller maps into it, so a job that names no Unity or lock
+// credential has nothing of that kind to pass.
+//
+// The mapping must name each secret exactly. `secrets: inherit`, a JSON dump of
+// the secrets context, and a dynamic index each hand the callee more than this
+// review can bound.
+func okReusableCaller(job *yaml.Node) bool {
+	text := strings.ToLower(nodeScalarText(job))
+	if containsUnityCredentialReference(text) || containsOpaqueSecretReference(text) {
+		return false
+	}
+	secrets := mappingValue(job, "secrets")
+	if secrets == nil {
+		return true
+	}
+	if secrets.Kind != yaml.MappingNode {
+		return false
+	}
+	for index := 0; index < len(secrets.Content); index += 2 {
+		name := strings.TrimSpace(secrets.Content[index].Value)
+		if name == "" || strings.ContainsAny(name, " \t\r\n{}[]'\"") ||
+			!exactSecretReference(secrets.Content[index+1]) {
+			return false
+		}
+	}
+	return true
+}
+
+// exactSecretReference accepts one exact `${{ secrets.<name> }}` value, which
+// may rename the secret the callee receives. Anything computed or combined
+// hands over a value a reviewer cannot name.
+func exactSecretReference(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return false
+	}
+	value := strings.Join(strings.Fields(node.Value), "")
+	const prefix = "${{secrets."
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, "}}") {
+		return false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(value, prefix), "}}")
+	if name == "" {
+		return false
+	}
+	for index, character := range name {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character == '_' || (index > 0 && character >= '0' && character <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// containsOpaqueSecretReference reports a secret expression that names no exact
+// secret, so a reviewer cannot say which values the callee receives.
+func containsOpaqueSecretReference(text string) bool {
+	text = strings.ToLower(strings.Join(strings.Fields(text), ""))
+	return strings.Contains(text, "tojson(secrets)") ||
+		strings.Contains(text, "secrets[") ||
+		strings.Contains(text, "secrets.*")
+}
+
+// reusableWorkflowLicensed reports whether the reusable workflow a caller pins
+// can license Unity work, and whether that verdict is proven from the callee
+// source at the exact pinned commit. Unproven calls stay unresolved so the
+// caller cannot pass without a cleanup path it does not own.
+func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
+	if a.reusableSource == nil {
+		return false, false
+	}
+	repository, workflowPath, ok := remoteReusableTarget(target)
+	if !ok {
+		return false, false
+	}
+	// A commit and a repository name ignore case. A workflow file name does not,
+	// so only those two fields fold.
+	key := strings.ToLower(repository+"@"+ref) + "\x00" + workflowPath
+	if licensed, memoized := a.reusableMemo[key]; memoized {
+		return licensed, true
+	}
+	content, err := a.reusableSource(repository, workflowPath, ref)
+	if err != nil {
+		return false, false
+	}
+	// The callee is audited as its own snapshot, so its jobs are classified
+	// against the callee repository identity. Its findings are dropped: only
+	// the licensed verdict decides whether this caller's job is a paid
+	// lifecycle. A local action or a local workflow call there has no file in
+	// this one-file snapshot, so it stays unproven.
+	called := &analyzer{
+		snapshot: Snapshot{
+			Repository: repository,
+			SHA:        ref,
+			Files:      map[string][]byte{workflowPath: content},
+		},
+		nodes:       make(map[string]*yaml.Node),
+		jobMemo:     make(map[string]bool),
+		actionMemo:  make(map[string]bool),
+		jobVisiting: make(map[string]bool),
+		actionVisit: make(map[string]bool),
+		guardAction: make(map[string]bool),
+		// The callee gets no resolver. A nested remote call there is work this
+		// audit cannot see, so it stays unresolved and license-capable.
+		reusableMemo: make(map[string]bool),
+		findings:     make([]Finding, 0),
+		findingSet:   make(map[string]bool),
+	}
+	workflow, err := called.node(workflowPath)
+	if err != nil {
+		return false, false
+	}
+	jobs := mappingValue(workflow, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		return false, false
+	}
+	licensed := false
+	for index := 0; index < len(jobs.Content); index += 2 {
+		calledJob := jobs.Content[index+1]
+		calledLicensed, err := called.jobLicensed(workflowPath, jobs.Content[index].Value)
+		if err != nil {
+			return false, false
+		}
+		// `jobLicensed` reads `uses:` steps only. Organization Unity work runs on
+		// the self-hosted fleet, so a self-hosted callee job can activate Unity
+		// from a `run:` step that no action reference names.
+		licensed = licensed || calledLicensed || !hostedRunnerJob(calledJob)
+	}
+	// Any finding in the callee means its work is not proven inert. That covers
+	// a nested remote call, a mutable reference, and an action path the callee
+	// snapshot cannot read.
+	if len(called.findings) > 0 {
+		return false, false
+	}
+	// A job that activates Unity through a third-party action holds no central
+	// acquire step, so the licensed verdict alone would call it inert. Any
+	// Unity marker in the callee keeps the caller paid.
+	licensed = licensed || containsUnityMarker(strings.ToLower(nodeScalarText(workflow)))
+	a.reusableMemo[key] = licensed
+	return licensed, true
+}
+
+// hostedRunnerLabel matches the reviewed GitHub-hosted label forms. Any other
+// selector needs no literal `self-hosted` to reach a self-hosted runner: a
+// custom label or a runner group does that too.
+var hostedRunnerLabel = regexp.MustCompile(`^(ubuntu|windows|macos)-(latest|[0-9]+(\.[0-9]+)*)$`)
+
+// hostedRunnerJob reports a callee job with positive evidence of a hosted
+// runner. Organization Unity work runs on the self-hosted fleet, and a `run:`
+// step there can activate Unity without naming an action, so every other
+// selector keeps the caller paid.
+func hostedRunnerJob(job *yaml.Node) bool {
+	runsOn := mappingValue(job, "runs-on")
+	if runsOn == nil || runsOn.Kind != yaml.ScalarNode {
+		return false
+	}
+	return hostedRunnerLabel.MatchString(strings.ToLower(strings.TrimSpace(runsOn.Value)))
+}
+
+// remoteReusableTarget splits `owner/repo/.github/workflows/file.yml` into the
+// callee repository and its workflow path. GitHub resolves reusable workflows
+// only from that exact directory, so a deeper or re-normalized path proves no
+// identity the audit could read. The file name is a plain YAML name: a
+// percent-encoded or quoted segment could reach a different path at a mirror.
+func remoteReusableTarget(target string) (string, string, bool) {
+	const marker = "/.github/workflows/"
+	at := strings.Index(target, marker)
+	if at < 0 {
+		return "", "", false
+	}
+	repository := target[:at]
+	workflowPath := target[at+1:]
+	if !validRepository(repository) || path.Clean(repository) != repository {
+		return "", "", false
+	}
+	clean, err := cleanRepositoryPath(workflowPath)
+	if err != nil || clean != workflowPath ||
+		!validWorkflowFileName(strings.TrimPrefix(workflowPath, ".github/workflows/")) {
+		return "", "", false
+	}
+	return repository, workflowPath, true
+}
+
+// validWorkflowFileName accepts one workflow file name directly under
+// `.github/workflows/`. It refuses a path separator, a percent-encoded byte, and
+// control or quoting characters, so the request names exactly one file and no
+// mirror can read another.
+func validWorkflowFileName(value string) bool {
+	if value == "" || !isYAML(value) {
+		return false
+	}
+	stem := strings.TrimSuffix(value, path.Ext(value))
+	if stem == "" || strings.HasPrefix(stem, ".") {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f ||
+			strings.ContainsRune("/\\%`'\"", character) {
+			return false
+		}
+	}
+	return true
 }
 
 // localActionPath maps a workspace-relative action path through a checkout of

@@ -33,6 +33,11 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		false,
 		"validate the reviewed registry without loading repositories",
 	)
+	reusableWorkflowBaseURL := flags.String(
+		"reusable-workflow-base-url",
+		defaultReusableWorkflowBaseURL,
+		"base URL serving the raw bytes of one immutable reusable workflow",
+	)
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return 2
 	}
@@ -61,6 +66,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		Inventory:    make([]enrollment.UnityInventoryEntry, 0),
 		Findings:     make([]enrollment.UnityAuditFinding, 0),
 	}
+	reusableWorkflows := newReusableWorkflowFetcher(*reusableWorkflowBaseURL)
 	for _, repository := range registry.Repositories {
 		root := filepath.Join(*repositoriesRoot, repositoryName(repository.Repository))
 		sha, snapshot, loadErr := loadExactSnapshot(root, repository)
@@ -96,6 +102,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			AllowWorkflowDispatch:    repository.AllowWorkflowDispatch,
 			AllowSchedule:            repository.AllowSchedule,
 			Now:                      time.Now().UTC(),
+			ResolveReusableWorkflow:  reusableWorkflows.resolve,
 		})
 		if analyzeErr != nil {
 			audit.Complete = false

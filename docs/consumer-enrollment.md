@@ -43,8 +43,17 @@ or writer App. The current inventory is recorded in
    environments.
 7. Use action files only from this central repository. A remote action path
    under `Ambiguous-Interactive/*/.github/actions/` is a policy finding unless
-   it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`;
-   reusable workflow calls are audited separately as workflow graph edges.
+   it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`.
+   Reusable workflow calls are audited as workflow graph edges. The audit reads
+   the called workflow at the pinned commit, from public raw content, without
+   following a redirect, and classifies its jobs. A callee with no Unity step
+   makes the caller a non-licensing job. A callee with a licensed job, a callee
+   job that does not name a hosted runner label, or any Unity reference makes
+   the caller paid. These cases leave the caller unresolved and
+   license-capable: a callee the audit cannot read, a mutable reference, a
+   repository-local action inside the callee, a nested reusable workflow call,
+   `secrets: inherit`, an opaque secrets expression, or a forwarded Unity or
+   lock secret from the reviewed name list.
 
 ## Release authorization
 
@@ -345,7 +354,10 @@ touches a Dependabot pull request.
 ## Workflow contract
 
 1. Pin every remote action, including transitive local-composite leaves, to a
-   reviewed 40-character commit SHA.
+   reviewed 40-character commit SHA. Give every reusable workflow call the same
+   immutable form, `owner/repository/.github/workflows/<file>.yml@<sha>`. The
+   audit reads that exact file, classifies its jobs, and reports a call it
+   cannot resolve as `unresolved-reusable-workflow`.
 2. Run `check-unity-runner-availability` in a hosted registration preflight
    before every licensed self-hosted job. It verifies only that every required
    label set has a registered runner visible to the repository; it does not
@@ -750,7 +762,7 @@ edits.
 | `unity-editor-check-after-lock` | Run the editor gate before acquire. See item 3. |
 | `unity-editor-provisioning-control` | Remove the editor provisioning control overrides. CI must not provision an editor. See item 3. |
 | `unity-return-not-always` | Run the central return with `always()` on acquired work. See item 7. |
-| `unresolved-reusable-workflow` | Keep every reusable workflow call resolvable at audit time. |
+| `unresolved-reusable-workflow` | Pin a public reusable workflow at an immutable commit, keep no repository-local action inside it, and pass it no Unity or lock secret. See item 7. |
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
 | `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
 | `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |

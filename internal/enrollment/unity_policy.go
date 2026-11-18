@@ -117,6 +117,10 @@ type UnityEnrollmentPolicy struct {
 	AllowWorkflowDispatch    bool                   `json:"-"`
 	AllowSchedule            bool                   `json:"-"`
 	Now                      time.Time              `json:"-"`
+	// ResolveReusableWorkflow reads one remote reusable workflow at the
+	// immutable commit a consumer pins. Without it every remote call stays
+	// unresolved, which is the fail-closed verdict.
+	ResolveReusableWorkflow ReusableWorkflowSource `json:"-"`
 }
 
 // UnityInventoryEntry is a source-free, deterministic classification suitable
@@ -295,6 +299,8 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		findings:           make([]Finding, 0),
 		findingSet:         make(map[string]bool),
 		requiredAcquireSHA: "",
+		reusableSource:     policy.ResolveReusableWorkflow,
+		reusableMemo:       make(map[string]bool),
 	}
 	a := &unityPolicyAnalyzer{
 		analyzer:              base,
