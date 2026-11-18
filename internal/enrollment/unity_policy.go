@@ -6703,7 +6703,6 @@ func selectionContextsAllowed(expression string) bool {
 		default:
 			return false
 		}
-		return false
 	}
 	return true
 }
