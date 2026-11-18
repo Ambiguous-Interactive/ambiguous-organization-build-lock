@@ -50,9 +50,9 @@ or writer App. The current inventory is recorded in
    non-licensing job. A callee with a licensed job or any Unity reference makes
    the caller paid. These cases leave the caller unresolved and
    license-capable: a callee the audit cannot read, a mutable reference, a
-   repository-local action inside the callee, a call chain deeper than four
-   workflows, `secrets: inherit`, an opaque secrets expression, or a forwarded
-   Unity or lock secret.
+   repository-local action inside the callee, a nested reusable workflow call,
+   `secrets: inherit`, an opaque secrets expression, or a forwarded Unity or
+   lock secret.
 
 ## Release authorization
 

@@ -2,8 +2,6 @@ package enrollment
 
 import (
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -6896,7 +6894,7 @@ func TestUnityEnrollmentRefusesOpaqueSecretForwarding(t *testing.T) {
 	}
 }
 
-func TestUnityEnrollmentResolvesANestedNonLicensingCall(t *testing.T) {
+func TestUnityEnrollmentKeepsANestedRemoteCallUnresolved(t *testing.T) {
 	source := reusableWorkflowMap(map[string]string{
 		".github/workflows/openai-review.yml": `name: Review
 on:
@@ -6908,36 +6906,13 @@ jobs:
 		".github/workflows/deep.yml": remoteReusableSnapshot(),
 	})
 	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), source)
-	if len(result.Findings) != 0 {
-		t.Fatalf("resolved nested non-licensing call produced findings: %#v", result.Findings)
-	}
-}
-
-func TestUnityEnrollmentBoundsANestedCallChain(t *testing.T) {
-	files := make(map[string]string, maxReusableWorkflowDepth+2)
-	for level := 1; level <= maxReusableWorkflowDepth+1; level++ {
-		next := level + 1
-		files[fmt.Sprintf(".github/workflows/level%d.yml", level)] = `name: Level
-on:
-  workflow_call:
-jobs:
-  run:
-    uses: Ambiguous-Interactive/review-tools/.github/workflows/level` +
-			strconv.Itoa(next) + `.yml@` + testSHA + `
-`
-	}
-	files[fmt.Sprintf(".github/workflows/level%d.yml", maxReusableWorkflowDepth+2)] = remoteReusableSnapshot()
-	// The caller calls level1, which chains past the depth bound.
-	workflow := `name: Review
-on:
-  pull_request:
-jobs:
-  review:
-    uses: Ambiguous-Interactive/review-tools/.github/workflows/level1.yml@` + testSHA + `
-`
-	result := analyzeRemoteCall(t, workflow, reusableWorkflowMap(files))
-	if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
-		t.Fatalf("an unbounded call chain was accepted: %#v", result.Findings)
+	// The callee is read, but the audit cannot see the workflow it calls, so
+	// the caller stays a paid job it cannot satisfy from a reusable workflow.
+	codes := findingCodes(result.Findings)
+	for _, code := range []string{"missing-licensed-steps", "unsafe-hosted-unity-runner"} {
+		if !strings.Contains(codes, code) {
+			t.Fatalf("a nested remote call was resolved (%s): %#v", code, result.Findings)
+		}
 	}
 }
 

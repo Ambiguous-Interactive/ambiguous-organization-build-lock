@@ -167,7 +167,6 @@ type analyzer struct {
 	reusableSource     ReusableWorkflowSource
 	reusableMemo       map[string]bool
 	reusableVisiting   map[string]bool
-	reusableDepth      int
 	findings           []Finding
 	findingSet         map[string]bool
 }
@@ -290,11 +289,6 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 	return licensed, nil
 }
 
-// maxReusableWorkflowDepth bounds how far one remote call may chain. A callee
-// that delegates again is read, but a chain past this depth proves nothing and
-// stays unresolved.
-const maxReusableWorkflowDepth = 4
-
 // okReusableCaller keeps a resolved call conservative when the caller hands
 // organization credentials to it. A remote reusable workflow can only receive
 // the values a caller maps into it, so a job that names no Unity or lock
@@ -339,7 +333,7 @@ func containsOpaqueSecretReference(text string) bool {
 // source at the exact pinned commit. Unproven calls stay unresolved so the
 // caller cannot pass without a cleanup path it does not own.
 func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
-	if a.reusableSource == nil || a.reusableDepth >= maxReusableWorkflowDepth {
+	if a.reusableSource == nil {
 		return false, false
 	}
 	repository, workflowPath, ok := remoteReusableTarget(target)
@@ -371,18 +365,16 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 			SHA:        ref,
 			Files:      map[string][]byte{workflowPath: content},
 		},
-		nodes:            make(map[string]*yaml.Node),
-		jobMemo:          make(map[string]bool),
-		actionMemo:       make(map[string]bool),
-		jobVisiting:      make(map[string]bool),
-		actionVisit:      make(map[string]bool),
-		guardAction:      make(map[string]bool),
-		reusableSource:   a.reusableSource,
-		reusableMemo:     a.reusableMemo,
-		reusableVisiting: a.reusableVisiting,
-		reusableDepth:    a.reusableDepth + 1,
-		findings:         make([]Finding, 0),
-		findingSet:       make(map[string]bool),
+		nodes:       make(map[string]*yaml.Node),
+		jobMemo:     make(map[string]bool),
+		actionMemo:  make(map[string]bool),
+		jobVisiting: make(map[string]bool),
+		actionVisit: make(map[string]bool),
+		guardAction: make(map[string]bool),
+		// The callee gets no resolver. A nested remote call there is work this
+		// audit cannot see, so it stays unresolved and license-capable.
+		findings:   make([]Finding, 0),
+		findingSet: make(map[string]bool),
 	}
 	workflow, err := called.node(workflowPath)
 	if err != nil {

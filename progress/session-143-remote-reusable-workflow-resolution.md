@@ -63,8 +63,8 @@ callee is in another repository.
   are required.
 - The callee workflow is parsed as its own snapshot and each of its jobs is
   classified with a sub-analyzer. Its findings are dropped; only the licensed
-  verdict matters. A callee that uses a repository-local action therefore stays
-  unproven. A nested remote call is followed up to a depth of four workflows.
+  verdict matters. A callee that uses a repository-local action or calls
+  another reusable workflow therefore stays unproven.
 - A callee job with a third-party Unity action holds no central acquire step, so
   any Unity marker in the callee text also makes the caller paid.
 - `reusableMemo` and `reusableVisiting` share one cache per audit, so a cycle
@@ -102,8 +102,7 @@ Tests:
 - `TestUnityEnrollmentResolvesNonLicensingRemoteReusableWorkflow`
 - `TestUnityEnrollmentKeepsUnresolvedRemoteReusableWorkflowConservative`
 - `TestUnityEnrollmentRefusesOpaqueSecretForwarding`
-- `TestUnityEnrollmentResolvesANestedNonLicensingCall`
-- `TestUnityEnrollmentBoundsANestedCallChain`
+- `TestUnityEnrollmentKeepsANestedRemoteCallUnresolved`
 - `TestUnityEnrollmentKeepsCalleeFileNamesCaseSensitive`
 - `TestUnityEnrollmentTreatsLicensedRemoteReusableWorkflowAsPaid`
 - `TestUnityEnrollmentTreatsOneLicensedCalleeJobAsPaid`
@@ -122,16 +121,16 @@ An independent adversarial review found these. All are fixed.
   mapping passed the caller check. The caller now needs each secret mapped to
   its exact name, and an opaque secrets expression is refused.
 - Medium: a nested call chain had no depth bound, so a consumer could chain
-  reads without limit. The bound is four workflows, and a deeper chain stays
-  unresolved.
+  reads without limit. The callee analyzer now gets no resolver, so any nested
+  call stays unresolved.
 - Low: the memo key folded the case of the workflow file name, so `Foo.yml`
   and `foo.yml` shared one verdict. Only the repository and commit fold now.
 - Low: a percent-encoded path segment reached `url.JoinPath` unchanged. The
   callee name now accepts only plain YAML file characters.
 - Low: the fetcher followed a redirect to any host. It now refuses a scheme or
   host change and bounds the chain.
-- Low: the docs claimed a nested call always stays unresolved. It is followed
-  up to the bound, and the docs say so.
+- Low: the docs claimed a nested call always stays unresolved. A nested call is
+  now never resolved: the callee analyzer gets no resolver.
 - Low: the callee marker set keeps a bare `unity` token on purpose. A callee
   that mentions Unity keeps the caller paid, which is the fail-closed
   direction. The measured review-tools callees hold no Unity token.
