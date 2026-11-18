@@ -19,6 +19,7 @@ const expectedWorkflowJobs = new Map([
   ["lock-recovery-audit.yml", ["audit"]],
   ["merge-policy-audit.yml", ["audit"]],
   ["onboard-unity-repository.yml", ["onboard"]],
+  ["openai-review.yml", ["review"]],
   ["repin-consumer-locks.yml", ["repin"]],
   ["request-unity-enrollment-audit.yml", ["request"]],
   ["request-unity-repository-onboarding.yml", ["request"]],
@@ -124,6 +125,7 @@ const expectedWorkflowRunScriptSignatures = new Map([
       "bash tools/workflows/unity-enrollment-audit.sh record-counts"
     ]
   ],
+  ["openai-review.yml", []],
   ["recover-build-lock.yml", []],
   [
     "reaper-delivery-audit.yml",
