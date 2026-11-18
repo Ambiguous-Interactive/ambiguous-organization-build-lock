@@ -6882,6 +6882,12 @@ func TestUnityEnrollmentRefusesOpaqueSecretForwarding(t *testing.T) {
       SERIAL: ${{ secrets[format('UNITY_{0}', 'SERIAL')] }}
 `,
 		},
+		{
+			name: "a wildcard secrets dump",
+			caller: `    with:
+      all: ${{ toJSON(secrets.*) }}
+`,
+		},
 	} {
 		result := analyzeRemoteCall(
 			t,

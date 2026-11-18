@@ -132,7 +132,7 @@ func TestRunResolvesNonLicensingRemoteReusableWorkflow(t *testing.T) {
 	}
 }
 
-func TestReusableWorkflowFetcherRefusesAHostChange(t *testing.T) {
+func TestReusableWorkflowFetcherRefusesARedirect(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte(reusableWorkflowFixture))
 	}))

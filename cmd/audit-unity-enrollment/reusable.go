@@ -36,22 +36,16 @@ type reusableWorkflowFetcher struct {
 	cache   map[string]reusableWorkflowRead
 }
 
-// maxReusableWorkflowRedirects bounds a redirect chain, which must also stay on
-// the reviewed host.
-const maxReusableWorkflowRedirects = 3
-
 func newReusableWorkflowFetcher(baseURL string) *reusableWorkflowFetcher {
 	return &reusableWorkflowFetcher{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		client: &http.Client{
 			Timeout: reusableWorkflowTimeout,
-			CheckRedirect: func(request *http.Request, via []*http.Request) error {
-				if len(via) >= maxReusableWorkflowRedirects ||
-					request.URL.Scheme != via[0].URL.Scheme ||
-					request.URL.Host != via[0].URL.Host {
-					return http.ErrUseLastResponse
-				}
-				return nil
+			// A redirect can name another path for the same host, so the bytes
+			// that answer may belong to a different workflow. Only the exact
+			// requested path is evidence.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
 			},
 		},
 		cache: make(map[string]reusableWorkflowRead),

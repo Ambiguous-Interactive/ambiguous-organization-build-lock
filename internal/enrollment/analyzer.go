@@ -347,7 +347,9 @@ func exactSecretReference(node *yaml.Node) bool {
 // secret, so a reviewer cannot say which values the callee receives.
 func containsOpaqueSecretReference(text string) bool {
 	text = strings.ToLower(strings.Join(strings.Fields(text), ""))
-	return strings.Contains(text, "tojson(secrets)") || strings.Contains(text, "secrets[")
+	return strings.Contains(text, "tojson(secrets)") ||
+		strings.Contains(text, "secrets[") ||
+		strings.Contains(text, "secrets.*")
 }
 
 // reusableWorkflowLicensed reports whether the reusable workflow a caller pins

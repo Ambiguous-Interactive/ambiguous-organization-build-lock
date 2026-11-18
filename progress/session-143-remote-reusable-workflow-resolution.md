@@ -76,14 +76,13 @@ callee is in another repository.
   serial, email, password, license, or lock credential. It also refuses
   `secrets: inherit` and any secrets expression that names no exact secret, and
   it requires each `secrets:` mapping value to be exactly one secret reference,
-  which may rename the secret.
+  which may rename the secret. A wildcard secrets expression is refused.
 - `remoteReusableTarget` accepts one plain YAML file name directly under
   `.github/workflows/`, so a percent-encoded or quoted segment cannot reach a
   different path at a mirror.
 - `cmd/audit-unity-enrollment` supplies the resolver: one anonymous raw read of
   `raw.githubusercontent.com/<repository>/<sha>/<path>`, a 15-second timeout, a
-  256 KiB bound, a status check, a redirect bound on the reviewed host, and a
-  per-run cache. `--reusable-workflow-base-url` exists for tests.
+  256 KiB bound, a status check, no redirect, and a per-run cache. `--reusable-workflow-base-url` exists for tests.
 - `docs/consumer-enrollment.md` states the rule in preconditions item 7, in
   workflow contract item 1, and in the `unresolved-reusable-workflow` row.
 
@@ -128,8 +127,8 @@ An independent adversarial review found these. All are fixed.
   and `foo.yml` shared one verdict. Only the repository and commit fold now.
 - Low: a percent-encoded path segment reached `url.JoinPath` unchanged. The
   callee name now accepts only plain YAML file characters.
-- Low: the fetcher followed a redirect to any host. It now refuses a scheme or
-  host change and bounds the chain.
+- Low: the fetcher followed a redirect. It now refuses every redirect, because a
+  redirect can name another path on the same host.
 - Low: the docs claimed a nested call always stays unresolved. A nested call is
   now never resolved: the callee analyzer gets no resolver.
 - Low: the callee marker set keeps a bare `unity` token on purpose. A callee

@@ -45,8 +45,8 @@ or writer App. The current inventory is recorded in
    under `Ambiguous-Interactive/*/.github/actions/` is a policy finding unless
    it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`.
    Reusable workflow calls are audited as workflow graph edges. The audit reads
-   the called workflow at the pinned commit, from public raw content, and
-   classifies its jobs. A callee with no Unity step makes the caller a
+   the called workflow at the pinned commit, from public raw content, without
+   following a redirect, and classifies its jobs. A callee with no Unity step makes the caller a
    non-licensing job. A callee with a licensed job or any Unity reference makes
    the caller paid. These cases leave the caller unresolved and
    license-capable: a callee the audit cannot read, a mutable reference, a
