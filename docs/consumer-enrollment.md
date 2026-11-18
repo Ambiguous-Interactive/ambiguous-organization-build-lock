@@ -543,8 +543,8 @@ touches a Dependabot pull request.
    a job-scoped context, a bracket `needs` reference, a function, a reusable
    workflow, or a secret is refused.
    The step passes only for an exact untrusted skip, for a successful
-   preflight when the selection is `false`, or for a successful preflight and
-   lane when the selection is `true`. Any other selection value is red. The
+   preflight and a skipped lane when the selection is `false`, or for a
+   successful preflight and lane when the selection is `true`. Any other selection value is red. The
    check refuses this shape for a lane that can block a merge, and for an
    aggregate context that the branch requires.
 
@@ -571,6 +571,7 @@ touches a Dependabot pull request.
                test "${UNITY_TESTS_RESULT}" = success
              elif [ "${LANE_SELECTED}" = "false" ]; then
                test "${RUNNER_PREFLIGHT_RESULT}" = success
+               test "${UNITY_TESTS_RESULT}" = skipped
              else
                echo "LANE_SELECTED must be true or false." >&2
                false
