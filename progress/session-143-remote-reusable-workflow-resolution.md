@@ -91,8 +91,8 @@ callee is in another repository.
 
 ## Evidence
 
-Local audit of the same seven default branches at the final commit after the
-change:
+Local audit of the same seven default branches after the change. It was re-run
+after every analyzer commit; the last run used the analyzer at `efb65e4deb`:
 
 ```text
 Audited 7/7 enrolled repositories; active-jobs=139 findings=22 complete=true
