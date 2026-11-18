@@ -536,10 +536,10 @@ touches a Dependabot pull request.
    request or merge group holds no merge gate.
    Such a lane may be optional. Declare the caller selection in the lane guard.
    Give its aggregate a literal `always()` and one step that reads
-   `LANE_SELECTED`. That value must repeat one `&&` term of the lane guard and
-   must not read a job result. The step passes only for an exact untrusted
-   skip, for a successful preflight when the selection is off, or for a
-   successful preflight and lane when the selection is on. The check refuses
+   `LANE_SELECTED`. That value must repeat one or more `&&` terms of the lane
+   guard and must not read a job result. The step passes only for an exact
+   untrusted skip, for a successful preflight when the selection is off, or for
+   a successful preflight and lane when the selection is on. The check refuses
    this shape for a lane that can block a merge.
 
    ```yaml
