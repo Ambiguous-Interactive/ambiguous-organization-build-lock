@@ -1,0 +1,142 @@
+# Session 144: several licensed lanes in one workflow
+
+Date: 2026-11-18
+
+Issues: #397 (decided and guarded here), #113 (unchanged), #335 (rechecked,
+still blocked upstream).
+
+## Objective and safety invariants
+
+Carry the GOAL.md directive: rank the open issues by impact with the least Unity
+CI churn, complete the highest-priority safe work, and drive it green.
+
+Safety invariants:
+
+- A licensed lane that cannot fail a protected pull request is not proven.
+- Two lanes that report one context share one verdict, so one context cannot
+  cover both.
+- A dispatch, schedule, or push lane holds no merge gate, and its own run
+  verdict stays authoritative.
+- No licensed workflow changes here, so the Unity matrix and its seats are
+  untouched.
+
+## Baseline
+
+- `main` at `47b17b4546`. No open pull request. The last ten runs are green,
+  including the three scheduled monitors.
+- Latest actionlint release is v1.7.12 (checked with `gh release list`). #335
+  stays blocked, because v1.7.12 still builds against YAML rc.3 only.
+- Local audit of the seven default branches with the unmodified analyzer:
+
+  ```text
+  Audited 7/7 enrolled repositories; active-jobs=136 findings=23 complete=true
+  ```
+
+- Finding classes: 13 DxMessaging shape findings, 8 expired policy exceptions,
+  2 unity-helpers findings.
+
+## Open-issue priority
+
+| Order | Item | Impact | Unity CI churn |
+| --- | --- | --- | --- |
+| 1 | #397 aggregate coverage | Blocks every workflow with more than one licensed lane. Three DxMessaging and one unity-helpers finding sit in this class. | None. Central analyzer and doc only. |
+| 2 | #113 DxMessaging shape | 13 consumer findings. | Low per workflow, but the dispatch lanes need consumer edits. |
+| 3 | #390 consumer status adoption | Needs a consumer job-shape decision and a ruleset edit. | Low. |
+| 4 | #379 merge queue adoption | Needs an owner decision to enable the queue. | Low. |
+| 5 | #335 actionlint YAML | Blocked upstream. Rechecked today: v1.7.12 is still latest. | None. |
+| 6 | #408 private callee policy | Needs an owner decision on the trust boundary. | None until decided. |
+| 7 | #29, #51, #53, #83, #153, #229, #231, #249, #277, #278, #334 | Each needs owner authority, portal evidence, or hardware this session cannot obtain. | Unknown until the evidence exists. |
+
+## Root cause
+
+`hasAggregate` binds one exact-shape aggregate to one licensed job, and the
+reviewed merge policy names one required context per repository. Measured with
+two typed-gate lanes on one workflow:
+
+- Both lanes pass when the policy requires both gate contexts.
+- Both lanes also pass when the policy requires only the first gate context. The
+  second lane then cannot block a merge, so a failed nightly lane would leave a
+  green required context.
+- Both lanes pass when the second gate reports the first gate's context name.
+  One context then carries two verdicts.
+
+## Change
+
+- `auditLicensedLaneCoverage` runs once per workflow. For every licensed job it
+  resolves the covering aggregate, then requires that aggregate's reported
+  context in the reviewed `requiredContexts` list. A lane whose context is not
+  required reports `unrequired-licensed-aggregate`.
+- Two licensed lanes that rely on one required context each report
+  `duplicate-licensed-aggregate-context`.
+- The rule applies only when the workflow declares a `pull_request` or eligible
+  `merge_group` trigger for a protected branch. A dispatch, schedule, or push
+  lane publishes its own run verdict, so it holds no merge gate. A malformed
+  trigger keeps the rule.
+- A historical readback lane, which omits the aggregate on purpose, keeps its
+  reviewed exclusion. An unprovable expression or matrix name stays with
+  `filtered-aggregate-gate`.
+- `docs/consumer-enrollment.md` item 10 now states the multi-lane shape: one
+  aggregate per lane, the classifier and preflight may be shared, and the
+  default branch must require every lane context. The finding table names both
+  new codes.
+
+## Evidence
+
+Local audit of the same seven checkouts after the change:
+
+```text
+Audited 7/7 enrolled repositories; active-jobs=136 findings=23 complete=true
+```
+
+The findings are the same 23 rows as the baseline. The first draft of the rule
+also named seven dispatch, schedule, and push lanes. Each was a non-pull-request
+workflow, so the protected-branch precondition removed that false positive.
+
+Tests:
+
+- `TestUnityEnrollmentAcceptsSeveralLicensedLanes`
+- `TestUnityEnrollmentRefusesUnprovenLicensedLaneGates`, three mutations:
+  unrequired lane context, shared lane context, and a gate bound to the other
+  lane's result.
+- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, three
+  trigger shapes: push only, merge group, and pull request.
+
+Local checks:
+
+- `go test ./...`, `go vet ./...`, `go test -race ./...`: pass.
+- `go mod verify`, both `go mod tidy -diff` commands: pass.
+- `go run ./cmd/workflow-credential-audit .`: pass.
+- `node tools/llm-harness.mjs check`: pass.
+- `bash tools/workflows/ci.sh javascript` and `shellcheck`: pass.
+- `node --test test/*.test.js` reports 20 failures on this macOS host. The same
+  20 tests fail on the untouched tree (identical failure sets, checked with
+  `git stash`), and each reads a symbolic-link, hard-link, inode, or git-hook
+  case that the host filesystem does not provide. CI runs them on Linux.
+- `golangci-lint` is not installed on this host. CI runs it.
+
+## Review findings and dispositions
+
+An independent adversarial review found these. All are fixed.
+
+- High: the first draft named every dispatch and push lane as drift. Seven false
+  positives appeared in the measured audit. The protected-branch precondition
+  removed them.
+- Medium: the card claimed each lane needs its own preflight. Two gates may name
+  the same preflight, and the measured fixture does. The doc and the code
+  comment now say so.
+- Low: the guard skipped the historical readback lane without saying why. The
+  code comment names it.
+
+## Merge and verification
+
+- Pull request: this repository's work pull request for #397.
+- `Build lock CI` must pass on the pull request before merge.
+- The organization Unity enrollment audit keeps 23 findings, so no consumer
+  drift was hidden or invented.
+
+## Out of scope
+
+- The 3 DxMessaging and 1 unity-helpers aggregate findings need consumer edits,
+  tracked in #113 and #397.
+- The 8 expired policy exceptions need an owner re-review.
+- #113 DxMessaging shape findings other than the aggregate class.

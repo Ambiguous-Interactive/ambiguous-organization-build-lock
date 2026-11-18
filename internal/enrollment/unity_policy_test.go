@@ -4491,6 +4491,188 @@ runs:
 	})
 }
 
+// severalLicensedLaneWorkflow adds a second licensed lane, its own fallback, and
+// its own gate to the reviewed typed shape.
+func severalLicensedLaneWorkflow(t *testing.T) string {
+	t.Helper()
+	base := typedConditionalValidationWorkflow()
+	licensed := strings.Index(base, "  unity:\n")
+	cleanup := strings.Index(base, "  cleanup:\n")
+	aggregate := strings.Index(base, "  aggregate:\n")
+	if licensed < 0 || cleanup < 0 || aggregate < 0 {
+		t.Fatal("the typed validation fixture moved")
+	}
+	lane := strings.NewReplacer(
+		"  unity:\n", "  unity-nightly:\n",
+		"needs.unity.result", "needs.unity-nightly.result",
+		"holder-id-suffix: qora", "holder-id-suffix: qora-nightly",
+		"evidence-suffix: qora", "evidence-suffix: qora-nightly",
+	).Replace(base[licensed:cleanup])
+	fallback := strings.NewReplacer(
+		"  cleanup:\n", "  cleanup-nightly:\n",
+		"needs.unity.result", "needs.unity-nightly.result",
+		"    needs: unity\n", "    needs: unity-nightly\n",
+		"holder-id: ${{ github.repository }}:${{ github.run_id }}:unity:qora",
+		"holder-id: ${{ github.repository }}:${{ github.run_id }}:unity-nightly:qora-nightly",
+		"holder-id-suffix: qora", "holder-id-suffix: qora-nightly",
+	).Replace(base[cleanup:aggregate])
+	gate := strings.NewReplacer(
+		"  aggregate:\n", "  aggregate-nightly:\n",
+		"needs: [static-validation, classify, preflight, unity, cleanup]",
+		"needs: [static-validation, classify, preflight, unity-nightly, cleanup-nightly]",
+		"unity-result: ${{ needs.unity.result }}",
+		"unity-result: ${{ needs.unity-nightly.result }}",
+		"fallback-result: ${{ needs.cleanup.result }}",
+		"fallback-result: ${{ needs.cleanup-nightly.result }}",
+		"fallback-cleanup-result: ${{ needs.cleanup.outputs.cleanup-result }}",
+		"fallback-cleanup-result: ${{ needs.cleanup-nightly.outputs.cleanup-result }}",
+	).Replace(base[aggregate:])
+	return base[:licensed] + lane + fallback + base[licensed:] + gate
+}
+
+// bothLanePolicies requires both lane contexts, the reviewed multi-lane shape.
+func bothLanePolicies() UnityEnrollmentPolicy {
+	policy := unityAuditPolicy()
+	policy.RequiredContexts = map[string][]string{
+		"Ambiguous-Interactive/fixture": {"aggregate", "aggregate-nightly"},
+	}
+	return policy
+}
+
+func TestUnityEnrollmentAcceptsSeveralLicensedLanes(t *testing.T) {
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{
+			".github/workflows/unity.yml": severalLicensedLaneWorkflow(t),
+		}),
+		bothLanePolicies(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("two licensed lanes produced findings: %#v", result.Findings)
+	}
+	paid := 0
+	for _, entry := range result.Inventory {
+		if entry.Classification == "paid-serial" {
+			paid++
+		}
+	}
+	if paid != 2 {
+		t.Fatalf("expected two paid lanes in inventory: %#v", result.Inventory)
+	}
+}
+
+func TestUnityEnrollmentRefusesUnprovenLicensedLaneGates(t *testing.T) {
+	workflow := severalLicensedLaneWorkflow(t)
+	mutations := []struct {
+		name    string
+		policy  UnityEnrollmentPolicy
+		mutate  func(string) string
+		want    string
+		laneJob string
+	}{
+		{
+			// The second lane reports a context no ruleset requires, so its
+			// failure cannot block a merge.
+			name:    "second lane context is not required",
+			policy:  unityAuditPolicy(),
+			mutate:  func(workflow string) string { return workflow },
+			want:    "unrequired-licensed-aggregate",
+			laneJob: "unity-nightly",
+		},
+		{
+			name:   "second gate reports the first lane context",
+			policy: bothLanePolicies(),
+			mutate: func(workflow string) string {
+				return strings.Replace(
+					workflow,
+					"  aggregate-nightly:\n",
+					"  aggregate-nightly:\n    name: aggregate\n",
+					1,
+				)
+			},
+			want:    "duplicate-licensed-aggregate-context",
+			laneJob: "unity-nightly",
+		},
+		{
+			name:   "second gate binds the first lane result",
+			policy: bothLanePolicies(),
+			mutate: func(workflow string) string {
+				return strings.Replace(
+					workflow,
+					"          unity-result: ${{ needs.unity-nightly.result }}",
+					"          unity-result: ${{ needs.unity.result }}",
+					1,
+				)
+			},
+			want:    "missing-unity-aggregate",
+			laneJob: "unity-nightly",
+		},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			mutated := mutation.mutate(workflow)
+			result, err := AnalyzeUnityEnrollment(
+				unityFixture(map[string]string{".github/workflows/unity.yml": mutated}),
+				mutation.policy,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, finding := range result.Findings {
+				if finding.Code == mutation.want && finding.Job == mutation.laneJob {
+					return
+				}
+			}
+			t.Fatalf("%s not reported for %s: %#v", mutation.want, mutation.laneJob, result.Findings)
+		})
+	}
+}
+
+func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.T) {
+	const triggers = "on:\n  pull_request:\n  push:\n    branches: [main]\n  workflow_dispatch:\n"
+	base := unityWorkflow(centralReturnSteps(), safeAggregate())
+	policy := unityAuditPolicy()
+	policy.RequiredContexts = map[string][]string{
+		"Ambiguous-Interactive/fixture": {"unrelated"},
+	}
+	tests := []struct {
+		name    string
+		trigger string
+		blocked bool
+	}{
+		// A push lane publishes its own run verdict. It holds no merge gate.
+		{"push only", "on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", false},
+		// A merge queue entry runs the branch's required checks.
+		{"merge group", "on:\n  pull_request:\n  merge_group:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", true},
+		// A pull request on a protected branch is the reviewed merge gate.
+		{"pull request", triggers, true},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			mutated := strings.Replace(base, triggers, testCase.trigger, 1)
+			if testCase.trigger != triggers && mutated == base {
+				t.Fatal("the trigger fixture moved")
+			}
+			result, err := AnalyzeUnityEnrollment(
+				unityFixture(map[string]string{".github/workflows/unity.yml": mutated}),
+				policy,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocked := strings.Contains(
+				findingCodes(result.Findings),
+				"unrequired-licensed-aggregate",
+			)
+			if blocked != testCase.blocked {
+				t.Fatalf("lane gate required=%v, want %v: %#v", blocked, testCase.blocked, result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentAcceptsMergeGroupTrigger(t *testing.T) {
 	/*
 	   A merge group runs the queued diff with organization secrets after a writer adds the

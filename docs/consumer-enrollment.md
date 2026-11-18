@@ -524,8 +524,13 @@ touches a Dependabot pull request.
    classified non-Unity skip, or fully successful licensed work whose fallback
    reports `noop`. Missing, malformed, cancelled, partial, contradictory, or
    residue-bearing execution fails. One exact-shape aggregate covers one
-   licensed job, so a second licensed lane, such as a nightly editor matrix,
-   belongs in its own workflow file.
+   licensed job. A workflow may hold several licensed lanes, such as a pull
+   request lane and a nightly editor matrix. Give every lane its own aggregate
+   and, for the typed gate, its own fallback. The classifier and preflight may
+   be shared. The default branch must require every lane aggregate context. A
+   lane whose aggregate reports a context the branch does not require cannot
+   block a merge, and two lanes that report one context share one verdict. The
+   audit reports both shapes.
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already
@@ -609,8 +614,9 @@ touches a Dependabot pull request.
 
 The conditional classifier and aggregate have an exact static shape. All five
 referenced jobs must be distinct and must not define workflow/job `env`,
-`defaults`, containers, services, or a matrix. The classifier has the two
-steps below. It may add one `Check added rule lines` step after the classifier
+`defaults`, containers, services, or a matrix. A second licensed lane adds its
+own gate and fallback, and it may name the same classifier and preflight. The
+classifier has the two steps below. It may add one `Check added rule lines` step after the classifier
 action, with only `name` and `run` keys and the exact commands shown. This
 check cannot change the already-reported classifier output, and its failure
 still fails the job. Preflight has exactly one approved preflight
@@ -720,6 +726,7 @@ edits.
 | `cleanup-gate-not-always` | Run the gate with literal `always()` and no `continue-on-error`. See item 9. |
 | `default-branch-advanced` | No consumer edit. The default branch advanced while the audit read it, so the audit refreshed the snapshot and failed closed when the refresh did not reconcile. The next audit reads the new head. |
 | `default-branch-revalidation-incomplete` | No consumer edit. The audit could not read the current default-branch head. Central operators check the reader token and run access. |
+| `duplicate-licensed-aggregate-context` | Give every licensed lane its own aggregate context. Two lanes that report one context share one verdict. See item 10. |
 | `expired-policy-exception` | Renew or remove the expired registry exception in `unity-enrollment-policy.json`. |
 | `expired-repin-exception` | Renew or remove the expired `repinExceptions` entry. See Release authorization. |
 | `fallback-cleanup-not-always` | Guard the fallback job with `always()` and the source-job condition shape. See item 8. |
@@ -762,6 +769,7 @@ edits.
 | `unity-editor-check-after-lock` | Run the editor gate before acquire. See item 3. |
 | `unity-editor-provisioning-control` | Remove the editor provisioning control overrides. CI must not provision an editor. See item 3. |
 | `unity-return-not-always` | Run the central return with `always()` on acquired work. See item 7. |
+| `unrequired-licensed-aggregate` | Require the aggregate context that covers this licensed lane on the default branch. See item 10. |
 | `unresolved-reusable-workflow` | Pin a public reusable workflow at an immutable commit, keep no repository-local action inside it, and pass it no Unity or lock secret. See item 7. |
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
 | `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |

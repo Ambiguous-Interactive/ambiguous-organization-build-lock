@@ -432,6 +432,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				)
 			}
 		}
+		a.auditLicensedLaneCoverage(workflow, workflowPath, jobs, preflightJobs, protectedBranches)
 	}
 
 	// A repin exception is stale when its protected file is gone, and expired
@@ -960,6 +961,97 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
 		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
 	}
+}
+
+// auditLicensedLaneCoverage proves that every licensed lane of a workflow that
+// can reach a protected pull request is gated by a context the reviewed merge
+// policy requires. One exact-shape aggregate binds one licensed lane, so a
+// workflow may hold several lanes, each with its own aggregate and, for the
+// typed gate, its own fallback. Two lanes that report one context cannot both
+// block a merge, because a single required context carries one verdict. The
+// resolve repeats hasAggregate, which reads only this snapshot and the approved
+// pins, so it adds no dependency on the order the jobs were audited in.
+func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
+	workflow *yaml.Node,
+	workflowPath string,
+	jobs *yaml.Node,
+	preflightJobs map[string]bool,
+	protectedBranches map[string]bool,
+) {
+	if len(a.requiredContexts) == 0 || !licensedLaneNeedsMergeGate(workflow, protectedBranches) {
+		return
+	}
+	lanes := make(map[string][]string)
+	for index := 0; index < len(jobs.Content); index += 2 {
+		jobName := jobs.Content[index].Value
+		licensed, err := a.analyzer.jobLicensed(workflowPath, jobName)
+		if err != nil || !licensed {
+			continue
+		}
+		aggregateName, aggregateJob, ok := a.hasAggregate(
+			workflow,
+			workflowPath,
+			jobs,
+			jobName,
+			jobs.Content[index+1],
+			preflightJobs,
+		)
+		if !ok || !conditionIsSafeAlways(mappingValue(aggregateJob, "if")) {
+			// A missing aggregate reports missing-unity-aggregate, and the
+			// reviewed historical readback shape omits the aggregate on
+			// purpose. Neither leaves an unproven context behind.
+			continue
+		}
+		context := reportedCheckContext(aggregateName, aggregateJob)
+		if context == "" {
+			// An expression or matrix name cannot prove which context this
+			// gate reports. The filtered-aggregate-gate rule already names it
+			// when the repository requires contexts.
+			continue
+		}
+		if !a.requiredContexts[context] {
+			a.analyzer.add("unrequired-licensed-aggregate", workflowPath, jobName)
+			continue
+		}
+		lanes[context] = append(lanes[context], jobName)
+	}
+	for _, contextLanes := range lanes {
+		if len(contextLanes) < 2 {
+			continue
+		}
+		for _, jobName := range contextLanes {
+			a.analyzer.add("duplicate-licensed-aggregate-context", workflowPath, jobName)
+		}
+	}
+}
+
+// licensedLaneNeedsMergeGate reports whether a pull request or merge group
+// trigger of this workflow reaches a protected branch. Only such a lane can
+// fail a required check, so only its context must be a required merge check. A
+// dispatch-, schedule-, or push-only lane publishes its own run verdict and
+// holds no merge gate. A malformed trigger proves nothing, so it keeps the
+// rule.
+func licensedLaneNeedsMergeGate(workflow *yaml.Node, protectedBranches map[string]bool) bool {
+	filters, err := pullRequestEventFilters(workflow, protectedBranches)
+	if err != nil {
+		return true
+	}
+	for _, filter := range filters {
+		if filter.runsOnProtected {
+			return true
+		}
+	}
+	configs, err := pullRequestEventConfigs(workflow)
+	if err != nil {
+		return true
+	}
+	for _, config := range configs {
+		if config.name == "merge_group" &&
+			mergeGroupTriggerEligible(config.config, protectedBranches) {
+			return true
+		}
+	}
+	return false
 }
 
 // auditIndependentCoverage reports the preflight and aggregate verdicts. They
