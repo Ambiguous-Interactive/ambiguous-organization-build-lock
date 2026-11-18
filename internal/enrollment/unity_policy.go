@@ -6463,6 +6463,12 @@ func selectionWithinLaneGuard(selection, licensedJob, aggregateJob *yaml.Node) b
 		available[compactExpression(term)] = true
 	}
 	selectionTerms, selectionOr := conditionTerms(expression)
+	if selectionTerms == nil {
+		if !selectionOr {
+			return false
+		}
+		return available[compactExpression(expression)]
+	}
 	if selectionOr || len(selectionTerms) == 0 {
 		return available[compactExpression(expression)]
 	}
