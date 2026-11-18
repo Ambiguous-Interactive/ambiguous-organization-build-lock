@@ -7025,7 +7025,8 @@ func TestUnityEnrollmentTreatsAnUnprovenRunnerCalleeJobAsPaid(t *testing.T) {
 		"[self-hosted, Windows]",
 		"${{ matrix.os }}",
 		"${{ inputs.runner }}",
-		"{group: unity-pool}",
+		"{group: build-pool}",
+		"build-agent",
 	} {
 		callee := `name: Scripted
 on:

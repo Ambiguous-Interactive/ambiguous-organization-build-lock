@@ -67,8 +67,9 @@ callee is in another repository.
   another reusable workflow therefore stays unproven.
 - A callee job with a third-party Unity action holds no central acquire step, so
   any Unity marker in the callee text also makes the caller paid. A callee job
-  on the self-hosted fleet, or on a runner expression or group, is paid too,
-  because a `run:` step there can activate Unity without naming an action.
+  that does not name a GitHub-hosted runner label is paid too, because a
+  `run:` step on a self-hosted runner can activate Unity without naming an
+  action.
 - `reusableMemo` caches one verdict per callee identity, so a repeated call
   costs one read. Only the repository and the commit fold case; the workflow
   file name stays exact.
@@ -125,6 +126,9 @@ Third review round:
   mark the verdict unproven. Any callee finding now leaves the caller
   unresolved, which covers a local action, a nested call, and a mutable
   reference.
+- Major: a runner group and a custom label need no literal `self-hosted`, so a
+  callee on either was read as hosted. The callee rule is now positive: only a
+  reviewed GitHub-hosted label makes a callee job non-licensing.
 
 The 31 remote-call findings are gone. The remaining 22 are the 14 DxMessaging
 shape findings and the 8 expired policy exceptions.

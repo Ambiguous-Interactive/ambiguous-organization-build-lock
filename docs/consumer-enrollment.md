@@ -47,13 +47,13 @@ or writer App. The current inventory is recorded in
    Reusable workflow calls are audited as workflow graph edges. The audit reads
    the called workflow at the pinned commit, from public raw content, without
    following a redirect, and classifies its jobs. A callee with no Unity step
-   makes the caller a non-licensing job. A callee with a licensed job, a job on
-   the self-hosted fleet or an unproven runner, or any Unity reference makes the
-   caller paid. These cases leave the caller
-   unresolved and license-capable: a callee the audit cannot read, a mutable
-   reference, a repository-local action inside the callee, a nested reusable
-   workflow call, `secrets: inherit`, an opaque secrets expression, or a
-   forwarded Unity or lock secret from the reviewed name list.
+   makes the caller a non-licensing job. A callee with a licensed job, a callee
+   job that does not name a hosted runner label, or any Unity reference makes
+   the caller paid. These cases leave the caller unresolved and
+   license-capable: a callee the audit cannot read, a mutable reference, a
+   repository-local action inside the callee, a nested reusable workflow call,
+   `secrets: inherit`, an opaque secrets expression, or a forwarded Unity or
+   lock secret from the reviewed name list.
 
 ## Release authorization
 
