@@ -534,6 +534,48 @@ touches a Dependabot pull request.
    share one verdict. One aggregate job may enforce several lanes, because it
    fails when any covered lane fails. A lane that runs for no protected pull
    request or merge group holds no merge gate.
+   Such a lane may be optional. Declare the caller selection in the lane guard.
+   Give its aggregate a literal `always()` and one step that reads
+   `LANE_SELECTED`. That value must repeat one or more `&&` terms of the lane
+   guard. Each term must render the boolean text `true` or `false`, so a bare
+   string input is refused. It may read caller inputs, `github.event_name`,
+   `github.event.inputs`, and `needs.<job>.outputs` in dot form. A job result,
+   a job-scoped context, a bracket `needs` reference, a function, a reusable
+   workflow, or a secret is refused.
+   The step passes only for an exact untrusted skip, for a successful
+   preflight when the selection is `false`, or for a successful preflight and
+   lane when the selection is `true`. Any other selection value is red. The
+   check refuses this shape for a lane that can block a merge, and for an
+   aggregate context that the branch requires.
+
+   ```yaml
+     unity-native-floor-success:
+       if: always()
+       needs: [runner-preflight, native-sdk-floor]
+       runs-on: ubuntu-latest
+       steps:
+         - shell: bash
+           env:
+             RUNNER_PREFLIGHT_RESULT: ${{ needs.runner-preflight.result }}
+             UNITY_TESTS_RESULT: ${{ needs.native-sdk-floor.result }}
+             LANE_SELECTED: ${{ inputs['native-sdk-floor'] == true }}
+             FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+             DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}
+           run: |
+             set -euo pipefail
+             if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
+               test "${RUNNER_PREFLIGHT_RESULT}" = skipped
+               test "${UNITY_TESTS_RESULT}" = skipped
+             elif [ "${LANE_SELECTED}" = "true" ]; then
+               test "${RUNNER_PREFLIGHT_RESULT}" = success
+               test "${UNITY_TESTS_RESULT}" = success
+             elif [ "${LANE_SELECTED}" = "false" ]; then
+               test "${RUNNER_PREFLIGHT_RESULT}" = success
+             else
+               echo "LANE_SELECTED must be true or false." >&2
+               false
+             fi
+   ```
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already

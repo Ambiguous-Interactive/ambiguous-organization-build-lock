@@ -5208,10 +5208,17 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 	if len(requiredPreflights) == 0 {
 		return "", nil, false
 	}
+	// A lane that no protected pull request or merge group can run may be
+	// selected by the caller, so its aggregate accepts a caller-selected skip.
+	// Such a lane can never block a merge, so the accepted skip cannot hide a
+	// failed protected check.
+	callerSelectedLane := !laneCanGateProtectedMerge(workflow, licensedJobNode)
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName := jobs.Content[index].Value
 		job := jobs.Content[index+1]
 		always := conditionIsSafeAlways(mappingValue(job, "if"))
+		selectedContext := reportedCheckContext(jobName, job)
+		selectedContextRequired := selectedContext != "" && a.requiredContexts[selectedContext]
 		if !needsAny(job, map[string]bool{licensedJob: true}) ||
 			(!always && !historicalReadbackLicensedJobExcluded(licensedJobNode)) ||
 			unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
@@ -5229,6 +5236,15 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 							licensedJob,
 							preflight,
 						) ||
+						(callerSelectedLane && always && !selectedContextRequired &&
+							selectedLaneAggregateEnforces(
+								workflow,
+								job,
+								step,
+								licensedJobNode,
+								licensedJob,
+								preflight,
+							)) ||
 						(always && a.typedValidationGateEnforces(
 							workflow,
 							jobs,
@@ -6253,31 +6269,12 @@ func trustedSkipAggregateEnforces(
 		scalarValue(mappingValue(step, "shell")) != "bash" {
 		return false
 	}
-	env := mappingValue(step, "env")
-	if !mappingHasOnlyKeys(env, map[string]bool{
-		"RUNNER_PREFLIGHT_RESULT": true,
-		"UNITY_TESTS_RESULT":      true,
-		"FORK_PR":                 true,
-		"DEPENDABOT_PR":           true,
-	}) ||
-		!exactExpression(
-			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
-			"needs."+preflightJob+".result",
-		) ||
-		!exactExpression(
-			mappingValue(env, "UNITY_TESTS_RESULT"),
-			"needs."+licensedJob+".result",
-		) ||
-		!exactExpression(
-			mappingValue(env, "FORK_PR"),
-			"github.event_name=='pull_request'&&"+
-				"github.event.pull_request.head.repo.full_name!=github.repository",
-		) ||
-		!exactExpression(
-			mappingValue(env, "DEPENDABOT_PR"),
-			"github.event_name=='pull_request'&&"+
-				"github.event.pull_request.user.login=='dependabot[bot]'",
-		) {
+	if !trustedSkipAggregateEnvironment(
+		mappingValue(step, "env"),
+		licensedJob,
+		preflightJob,
+		nil,
+	) {
 		return false
 	}
 	run := mappingValue(step, "run")
@@ -6309,6 +6306,500 @@ func trustedSkipAggregateEnforces(
 		}
 	}
 	return true
+}
+
+// trustedSkipAggregateEnvironment holds the exact trusted-skip bindings shared
+// by the two aggregate shapes. The caller names the only keys it may add.
+func trustedSkipAggregateEnvironment(
+	env *yaml.Node,
+	licensedJob, preflightJob string,
+	extra map[string]bool,
+) bool {
+	allowed := map[string]bool{
+		"RUNNER_PREFLIGHT_RESULT": true,
+		"UNITY_TESTS_RESULT":      true,
+		"FORK_PR":                 true,
+		"DEPENDABOT_PR":           true,
+	}
+	for key := range extra {
+		allowed[key] = true
+	}
+	return mappingHasOnlyKeys(env, allowed) &&
+		exactExpression(
+			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
+			"needs."+preflightJob+".result",
+		) &&
+		exactExpression(
+			mappingValue(env, "UNITY_TESTS_RESULT"),
+			"needs."+licensedJob+".result",
+		) &&
+		exactExpression(
+			mappingValue(env, "FORK_PR"),
+			"github.event_name=='pull_request'&&"+
+				"github.event.pull_request.head.repo.full_name!=github.repository",
+		) &&
+		exactExpression(
+			mappingValue(env, "DEPENDABOT_PR"),
+			"github.event_name=='pull_request'&&"+
+				"github.event.pull_request.user.login=='dependabot[bot]'",
+		)
+}
+
+// selectedLaneAggregateEnforces proves a lane that the caller selects. The
+// lane cannot reach a protected pull request or merge group, so a skipped lane
+// can never hide a failed protected check, and its context is not required.
+// LANE_SELECTED must be a boolean-valued conjunct of the licensed job guard that
+// reads only caller inputs and declared job outputs. The script stays red for
+// any other selection value, so a job-scoped context or a bare string cannot
+// green-report a lane that did not run.
+func selectedLaneAggregateEnforces(
+	workflow, job, step, licensedJobNode *yaml.Node,
+	licensedJob, preflightJob string,
+) bool {
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if !conditionIsSafeAlways(mappingValue(job, "if")) ||
+		len(steps) != 1 || steps[0] != step ||
+		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		mappingValue(job, "environment") != nil ||
+		unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
+		!affirmativeCondition(mappingValue(step, "if")) ||
+		!criticalNodeFailurePropagates(step) ||
+		scalarValue(mappingValue(step, "shell")) != "bash" {
+		return false
+	}
+	env := mappingValue(step, "env")
+	if !trustedSkipAggregateEnvironment(
+		env,
+		licensedJob,
+		preflightJob,
+		map[string]bool{"LANE_SELECTED": true},
+	) ||
+		!selectionWithinLaneGuard(
+			mappingValue(env, "LANE_SELECTED"),
+			licensedJobNode,
+			job,
+		) {
+		return false
+	}
+	run := mappingValue(step, "run")
+	if run == nil || run.Kind != yaml.ScalarNode {
+		return false
+	}
+	lines := make([]string, 0, 13)
+	for _, line := range strings.Split(run.Value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	expected := []string{
+		"set -euo pipefail",
+		`if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = skipped`,
+		`test "${UNITY_TESTS_RESULT}" = skipped`,
+		`elif [ "${LANE_SELECTED}" = "true" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		`test "${UNITY_TESTS_RESULT}" = success`,
+		`elif [ "${LANE_SELECTED}" = "false" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		"else",
+		`echo "LANE_SELECTED must be true or false." >&2`,
+		"false",
+		"fi",
+	}
+	if len(lines) != len(expected) {
+		return false
+	}
+	for index := range expected {
+		if lines[index] != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// laneCanGateProtectedMerge reports whether the lane can run for a protected
+// pull request or merge group. Only such a lane can block a merge. A reusable
+// workflow has no local trigger, but a caller can run it for a protected pull
+// request, so it stays merge-reachable here.
+func laneCanGateProtectedMerge(workflow, licensedJob *yaml.Node) bool {
+	if workflowDeclaresEvent(workflow, "workflow_call") {
+		return true
+	}
+	mergeEvents := map[string]bool{
+		"pull_request":        true,
+		"pull_request_target": true,
+		"merge_group":         true,
+	}
+	if jobExcludedFromEvents(mappingValue(licensedJob, "if"), mergeEvents) {
+		return false
+	}
+	return workflowDeclaresEvent(workflow, "pull_request") ||
+		workflowDeclaresEvent(workflow, "pull_request_target") ||
+		workflowDeclaresEvent(workflow, "merge_group")
+}
+
+// selectionWithinLaneGuard proves that LANE_SELECTED is one conjunct of the
+// licensed job guard. A skipped selection then names the same condition that
+// skipped the lane, and no job result can waive the lane. The selection must
+// render the boolean text "true" or "false", because the aggregate script
+// branches on that exact text, and it may read only caller inputs and declared
+// job outputs, because every other context can differ between the two jobs.
+func selectionWithinLaneGuard(selection, licensedJob, aggregateJob *yaml.Node) bool {
+	if selection == nil || selection.Kind != yaml.ScalarNode {
+		return false
+	}
+	expression := strings.TrimSpace(selection.Value)
+	if !strings.HasPrefix(expression, "${{") || !strings.HasSuffix(expression, "}}") {
+		return false
+	}
+	expression = strings.TrimSpace(
+		strings.TrimSuffix(strings.TrimPrefix(expression, "${{"), "}}"),
+	)
+	if expression == "" ||
+		containsStatusFunction(expression) ||
+		strings.Contains(expression, ".result") ||
+		!booleanValuedSelection(expression) ||
+		!selectionContextsAllowed(expression) {
+		return false
+	}
+	for _, needed := range neededJobNames(expression) {
+		if !needsAny(aggregateJob, map[string]bool{needed: true}) {
+			return false
+		}
+	}
+	guard := mappingValue(licensedJob, "if")
+	if guard == nil || guard.Kind != yaml.ScalarNode {
+		return false
+	}
+	guardTerms, guardOr := conditionTerms(guard.Value)
+	if len(guardTerms) == 0 || guardOr {
+		return false
+	}
+	available := make(map[string]bool, len(guardTerms))
+	for _, term := range guardTerms {
+		available[compactExpression(term)] = true
+	}
+	selectionTerms, selectionOr := conditionTerms(expression)
+	if selectionTerms == nil {
+		if !selectionOr {
+			return false
+		}
+		return available[compactExpression(expression)]
+	}
+	if selectionOr || len(selectionTerms) == 0 {
+		return available[compactExpression(expression)]
+	}
+	for _, term := range selectionTerms {
+		if !available[compactExpression(term)] {
+			return false
+		}
+	}
+	return true
+}
+
+// booleanValuedSelection reports whether a condition renders boolean text. A
+// bare reference can render a string, so only a literal, a negation, or a
+// comparison counts, in every branch of an AND or OR chain.
+func booleanValuedSelection(expression string) bool {
+	expression = trimOuterParentheses(strings.TrimSpace(expression))
+	if expression == "" {
+		return false
+	}
+	if parts, ok := splitTopLevelOr(expression); ok {
+		for _, part := range parts {
+			if !booleanValuedSelection(part) {
+				return false
+			}
+		}
+		return true
+	}
+	if parts, topLevelOr := splitTopLevelAnd(expression); topLevelOr {
+		return false
+	} else if len(parts) > 1 {
+		for _, part := range parts {
+			if !booleanValuedSelection(part) {
+				return false
+			}
+		}
+		return true
+	}
+	if expression == "true" || expression == "false" {
+		return true
+	}
+	if strings.HasPrefix(expression, "!") {
+		return true
+	}
+	return containsTopLevelComparison(expression)
+}
+
+func splitTopLevelOr(expression string) ([]string, bool) {
+	return splitTopLevelOperator(expression, '|')
+}
+
+func splitTopLevelOperator(expression string, operator rune) ([]string, bool) {
+	terms := make([]string, 0, 1)
+	start, depth := 0, 0
+	found := false
+	var quote rune
+	runes := []rune(expression)
+	for index := 0; index < len(runes); index++ {
+		char := runes[index]
+		if quote != 0 {
+			if char == quote && (index == 0 || runes[index-1] != '\\') {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			continue
+		}
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return nil, false
+			}
+			depth--
+		case operator:
+			if index+1 >= len(runes) || runes[index+1] != operator {
+				return nil, false
+			}
+			if depth == 0 {
+				term := strings.TrimSpace(string(runes[start:index]))
+				if term == "" {
+					return nil, false
+				}
+				terms = append(terms, term)
+				start = index + 2
+				found = true
+			}
+			index++
+		}
+	}
+	if quote != 0 || depth != 0 || !found {
+		return nil, false
+	}
+	term := strings.TrimSpace(string(runes[start:]))
+	if term == "" {
+		return nil, false
+	}
+	return append(terms, term), true
+}
+
+func containsTopLevelComparison(expression string) bool {
+	depth := 0
+	var quote rune
+	runes := []rune(expression)
+	for index := 0; index < len(runes); index++ {
+		char := runes[index]
+		if quote != 0 {
+			if char == quote && (index == 0 || runes[index-1] != '\\') {
+				quote = 0
+			}
+			continue
+		}
+		if char == '\'' || char == '"' {
+			quote = char
+			continue
+		}
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return false
+			}
+			depth--
+		case '=', '!', '>', '<':
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// selectionContextsAllowed admits only caller inputs, the event name or event
+// inputs, and outputs of jobs the aggregate needs. A job-scoped context such as
+// github.job or runner.name can differ between the lane and the aggregate, so
+// it cannot prove the lane ran.
+func selectionContextsAllowed(expression string) bool {
+	compact := compactExpression(expression)
+	if strings.Contains(compact, "needs[") {
+		return false
+	}
+	for index := 0; index < len(compact); {
+		char := compact[index]
+		if char == '\'' || char == '"' {
+			index++
+			for index < len(compact) {
+				if compact[index] == char {
+					index++
+					break
+				}
+				index++
+			}
+			continue
+		}
+		if !identifierStart(char) {
+			index++
+			continue
+		}
+		start := index
+		for index < len(compact) && identifierPart(compact[index]) {
+			index++
+		}
+		root := compact[start:index]
+		if index < len(compact) && compact[index] == '(' {
+			// A workspace-dependent function such as hashFiles can differ
+			// between the lane and the hosted aggregate.
+			return false
+		}
+		if index >= len(compact) || (compact[index] != '.' && compact[index] != '[') {
+			continue
+		}
+		switch root {
+		case "inputs":
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
+		case "github":
+			rest := compact[index+1:]
+			if !strings.HasPrefix(rest, "event_name") &&
+				!strings.HasPrefix(rest, "event.") &&
+				!strings.HasPrefix(rest, "event[") {
+				return false
+			}
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
+		case "needs":
+			if compact[index] != '.' {
+				return false
+			}
+			rest := compact[index+1:]
+			nameEnd := 0
+			for nameEnd < len(rest) && identifierPart(rest[nameEnd]) {
+				nameEnd++
+			}
+			if nameEnd == 0 || !strings.HasPrefix(rest[nameEnd:], ".outputs.") {
+				return false
+			}
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// skipPropertyChain advances past a run of `.name` and `['literal']` segments.
+// A dynamic index such as `inputs[matrix.mode]` can differ between the two
+// jobs, so it is refused.
+func skipPropertyChain(compact string, index int) (int, bool) {
+	for index < len(compact) {
+		switch compact[index] {
+		case '.':
+			index++
+			for index < len(compact) && identifierPart(compact[index]) {
+				index++
+			}
+		case '[':
+			index++
+			if index >= len(compact) || (compact[index] != '\'' && compact[index] != '"') {
+				return 0, false
+			}
+			quote := compact[index]
+			index++
+			for index < len(compact) && compact[index] != quote {
+				index++
+			}
+			if index >= len(compact) {
+				return 0, false
+			}
+			index++
+			if index >= len(compact) || compact[index] != ']' {
+				return 0, false
+			}
+			index++
+		default:
+			return index, true
+		}
+	}
+	return index, true
+}
+
+func identifierStart(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_'
+}
+
+func identifierPart(char byte) bool {
+	return identifierStart(char) || (char >= '0' && char <= '9') || char == '-'
+}
+
+// neededJobNames lists the jobs a condition reads through needs.<name>.
+func neededJobNames(expression string) []string {
+	names := make([]string, 0, 1)
+	remaining := expression
+	for {
+		index := strings.Index(remaining, "needs.")
+		if index < 0 {
+			return names
+		}
+		remaining = remaining[index+len("needs."):]
+		end := 0
+		for end < len(remaining) {
+			char := remaining[end]
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') || char == '_' || char == '-' {
+				end++
+				continue
+			}
+			break
+		}
+		if end > 0 {
+			names = append(names, remaining[:end])
+		}
+		remaining = remaining[end:]
+	}
+}
+
+func compactExpression(value string) string {
+	var builder strings.Builder
+	var quote rune
+	for _, character := range value {
+		if quote != 0 {
+			builder.WriteRune(character)
+			if character == quote {
+				quote = 0
+			}
+			continue
+		}
+		if character == '\'' || character == '"' {
+			quote = character
+			builder.WriteRune(character)
+			continue
+		}
+		if character == ' ' || character == '\t' || character == '\r' || character == '\n' {
+			continue
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String()
 }
 
 // Preserve quoted text when comparing the dispatch selector. A space inside a
