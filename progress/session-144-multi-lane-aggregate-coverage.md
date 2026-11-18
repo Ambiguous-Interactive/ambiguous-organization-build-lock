@@ -173,10 +173,23 @@ Third round, from the advisory review:
 
 ## Merge and verification
 
-- Pull request: this repository's work pull request for #397.
-- `Build lock CI` must pass on the pull request before merge.
-- The organization Unity enrollment audit keeps 23 findings, so no consumer
-  drift was hidden or invented.
+- Pull request #411 merged on `main` as `0722c77ddf` (squash) on 2026-11-18.
+- `Build lock CI` run 44397021167 on `0722c77ddf`: success.
+- Organization Unity enrollment audit run 44397021295 on `0722c77ddf`:
+  success, with 23 findings across 3 repositories. The classes are the same as
+  the baseline: `expired-policy-exception` x8, `missing-unity-aggregate` x4,
+  `missing-unity-editor-check` x5, `unsafe-central-return-suffix` x3,
+  `unsafe-workflow-queue` x3. No `unrequired-licensed-aggregate` and no
+  `duplicate-licensed-aggregate-context` appears, so the new rule found no
+  consumer drift today.
+- Reaper delivery audit run 44397106604 on `0722c77ddf`: success. Build lock
+  incident recovery audit run at 20:53 on the parent commit: success. Its next
+  scheduled run reads this commit.
+- Every review thread is answered and resolved. The advisory review on the final
+  commit reports zero findings. The CodeRabbit changes-requested review was
+  dismissed because every actionable comment was fixed and CodeRabbit did not
+  re-review.
+- #397 is closed. #412 tracks the consumer aggregate work that remains.
 
 ## Out of scope
 
