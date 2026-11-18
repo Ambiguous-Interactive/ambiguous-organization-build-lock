@@ -1100,9 +1100,10 @@ func mergeGateReachable(workflow *yaml.Node, protectedBranches map[string]bool) 
 }
 
 // triggerMayReachProtectedBranches proves a pull request trigger can still start
-// for a protected branch. A glob or a rejected trigger key can reach one, so
-// both keep the rule. Only an allow list of exact unprotected literals, or a
-// deny list that names every protected branch, proves the trigger cannot.
+// for a protected branch. A pattern that is not a plain branch name can match
+// one, because the GitHub filter language reads `*`, `?`, `[]`, `{}`, and `+` as
+// operators. Only an allow list of exact unprotected names, or a deny list that
+// names every protected branch, proves the trigger cannot.
 func triggerMayReachProtectedBranches(
 	allow, deny *yaml.Node,
 	protectedBranches map[string]bool,
@@ -1116,7 +1117,7 @@ func triggerMayReachProtectedBranches(
 			return true
 		}
 		for _, pattern := range patterns {
-			if protectedBranches[pattern] || strings.ContainsAny(pattern, "*?[]") {
+			if protectedBranches[pattern] || !literalBranchName(pattern) {
 				return true
 			}
 		}
@@ -1131,12 +1132,31 @@ func triggerMayReachProtectedBranches(
 		remaining[branch] = true
 	}
 	for _, pattern := range patterns {
-		if strings.ContainsAny(pattern, "*?[]") {
+		if !literalBranchName(pattern) {
 			return true
 		}
 		delete(remaining, pattern)
 	}
 	return len(remaining) > 0
+}
+
+// literalBranchName reports whether a branch filter entry is a plain branch
+// name, so an exact membership test covers it.
+func literalBranchName(pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+	for _, char := range pattern {
+		switch {
+		case char >= 'a' && char <= 'z',
+			char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9',
+			char == '-', char == '_', char == '.', char == '/':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // auditIndependentCoverage reports the preflight and aggregate verdicts. They

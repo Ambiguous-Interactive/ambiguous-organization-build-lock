@@ -104,10 +104,11 @@ Tests:
 - `TestUnityEnrollmentRefusesUnprovenLicensedLaneGates`, three mutations:
   unrequired lane context, shared lane context, and a gate bound to the other
   lane's result.
-- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, ten
+- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, eleven
   trigger shapes: push only, merge group, merge group only, pull request, an
   allow list of unprotected branches, every protected branch denied, an allow
-  glob, a deny glob, an all-branches glob, and a denied release-branch glob.
+  glob, a deny glob, an all-branches glob, a denied release-branch glob, and a
+  `+` quantifier glob.
 - `TestUnityEnrollmentDoesNotRequireAMergeGateForALaneOffMergeEvents`
 - `TestUnityEnrollmentAcceptsOneAggregateThatEnforcesSeveralLanes`
 - `TestUnityEnrollmentRefusesOneRequiredContextForTwoAggregateJobs`
@@ -163,6 +164,12 @@ Second round, from the advisory review and CodeRabbit:
 - The request to change the shared `triggerRunsOnProtectedBranches` to glob
   semantics is declined. That helper serves the path-filter rule, where "not
   proven" must fail closed. The lane rule has its own may-reach test.
+
+Third round, from the advisory review:
+
+- High: a pattern with `+` could match a protected branch while the rule read it
+  as a plain name. `literalBranchName` now accepts only letters, digits, `.`,
+  `-`, `_`, and `/`. Every other pattern keeps the rule.
 
 ## Merge and verification
 

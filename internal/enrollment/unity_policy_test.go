@@ -4658,6 +4658,9 @@ func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.
 		{"deny glob", "on:\n  pull_request:\n    branches-ignore: ['releases/*']\n  workflow_dispatch:\n", true},
 		{"all branches glob", "on:\n  pull_request:\n    branches: ['**']\n  workflow_dispatch:\n", true},
 		{"release branches glob denied", "on:\n  pull_request:\n    branches-ignore: ['release/**']\n  workflow_dispatch:\n", true},
+		// The filter language reads `+` as an operator, so this entry can
+		// match a protected branch.
+		{"quantifier glob", "on:\n  pull_request:\n    branches: ['mai+n']\n  workflow_dispatch:\n", true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
