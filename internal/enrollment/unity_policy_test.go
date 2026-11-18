@@ -4645,6 +4645,7 @@ func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.
 		// A push lane publishes its own run verdict. It holds no merge gate.
 		{"push only", "on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", false},
 		// A merge queue entry runs the branch's required checks.
+		{"merge group only", "on:\n  merge_group:\n  workflow_dispatch:\n", true},
 		{"merge group", "on:\n  pull_request:\n  merge_group:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", true},
 		// A pull request on a protected branch is the reviewed merge gate.
 		{"pull request", triggers, true},
@@ -4655,6 +4656,8 @@ func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.
 		// A glob is not an exact answer either way, so the rule keeps its hold.
 		{"allow glob", "on:\n  pull_request:\n    branches: ['m*']\n  workflow_dispatch:\n", true},
 		{"deny glob", "on:\n  pull_request:\n    branches-ignore: ['releases/*']\n  workflow_dispatch:\n", true},
+		{"all branches glob", "on:\n  pull_request:\n    branches: ['**']\n  workflow_dispatch:\n", true},
+		{"release branches glob denied", "on:\n  pull_request:\n    branches-ignore: ['release/**']\n  workflow_dispatch:\n", true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -4739,6 +4742,29 @@ func TestUnityEnrollmentRefusesOneRequiredContextForTwoAggregateJobs(t *testing.
 	}
 	if len(paths) != 2 {
 		t.Fatalf("one context across two workflows was accepted: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentDoesNotRequireAMergeGateForALaneOffMergeEvents(t *testing.T) {
+	workflow := strings.Replace(
+		unityWorkflow(centralReturnSteps(), safeAggregate()),
+		"    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n",
+		"    if: github.event_name == 'workflow_dispatch'\n",
+		1,
+	)
+	policy := unityAuditPolicy()
+	policy.RequiredContexts = map[string][]string{
+		"Ambiguous-Interactive/fixture": {"unrelated"},
+	}
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": workflow}),
+		policy,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(result.Findings), "unrequired-licensed-aggregate") {
+		t.Fatalf("a lane off every merge event required a merge gate: %#v", result.Findings)
 	}
 }
 

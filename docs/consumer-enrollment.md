@@ -532,7 +532,8 @@ touches a Dependabot pull request.
    whose aggregate reports a context the branch does not require cannot block a
    merge. Two aggregate jobs must not report one context, because then they
    share one verdict. One aggregate job may enforce several lanes, because it
-   fails when any covered lane fails.
+   fails when any covered lane fails. A lane that runs for no protected pull
+   request or merge group holds no merge gate.
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already

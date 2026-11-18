@@ -72,11 +72,12 @@ two typed-gate lanes on one workflow:
   check reads every workflow of the snapshot, so two files that report one
   context are refused too.
 - The rule applies only where a pull request or eligible `merge_group` trigger
-  can reach a protected branch. A dispatch, schedule, or push lane publishes
-  its own run verdict, so it holds no merge gate. A `pull_request_target` run
-  holds no licensed lane, because the reviewed trigger shape says such a job is
-  excluded. A branch glob, a rejected trigger key, or a malformed trigger keeps
-  the rule, because none of them proves the trigger cannot reach a merge.
+  can reach a protected branch, and only to a lane whose job guard does not
+  exclude both events. A dispatch, schedule, or push lane publishes its own run
+  verdict, so it holds no merge gate. A `pull_request_target` run holds no
+  licensed lane, because the reviewed trigger shape says such a job is excluded.
+  A branch glob, a rejected trigger key, or a malformed trigger keeps the rule,
+  because none of them proves the trigger cannot reach a merge.
 - A historical readback lane, which omits the aggregate on purpose, keeps its
   reviewed exclusion. An unprovable expression or matrix name stays with
   `filtered-aggregate-gate`.
@@ -103,10 +104,11 @@ Tests:
 - `TestUnityEnrollmentRefusesUnprovenLicensedLaneGates`, three mutations:
   unrequired lane context, shared lane context, and a gate bound to the other
   lane's result.
-- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, seven
-  trigger shapes: push only, merge group, pull request, an allow list of
-  unprotected branches, every protected branch denied, an allow glob, and a deny
-  glob.
+- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, ten
+  trigger shapes: push only, merge group, merge group only, pull request, an
+  allow list of unprotected branches, every protected branch denied, an allow
+  glob, a deny glob, an all-branches glob, and a denied release-branch glob.
+- `TestUnityEnrollmentDoesNotRequireAMergeGateForALaneOffMergeEvents`
 - `TestUnityEnrollmentAcceptsOneAggregateThatEnforcesSeveralLanes`
 - `TestUnityEnrollmentRefusesOneRequiredContextForTwoAggregateJobs`
 
@@ -149,6 +151,18 @@ An independent adversarial review found these. All are fixed.
   answers both questions.
 - Low: the audit evidence was measured before the merge group support. The audit
   was re-run at the final code, and the count held at 23.
+
+Second round, from the advisory review and CodeRabbit:
+
+- Medium: a lane whose job guard excludes both merge events was refused. That
+  lane never fails a protected pull request, so the rule now reads the job guard
+  with `jobExcludedFromEvents` and skips it.
+- Low: the merge group fixture always declared a pull request trigger beside it.
+  A merge-group-only case now sits in the table, with the all-branches and
+  denied-release glob cases CodeRabbit asked for.
+- The request to change the shared `triggerRunsOnProtectedBranches` to glob
+  semantics is declined. That helper serves the path-filter rule, where "not
+  proven" must fail closed. The lane rule has its own may-reach test.
 
 ## Merge and verification
 

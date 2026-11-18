@@ -994,8 +994,17 @@ func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
 	}
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName := jobs.Content[index].Value
+		job := jobs.Content[index+1]
 		licensed, err := a.analyzer.jobLicensed(workflowPath, jobName)
 		if err != nil || !licensed {
+			continue
+		}
+		if jobExcludedFromEvents(mappingValue(job, "if"), map[string]bool{
+			"pull_request": true,
+			"merge_group":  true,
+		}) {
+			// This lane runs for no protected pull request or merge group, so
+			// it holds no merge gate.
 			continue
 		}
 		aggregateName, aggregateJob, ok := a.hasAggregate(
@@ -1003,7 +1012,7 @@ func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
 			workflowPath,
 			jobs,
 			jobName,
-			jobs.Content[index+1],
+			job,
 			preflightJobs,
 		)
 		if !ok || !conditionIsSafeAlways(mappingValue(aggregateJob, "if")) {
