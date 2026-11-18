@@ -1,6 +1,7 @@
 package enrollment
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -6664,5 +6665,179 @@ jobs:
 	}
 	if !strings.Contains(findingCodes(result.Findings), "filtered-aggregate-gate") {
 		t.Fatalf("matrix companion name proved coverage: %#v", result.Findings)
+	}
+}
+
+// remoteCallWorkflow is one repository workflow that delegates to a reusable
+// workflow in another repository at a caller-chosen reference.
+func remoteCallWorkflow(reference, extra string) string {
+	return `name: Review
+on:
+  pull_request:
+jobs:
+  review:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/openai-review.yml@` + reference + `
+` + extra
+}
+
+// remoteReusableSnapshot maps the reviewed non-licensing callee the remote call
+// tests resolve.
+func remoteReusableSnapshot() string {
+	return `name: OpenAI Review
+on:
+  workflow_call:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python3 scripts/review.py
+`
+}
+
+func remoteReusableResolver(callee string, readErr error) ReusableWorkflowSource {
+	return func(repository, workflowPath, sha string) ([]byte, error) {
+		if readErr != nil {
+			return nil, readErr
+		}
+		if repository != "Ambiguous-Interactive/review-tools" ||
+			workflowPath != ".github/workflows/openai-review.yml" ||
+			!isSHA(sha) {
+			return nil, errors.New("unexpected reusable workflow identity")
+		}
+		return []byte(callee), nil
+	}
+}
+
+func analyzeRemoteCall(t *testing.T, workflow string, source ReusableWorkflowSource) UnityEnrollmentResult {
+	t.Helper()
+	policy := unityAuditPolicy()
+	policy.ResolveReusableWorkflow = source
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/review.yml": workflow}),
+		policy,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestUnityEnrollmentResolvesNonLicensingRemoteReusableWorkflow(t *testing.T) {
+	result := analyzeRemoteCall(
+		t,
+		remoteCallWorkflow(testSHA, ""),
+		remoteReusableResolver(remoteReusableSnapshot(), nil),
+	)
+	if len(result.Findings) != 0 {
+		t.Fatalf("resolved non-licensing call produced findings: %#v", result.Findings)
+	}
+	// The resolved callee does no Unity work, so the caller is not a Unity
+	// inventory row at all.
+	if len(result.Inventory) != 0 {
+		t.Fatalf("resolved call was not classified as non-licensing: %#v", result.Inventory)
+	}
+}
+
+func TestUnityEnrollmentKeepsUnresolvedRemoteReusableWorkflowConservative(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		source ReusableWorkflowSource
+	}{
+		{"no resolver", nil},
+		{"unreadable callee", remoteReusableResolver("", errors.New("denied"))},
+		{"unparseable callee", remoteReusableResolver("jobs: [", nil)},
+		{"callee uses a local action", remoteReusableResolver(
+			strings.Replace(
+				remoteReusableSnapshot(),
+				"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+				"./.github/actions/review",
+				1,
+			),
+			nil,
+		)},
+		{"caller forwards Unity credentials", remoteReusableResolver(remoteReusableSnapshot(), nil)},
+	} {
+		workflow := remoteCallWorkflow(testSHA, "")
+		if strings.Contains(testCase.name, "forwards") {
+			workflow = remoteCallWorkflow(testSHA, `    secrets:
+      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+`)
+		}
+		result := analyzeRemoteCall(t, workflow, testCase.source)
+		if !strings.Contains(findingCodes(result.Findings), "unresolved-reusable-workflow") {
+			t.Fatalf("%s: remote call was not reported as unresolved: %#v", testCase.name, result.Findings)
+		}
+	}
+}
+
+func TestUnityEnrollmentTreatsLicensedRemoteReusableWorkflowAsPaid(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		callee string
+	}{
+		{
+			name: "callee acquires the lock",
+			callee: `name: Licensed
+on:
+  workflow_call:
+jobs:
+  licensed:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+`,
+		},
+		{
+			// A callee that delegates again proves nothing about its own work
+			// here, so the caller stays paid.
+			name: "callee delegates again",
+			callee: `name: Review
+on:
+  workflow_call:
+jobs:
+  review:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/deep.yml@` + testSHA + `
+`,
+		},
+		{
+			// A third-party Unity action carries no central acquire step, so
+			// the licensed verdict alone would call this callee inert.
+			name: "callee uses a third-party Unity action",
+			callee: `name: Unity Build
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - uses: game-ci/unity-builder@` + testSHA + `
+`,
+		},
+	} {
+		result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), remoteReusableResolver(testCase.callee, nil))
+		codes := findingCodes(result.Findings)
+		for _, code := range []string{"missing-licensed-steps", "unsafe-hosted-unity-runner"} {
+			if !strings.Contains(codes, code) {
+				t.Fatalf("%s: caller was not treated as a paid job (%s): %#v", testCase.name, code, result.Findings)
+			}
+		}
+		if strings.Contains(codes, "unresolved-reusable-workflow") {
+			t.Fatalf("%s: resolved callee was reported as unresolved: %#v", testCase.name, result.Findings)
+		}
+	}
+}
+
+func TestUnityEnrollmentRefusesMutableRemoteReusableWorkflow(t *testing.T) {
+	result := analyzeRemoteCall(
+		t,
+		remoteCallWorkflow("main", ""),
+		remoteReusableResolver(remoteReusableSnapshot(), nil),
+	)
+	codes := findingCodes(result.Findings)
+	for _, code := range []string{"mutable-reusable-ref", "unresolved-reusable-workflow"} {
+		if !strings.Contains(codes, code) {
+			t.Fatalf("mutable remote call was not reported as %s: %#v", code, result.Findings)
+		}
 	}
 }

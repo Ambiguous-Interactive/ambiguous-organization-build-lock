@@ -71,6 +71,8 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 		requiredAcquireSHA: policy.RequiredAcquireSHA,
 		findings:           make([]Finding, 0),
 		findingSet:         make(map[string]bool),
+		reusableMemo:       make(map[string]bool),
+		reusableVisiting:   make(map[string]bool),
 	}
 	workflowPaths := make([]string, 0)
 	for file := range snapshot.Files {
@@ -145,6 +147,13 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 	return a.findings, nil
 }
 
+// ReusableWorkflowSource resolves the exact bytes of one remote reusable
+// workflow at the immutable commit a caller pins. The organization audit
+// supplies it from the callee repository, and tests supply it directly. A nil
+// source leaves every remote call unresolved, which stays the fail-closed
+// verdict.
+type ReusableWorkflowSource func(repository, path, sha string) ([]byte, error)
+
 type analyzer struct {
 	snapshot           Snapshot
 	nodes              map[string]*yaml.Node
@@ -155,6 +164,9 @@ type analyzer struct {
 	guardAction        map[string]bool
 	requiredGuardSHA   string
 	requiredAcquireSHA string
+	reusableSource     ReusableWorkflowSource
+	reusableMemo       map[string]bool
+	reusableVisiting   map[string]bool
 	findings           []Finding
 	findingSet         map[string]bool
 }
@@ -223,9 +235,15 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 			at := strings.LastIndex(call, "@")
 			if at < 0 || !isSHA(call[at+1:]) {
 				a.add("mutable-reusable-ref", workflowPath, jobName)
+			} else if licensed, resolved := a.reusableWorkflowLicensed(
+				call[:at],
+				call[at+1:],
+			); resolved && okReusableCaller(job) {
+				a.jobMemo[key] = licensed
+				return licensed, nil
 			}
-			// Until the snapshot graph supplies this exact remote tree, conservatively
-			// treat the call as license-capable so caller cancellation cannot pass.
+			// Until the callee tree proves otherwise, conservatively treat the
+			// call as license-capable so caller cancellation cannot pass.
 			a.add("unresolved-reusable-workflow", workflowPath, jobName)
 			licensed = true
 		default:
@@ -271,7 +289,111 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 	return licensed, nil
 }
 
-// localActionPath maps a workspace-relative action path through a checkout of
+// okReusableCaller keeps a resolved call conservative when the caller hands
+// organization credentials to it. A remote reusable workflow can only receive
+// the values a caller maps into it, so a job that names no Unity or lock
+// credential has nothing of that kind to pass.
+func okReusableCaller(job *yaml.Node) bool {
+	return !containsUnityCredentialReference(strings.ToLower(nodeScalarText(job)))
+}
+
+// reusableWorkflowLicensed reports whether the reusable workflow a caller pins
+// can license Unity work, and whether that verdict is proven from the callee
+// source at the exact pinned commit. Unproven calls stay unresolved so the
+// caller cannot pass without a cleanup path it does not own.
+func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
+	if a.reusableSource == nil {
+		return false, false
+	}
+	repository, workflowPath, ok := remoteReusableTarget(target)
+	if !ok {
+		return false, false
+	}
+	key := strings.ToLower(repository + "@" + ref + "\x00" + workflowPath)
+	if licensed, memoized := a.reusableMemo[key]; memoized {
+		return licensed, true
+	}
+	if a.reusableVisiting[key] {
+		return false, false
+	}
+	a.reusableVisiting[key] = true
+	defer delete(a.reusableVisiting, key)
+	content, err := a.reusableSource(repository, workflowPath, ref)
+	if err != nil {
+		return false, false
+	}
+	// The callee is audited as its own snapshot, so a local action or a local
+	// workflow call there resolves against the callee repository rather than
+	// this one. Its findings are dropped: only its licensed verdict decides
+	// whether this caller's job is a paid lifecycle.
+	called := &analyzer{
+		snapshot: Snapshot{
+			Repository: repository,
+			SHA:        ref,
+			Files:      map[string][]byte{workflowPath: content},
+		},
+		nodes:            make(map[string]*yaml.Node),
+		jobMemo:          make(map[string]bool),
+		actionMemo:       make(map[string]bool),
+		jobVisiting:      make(map[string]bool),
+		actionVisit:      make(map[string]bool),
+		guardAction:      make(map[string]bool),
+		reusableSource:   a.reusableSource,
+		reusableMemo:     a.reusableMemo,
+		reusableVisiting: a.reusableVisiting,
+		findings:         make([]Finding, 0),
+		findingSet:       make(map[string]bool),
+	}
+	workflow, err := called.node(workflowPath)
+	if err != nil {
+		return false, false
+	}
+	jobs := mappingValue(workflow, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		return false, false
+	}
+	licensed := false
+	for index := 0; index < len(jobs.Content); index += 2 {
+		calledLicensed, err := called.jobLicensed(workflowPath, jobs.Content[index].Value)
+		if err != nil {
+			return false, false
+		}
+		licensed = licensed || calledLicensed
+	}
+	// A job that activates Unity through a third-party action holds no central
+	// acquire step, so the licensed verdict alone would call it inert. Any
+	// Unity marker in the callee keeps the caller paid.
+	licensed = licensed || containsUnityMarker(strings.ToLower(nodeScalarText(workflow)))
+	a.reusableMemo[key] = licensed
+	return licensed, true
+}
+
+// remoteReusableTarget splits `owner/repo/.github/workflows/file.yml` into the
+// callee repository and its workflow path. GitHub resolves reusable workflows
+// only from that exact directory, so a deeper or re-normalized path proves no
+// identity the audit could read.
+func remoteReusableTarget(target string) (string, string, bool) {
+	const marker = "/.github/workflows/"
+	at := strings.Index(target, marker)
+	if at < 0 {
+		return "", "", false
+	}
+	repository := target[:at]
+	workflowPath := target[at+1:]
+	if !validRepository(repository) {
+		return "", "", false
+	}
+	clean, err := cleanRepositoryPath(workflowPath)
+	if err != nil || clean != workflowPath || !isYAML(clean) ||
+		strings.Contains(
+			strings.TrimPrefix(workflowPath, ".github/workflows/"),
+			"/",
+		) {
+		return "", "", false
+	}
+	return repository, workflowPath, true
+}
+
 // this repository at a path prefix. GitHub resolves `./main/.github/...`
 // against that checkout, so the snapshot contains the same bytes one level
 // down. A checkout that names another repository is not evidence for this
