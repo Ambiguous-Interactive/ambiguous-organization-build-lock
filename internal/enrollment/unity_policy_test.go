@@ -3018,6 +3018,68 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			},
 		},
 		{
+			name: "aggregate can report for a reusable workflow",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  workflow_dispatch:",
+					"on:\n  workflow_call:\n  workflow_dispatch:",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection compares a quoted value with different whitespace",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == 'ab' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ inputs['run-lane'] == 'a b' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection uses a workspace function",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && hashFiles('marker') != '' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ hashFiles('marker') != '' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection reads a bracket job result",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && needs.preflight['result'] == 'success' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ needs.preflight['result'] == 'success' }}",
+					1,
+				)
+			},
+		},
+		{
 			name: "selection renders a non-boolean string",
 			workflowMutation: func(value string) string {
 				value = strings.Replace(

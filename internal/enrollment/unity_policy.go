@@ -6419,8 +6419,13 @@ func selectedLaneAggregateEnforces(
 }
 
 // laneCanGateProtectedMerge reports whether the lane can run for a protected
-// pull request or merge group. Only such a lane can block a merge.
+// pull request or merge group. Only such a lane can block a merge. A reusable
+// workflow has no local trigger, but a caller can run it for a protected pull
+// request, so it stays merge-reachable here.
 func laneCanGateProtectedMerge(workflow, licensedJob *yaml.Node) bool {
+	if workflowDeclaresEvent(workflow, "workflow_call") {
+		return true
+	}
 	mergeEvents := map[string]bool{
 		"pull_request":        true,
 		"pull_request_target": true,
@@ -6648,6 +6653,11 @@ func selectionContextsAllowed(expression string) bool {
 			index++
 		}
 		root := compact[start:index]
+		if index < len(compact) && compact[index] == '(' {
+			// A workspace-dependent function such as hashFiles can differ
+			// between the lane and the hosted aggregate.
+			return false
+		}
 		if index >= len(compact) || (compact[index] != '.' && compact[index] != '[') {
 			continue
 		}

@@ -540,7 +540,8 @@ touches a Dependabot pull request.
    guard. Each term must render the boolean text `true` or `false`, so a bare
    string input is refused. It may read caller inputs, `github.event_name`,
    `github.event.inputs`, and `needs.<job>.outputs` in dot form. A job result,
-   a job-scoped context, a bracket `needs` reference, or a secret is refused.
+   a job-scoped context, a bracket `needs` reference, a function, a reusable
+   workflow, or a secret is refused.
    The step passes only for an exact untrusted skip, for a successful
    preflight when the selection is `false`, or for a successful preflight and
    lane when the selection is `true`. Any other selection value is red. The
