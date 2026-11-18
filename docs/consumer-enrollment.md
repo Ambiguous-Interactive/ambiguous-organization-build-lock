@@ -528,9 +528,11 @@ touches a Dependabot pull request.
    request lane and a nightly editor matrix. Give every lane its own aggregate
    and, for the typed gate, its own fallback. The classifier and preflight may
    be shared. The default branch must require every lane aggregate context. A
-   lane whose aggregate reports a context the branch does not require cannot
-   block a merge, and two lanes that report one context share one verdict. The
-   audit reports both shapes.
+   pull request and a merge queue entry both run those required checks. A lane
+   whose aggregate reports a context the branch does not require cannot block a
+   merge. Two aggregate jobs must not report one context, because then they
+   share one verdict. One aggregate job may enforce several lanes, because it
+   fails when any covered lane fails.
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already
@@ -726,7 +728,7 @@ edits.
 | `cleanup-gate-not-always` | Run the gate with literal `always()` and no `continue-on-error`. See item 9. |
 | `default-branch-advanced` | No consumer edit. The default branch advanced while the audit read it, so the audit refreshed the snapshot and failed closed when the refresh did not reconcile. The next audit reads the new head. |
 | `default-branch-revalidation-incomplete` | No consumer edit. The audit could not read the current default-branch head. Central operators check the reader token and run access. |
-| `duplicate-licensed-aggregate-context` | Give every licensed lane its own aggregate context. Two lanes that report one context share one verdict. See item 10. |
+| `duplicate-licensed-aggregate-context` | Give every licensed lane its own aggregate context. Two aggregate jobs that report one context share one verdict. See item 10. |
 | `expired-policy-exception` | Renew or remove the expired registry exception in `unity-enrollment-policy.json`. |
 | `expired-repin-exception` | Renew or remove the expired `repinExceptions` entry. See Release authorization. |
 | `fallback-cleanup-not-always` | Guard the fallback job with `always()` and the source-job condition shape. See item 8. |

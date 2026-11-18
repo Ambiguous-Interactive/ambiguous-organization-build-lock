@@ -66,12 +66,17 @@ two typed-gate lanes on one workflow:
   resolves the covering aggregate, then requires that aggregate's reported
   context in the reviewed `requiredContexts` list. A lane whose context is not
   required reports `unrequired-licensed-aggregate`.
-- Two licensed lanes that rely on one required context each report
-  `duplicate-licensed-aggregate-context`.
-- The rule applies only when the workflow declares a `pull_request` or eligible
-  `merge_group` trigger for a protected branch. A dispatch, schedule, or push
-  lane publishes its own run verdict, so it holds no merge gate. A malformed
-  trigger keeps the rule.
+- Two different aggregate jobs that report one required context each report
+  `duplicate-licensed-aggregate-context`. One aggregate job that enforces
+  several lanes is the reviewed shape, because it fails when any lane fails. The
+  check reads every workflow of the snapshot, so two files that report one
+  context are refused too.
+- The rule applies only where a pull request or eligible `merge_group` trigger
+  can reach a protected branch. A dispatch, schedule, or push lane publishes
+  its own run verdict, so it holds no merge gate. A `pull_request_target` run
+  holds no licensed lane, because the reviewed trigger shape says such a job is
+  excluded. A branch glob, a rejected trigger key, or a malformed trigger keeps
+  the rule, because none of them proves the trigger cannot reach a merge.
 - A historical readback lane, which omits the aggregate on purpose, keeps its
   reviewed exclusion. An unprovable expression or matrix name stays with
   `filtered-aggregate-gate`.
@@ -98,8 +103,12 @@ Tests:
 - `TestUnityEnrollmentRefusesUnprovenLicensedLaneGates`, three mutations:
   unrequired lane context, shared lane context, and a gate bound to the other
   lane's result.
-- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, three
-  trigger shapes: push only, merge group, and pull request.
+- `TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked`, seven
+  trigger shapes: push only, merge group, pull request, an allow list of
+  unprotected branches, every protected branch denied, an allow glob, and a deny
+  glob.
+- `TestUnityEnrollmentAcceptsOneAggregateThatEnforcesSeveralLanes`
+- `TestUnityEnrollmentRefusesOneRequiredContextForTwoAggregateJobs`
 
 Local checks:
 
@@ -118,14 +127,28 @@ Local checks:
 
 An independent adversarial review found these. All are fixed.
 
-- High: the first draft named every dispatch and push lane as drift. Seven false
-  positives appeared in the measured audit. The protected-branch precondition
-  removed them.
-- Medium: the card claimed each lane needs its own preflight. Two gates may name
-  the same preflight, and the measured fixture does. The doc and the code
-  comment now say so.
-- Low: the guard skipped the historical readback lane without saying why. The
-  code comment names it.
+- High: a branch glob disabled the whole rule. `pullRequestEventFilters` reports
+  a glob filter as "not proven", which fails closed for the filter rule and would
+  fail open for this one. `triggerMayReachProtectedBranches` now answers the
+  opposite question: only an exact unprotected allow list, or a deny list that
+  names every protected branch, proves the trigger cannot reach a merge. A glob,
+  a rejected trigger key, and a malformed trigger all keep the rule.
+- Medium: two workflow files that reported one context were accepted, because
+  the duplicate map was per workflow. The map now spans the snapshot, and the
+  check refuses two different aggregate jobs that report one context.
+- Medium: one aggregate job that enforces several lanes was refused. That job
+  fails when any lane fails, so it is the reviewed shape. Only two different
+  aggregate jobs that share a context are refused now.
+- Medium: the docs and the code comment said "pull request" only, and did not
+  name the merge group or the shared-aggregate shape. Both are corrected. The
+  plan keeps only the open DxMessaging action.
+- Low: a `pull_request_target` only workflow produced a false positive. A
+  licensed job is required to be excluded from that event, so the rule now reads
+  `pull_request` and `merge_group` only.
+- Low: the trigger list was parsed twice. One `pullRequestEventConfigs` pass
+  answers both questions.
+- Low: the audit evidence was measured before the merge group support. The audit
+  was re-run at the final code, and the count held at 23.
 
 ## Merge and verification
 

@@ -4648,6 +4648,13 @@ func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.
 		{"merge group", "on:\n  pull_request:\n  merge_group:\n  push:\n    branches: [main]\n  workflow_dispatch:\n", true},
 		// A pull request on a protected branch is the reviewed merge gate.
 		{"pull request", triggers, true},
+		// An allow list of exact unprotected branches cannot reach a merge.
+		{"unprotected branches only", "on:\n  pull_request:\n    branches: [release]\n  workflow_dispatch:\n", false},
+		// A deny list that names every protected branch cannot reach a merge.
+		{"every protected branch denied", "on:\n  pull_request:\n    branches-ignore: [main]\n  workflow_dispatch:\n", false},
+		// A glob is not an exact answer either way, so the rule keeps its hold.
+		{"allow glob", "on:\n  pull_request:\n    branches: ['m*']\n  workflow_dispatch:\n", true},
+		{"deny glob", "on:\n  pull_request:\n    branches-ignore: ['releases/*']\n  workflow_dispatch:\n", true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -4670,6 +4677,68 @@ func TestUnityEnrollmentRequiresALaneGateOnlyWhereAMergeCanBeBlocked(t *testing.
 				t.Fatalf("lane gate required=%v, want %v: %#v", blocked, testCase.blocked, result.Findings)
 			}
 		})
+	}
+}
+
+// sharedAggregateWorkflow gives two licensed lanes one Bash aggregate job that
+// checks both, which is the reviewed way to gate several lanes with one context.
+func sharedAggregateWorkflow(t *testing.T) string {
+	t.Helper()
+	aggregate := `  aggregate:
+    if: always()
+    needs: [preflight, unity, unity-nightly]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          test "${{ needs.preflight.result }}" = success
+          test "${{ needs.unity.result }}" = success
+      - run: |
+          test "${{ needs.preflight.result }}" = success
+          test "${{ needs.unity-nightly.result }}" = success
+`
+	base := unityWorkflow(centralReturnSteps(), aggregate)
+	lane := strings.Index(base, "  unity:\n")
+	aggregateJob := strings.Index(base, "  aggregate:\n")
+	if lane < 0 || aggregateJob < 0 {
+		t.Fatal("the unity fixture moved")
+	}
+	nightly := strings.Replace(base[lane:aggregateJob], "  unity:\n", "  unity-nightly:\n", 1)
+	return base[:aggregateJob] + nightly + base[aggregateJob:]
+}
+
+func TestUnityEnrollmentAcceptsOneAggregateThatEnforcesSeveralLanes(t *testing.T) {
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{".github/workflows/unity.yml": sharedAggregateWorkflow(t)}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findingCodes(result.Findings), "duplicate-licensed-aggregate-context") {
+		t.Fatalf("one aggregate that enforces both lanes was refused: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRefusesOneRequiredContextForTwoAggregateJobs(t *testing.T) {
+	workflow := typedConditionalValidationWorkflow()
+	result, err := AnalyzeUnityEnrollment(
+		unityFixture(map[string]string{
+			".github/workflows/unity.yml":         workflow,
+			".github/workflows/unity-nightly.yml": workflow,
+		}),
+		unityAuditPolicy(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := make(map[string]bool)
+	for _, finding := range result.Findings {
+		if finding.Code == "duplicate-licensed-aggregate-context" && finding.Job == "unity" {
+			paths[finding.Path] = true
+		}
+	}
+	if len(paths) != 2 {
+		t.Fatalf("one context across two workflows was accepted: %#v", result.Findings)
 	}
 }
 

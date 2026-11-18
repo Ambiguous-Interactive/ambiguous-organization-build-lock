@@ -329,6 +329,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 	}
 	sort.Strings(workflowPaths)
 
+	coveredLanes := make(map[string][]licensedLane)
 	for _, workflowPath := range workflowPaths {
 		workflow, err := base.node(workflowPath)
 		if err != nil {
@@ -432,8 +433,16 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				)
 			}
 		}
-		a.auditLicensedLaneCoverage(workflow, workflowPath, jobs, preflightJobs, protectedBranches)
+		a.auditLicensedLaneCoverage(
+			workflow,
+			workflowPath,
+			jobs,
+			preflightJobs,
+			protectedBranches,
+			coveredLanes,
+		)
 	}
+	a.auditDuplicateLaneContexts(coveredLanes)
 
 	// A repin exception is stale when its protected file is gone, and expired
 	// when its review window has closed. Both states make the entry an
@@ -964,24 +973,25 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 }
 
 // auditLicensedLaneCoverage proves that every licensed lane of a workflow that
-// can reach a protected pull request is gated by a context the reviewed merge
-// policy requires. One exact-shape aggregate binds one licensed lane, so a
-// workflow may hold several lanes, each with its own aggregate and, for the
-// typed gate, its own fallback. Two lanes that report one context cannot both
-// block a merge, because a single required context carries one verdict. The
-// resolve repeats hasAggregate, which reads only this snapshot and the approved
-// pins, so it adds no dependency on the order the jobs were audited in.
+// can reach a protected pull request or merge group is gated by a context the
+// reviewed merge policy requires. One exact-shape aggregate binds one licensed
+// lane, so a workflow may hold several lanes, each with its own aggregate and,
+// for the typed gate, its own fallback. The covered lanes return per context so
+// the caller can refuse two aggregate jobs that report one context, because one
+// context carries one verdict. The resolve repeats hasAggregate, which reads
+// only this snapshot and the approved pins, so it adds no dependency on the
+// order the jobs were audited in.
 func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
 	workflow *yaml.Node,
 	workflowPath string,
 	jobs *yaml.Node,
 	preflightJobs map[string]bool,
 	protectedBranches map[string]bool,
+	lanes map[string][]licensedLane,
 ) {
-	if len(a.requiredContexts) == 0 || !licensedLaneNeedsMergeGate(workflow, protectedBranches) {
+	if len(a.requiredContexts) == 0 || !mergeGateReachable(workflow, protectedBranches) {
 		return
 	}
-	lanes := make(map[string][]string)
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName := jobs.Content[index].Value
 		licensed, err := a.analyzer.jobLicensed(workflowPath, jobName)
@@ -1013,45 +1023,111 @@ func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
 			a.analyzer.add("unrequired-licensed-aggregate", workflowPath, jobName)
 			continue
 		}
-		lanes[context] = append(lanes[context], jobName)
+		lanes[context] = append(lanes[context], licensedLane{
+			workflowPath: workflowPath,
+			job:          jobName,
+			aggregate:    aggregateName,
+		})
 	}
+}
+
+// licensedLane names the aggregate that gates one licensed lane.
+type licensedLane struct {
+	workflowPath string
+	job          string
+	aggregate    string
+}
+
+// auditDuplicateLaneContexts refuses a required context that two aggregate jobs
+// report. One aggregate job that enforces several lanes fails when any lane
+// fails, which is the reviewed shape. Two jobs share a verdict instead, so a
+// failed lane can hide behind the other job's pass.
+func (a *unityPolicyAnalyzer) auditDuplicateLaneContexts(lanes map[string][]licensedLane) {
 	for _, contextLanes := range lanes {
-		if len(contextLanes) < 2 {
+		aggregates := make(map[string]bool, len(contextLanes))
+		for _, lane := range contextLanes {
+			aggregates[lane.workflowPath+"\x00"+lane.aggregate] = true
+		}
+		if len(aggregates) < 2 {
 			continue
 		}
-		for _, jobName := range contextLanes {
-			a.analyzer.add("duplicate-licensed-aggregate-context", workflowPath, jobName)
+		for _, lane := range contextLanes {
+			a.analyzer.add("duplicate-licensed-aggregate-context", lane.workflowPath, lane.job)
 		}
 	}
 }
 
-// licensedLaneNeedsMergeGate reports whether a pull request or merge group
-// trigger of this workflow reaches a protected branch. Only such a lane can
-// fail a required check, so only its context must be a required merge check. A
+// mergeGateReachable reports whether a pull request or merge group trigger of
+// this workflow can start for a protected branch. Only such a lane can fail a
+// required check, so only its context must be a required merge check. A
 // dispatch-, schedule-, or push-only lane publishes its own run verdict and
-// holds no merge gate. A malformed trigger proves nothing, so it keeps the
-// rule.
-func licensedLaneNeedsMergeGate(workflow *yaml.Node, protectedBranches map[string]bool) bool {
-	filters, err := pullRequestEventFilters(workflow, protectedBranches)
-	if err != nil {
-		return true
-	}
-	for _, filter := range filters {
-		if filter.runsOnProtected {
-			return true
-		}
-	}
+// holds no merge gate. A pull request target run holds no licensed lane,
+// because the reviewed trigger shape says such a job is excluded. A malformed
+// trigger proves nothing, so it keeps the rule.
+func mergeGateReachable(workflow *yaml.Node, protectedBranches map[string]bool) bool {
 	configs, err := pullRequestEventConfigs(workflow)
 	if err != nil {
 		return true
 	}
 	for _, config := range configs {
-		if config.name == "merge_group" &&
-			mergeGroupTriggerEligible(config.config, protectedBranches) {
-			return true
+		switch config.name {
+		case "pull_request":
+			if config.config == nil || config.config.Kind != yaml.MappingNode {
+				return true
+			}
+			allow := mappingValue(config.config, "branches")
+			deny := mappingValue(config.config, "branches-ignore")
+			if (allow == nil && deny == nil) ||
+				triggerMayReachProtectedBranches(allow, deny, protectedBranches) {
+				return true
+			}
+		case "merge_group":
+			if mergeGroupTriggerEligible(config.config, protectedBranches) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// triggerMayReachProtectedBranches proves a pull request trigger can still start
+// for a protected branch. A glob or a rejected trigger key can reach one, so
+// both keep the rule. Only an allow list of exact unprotected literals, or a
+// deny list that names every protected branch, proves the trigger cannot.
+func triggerMayReachProtectedBranches(
+	allow, deny *yaml.Node,
+	protectedBranches map[string]bool,
+) bool {
+	if allow != nil && deny != nil {
+		return true
+	}
+	if allow != nil {
+		patterns, err := scalarPatterns(allow)
+		if err != nil {
+			return true
+		}
+		for _, pattern := range patterns {
+			if protectedBranches[pattern] || strings.ContainsAny(pattern, "*?[]") {
+				return true
+			}
+		}
+		return false
+	}
+	patterns, err := scalarPatterns(deny)
+	if err != nil {
+		return true
+	}
+	remaining := make(map[string]bool, len(protectedBranches))
+	for branch := range protectedBranches {
+		remaining[branch] = true
+	}
+	for _, pattern := range patterns {
+		if strings.ContainsAny(pattern, "*?[]") {
+			return true
+		}
+		delete(remaining, pattern)
+	}
+	return len(remaining) > 0
 }
 
 // auditIndependentCoverage reports the preflight and aggregate verdicts. They

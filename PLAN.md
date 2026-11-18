@@ -27,9 +27,9 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Linter compatibility (#335): the pinned linter still fails to build against
   YAML v4.0.0, which no longer exports `yaml.ParserError`. Move the dependency
   only after a linter release supports the newer API.
-- Aggregate coverage (#397): a workflow may hold several licensed lanes, each
-  with its own aggregate. Require every lane context, or the lane cannot block a
-  merge. DxMessaging `runner-bootstrap.yml` still needs one aggregate per lane.
+- Aggregate coverage (#397): DxMessaging `runner-bootstrap.yml` needs one
+  aggregate per licensed lane before #113 can close. The reviewed shape is in
+  `docs/consumer-enrollment.md` item 10.
 - Merge queue adoption (#379): v1.18.1 publishes an approved pin. Repin
   DoxReloaded, add `merge_group`, and enable the queue after the owner
   authorizes it.
