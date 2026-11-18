@@ -46,13 +46,13 @@ or writer App. The current inventory is recorded in
    it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`.
    Reusable workflow calls are audited as workflow graph edges. The audit reads
    the called workflow at the pinned commit, from public raw content, without
-   following a redirect, and classifies its jobs. A callee with no Unity step makes the caller a
-   non-licensing job. A callee with a licensed job or any Unity reference makes
-   the caller paid. These cases leave the caller unresolved and
-   license-capable: a callee the audit cannot read, a mutable reference, a
-   repository-local action inside the callee, a nested reusable workflow call,
-   `secrets: inherit`, an opaque secrets expression, or a forwarded Unity or
-   lock secret.
+   following a redirect, and classifies its jobs. A callee with no Unity step
+   makes the caller a non-licensing job. A callee with a licensed job or any
+   Unity reference makes the caller paid. These cases leave the caller
+   unresolved and license-capable: a callee the audit cannot read, a mutable
+   reference, a repository-local action inside the callee, a nested reusable
+   workflow call, `secrets: inherit`, an opaque secrets expression, or a
+   forwarded Unity or lock secret.
 
 ## Release authorization
 
