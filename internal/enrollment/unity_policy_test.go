@@ -6757,11 +6757,16 @@ func TestUnityEnrollmentKeepsUnresolvedRemoteReusableWorkflowConservative(t *tes
 			nil,
 		)},
 		{"caller forwards Unity credentials", remoteReusableResolver(remoteReusableSnapshot(), nil)},
+		{"caller inherits every secret", remoteReusableResolver(remoteReusableSnapshot(), nil)},
 	} {
 		workflow := remoteCallWorkflow(testSHA, "")
 		if strings.Contains(testCase.name, "forwards") {
 			workflow = remoteCallWorkflow(testSHA, `    secrets:
       UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+`)
+		}
+		if strings.Contains(testCase.name, "inherits") {
+			workflow = remoteCallWorkflow(testSHA, `    secrets: inherit
 `)
 		}
 		result := analyzeRemoteCall(t, workflow, testCase.source)

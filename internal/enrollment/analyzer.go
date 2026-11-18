@@ -292,8 +292,13 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 // okReusableCaller keeps a resolved call conservative when the caller hands
 // organization credentials to it. A remote reusable workflow can only receive
 // the values a caller maps into it, so a job that names no Unity or lock
-// credential has nothing of that kind to pass.
+// credential has nothing of that kind to pass. `secrets: inherit` passes
+// everything, which no review of the callee here can bound.
 func okReusableCaller(job *yaml.Node) bool {
+	secrets := mappingValue(job, "secrets")
+	if secrets != nil && secrets.Kind == yaml.ScalarNode && secrets.Value == "inherit" {
+		return false
+	}
 	return !containsUnityCredentialReference(strings.ToLower(nodeScalarText(job)))
 }
 
