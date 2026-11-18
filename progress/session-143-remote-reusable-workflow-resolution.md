@@ -75,7 +75,8 @@ callee is in another repository.
 - `okReusableCaller` refuses a resolved call whose job text names a Unity
   serial, email, password, license, or lock credential. It also refuses
   `secrets: inherit` and any secrets expression that names no exact secret, and
-  it requires each `secrets:` mapping value to be exactly that secret.
+  it requires each `secrets:` mapping value to be exactly one secret reference,
+  which may rename the secret.
 - `remoteReusableTarget` accepts one plain YAML file name directly under
   `.github/workflows/`, so a percent-encoded or quoted segment cannot reach a
   different path at a mirror.
@@ -117,9 +118,9 @@ Tests:
 
 An independent adversarial review found these. All are fixed.
 
-- High: `with: { all: ${{ toJSON(secrets) }} }` and a renamed or dynamic secret
-  mapping passed the caller check. The caller now needs each secret mapped to
-  its exact name, and an opaque secrets expression is refused.
+- High: `with: { all: ${{ toJSON(secrets) }} }` and a computed secret mapping
+  passed the caller check. Each mapped value must now be one exact secret
+  reference, and an opaque secrets expression is refused.
 - Medium: a nested call chain had no depth bound, so a consumer could chain
   reads without limit. The callee analyzer now gets no resolver, so any nested
   call stays unresolved.

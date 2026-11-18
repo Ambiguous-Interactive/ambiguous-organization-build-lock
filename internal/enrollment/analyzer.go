@@ -311,12 +311,36 @@ func okReusableCaller(job *yaml.Node) bool {
 	}
 	for index := 0; index < len(secrets.Content); index += 2 {
 		name := strings.TrimSpace(secrets.Content[index].Value)
-		value := secrets.Content[index+1]
 		if name == "" || strings.ContainsAny(name, " \t\r\n{}[]'\"") ||
-			value.Kind != yaml.ScalarNode ||
-			!exactExpression(value, "secrets."+name) {
+			!exactSecretReference(secrets.Content[index+1]) {
 			return false
 		}
+	}
+	return true
+}
+
+// exactSecretReference accepts one exact `${{ secrets.<name> }}` value, which
+// may rename the secret the callee receives. Anything computed or combined
+// hands over a value a reviewer cannot name.
+func exactSecretReference(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return false
+	}
+	value := strings.Join(strings.Fields(node.Value), "")
+	const prefix = "${{secrets."
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, "}}") {
+		return false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(value, prefix), "}}")
+	if name == "" {
+		return false
+	}
+	for index, character := range name {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character == '_' || (index > 0 && character >= '0' && character <= '9') {
+			continue
+		}
+		return false
 	}
 	return true
 }

@@ -6989,3 +6989,17 @@ func TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestUnityEnrollmentAllowsAnExactRenamedSecret(t *testing.T) {
+	workflow := remoteCallWorkflow(testSHA, `    secrets:
+      TOKEN: ${{ secrets.GITHUB_TOKEN }}
+`)
+	result := analyzeRemoteCall(
+		t,
+		workflow,
+		remoteReusableResolver(remoteReusableSnapshot(), nil),
+	)
+	if len(result.Findings) != 0 {
+		t.Fatalf("an exact renamed secret was refused: %#v", result.Findings)
+	}
+}
