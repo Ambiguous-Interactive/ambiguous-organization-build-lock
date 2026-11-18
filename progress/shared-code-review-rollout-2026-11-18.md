@@ -17,7 +17,7 @@ resources. A conversion to draft must cancel the older review run.
 
 ## Change
 
-- Add the SHA-pinned shared caller with one named secret and job-scoped PR write.
+- Add the SHA-pinned v1.1.1 shared caller with one named secret and job-scoped PR write.
 - Keep workflow-wide content access read-only and cancel superseded PR reviews.
 - Add the workflow and its review job to both existing policy inventories.
 - Document the physical temporary-root requirement for local macOS safety tests.
@@ -44,6 +44,16 @@ reviews; it does not merge pull requests.
 The local host lacks `setsid`, so the verifier's checks run as their individual
 commands. The Linux CI and devcontainer workflows remain the delivery gates.
 Hosted results and the live review marker must be checked before merge.
+
+## Live rollout finding
+
+Two attempts at v1.1.0 post explicit not-reviewed results after HTTP errors.
+The repository-derived cache key has 69 characters; the API limit is 64.
+The shared tool now hashes oversized keys and keeps accepted keys unchanged.
+A mocked length-rejection test reproduces the failure before the fix and passes
+with it. All 65 shared-tool tests and strict checks pass. The fix is reviewed
+independently and merged as review-tools #5. The caller moves to v1.1.1.
+The fixed live review still needs validation before merge.
 
 ## Review and retrospective
 
