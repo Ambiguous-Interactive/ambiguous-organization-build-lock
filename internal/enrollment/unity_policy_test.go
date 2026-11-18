@@ -6794,18 +6794,6 @@ jobs:
 `,
 		},
 		{
-			// A callee that delegates again proves nothing about its own work
-			// here, so the caller stays paid.
-			name: "callee delegates again",
-			callee: `name: Review
-on:
-  workflow_call:
-jobs:
-  review:
-    uses: Ambiguous-Interactive/review-tools/.github/workflows/deep.yml@` + testSHA + `
-`,
-		},
-		{
 			// A third-party Unity action carries no central acquire step, so
 			// the licensed verdict alone would call this callee inert.
 			name: "callee uses a third-party Unity action",
@@ -6828,7 +6816,7 @@ jobs:
 			}
 		}
 		if strings.Contains(codes, "unresolved-reusable-workflow") {
-			t.Fatalf("%s: resolved callee was reported as unresolved: %#v", testCase.name, result.Findings)
+			t.Fatalf("%s: proven callee was reported as unresolved: %#v", testCase.name, result.Findings)
 		}
 	}
 }
@@ -6913,9 +6901,14 @@ jobs:
 	})
 	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), source)
 	// The callee is read, but the audit cannot see the workflow it calls, so
-	// the caller stays a paid job it cannot satisfy from a reusable workflow.
+	// the caller stays unresolved and a paid job it cannot satisfy from a
+	// reusable workflow.
 	codes := findingCodes(result.Findings)
-	for _, code := range []string{"missing-licensed-steps", "unsafe-hosted-unity-runner"} {
+	for _, code := range []string{
+		"unresolved-reusable-workflow",
+		"missing-licensed-steps",
+		"unsafe-hosted-unity-runner",
+	} {
 		if !strings.Contains(codes, code) {
 			t.Fatalf("a nested remote call was resolved (%s): %#v", code, result.Findings)
 		}
@@ -6985,6 +6978,7 @@ func TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity(t *testing.T) {
 		{"Ambiguous-Interactive/review-tools/.github/workflows/a`b.yml", false},
 		{"Ambiguous-Interactive/review-tools/.github/workflows/a b.yml", true},
 		{"Ambiguous-Interactive/review-tools/.github/workflows/build (2).yml", true},
+		{"Ambiguous-Interactive/review.tools/.github/workflows/review.yml", true},
 		{"owner/../.github/workflows/review.yml", false},
 		{"owner/./.github/workflows/review.yml", false},
 		{"review-tools/.github/workflows/review.yml", false},
@@ -7014,20 +7008,28 @@ func TestUnityEnrollmentAllowsAnExactRenamedSecret(t *testing.T) {
 	}
 }
 
-func TestUnityEnrollmentTreatsASelfHostedCalleeJobAsPaid(t *testing.T) {
+func TestUnityEnrollmentTreatsAnUnprovenRunnerCalleeJobAsPaid(t *testing.T) {
 	// A self-hosted job can activate Unity from a script that no action
-	// reference names, so its shape alone keeps the caller paid.
-	callee := `name: Scripted
+	// reference names, so its runner alone keeps the caller paid. A runner
+	// expression or a runner group may select that fleet.
+	for _, runner := range []string{
+		"[self-hosted, Windows]",
+		"${{ matrix.os }}",
+		"${{ inputs.runner }}",
+		"{group: unity-pool}",
+	} {
+		callee := `name: Scripted
 on:
   workflow_call:
 jobs:
   activate:
-    runs-on: [self-hosted, Windows]
+    runs-on: ` + runner + `
     steps:
       - run: ./scripts/activate.ps1
 `
-	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), remoteReusableResolver(callee, nil))
-	if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
-		t.Fatalf("a self-hosted callee job left the caller non-licensing: %#v", result.Findings)
+		result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), remoteReusableResolver(callee, nil))
+		if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
+			t.Fatalf("callee runner %q left the caller non-licensing: %#v", runner, result.Findings)
+		}
 	}
 }

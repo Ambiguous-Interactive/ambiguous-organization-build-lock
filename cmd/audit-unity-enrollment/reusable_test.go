@@ -149,6 +149,6 @@ func TestReusableWorkflowFetcherRefusesARedirect(t *testing.T) {
 		".github/workflows/openai-review.yml",
 		reusableWorkflowCommit,
 	); err == nil {
-		t.Fatal("a redirect to another host was followed")
+		t.Fatal("a redirect to another path was followed")
 	}
 }

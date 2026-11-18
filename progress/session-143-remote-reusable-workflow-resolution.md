@@ -67,8 +67,8 @@ callee is in another repository.
   another reusable workflow therefore stays unproven.
 - A callee job with a third-party Unity action holds no central acquire step, so
   any Unity marker in the callee text also makes the caller paid. A callee job
-  on the self-hosted fleet is paid too, because a `run:` step there can
-  activate Unity without naming an action.
+  on the self-hosted fleet, or on a runner expression or group, is paid too,
+  because a `run:` step there can activate Unity without naming an action.
 - `reusableMemo` caches one verdict per callee identity, so a repeated call
   costs one read. Only the repository and the commit fold case; the workflow
   file name stays exact.
@@ -114,6 +114,14 @@ Second review round:
 - Low: the redirect test now redirects on the same host and path change only.
 - Nit: the record and the doc name the reviewed credential list.
 
+Third review round:
+
+- Medium: a callee job with a runner expression or a runner group was read as
+  hosted. Any such job now keeps the caller paid.
+- Low: the record named a test that does not exist, and the evidence named no
+  commit. Both are fixed.
+- Low: the doc now names the self-hosted and unproven-runner rule.
+
 The 31 remote-call findings are gone. The remaining 22 are the 14 DxMessaging
 shape findings and the 8 expired policy exceptions.
 
@@ -126,12 +134,12 @@ Tests:
 - `TestUnityEnrollmentKeepsCalleeFileNamesCaseSensitive`
 - `TestUnityEnrollmentTreatsLicensedRemoteReusableWorkflowAsPaid`
 - `TestUnityEnrollmentTreatsOneLicensedCalleeJobAsPaid`
-- `TestUnityEnrollmentTreatsASelfHostedCalleeJobAsPaid`
+- `TestUnityEnrollmentTreatsAnUnprovenRunnerCalleeJobAsPaid`
 - `TestUnityEnrollmentRefusesMutableRemoteReusableWorkflow`
 - `TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity`
 - `TestReusableWorkflowFetcherReadsOneImmutableIdentity`
 - `TestReusableWorkflowFetcherRefusesOversizedContent`
-- `TestReusableWorkflowFetcherRefusesAHostChange`
+- `TestReusableWorkflowFetcherRefusesARedirect`
 - `TestRunResolvesNonLicensingRemoteReusableWorkflow`
 
 ## Review findings and dispositions

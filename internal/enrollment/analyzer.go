@@ -415,7 +415,15 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 		// `jobLicensed` reads `uses:` steps only. Organization Unity work runs on
 		// the self-hosted fleet, so a self-hosted callee job can activate Unity
 		// from a `run:` step that no action reference names.
-		licensed = licensed || calledLicensed || selfHostedJob(calledJob)
+		licensed = licensed || calledLicensed ||
+			selfHostedJob(calledJob) || unprovenRunnerJob(calledJob)
+	}
+	// A call the callee makes to another remote workflow proves nothing about
+	// the work behind it, so the outer call stays unresolved.
+	for _, finding := range called.findings {
+		if finding.Code == "unresolved-reusable-workflow" || finding.Code == "mutable-reusable-ref" {
+			return false, false
+		}
 	}
 	// A job that activates Unity through a third-party action holds no central
 	// acquire step, so the licensed verdict alone would call it inert. Any
@@ -423,6 +431,14 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 	licensed = licensed || containsUnityMarker(strings.ToLower(nodeScalarText(workflow)))
 	a.reusableMemo[key] = licensed
 	return licensed, true
+}
+
+// unprovenRunnerJob reports a callee job whose runner may be the self-hosted
+// fleet. A runner expression or a runner group cannot be read as hosted, and a
+// `run:` step there can activate Unity without naming an action.
+func unprovenRunnerJob(job *yaml.Node) bool {
+	text := strings.ToLower(nodeScalarText(mappingValue(job, "runs-on")))
+	return strings.Contains(text, "${{") || strings.Contains(text, "group:")
 }
 
 // remoteReusableTarget splits `owner/repo/.github/workflows/file.yml` into the
