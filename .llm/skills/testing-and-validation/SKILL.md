@@ -43,6 +43,11 @@ dependence is nondeterminism. Await a ref'd delay that outlives the scheduled
 timeout, then assert the already-settled outcome. The delay holds the loop
 alive; it is not a timing assertion.
 
+On macOS, use a physical temporary root for tests that reject symlink ancestors.
+The default `/var` temp path can pass through a symlink. For the complete Node
+suite, use `TMPDIR=/private/tmp node --test test/*.test.js`. Keep the production
+symlink refusal intact; changing the fixture root does not weaken that guard.
+
 A mutation scan needs a red result to prove coverage. A mutant that cannot
 build or run is inconclusive, not covered; record it and fix the harness.
 
