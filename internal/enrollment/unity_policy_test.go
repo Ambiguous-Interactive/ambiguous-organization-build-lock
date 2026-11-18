@@ -2840,6 +2840,178 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 	}
 }
 
+func dispatchLaneWorkflow(licensedCondition, aggregate string) string {
+	return `name: Dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      run-lane:
+        type: boolean
+        default: false
+concurrency:
+  group: dispatch-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ` + preflightActionRef + `
+  unity:
+    needs: preflight
+    if: ` + licensedCondition + `
+    runs-on: [self-hosted, Windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [EditMode]
+    steps:
+` + centralReturnSteps() + aggregate
+}
+
+func selectedLaneAggregate(selection string) string {
+	return `  lane-gate:
+    if: always()
+    needs: [preflight, unity]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          RUNNER_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          UNITY_TESTS_RESULT: ${{ needs.unity.result }}
+          LANE_SELECTED: ` + selection + `
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}
+        run: |
+          set -euo pipefail
+          if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
+            test "${RUNNER_PREFLIGHT_RESULT}" = skipped
+            test "${UNITY_TESTS_RESULT}" = skipped
+          elif [ "${LANE_SELECTED}" != "true" ]; then
+            test "${RUNNER_PREFLIGHT_RESULT}" = success
+          else
+            test "${RUNNER_PREFLIGHT_RESULT}" = success
+            test "${UNITY_TESTS_RESULT}" = success
+          fi
+`
+}
+
+func TestUnityEnrollmentAcceptsCallerSelectedLaneAggregate(t *testing.T) {
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/dispatch.yml": dispatchLaneWorkflow(
+			"${{ inputs['run-lane'] }}",
+			selectedLaneAggregate("${{ inputs['run-lane'] }}"),
+		),
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("caller-selected lane aggregate produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentAcceptsCallerSelectedLaneOffAnotherWorkflowEvent(t *testing.T) {
+	workflow := strings.Replace(
+		unityWorkflow(
+			centralReturnSteps(),
+			selectedLaneAggregate("${{ github.event_name == 'workflow_dispatch' && inputs['run-lane'] }}"),
+		),
+		"    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n",
+		"    if: github.event_name == 'workflow_dispatch' && inputs['run-lane'] && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)\n",
+		1,
+	)
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/unity.yml": workflow,
+	}), unityAuditPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("event-excluded caller-selected lane produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T) {
+	tests := []struct {
+		name             string
+		workflowMutation func(string) string
+	}{
+		{
+			name: "selection reads one job result",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					"LANE_SELECTED: ${{ needs.unity.result == 'success' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection is not a lane guard term",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					"LANE_SELECTED: ${{ inputs['other-lane'] }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection only names part of a guard comparison",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] }}",
+					"if: ${{ inputs['run-lane'] == 'yes' }}",
+					1,
+				)
+				return value
+			},
+		},
+		{
+			name: "selection uses a status function",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					"LANE_SELECTED: ${{ always() }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "aggregate can report for a merge-gated lane",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  workflow_dispatch:",
+					"on:\n  pull_request:\n  workflow_dispatch:",
+					1,
+				)
+			},
+		},
+	}
+	base := dispatchLaneWorkflow(
+		"${{ inputs['run-lane'] }}",
+		selectedLaneAggregate("${{ inputs['run-lane'] }}"),
+	)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+				".github/workflows/dispatch.yml": testCase.workflowMutation(base),
+			}), unityAuditPolicy())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate") {
+				t.Fatalf("mutated caller-selected lane aggregate was accepted: %#v", result.Findings)
+			}
+		})
+	}
+}
+
 func TestUnityEnrollmentAcceptsCentralAcquiredScopedReturn(t *testing.T) {
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/unity.yml": unityWorkflow(centralReturnSteps(), safeAggregate()),

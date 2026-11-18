@@ -6,10 +6,10 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 - Credential scope (#51): the owner keeps both Apps installed org-wide. The
   remaining work is the org-secret repository scope and the permission probe.
-- Enrollment drift (#113): 14 DxMessaging shape findings and eight expired
-  unity-builder and unity-helpers exceptions remain. The 31 remote reusable
-  workflow findings (#406) clear when the audit adopts the resolved-callee
-  change. DxAudio, DoxReloaded, IshoBoy, and qora-redux are clean.
+- Enrollment drift (#113): 11 DxMessaging shape findings and eight expired
+  unity-builder and unity-helpers exceptions remain. The four optional-lane
+  aggregate findings (#412) are cleared. DxAudio, DoxReloaded, IshoBoy, and
+  qora-redux are clean.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.
 - Shared-seat capacity (#83): prove independent returnable identities and both
@@ -27,9 +27,6 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Linter compatibility (#335): the pinned linter still fails to build against
   YAML v4.0.0, which no longer exports `yaml.ParserError`. Move the dependency
   only after a linter release supports the newer API.
-- Consumer aggregates (#412): four licensed lanes still need one aggregate each
-  in DxMessaging `runner-bootstrap.yml` and unity-helpers `unity-tests.yml`. The
-  reviewed shape is in `docs/consumer-enrollment.md` item 10.
 - Merge queue adoption (#379): v1.18.1 publishes an approved pin. Repin
   DoxReloaded, add `merge_group`, and enable the queue after the owner
   authorizes it.

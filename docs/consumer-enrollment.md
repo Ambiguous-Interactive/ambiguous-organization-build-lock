@@ -534,6 +534,39 @@ touches a Dependabot pull request.
    share one verdict. One aggregate job may enforce several lanes, because it
    fails when any covered lane fails. A lane that runs for no protected pull
    request or merge group holds no merge gate.
+   Such a lane may be optional. Declare the caller selection in the lane guard.
+   Give its aggregate a literal `always()` and one step that reads
+   `LANE_SELECTED`. That value must repeat one `&&` term of the lane guard and
+   must not read a job result. The step passes only for an exact untrusted
+   skip, for a successful preflight when the selection is off, or for a
+   successful preflight and lane when the selection is on. The check refuses
+   this shape for a lane that can block a merge.
+
+   ```yaml
+     unity-native-floor-success:
+       if: always()
+       needs: [runner-preflight, native-sdk-floor]
+       runs-on: ubuntu-latest
+       steps:
+         - shell: bash
+           env:
+             RUNNER_PREFLIGHT_RESULT: ${{ needs.runner-preflight.result }}
+             UNITY_TESTS_RESULT: ${{ needs.native-sdk-floor.result }}
+             LANE_SELECTED: ${{ inputs['native-sdk-floor'] }}
+             FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+             DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}
+           run: |
+             set -euo pipefail
+             if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
+               test "${RUNNER_PREFLIGHT_RESULT}" = skipped
+               test "${UNITY_TESTS_RESULT}" = skipped
+             elif [ "${LANE_SELECTED}" != "true" ]; then
+               test "${RUNNER_PREFLIGHT_RESULT}" = success
+             else
+               test "${RUNNER_PREFLIGHT_RESULT}" = success
+               test "${UNITY_TESTS_RESULT}" = success
+             fi
+   ```
    A pull request keeps one licensed run per tree it validates. Its
    base-to-head diff covers the whole pull request, so a follow-up push that
    changes no Unity path repeats a licensed run the previous run already

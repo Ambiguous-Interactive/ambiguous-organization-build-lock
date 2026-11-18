@@ -5208,6 +5208,11 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 	if len(requiredPreflights) == 0 {
 		return "", nil, false
 	}
+	// A lane that no protected pull request or merge group can run may be
+	// selected by the caller, so its aggregate accepts a caller-selected skip.
+	// Such a lane can never block a merge, so the accepted skip cannot hide a
+	// failed protected check.
+	callerSelectedLane := !laneCanGateProtectedMerge(workflow, licensedJobNode)
 	for index := 0; index < len(jobs.Content); index += 2 {
 		jobName := jobs.Content[index].Value
 		job := jobs.Content[index+1]
@@ -5229,6 +5234,14 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 							licensedJob,
 							preflight,
 						) ||
+						(callerSelectedLane && always && selectedLaneAggregateEnforces(
+							workflow,
+							job,
+							step,
+							licensedJobNode,
+							licensedJob,
+							preflight,
+						)) ||
 						(always && a.typedValidationGateEnforces(
 							workflow,
 							jobs,
@@ -6253,31 +6266,12 @@ func trustedSkipAggregateEnforces(
 		scalarValue(mappingValue(step, "shell")) != "bash" {
 		return false
 	}
-	env := mappingValue(step, "env")
-	if !mappingHasOnlyKeys(env, map[string]bool{
-		"RUNNER_PREFLIGHT_RESULT": true,
-		"UNITY_TESTS_RESULT":      true,
-		"FORK_PR":                 true,
-		"DEPENDABOT_PR":           true,
-	}) ||
-		!exactExpression(
-			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
-			"needs."+preflightJob+".result",
-		) ||
-		!exactExpression(
-			mappingValue(env, "UNITY_TESTS_RESULT"),
-			"needs."+licensedJob+".result",
-		) ||
-		!exactExpression(
-			mappingValue(env, "FORK_PR"),
-			"github.event_name=='pull_request'&&"+
-				"github.event.pull_request.head.repo.full_name!=github.repository",
-		) ||
-		!exactExpression(
-			mappingValue(env, "DEPENDABOT_PR"),
-			"github.event_name=='pull_request'&&"+
-				"github.event.pull_request.user.login=='dependabot[bot]'",
-		) {
+	if !trustedSkipAggregateEnvironment(
+		mappingValue(step, "env"),
+		licensedJob,
+		preflightJob,
+		nil,
+	) {
 		return false
 	}
 	run := mappingValue(step, "run")
@@ -6309,6 +6303,206 @@ func trustedSkipAggregateEnforces(
 		}
 	}
 	return true
+}
+
+// trustedSkipAggregateEnvironment holds the exact trusted-skip bindings shared
+// by the two aggregate shapes. The caller names the only keys it may add.
+func trustedSkipAggregateEnvironment(
+	env *yaml.Node,
+	licensedJob, preflightJob string,
+	extra map[string]bool,
+) bool {
+	allowed := map[string]bool{
+		"RUNNER_PREFLIGHT_RESULT": true,
+		"UNITY_TESTS_RESULT":      true,
+		"FORK_PR":                 true,
+		"DEPENDABOT_PR":           true,
+	}
+	for key := range extra {
+		allowed[key] = true
+	}
+	return mappingHasOnlyKeys(env, allowed) &&
+		exactExpression(
+			mappingValue(env, "RUNNER_PREFLIGHT_RESULT"),
+			"needs."+preflightJob+".result",
+		) &&
+		exactExpression(
+			mappingValue(env, "UNITY_TESTS_RESULT"),
+			"needs."+licensedJob+".result",
+		) &&
+		exactExpression(
+			mappingValue(env, "FORK_PR"),
+			"github.event_name=='pull_request'&&"+
+				"github.event.pull_request.head.repo.full_name!=github.repository",
+		) &&
+		exactExpression(
+			mappingValue(env, "DEPENDABOT_PR"),
+			"github.event_name=='pull_request'&&"+
+				"github.event.pull_request.user.login=='dependabot[bot]'",
+		)
+}
+
+// selectedLaneAggregateEnforces proves a lane that the caller selects. The
+// lane cannot reach a protected pull request or merge group, so a skipped lane
+// can never hide a failed protected check. LANE_SELECTED must be a conjunct of
+// the licensed job guard and must read only caller inputs and job outputs, so a
+// job result or a step outcome cannot green-report a lane that did not run.
+func selectedLaneAggregateEnforces(
+	workflow, job, step, licensedJobNode *yaml.Node,
+	licensedJob, preflightJob string,
+) bool {
+	steps := sequenceValues(mappingValue(job, "steps"))
+	if !conditionIsSafeAlways(mappingValue(job, "if")) ||
+		len(steps) != 1 || steps[0] != step ||
+		scalarValue(mappingValue(job, "runs-on")) != "ubuntu-latest" ||
+		!validationJobIsolationSafe(workflow, job) ||
+		mappingValue(job, "environment") != nil ||
+		unsafeAggregateConcurrency(mappingValue(job, "concurrency")) ||
+		!affirmativeCondition(mappingValue(step, "if")) ||
+		!criticalNodeFailurePropagates(step) ||
+		scalarValue(mappingValue(step, "shell")) != "bash" {
+		return false
+	}
+	env := mappingValue(step, "env")
+	if !trustedSkipAggregateEnvironment(
+		env,
+		licensedJob,
+		preflightJob,
+		map[string]bool{"LANE_SELECTED": true},
+	) ||
+		!selectionWithinLaneGuard(
+			mappingValue(env, "LANE_SELECTED"),
+			licensedJobNode,
+			job,
+		) {
+		return false
+	}
+	run := mappingValue(step, "run")
+	if run == nil || run.Kind != yaml.ScalarNode {
+		return false
+	}
+	lines := make([]string, 0, 11)
+	for _, line := range strings.Split(run.Value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	expected := []string{
+		"set -euo pipefail",
+		`if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = skipped`,
+		`test "${UNITY_TESTS_RESULT}" = skipped`,
+		`elif [ "${LANE_SELECTED}" != "true" ]; then`,
+		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		"else",
+		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		`test "${UNITY_TESTS_RESULT}" = success`,
+		"fi",
+	}
+	if len(lines) != len(expected) {
+		return false
+	}
+	for index := range expected {
+		if lines[index] != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// laneCanGateProtectedMerge reports whether the lane can run for a protected
+// pull request or merge group. Only such a lane can block a merge.
+func laneCanGateProtectedMerge(workflow, licensedJob *yaml.Node) bool {
+	mergeEvents := map[string]bool{
+		"pull_request": true,
+		"merge_group":  true,
+	}
+	if jobExcludedFromEvents(mappingValue(licensedJob, "if"), mergeEvents) {
+		return false
+	}
+	return workflowDeclaresEvent(workflow, "pull_request") ||
+		workflowDeclaresEvent(workflow, "merge_group")
+}
+
+// selectionWithinLaneGuard proves that LANE_SELECTED is one conjunct of the
+// licensed job guard. A skipped selection then names the same condition that
+// skipped the lane, and no job result can waive the lane.
+func selectionWithinLaneGuard(selection, licensedJob, aggregateJob *yaml.Node) bool {
+	if selection == nil || selection.Kind != yaml.ScalarNode {
+		return false
+	}
+	expression := strings.TrimSpace(selection.Value)
+	if !strings.HasPrefix(expression, "${{") || !strings.HasSuffix(expression, "}}") {
+		return false
+	}
+	expression = strings.TrimSpace(
+		strings.TrimSuffix(strings.TrimPrefix(expression, "${{"), "}}"),
+	)
+	if expression == "" ||
+		containsStatusFunction(expression) ||
+		strings.Contains(expression, ".result") ||
+		strings.Contains(expression, "secrets") ||
+		strings.Contains(expression, "steps.") {
+		return false
+	}
+	for _, needed := range neededJobNames(expression) {
+		if !needsAny(aggregateJob, map[string]bool{needed: true}) {
+			return false
+		}
+	}
+	guard := mappingValue(licensedJob, "if")
+	if guard == nil || guard.Kind != yaml.ScalarNode {
+		return false
+	}
+	guardTerms, guardOr := conditionTerms(guard.Value)
+	if len(guardTerms) == 0 || guardOr {
+		return false
+	}
+	available := make(map[string]bool, len(guardTerms))
+	for _, term := range guardTerms {
+		available[compactExpression(term)] = true
+	}
+	selectionTerms, selectionOr := conditionTerms(expression)
+	if selectionOr || len(selectionTerms) == 0 {
+		return available[compactExpression(expression)]
+	}
+	for _, term := range selectionTerms {
+		if !available[compactExpression(term)] {
+			return false
+		}
+	}
+	return true
+}
+
+// neededJobNames lists the jobs a condition reads through needs.<name>.
+func neededJobNames(expression string) []string {
+	names := make([]string, 0, 1)
+	remaining := expression
+	for {
+		index := strings.Index(remaining, "needs.")
+		if index < 0 {
+			return names
+		}
+		remaining = remaining[index+len("needs."):]
+		end := 0
+		for end < len(remaining) {
+			char := remaining[end]
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') || char == '_' || char == '-' {
+				end++
+				continue
+			}
+			break
+		}
+		if end > 0 {
+			names = append(names, remaining[:end])
+		}
+		remaining = remaining[end:]
+	}
+}
+
+func compactExpression(value string) string {
+	return strings.Join(strings.Fields(value), "")
 }
 
 // Preserve quoted text when comparing the dispatch selector. A space inside a
