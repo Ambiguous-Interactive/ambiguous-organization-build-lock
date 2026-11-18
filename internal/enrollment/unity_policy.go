@@ -6371,20 +6371,32 @@ func selectedLaneAggregateEnforces(
 		return false
 	}
 	env := mappingValue(step, "env")
-	if !trustedSkipAggregateEnvironment(
-		env,
-		licensedJob,
-		preflightJob,
-		map[string]bool{
-			"LANE_SELECTED":              true,
-			"SECONDARY_PREFLIGHT_RESULT": true,
-		},
-	) ||
-		!selectionWithinLaneGuard(
-			mappingValue(env, "LANE_SELECTED"),
-			licensedJobNode,
-			job,
-		) {
+	extras := map[string]bool{
+		"LANE_SELECTED":              true,
+		"SECONDARY_PREFLIGHT_RESULT": true,
+	}
+	secondary := mappingValue(env, "SECONDARY_PREFLIGHT_RESULT")
+	if secondary == nil {
+		if !trustedSkipAggregateEnvironment(env, licensedJob, preflightJob, extras) {
+			return false
+		}
+	} else {
+		primaryJob := needsResultReference(mappingValue(env, "RUNNER_PREFLIGHT_RESULT"))
+		secondaryJob := needsResultReference(secondary)
+		if primaryJob == "" || secondaryJob == "" || primaryJob == secondaryJob ||
+			!requiredPreflights[primaryJob] || secondaryJob == licensedJob ||
+			(primaryJob != preflightJob && secondaryJob != preflightJob) ||
+			!needsAny(job, map[string]bool{primaryJob: true}) ||
+			!needsAny(job, map[string]bool{secondaryJob: true}) ||
+			!trustedSkipAggregateEnvironment(env, licensedJob, primaryJob, extras) {
+			return false
+		}
+	}
+	if !selectionWithinLaneGuard(
+		mappingValue(env, "LANE_SELECTED"),
+		licensedJobNode,
+		job,
+	) {
 		return false
 	}
 	run := mappingValue(step, "run")
@@ -6413,13 +6425,7 @@ func selectedLaneAggregateEnforces(
 		"false",
 		"fi",
 	}
-	if secondary := mappingValue(env, "SECONDARY_PREFLIGHT_RESULT"); secondary != nil {
-		secondaryJob := needsResultReference(secondary)
-		if secondaryJob == "" || secondaryJob == preflightJob ||
-			!requiredPreflights[secondaryJob] ||
-			!needsAny(job, map[string]bool{secondaryJob: true}) {
-			return false
-		}
+	if secondary != nil {
 		expected = []string{
 			"set -euo pipefail",
 			`if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`,
