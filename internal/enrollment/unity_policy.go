@@ -301,7 +301,6 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 		requiredAcquireSHA: "",
 		reusableSource:     policy.ResolveReusableWorkflow,
 		reusableMemo:       make(map[string]bool),
-		reusableVisiting:   make(map[string]bool),
 	}
 	a := &unityPolicyAnalyzer{
 		analyzer:              base,

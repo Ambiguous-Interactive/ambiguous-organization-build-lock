@@ -72,7 +72,6 @@ func AnalyzePolicy(snapshot Snapshot, policy Policy) ([]Finding, error) {
 		findings:           make([]Finding, 0),
 		findingSet:         make(map[string]bool),
 		reusableMemo:       make(map[string]bool),
-		reusableVisiting:   make(map[string]bool),
 	}
 	workflowPaths := make([]string, 0)
 	for file := range snapshot.Files {
@@ -166,7 +165,6 @@ type analyzer struct {
 	requiredAcquireSHA string
 	reusableSource     ReusableWorkflowSource
 	reusableMemo       map[string]bool
-	reusableVisiting   map[string]bool
 	findings           []Finding
 	findingSet         map[string]bool
 }
@@ -370,19 +368,15 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 	if licensed, memoized := a.reusableMemo[key]; memoized {
 		return licensed, true
 	}
-	if a.reusableVisiting[key] {
-		return false, false
-	}
-	a.reusableVisiting[key] = true
-	defer delete(a.reusableVisiting, key)
 	content, err := a.reusableSource(repository, workflowPath, ref)
 	if err != nil {
 		return false, false
 	}
-	// The callee is audited as its own snapshot, so a local action or a local
-	// workflow call there resolves against the callee repository rather than
-	// this one. Its findings are dropped: only its licensed verdict decides
-	// whether this caller's job is a paid lifecycle.
+	// The callee is audited as its own snapshot, so its jobs are classified
+	// against the callee repository identity. Its findings are dropped: only
+	// the licensed verdict decides whether this caller's job is a paid
+	// lifecycle. A local action or a local workflow call there has no file in
+	// this one-file snapshot, so it stays unproven.
 	called := &analyzer{
 		snapshot: Snapshot{
 			Repository: repository,
