@@ -6663,7 +6663,12 @@ func selectionContextsAllowed(expression string) bool {
 		}
 		switch root {
 		case "inputs":
-			index = skipPropertyChain(compact, index)
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
 		case "github":
 			rest := compact[index+1:]
 			if !strings.HasPrefix(rest, "event_name") &&
@@ -6671,7 +6676,12 @@ func selectionContextsAllowed(expression string) bool {
 				!strings.HasPrefix(rest, "event[") {
 				return false
 			}
-			index = skipPropertyChain(compact, index)
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
 		case "needs":
 			if compact[index] != '.' {
 				return false
@@ -6684,16 +6694,24 @@ func selectionContextsAllowed(expression string) bool {
 			if nameEnd == 0 || !strings.HasPrefix(rest[nameEnd:], ".outputs.") {
 				return false
 			}
-			index = skipPropertyChain(compact, index)
+			next, ok := skipPropertyChain(compact, index)
+			if !ok {
+				return false
+			}
+			index = next
+			continue
 		default:
 			return false
 		}
+		return false
 	}
 	return true
 }
 
-// skipPropertyChain advances past a run of `.name` and `[...]` segments.
-func skipPropertyChain(compact string, index int) int {
+// skipPropertyChain advances past a run of `.name` and `['literal']` segments.
+// A dynamic index such as `inputs[matrix.mode]` can differ between the two
+// jobs, so it is refused.
+func skipPropertyChain(compact string, index int) (int, bool) {
 	for index < len(compact) {
 		switch compact[index] {
 		case '.':
@@ -6703,17 +6721,27 @@ func skipPropertyChain(compact string, index int) int {
 			}
 		case '[':
 			index++
-			for index < len(compact) && compact[index] != ']' {
+			if index >= len(compact) || (compact[index] != '\'' && compact[index] != '"') {
+				return 0, false
+			}
+			quote := compact[index]
+			index++
+			for index < len(compact) && compact[index] != quote {
 				index++
 			}
-			if index < len(compact) {
-				index++
+			if index >= len(compact) {
+				return 0, false
 			}
+			index++
+			if index >= len(compact) || compact[index] != ']' {
+				return 0, false
+			}
+			index++
 		default:
-			return index
+			return index, true
 		}
 	}
-	return index
+	return index, true
 }
 
 func identifierStart(char byte) bool {

@@ -3063,6 +3063,23 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			},
 		},
 		{
+			name: "selection uses a dynamic input index",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && inputs[matrix.mode] == true }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ inputs[matrix.mode] == true }}",
+					1,
+				)
+			},
+		},
+		{
 			name: "selection mixes a job result and an output on one job",
 			workflowMutation: func(value string) string {
 				value = strings.Replace(
