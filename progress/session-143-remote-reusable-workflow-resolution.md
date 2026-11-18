@@ -63,18 +63,26 @@ callee is in another repository.
   are required.
 - The callee workflow is parsed as its own snapshot and each of its jobs is
   classified with a sub-analyzer. Its findings are dropped; only the licensed
-  verdict matters. A callee that uses a repository-local action or calls
-  another remote workflow therefore stays unproven.
+  verdict matters. A callee that uses a repository-local action therefore stays
+  unproven. A nested remote call is followed up to a depth of four workflows.
+- A callee job with a third-party Unity action holds no central acquire step, so
+  any Unity marker in the callee text also makes the caller paid.
 - `reusableMemo` and `reusableVisiting` share one cache per audit, so a cycle
-  and a repeated call cost one read and one verdict.
+  and a repeated call cost one read and one verdict. Only the repository and
+  commit fold case; the workflow file name stays exact.
 - Any unproven case keeps the old verdict: `unresolved-reusable-workflow` and
   license-capable.
 - `okReusableCaller` refuses a resolved call whose job text names a Unity
-  serial, email, password, license, or lock credential.
+  serial, email, password, license, or lock credential. It also refuses
+  `secrets: inherit` and any secrets expression that names no exact secret, and
+  it requires each `secrets:` mapping value to be exactly that secret.
+- `remoteReusableTarget` accepts one plain YAML file name directly under
+  `.github/workflows/`, so a percent-encoded or quoted segment cannot reach a
+  different path at a mirror.
 - `cmd/audit-unity-enrollment` supplies the resolver: one anonymous raw read of
   `raw.githubusercontent.com/<repository>/<sha>/<path>`, a 15-second timeout, a
-  256 KiB bound, a status check, and a per-run cache. `--reusable-workflow-base-url`
-  exists for tests.
+  256 KiB bound, a status check, a redirect bound on the reviewed host, and a
+  per-run cache. `--reusable-workflow-base-url` exists for tests.
 - `docs/consumer-enrollment.md` states the rule in preconditions item 7, in
   workflow contract item 1, and in the `unresolved-reusable-workflow` row.
 
@@ -89,18 +97,44 @@ Audited 7/7 enrolled repositories; active-jobs=139 findings=22 complete=true
 The 31 remote-call findings are gone. The remaining 22 are the 14 DxMessaging
 shape findings and the 8 expired policy exceptions.
 
-Focused tests:
+Tests:
 
-```text
-go test ./internal/enrollment -run 'TestUnityEnrollment(Resolves|Keeps|Treats|Refuses)'
-ok  github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/internal/enrollment
-go test ./cmd/audit-unity-enrollment
-ok  github.com/Ambiguous-Interactive/ambiguous-organization-build-lock/cmd/audit-unity-enrollment
-```
+- `TestUnityEnrollmentResolvesNonLicensingRemoteReusableWorkflow`
+- `TestUnityEnrollmentKeepsUnresolvedRemoteReusableWorkflowConservative`
+- `TestUnityEnrollmentRefusesOpaqueSecretForwarding`
+- `TestUnityEnrollmentResolvesANestedNonLicensingCall`
+- `TestUnityEnrollmentBoundsANestedCallChain`
+- `TestUnityEnrollmentKeepsCalleeFileNamesCaseSensitive`
+- `TestUnityEnrollmentTreatsLicensedRemoteReusableWorkflowAsPaid`
+- `TestUnityEnrollmentTreatsOneLicensedCalleeJobAsPaid`
+- `TestUnityEnrollmentRefusesMutableRemoteReusableWorkflow`
+- `TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity`
+- `TestReusableWorkflowFetcherReadsOneImmutableIdentity`
+- `TestReusableWorkflowFetcherRefusesOversizedContent`
+- `TestReusableWorkflowFetcherRefusesAHostChange`
+- `TestRunResolvesNonLicensingRemoteReusableWorkflow`
 
 ## Review findings and dispositions
 
-Pending.
+An independent adversarial review found these. All are fixed.
+
+- High: `with: { all: ${{ toJSON(secrets) }} }` and a renamed or dynamic secret
+  mapping passed the caller check. The caller now needs each secret mapped to
+  its exact name, and an opaque secrets expression is refused.
+- Medium: a nested call chain had no depth bound, so a consumer could chain
+  reads without limit. The bound is four workflows, and a deeper chain stays
+  unresolved.
+- Low: the memo key folded the case of the workflow file name, so `Foo.yml`
+  and `foo.yml` shared one verdict. Only the repository and commit fold now.
+- Low: a percent-encoded path segment reached `url.JoinPath` unchanged. The
+  callee name now accepts only plain YAML file characters.
+- Low: the fetcher followed a redirect to any host. It now refuses a scheme or
+  host change and bounds the chain.
+- Low: the docs claimed a nested call always stays unresolved. It is followed
+  up to the bound, and the docs say so.
+- Low: the callee marker set keeps a bare `unity` token on purpose. A callee
+  that mentions Unity keeps the caller paid, which is the fail-closed
+  direction. The measured review-tools callees hold no Unity token.
 
 ## Out of scope
 

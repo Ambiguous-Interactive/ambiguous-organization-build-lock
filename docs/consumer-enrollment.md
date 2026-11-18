@@ -45,11 +45,14 @@ or writer App. The current inventory is recorded in
    under `Ambiguous-Interactive/*/.github/actions/` is a policy finding unless
    it is under `Ambiguous-Interactive/ambiguous-organization-build-lock`.
    Reusable workflow calls are audited as workflow graph edges. The audit reads
-   the called workflow at the pinned commit and classifies its jobs. A call it
-   cannot read, a mutable reference, a repository-local action inside the
-   callee, or a nested remote call leaves the caller unresolved and
-   license-capable. A caller that forwards a Unity or lock credential to a
-   reusable workflow is always unresolved.
+   the called workflow at the pinned commit, from public raw content, and
+   classifies its jobs. A callee with no Unity step makes the caller a
+   non-licensing job. A callee with a licensed job or any Unity reference makes
+   the caller paid. These cases leave the caller unresolved and
+   license-capable: a callee the audit cannot read, a mutable reference, a
+   repository-local action inside the callee, a call chain deeper than four
+   workflows, `secrets: inherit`, an opaque secrets expression, or a forwarded
+   Unity or lock secret.
 
 ## Release authorization
 
@@ -758,7 +761,7 @@ edits.
 | `unity-editor-check-after-lock` | Run the editor gate before acquire. See item 3. |
 | `unity-editor-provisioning-control` | Remove the editor provisioning control overrides. CI must not provision an editor. See item 3. |
 | `unity-return-not-always` | Run the central return with `always()` on acquired work. See item 7. |
-| `unresolved-reusable-workflow` | Pin a public reusable workflow at an immutable commit, keep no repository-local action inside it, and pass it no Unity or lock credential. See item 7. |
+| `unresolved-reusable-workflow` | Pin a public reusable workflow at an immutable commit, keep no repository-local action inside it, and pass it no Unity or lock secret. See item 7. |
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
 | `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
 | `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |
