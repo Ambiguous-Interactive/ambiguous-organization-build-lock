@@ -2886,11 +2886,14 @@ func selectedLaneAggregate(selection string) string {
           if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
             test "${RUNNER_PREFLIGHT_RESULT}" = skipped
             test "${UNITY_TESTS_RESULT}" = skipped
-          elif [ "${LANE_SELECTED}" != "true" ]; then
-            test "${RUNNER_PREFLIGHT_RESULT}" = success
-          else
+          elif [ "${LANE_SELECTED}" = "true" ]; then
             test "${RUNNER_PREFLIGHT_RESULT}" = success
             test "${UNITY_TESTS_RESULT}" = success
+          elif [ "${LANE_SELECTED}" = "false" ]; then
+            test "${RUNNER_PREFLIGHT_RESULT}" = success
+          else
+            echo "LANE_SELECTED must be true or false." >&2
+            false
           fi
 `
 }
@@ -2898,8 +2901,8 @@ func selectedLaneAggregate(selection string) string {
 func TestUnityEnrollmentAcceptsCallerSelectedLaneAggregate(t *testing.T) {
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/dispatch.yml": dispatchLaneWorkflow(
-			"${{ inputs['run-lane'] }}",
-			selectedLaneAggregate("${{ inputs['run-lane'] }}"),
+			"${{ inputs['run-lane'] == true }}",
+			selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
 		),
 	}), unityAuditPolicy())
 	if err != nil {
@@ -2914,10 +2917,10 @@ func TestUnityEnrollmentAcceptsCallerSelectedLaneOffAnotherWorkflowEvent(t *test
 	workflow := strings.Replace(
 		unityWorkflow(
 			centralReturnSteps(),
-			selectedLaneAggregate("${{ github.event_name == 'workflow_dispatch' && inputs['run-lane'] }}"),
+			selectedLaneAggregate("${{ github.event_name == 'workflow_dispatch' && inputs['run-lane'] == true }}"),
 		),
 		"    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository\n",
-		"    if: github.event_name == 'workflow_dispatch' && inputs['run-lane'] && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)\n",
+		"    if: github.event_name == 'workflow_dispatch' && inputs['run-lane'] == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)\n",
 		1,
 	)
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
@@ -2941,7 +2944,7 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			workflowMutation: func(value string) string {
 				return strings.Replace(
 					value,
-					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
 					"LANE_SELECTED: ${{ needs.unity.result == 'success' }}",
 					1,
 				)
@@ -2952,8 +2955,8 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			workflowMutation: func(value string) string {
 				return strings.Replace(
 					value,
-					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
-					"LANE_SELECTED: ${{ inputs['other-lane'] }}",
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ inputs['other-lane'] == true }}",
 					1,
 				)
 			},
@@ -2963,7 +2966,7 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			workflowMutation: func(value string) string {
 				value = strings.Replace(
 					value,
-					"if: ${{ inputs['run-lane'] }}",
+					"if: ${{ inputs['run-lane'] == true }}",
 					"if: ${{ inputs['run-lane'] == 'yes' }}",
 					1,
 				)
@@ -2975,8 +2978,8 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			workflowMutation: func(value string) string {
 				return strings.Replace(
 					value,
-					"if: ${{ inputs['run-lane'] }}",
-					"if: ${{ inputs['run lane'] }}",
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run lane'] == true }}",
 					1,
 				)
 			},
@@ -2986,7 +2989,7 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			workflowMutation: func(value string) string {
 				return strings.Replace(
 					value,
-					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
 					"LANE_SELECTED: ${{ always() }}",
 					1,
 				)
@@ -3003,10 +3006,72 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 				)
 			},
 		},
+		{
+			name: "aggregate can report for a pull request target lane",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"on:\n  workflow_dispatch:",
+					"on:\n  pull_request_target:\n  workflow_dispatch:",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection renders a non-boolean string",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ inputs['run-lane'] }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection reads a job-scoped context",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && github.job == 'unity' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ github.job == 'unity' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection reads a bracket needs reference",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && needs['preflight'].outputs.ready == 'true' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ needs['preflight'].outputs.ready == 'true' }}",
+					1,
+				)
+			},
+		},
 	}
 	base := dispatchLaneWorkflow(
-		"${{ inputs['run-lane'] }}",
-		selectedLaneAggregate("${{ inputs['run-lane'] }}"),
+		"${{ inputs['run-lane'] == true }}",
+		selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
 	)
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -3020,6 +3085,25 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 				t.Fatalf("mutated caller-selected lane aggregate was accepted: %#v", result.Findings)
 			}
 		})
+	}
+}
+
+func TestUnityEnrollmentRefusesARequiredCallerSelectedLaneContext(t *testing.T) {
+	policy := unityAuditPolicy()
+	policy.RequiredContexts = map[string][]string{
+		"Ambiguous-Interactive/fixture": {"lane-gate"},
+	}
+	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
+		".github/workflows/dispatch.yml": dispatchLaneWorkflow(
+			"${{ inputs['run-lane'] == true }}",
+			selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
+		),
+	}), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingCodes(result.Findings), "missing-unity-aggregate") {
+		t.Fatalf("a required context accepted a caller-selected lane: %#v", result.Findings)
 	}
 }
 
