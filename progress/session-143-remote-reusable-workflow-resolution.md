@@ -91,11 +91,28 @@ callee is in another repository.
 
 ## Evidence
 
-Local audit of the same seven snapshots after the change:
+Local audit of the same seven default branches at the final commit after the
+change:
 
 ```text
 Audited 7/7 enrolled repositories; active-jobs=139 findings=22 complete=true
 ```
+
+The 22 finding rows are the same 14 DxMessaging shape findings and 8 expired
+policy exceptions. No cleared caller nests a call, uses a self-hosted callee,
+or names a file outside the accepted characters.
+
+Second review round:
+
+- Medium: a self-hosted callee job could activate Unity from a `run:` step that
+  names no action. Such a job now keeps the caller paid.
+- Medium: the recorded evidence did not cover the final commit. The audit above
+  was re-run at the final commit.
+- Low: a callee repository name that is not a clean `owner/name` is refused.
+- Low: the accepted file-name set is the plain set GitHub accepts, so a
+  legitimate name with a space clears.
+- Low: the redirect test now redirects on the same host and path change only.
+- Nit: the record and the doc name the reviewed credential list.
 
 The 31 remote-call findings are gone. The remaining 22 are the 14 DxMessaging
 shape findings and the 8 expired policy exceptions.
