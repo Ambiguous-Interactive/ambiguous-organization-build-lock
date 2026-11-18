@@ -133,12 +133,14 @@ func TestRunResolvesNonLicensingRemoteReusableWorkflow(t *testing.T) {
 }
 
 func TestReusableWorkflowFetcherRefusesARedirect(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = writer.Write([]byte(reusableWorkflowFixture))
-	}))
-	defer target.Close()
+	// The redirect stays on this server and changes only the path, so the
+	// fetcher must refuse it on identity, not on host.
 	source := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		http.Redirect(writer, request, target.URL+request.URL.Path, http.StatusFound)
+		if strings.HasSuffix(request.URL.Path, "/other.yml") {
+			_, _ = writer.Write([]byte(reusableWorkflowFixture))
+			return
+		}
+		http.Redirect(writer, request, "/other.yml", http.StatusFound)
 	}))
 	defer source.Close()
 	fetcher := newReusableWorkflowFetcher(source.URL)

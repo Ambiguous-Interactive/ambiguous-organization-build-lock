@@ -393,8 +393,9 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 		guardAction: make(map[string]bool),
 		// The callee gets no resolver. A nested remote call there is work this
 		// audit cannot see, so it stays unresolved and license-capable.
-		findings:   make([]Finding, 0),
-		findingSet: make(map[string]bool),
+		reusableMemo: make(map[string]bool),
+		findings:     make([]Finding, 0),
+		findingSet:   make(map[string]bool),
 	}
 	workflow, err := called.node(workflowPath)
 	if err != nil {
@@ -406,11 +407,15 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 	}
 	licensed := false
 	for index := 0; index < len(jobs.Content); index += 2 {
+		calledJob := jobs.Content[index+1]
 		calledLicensed, err := called.jobLicensed(workflowPath, jobs.Content[index].Value)
 		if err != nil {
 			return false, false
 		}
-		licensed = licensed || calledLicensed
+		// `jobLicensed` reads `uses:` steps only. Organization Unity work runs on
+		// the self-hosted fleet, so a self-hosted callee job can activate Unity
+		// from a `run:` step that no action reference names.
+		licensed = licensed || calledLicensed || selfHostedJob(calledJob)
 	}
 	// A job that activates Unity through a third-party action holds no central
 	// acquire step, so the licensed verdict alone would call it inert. Any
@@ -433,7 +438,7 @@ func remoteReusableTarget(target string) (string, string, bool) {
 	}
 	repository := target[:at]
 	workflowPath := target[at+1:]
-	if !validRepository(repository) {
+	if !validRepository(repository) || path.Clean(repository) != repository {
 		return "", "", false
 	}
 	clean, err := cleanRepositoryPath(workflowPath)
@@ -444,9 +449,10 @@ func remoteReusableTarget(target string) (string, string, bool) {
 	return repository, workflowPath, true
 }
 
-// validWorkflowFileName accepts one reviewed workflow file name under
-// `.github/workflows/`: no directory separator, no percent encoding, and no
-// character GitHub does not accept in a workflow path.
+// validWorkflowFileName accepts one workflow file name directly under
+// `.github/workflows/`. It refuses a path separator, a percent-encoded byte, and
+// control or quoting characters, so the request names exactly one file and no
+// mirror can read another.
 func validWorkflowFileName(value string) bool {
 	if value == "" || !isYAML(value) {
 		return false
@@ -456,12 +462,10 @@ func validWorkflowFileName(value string) bool {
 		return false
 	}
 	for _, character := range value {
-		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
-			character >= '0' && character <= '9' ||
-			character == '.' || character == '_' || character == '-' {
-			continue
+		if character < 0x20 || character == 0x7f ||
+			strings.ContainsRune("/\\%`'\"", character) {
+			return false
 		}
-		return false
 	}
 	return true
 }

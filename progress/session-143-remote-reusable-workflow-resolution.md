@@ -66,10 +66,12 @@ callee is in another repository.
   verdict matters. A callee that uses a repository-local action or calls
   another reusable workflow therefore stays unproven.
 - A callee job with a third-party Unity action holds no central acquire step, so
-  any Unity marker in the callee text also makes the caller paid.
-- `reusableMemo` and `reusableVisiting` share one cache per audit, so a cycle
-  and a repeated call cost one read and one verdict. Only the repository and
-  commit fold case; the workflow file name stays exact.
+  any Unity marker in the callee text also makes the caller paid. A callee job
+  on the self-hosted fleet is paid too, because a `run:` step there can
+  activate Unity without naming an action.
+- `reusableMemo` caches one verdict per callee identity, so a repeated call
+  costs one read. Only the repository and the commit fold case; the workflow
+  file name stays exact.
 - Any unproven case keeps the old verdict: `unresolved-reusable-workflow` and
   license-capable.
 - `okReusableCaller` refuses a resolved call whose job text names a Unity
@@ -77,12 +79,13 @@ callee is in another repository.
   `secrets: inherit` and any secrets expression that names no exact secret, and
   it requires each `secrets:` mapping value to be exactly one secret reference,
   which may rename the secret. A wildcard secrets expression is refused.
-- `remoteReusableTarget` accepts one plain YAML file name directly under
-  `.github/workflows/`, so a percent-encoded or quoted segment cannot reach a
-  different path at a mirror.
+- `remoteReusableTarget` requires a clean `owner/name` repository and one YAML
+  file name directly under `.github/workflows/`. A percent-encoded or quoted
+  segment cannot reach a different path at a mirror.
 - `cmd/audit-unity-enrollment` supplies the resolver: one anonymous raw read of
   `raw.githubusercontent.com/<repository>/<sha>/<path>`, a 15-second timeout, a
-  256 KiB bound, a status check, no redirect, and a per-run cache. `--reusable-workflow-base-url` exists for tests.
+  256 KiB bound, a status check, no redirect, and a per-run cache.
+  `--reusable-workflow-base-url` exists for tests.
 - `docs/consumer-enrollment.md` states the rule in preconditions item 7, in
   workflow contract item 1, and in the `unresolved-reusable-workflow` row.
 
@@ -106,6 +109,7 @@ Tests:
 - `TestUnityEnrollmentKeepsCalleeFileNamesCaseSensitive`
 - `TestUnityEnrollmentTreatsLicensedRemoteReusableWorkflowAsPaid`
 - `TestUnityEnrollmentTreatsOneLicensedCalleeJobAsPaid`
+- `TestUnityEnrollmentTreatsASelfHostedCalleeJobAsPaid`
 - `TestUnityEnrollmentRefusesMutableRemoteReusableWorkflow`
 - `TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity`
 - `TestReusableWorkflowFetcherReadsOneImmutableIdentity`

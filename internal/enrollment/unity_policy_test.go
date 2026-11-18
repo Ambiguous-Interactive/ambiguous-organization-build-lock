@@ -6982,7 +6982,11 @@ func TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity(t *testing.T) {
 		{"Ambiguous-Interactive/review-tools/.github/workflows/%2e%2e%2fevil.yml", false},
 		{"Ambiguous-Interactive/review-tools/.github/workflows/review.json", false},
 		{"Ambiguous-Interactive/review-tools/.github/workflows/.yml", false},
-		{"Ambiguous-Interactive/review-tools/.github/workflows/a b.yml", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/a`b.yml", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/a b.yml", true},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/build (2).yml", true},
+		{"owner/../.github/workflows/review.yml", false},
+		{"owner/./.github/workflows/review.yml", false},
 		{"review-tools/.github/workflows/review.yml", false},
 		{"Ambiguous-Interactive/review-tools/review.yml", false},
 	} {
@@ -7007,5 +7011,23 @@ func TestUnityEnrollmentAllowsAnExactRenamedSecret(t *testing.T) {
 	)
 	if len(result.Findings) != 0 {
 		t.Fatalf("an exact renamed secret was refused: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentTreatsASelfHostedCalleeJobAsPaid(t *testing.T) {
+	// A self-hosted job can activate Unity from a script that no action
+	// reference names, so its shape alone keeps the caller paid.
+	callee := `name: Scripted
+on:
+  workflow_call:
+jobs:
+  activate:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - run: ./scripts/activate.ps1
+`
+	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), remoteReusableResolver(callee, nil))
+	if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
+		t.Fatalf("a self-hosted callee job left the caller non-licensing: %#v", result.Findings)
 	}
 }

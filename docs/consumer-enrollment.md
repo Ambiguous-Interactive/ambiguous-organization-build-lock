@@ -52,7 +52,7 @@ or writer App. The current inventory is recorded in
    unresolved and license-capable: a callee the audit cannot read, a mutable
    reference, a repository-local action inside the callee, a nested reusable
    workflow call, `secrets: inherit`, an opaque secrets expression, or a
-   forwarded Unity or lock secret.
+   forwarded Unity or lock secret from the reviewed name list.
 
 ## Release authorization
 
