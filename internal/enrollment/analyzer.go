@@ -1228,10 +1228,12 @@ func termFalseForEvent(term, event string) bool {
 		return false
 	}
 	value := rest[1 : len(rest)-1]
+	// GitHub compares strings without regard to case, so an upper-case event
+	// literal is the same event. A case-sensitive test would prove nothing.
 	if operator == "==" {
-		return event != value
+		return !strings.EqualFold(event, value)
 	}
-	return event == value
+	return strings.EqualFold(event, value)
 }
 
 func trimOuterParentheses(value string) string {

@@ -6677,7 +6677,11 @@ func selectionContextsAllowed(expression string) bool {
 				return false
 			}
 			rest := compact[index+1:]
-			if !strings.Contains(rest, ".outputs.") {
+			nameEnd := 0
+			for nameEnd < len(rest) && identifierPart(rest[nameEnd]) {
+				nameEnd++
+			}
+			if nameEnd == 0 || !strings.HasPrefix(rest[nameEnd:], ".outputs.") {
 				return false
 			}
 			index = skipPropertyChain(compact, index)

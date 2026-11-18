@@ -3063,6 +3063,46 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			},
 		},
 		{
+			name: "selection mixes a job result and an output on one job",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ inputs['run-lane'] == true && needs.preflight['result'] == 'success' && needs.preflight.outputs.ready == 'true' }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ needs.preflight['result'] == 'success' && needs.preflight.outputs.ready == 'true' }}",
+					1,
+				)
+			},
+		},
+		{
+			name: "selection excludes in upper case only",
+			workflowMutation: func(value string) string {
+				value = strings.Replace(
+					value,
+					"on:\n  workflow_dispatch:",
+					"on:\n  pull_request:\n  workflow_dispatch:",
+					1,
+				)
+				value = strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] == true }}",
+					"if: ${{ github.event_name == 'PULL_REQUEST' && inputs['run-lane'] == true }}",
+					1,
+				)
+				return strings.Replace(
+					value,
+					"LANE_SELECTED: ${{ inputs['run-lane'] == true }}",
+					"LANE_SELECTED: ${{ github.event_name == 'PULL_REQUEST' && inputs['run-lane'] == true }}",
+					1,
+				)
+			},
+		},
+		{
 			name: "selection reads a bracket job result",
 			workflowMutation: func(value string) string {
 				value = strings.Replace(

@@ -7,9 +7,7 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Credential scope (#51): the owner keeps both Apps installed org-wide. The
   remaining work is the org-secret repository scope and the permission probe.
 - Enrollment drift (#113): 11 DxMessaging shape findings and eight expired
-  unity-builder and unity-helpers exceptions remain. The four optional-lane
-  aggregate findings (#412) are cleared. DxAudio, DoxReloaded, IshoBoy, and
-  qora-redux are clean.
+  unity-builder and unity-helpers exceptions remain.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.
 - Shared-seat capacity (#83): prove independent returnable identities and both
