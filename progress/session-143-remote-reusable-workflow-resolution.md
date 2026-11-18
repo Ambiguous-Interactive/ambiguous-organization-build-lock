@@ -172,6 +172,20 @@ An independent adversarial review found these. All are fixed.
   that mentions Unity keeps the caller paid, which is the fail-closed
   direction. The measured review-tools callees hold no Unity token.
 
+## Merge and verification
+
+- Pull request #407 merged as `9232423429` on 2026-11-18.
+- `Build lock CI` on `main` at `9232423429`: success.
+- Organization Unity enrollment audit run 44236879778 at `9232423429`:
+  `Audited 7/7 enrolled repositories; active-jobs=139 findings=22 complete=true`.
+  This is the first production run of the callee read.
+- Issue #113 now reports 22 findings and 139 inventory rows, with no
+  `unresolved-reusable-workflow` row.
+- The scheduled monitors were green before the merge at `fc9fa75a04`: incident
+  recovery audit, reaper delivery audit, and reap stale build locks.
+- Follow-up: #408 records the private-callee decision. #397 carries the
+  measured aggregate rule.
+
 ## Out of scope
 
 - #397 keeps its open decision. This session added the measured two-lane
