@@ -2971,6 +2971,17 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 			},
 		},
 		{
+			name: "selection differs only by quoted whitespace",
+			workflowMutation: func(value string) string {
+				return strings.Replace(
+					value,
+					"if: ${{ inputs['run-lane'] }}",
+					"if: ${{ inputs['run lane'] }}",
+					1,
+				)
+			},
+		},
+		{
 			name: "selection uses a status function",
 			workflowMutation: func(value string) string {
 				return strings.Replace(

@@ -6502,7 +6502,27 @@ func neededJobNames(expression string) []string {
 }
 
 func compactExpression(value string) string {
-	return strings.Join(strings.Fields(value), "")
+	var builder strings.Builder
+	var quote rune
+	for _, character := range value {
+		if quote != 0 {
+			builder.WriteRune(character)
+			if character == quote {
+				quote = 0
+			}
+			continue
+		}
+		if character == '\'' || character == '"' {
+			quote = character
+			builder.WriteRune(character)
+			continue
+		}
+		if character == ' ' || character == '\t' || character == '\r' || character == '\n' {
+			continue
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String()
 }
 
 // Preserve quoted text when comparing the dispatch selector. A space inside a
