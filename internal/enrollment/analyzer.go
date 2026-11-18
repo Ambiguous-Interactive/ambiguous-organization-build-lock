@@ -418,12 +418,11 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 		licensed = licensed || calledLicensed ||
 			selfHostedJob(calledJob) || unprovenRunnerJob(calledJob)
 	}
-	// A call the callee makes to another remote workflow proves nothing about
-	// the work behind it, so the outer call stays unresolved.
-	for _, finding := range called.findings {
-		if finding.Code == "unresolved-reusable-workflow" || finding.Code == "mutable-reusable-ref" {
-			return false, false
-		}
+	// Any finding in the callee means its work is not proven inert. That covers
+	// a nested remote call, a mutable reference, and an action path the callee
+	// snapshot cannot read.
+	if len(called.findings) > 0 {
+		return false, false
 	}
 	// A job that activates Unity through a third-party action holds no central
 	// acquire step, so the licensed verdict alone would call it inert. Any

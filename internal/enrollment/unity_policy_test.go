@@ -6756,6 +6756,15 @@ func TestUnityEnrollmentKeepsUnresolvedRemoteReusableWorkflowConservative(t *tes
 			),
 			nil,
 		)},
+		{"callee references another organization action", remoteReusableResolver(
+			strings.Replace(
+				remoteReusableSnapshot(),
+				"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+				"Ambiguous-Interactive/review-tools/.github/actions/review@"+testSHA,
+				1,
+			),
+			nil,
+		)},
 		{"caller forwards Unity credentials", remoteReusableResolver(remoteReusableSnapshot(), nil)},
 		{"caller inherits every secret", remoteReusableResolver(remoteReusableSnapshot(), nil)},
 	} {

@@ -121,6 +121,10 @@ Third review round:
 - Low: the record named a test that does not exist, and the evidence named no
   commit. Both are fixed.
 - Low: the doc now names the self-hosted and unproven-runner rule.
+- Major: a callee finding for an unreadable local action did not, by itself,
+  mark the verdict unproven. Any callee finding now leaves the caller
+  unresolved, which covers a local action, a nested call, and a mutable
+  reference.
 
 The 31 remote-call findings are gone. The remaining 22 are the 14 DxMessaging
 shape findings and the 8 expired policy exceptions.
