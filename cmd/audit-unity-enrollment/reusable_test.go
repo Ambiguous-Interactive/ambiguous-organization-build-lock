@@ -131,3 +131,22 @@ func TestRunResolvesNonLicensingRemoteReusableWorkflow(t *testing.T) {
 		t.Fatalf("resolved non-licensing call produced findings: %#v", audit.Findings)
 	}
 }
+
+func TestReusableWorkflowFetcherRefusesAHostChange(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(reusableWorkflowFixture))
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, target.URL+request.URL.Path, http.StatusFound)
+	}))
+	defer source.Close()
+	fetcher := newReusableWorkflowFetcher(source.URL)
+	if _, err := fetcher.resolve(
+		"Ambiguous-Interactive/review-tools",
+		".github/workflows/openai-review.yml",
+		reusableWorkflowCommit,
+	); err == nil {
+		t.Fatal("a redirect to another host was followed")
+	}
+}

@@ -2,6 +2,8 @@ package enrollment
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -6843,6 +6845,172 @@ func TestUnityEnrollmentRefusesMutableRemoteReusableWorkflow(t *testing.T) {
 	for _, code := range []string{"mutable-reusable-ref", "unresolved-reusable-workflow"} {
 		if !strings.Contains(codes, code) {
 			t.Fatalf("mutable remote call was not reported as %s: %#v", code, result.Findings)
+		}
+	}
+}
+
+// reusableWorkflowMap resolves callees by their exact workflow path.
+func reusableWorkflowMap(files map[string]string) ReusableWorkflowSource {
+	return func(_, workflowPath, _ string) ([]byte, error) {
+		content, ok := files[workflowPath]
+		if !ok {
+			return nil, errors.New("missing callee")
+		}
+		return []byte(content), nil
+	}
+}
+
+func TestUnityEnrollmentRefusesOpaqueSecretForwarding(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		extra  string
+		caller string
+	}{
+		{
+			name: "every secret as JSON",
+			caller: `    with:
+      all: ${{ toJSON(secrets) }}
+`,
+		},
+		{
+			name: "a renamed secret",
+			caller: `    secrets:
+      SERIAL: ${{ needs.plan.outputs.serial }}
+`,
+		},
+		{
+			name: "a dynamic secret index",
+			caller: `    secrets:
+      SERIAL: ${{ secrets[format('UNITY_{0}', 'SERIAL')] }}
+`,
+		},
+	} {
+		result := analyzeRemoteCall(
+			t,
+			remoteCallWorkflow(testSHA, testCase.caller),
+			remoteReusableResolver(remoteReusableSnapshot(), nil),
+		)
+		if !strings.Contains(findingCodes(result.Findings), "unresolved-reusable-workflow") {
+			t.Fatalf("%s: opaque forwarding was accepted: %#v", testCase.name, result.Findings)
+		}
+	}
+}
+
+func TestUnityEnrollmentResolvesANestedNonLicensingCall(t *testing.T) {
+	source := reusableWorkflowMap(map[string]string{
+		".github/workflows/openai-review.yml": `name: Review
+on:
+  workflow_call:
+jobs:
+  review:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/deep.yml@` + testSHA + `
+`,
+		".github/workflows/deep.yml": remoteReusableSnapshot(),
+	})
+	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), source)
+	if len(result.Findings) != 0 {
+		t.Fatalf("resolved nested non-licensing call produced findings: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentBoundsANestedCallChain(t *testing.T) {
+	files := make(map[string]string, maxReusableWorkflowDepth+2)
+	for level := 1; level <= maxReusableWorkflowDepth+1; level++ {
+		next := level + 1
+		files[fmt.Sprintf(".github/workflows/level%d.yml", level)] = `name: Level
+on:
+  workflow_call:
+jobs:
+  run:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/level` +
+			strconv.Itoa(next) + `.yml@` + testSHA + `
+`
+	}
+	files[fmt.Sprintf(".github/workflows/level%d.yml", maxReusableWorkflowDepth+2)] = remoteReusableSnapshot()
+	// The caller calls level1, which chains past the depth bound.
+	workflow := `name: Review
+on:
+  pull_request:
+jobs:
+  review:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/level1.yml@` + testSHA + `
+`
+	result := analyzeRemoteCall(t, workflow, reusableWorkflowMap(files))
+	if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
+		t.Fatalf("an unbounded call chain was accepted: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentKeepsCalleeFileNamesCaseSensitive(t *testing.T) {
+	source := reusableWorkflowMap(map[string]string{
+		".github/workflows/review.yml": remoteReusableSnapshot(),
+		".github/workflows/Review.yml": `name: Licensed
+on:
+  workflow_call:
+jobs:
+  licensed:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - uses: ` + lockActionPrefix + `acquire-build-lock@` + testSHA + `
+`,
+	})
+	workflow := `name: Review
+on:
+  pull_request:
+jobs:
+  a:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/review.yml@` + testSHA + `
+  b:
+    uses: Ambiguous-Interactive/review-tools/.github/workflows/Review.yml@` + testSHA + `
+`
+	result := analyzeRemoteCall(t, workflow, source)
+	codes := findingCodes(result.Findings)
+	if !strings.Contains(codes, "missing-licensed-steps:.github/workflows/review.yml:b") {
+		t.Fatalf("a licensing callee file name was folded into a non-licensing one: %#v", result.Findings)
+	}
+}
+
+func TestUnityEnrollmentTreatsOneLicensedCalleeJobAsPaid(t *testing.T) {
+	callee := `name: Mixed
+on:
+  workflow_call:
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 scripts/report.py
+  build:
+    runs-on: [self-hosted, Windows]
+    steps:
+      - uses: game-ci/unity-builder@` + testSHA + `
+`
+	result := analyzeRemoteCall(t, remoteCallWorkflow(testSHA, ""), remoteReusableResolver(callee, nil))
+	if !strings.Contains(findingCodes(result.Findings), "missing-licensed-steps") {
+		t.Fatalf("one licensed callee job did not make the caller paid: %#v", result.Findings)
+	}
+}
+
+func TestRemoteReusableTargetAcceptsOnlyAResolvableIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		target string
+		ok     bool
+	}{
+		{"Ambiguous-Interactive/review-tools/.github/workflows/openai-review.yml", true},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/openai-review.yaml", true},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/sub/review.yml", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/%2e%2e%2fevil.yml", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/review.json", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/.yml", false},
+		{"Ambiguous-Interactive/review-tools/.github/workflows/a b.yml", false},
+		{"review-tools/.github/workflows/review.yml", false},
+		{"Ambiguous-Interactive/review-tools/review.yml", false},
+	} {
+		repository, workflowPath, ok := remoteReusableTarget(testCase.target)
+		if ok != testCase.ok {
+			t.Fatalf("%q accepted=%v, want %v", testCase.target, ok, testCase.ok)
+		}
+		if ok && (repository == "" || workflowPath == "") {
+			t.Fatalf("%q resolved an empty identity", testCase.target)
 		}
 	}
 }

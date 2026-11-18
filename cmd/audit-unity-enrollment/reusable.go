@@ -28,18 +28,33 @@ type reusableWorkflowRead struct {
 
 // reusableWorkflowFetcher reads remote reusable workflows from their immutable
 // raw content. A read that fails is remembered, so one unreachable callee is
-// read once per audit instead of once per caller.
+// read once per audit instead of once per caller. The audit calls it from one
+// goroutine, so the cache needs no lock.
 type reusableWorkflowFetcher struct {
 	baseURL string
 	client  *http.Client
 	cache   map[string]reusableWorkflowRead
 }
 
+// maxReusableWorkflowRedirects bounds a redirect chain, which must also stay on
+// the reviewed host.
+const maxReusableWorkflowRedirects = 3
+
 func newReusableWorkflowFetcher(baseURL string) *reusableWorkflowFetcher {
 	return &reusableWorkflowFetcher{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
-		client:  &http.Client{Timeout: reusableWorkflowTimeout},
-		cache:   make(map[string]reusableWorkflowRead),
+		client: &http.Client{
+			Timeout: reusableWorkflowTimeout,
+			CheckRedirect: func(request *http.Request, via []*http.Request) error {
+				if len(via) >= maxReusableWorkflowRedirects ||
+					request.URL.Scheme != via[0].URL.Scheme ||
+					request.URL.Host != via[0].URL.Host {
+					return http.ErrUseLastResponse
+				}
+				return nil
+			},
+		},
+		cache: make(map[string]reusableWorkflowRead),
 	}
 }
 

@@ -167,6 +167,7 @@ type analyzer struct {
 	reusableSource     ReusableWorkflowSource
 	reusableMemo       map[string]bool
 	reusableVisiting   map[string]bool
+	reusableDepth      int
 	findings           []Finding
 	findingSet         map[string]bool
 }
@@ -289,17 +290,48 @@ func (a *analyzer) jobLicensed(workflowPath, jobName string) (bool, error) {
 	return licensed, nil
 }
 
+// maxReusableWorkflowDepth bounds how far one remote call may chain. A callee
+// that delegates again is read, but a chain past this depth proves nothing and
+// stays unresolved.
+const maxReusableWorkflowDepth = 4
+
 // okReusableCaller keeps a resolved call conservative when the caller hands
 // organization credentials to it. A remote reusable workflow can only receive
 // the values a caller maps into it, so a job that names no Unity or lock
-// credential has nothing of that kind to pass. `secrets: inherit` passes
-// everything, which no review of the callee here can bound.
+// credential has nothing of that kind to pass.
+//
+// The mapping must name each secret exactly. `secrets: inherit`, a JSON dump of
+// the secrets context, and a dynamic index each hand the callee more than this
+// review can bound.
 func okReusableCaller(job *yaml.Node) bool {
-	secrets := mappingValue(job, "secrets")
-	if secrets != nil && secrets.Kind == yaml.ScalarNode && secrets.Value == "inherit" {
+	text := strings.ToLower(nodeScalarText(job))
+	if containsUnityCredentialReference(text) || containsOpaqueSecretReference(text) {
 		return false
 	}
-	return !containsUnityCredentialReference(strings.ToLower(nodeScalarText(job)))
+	secrets := mappingValue(job, "secrets")
+	if secrets == nil {
+		return true
+	}
+	if secrets.Kind != yaml.MappingNode {
+		return false
+	}
+	for index := 0; index < len(secrets.Content); index += 2 {
+		name := strings.TrimSpace(secrets.Content[index].Value)
+		value := secrets.Content[index+1]
+		if name == "" || strings.ContainsAny(name, " \t\r\n{}[]'\"") ||
+			value.Kind != yaml.ScalarNode ||
+			!exactExpression(value, "secrets."+name) {
+			return false
+		}
+	}
+	return true
+}
+
+// containsOpaqueSecretReference reports a secret expression that names no exact
+// secret, so a reviewer cannot say which values the callee receives.
+func containsOpaqueSecretReference(text string) bool {
+	text = strings.ToLower(strings.Join(strings.Fields(text), ""))
+	return strings.Contains(text, "tojson(secrets)") || strings.Contains(text, "secrets[")
 }
 
 // reusableWorkflowLicensed reports whether the reusable workflow a caller pins
@@ -307,14 +339,16 @@ func okReusableCaller(job *yaml.Node) bool {
 // source at the exact pinned commit. Unproven calls stay unresolved so the
 // caller cannot pass without a cleanup path it does not own.
 func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
-	if a.reusableSource == nil {
+	if a.reusableSource == nil || a.reusableDepth >= maxReusableWorkflowDepth {
 		return false, false
 	}
 	repository, workflowPath, ok := remoteReusableTarget(target)
 	if !ok {
 		return false, false
 	}
-	key := strings.ToLower(repository + "@" + ref + "\x00" + workflowPath)
+	// A commit and a repository name ignore case. A workflow file name does not,
+	// so only those two fields fold.
+	key := strings.ToLower(repository+"@"+ref) + "\x00" + workflowPath
 	if licensed, memoized := a.reusableMemo[key]; memoized {
 		return licensed, true
 	}
@@ -346,6 +380,7 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 		reusableSource:   a.reusableSource,
 		reusableMemo:     a.reusableMemo,
 		reusableVisiting: a.reusableVisiting,
+		reusableDepth:    a.reusableDepth + 1,
 		findings:         make([]Finding, 0),
 		findingSet:       make(map[string]bool),
 	}
@@ -376,7 +411,8 @@ func (a *analyzer) reusableWorkflowLicensed(target, ref string) (bool, bool) {
 // remoteReusableTarget splits `owner/repo/.github/workflows/file.yml` into the
 // callee repository and its workflow path. GitHub resolves reusable workflows
 // only from that exact directory, so a deeper or re-normalized path proves no
-// identity the audit could read.
+// identity the audit could read. The file name is a plain YAML name: a
+// percent-encoded or quoted segment could reach a different path at a mirror.
 func remoteReusableTarget(target string) (string, string, bool) {
 	const marker = "/.github/workflows/"
 	at := strings.Index(target, marker)
@@ -389,16 +425,36 @@ func remoteReusableTarget(target string) (string, string, bool) {
 		return "", "", false
 	}
 	clean, err := cleanRepositoryPath(workflowPath)
-	if err != nil || clean != workflowPath || !isYAML(clean) ||
-		strings.Contains(
-			strings.TrimPrefix(workflowPath, ".github/workflows/"),
-			"/",
-		) {
+	if err != nil || clean != workflowPath ||
+		!validWorkflowFileName(strings.TrimPrefix(workflowPath, ".github/workflows/")) {
 		return "", "", false
 	}
 	return repository, workflowPath, true
 }
 
+// validWorkflowFileName accepts one reviewed workflow file name under
+// `.github/workflows/`: no directory separator, no percent encoding, and no
+// character GitHub does not accept in a workflow path.
+func validWorkflowFileName(value string) bool {
+	if value == "" || !isYAML(value) {
+		return false
+	}
+	stem := strings.TrimSuffix(value, path.Ext(value))
+	if stem == "" || strings.HasPrefix(stem, ".") {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' ||
+			character == '.' || character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// localActionPath maps a workspace-relative action path through a checkout of
 // this repository at a path prefix. GitHub resolves `./main/.github/...`
 // against that checkout, so the snapshot contains the same bytes one level
 // down. A checkout that names another repository is not evidence for this
