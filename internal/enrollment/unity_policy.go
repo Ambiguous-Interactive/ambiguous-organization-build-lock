@@ -329,6 +329,7 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 	}
 	sort.Strings(workflowPaths)
 
+	coveredLanes := make(map[string][]licensedLane)
 	for _, workflowPath := range workflowPaths {
 		workflow, err := base.node(workflowPath)
 		if err != nil {
@@ -432,7 +433,16 @@ func AnalyzeUnityEnrollment(snapshot Snapshot, policy UnityEnrollmentPolicy) (Un
 				)
 			}
 		}
+		a.auditLicensedLaneCoverage(
+			workflow,
+			workflowPath,
+			jobs,
+			preflightJobs,
+			protectedBranches,
+			coveredLanes,
+		)
 	}
+	a.auditDuplicateLaneContexts(coveredLanes)
 
 	// A repin exception is stale when its protected file is gone, and expired
 	// when its review window has closed. Both states make the entry an
@@ -960,6 +970,193 @@ func (a *unityPolicyAnalyzer) auditAcquireOrder(
 	if firstActivation >= 0 && (firstAcquire < 0 || firstAcquire >= firstActivation) {
 		a.analyzer.add("acquire-after-activation", workflowPath, jobName)
 	}
+}
+
+// auditLicensedLaneCoverage proves that every licensed lane of a workflow that
+// can reach a protected pull request or merge group is gated by a context the
+// reviewed merge policy requires. One exact-shape aggregate binds one licensed
+// lane, so a workflow may hold several lanes, each with its own aggregate and,
+// for the typed gate, its own fallback. The covered lanes return per context so
+// the caller can refuse two aggregate jobs that report one context, because one
+// context carries one verdict. The resolve repeats hasAggregate, which reads
+// only this snapshot and the approved pins, so it adds no dependency on the
+// order the jobs were audited in.
+func (a *unityPolicyAnalyzer) auditLicensedLaneCoverage(
+	workflow *yaml.Node,
+	workflowPath string,
+	jobs *yaml.Node,
+	preflightJobs map[string]bool,
+	protectedBranches map[string]bool,
+	lanes map[string][]licensedLane,
+) {
+	if len(a.requiredContexts) == 0 || !mergeGateReachable(workflow, protectedBranches) {
+		return
+	}
+	for index := 0; index < len(jobs.Content); index += 2 {
+		jobName := jobs.Content[index].Value
+		job := jobs.Content[index+1]
+		licensed, err := a.analyzer.jobLicensed(workflowPath, jobName)
+		if err != nil || !licensed {
+			continue
+		}
+		if jobExcludedFromEvents(mappingValue(job, "if"), map[string]bool{
+			"pull_request": true,
+			"merge_group":  true,
+		}) {
+			// This lane runs for no protected pull request or merge group, so
+			// it holds no merge gate.
+			continue
+		}
+		aggregateName, aggregateJob, ok := a.hasAggregate(
+			workflow,
+			workflowPath,
+			jobs,
+			jobName,
+			job,
+			preflightJobs,
+		)
+		if !ok || !conditionIsSafeAlways(mappingValue(aggregateJob, "if")) {
+			// A missing aggregate reports missing-unity-aggregate, and the
+			// reviewed historical readback shape omits the aggregate on
+			// purpose. Neither leaves an unproven context behind.
+			continue
+		}
+		context := reportedCheckContext(aggregateName, aggregateJob)
+		if context == "" {
+			// An expression or matrix name cannot prove which context this
+			// gate reports. The filtered-aggregate-gate rule already names it
+			// when the repository requires contexts.
+			continue
+		}
+		if !a.requiredContexts[context] {
+			a.analyzer.add("unrequired-licensed-aggregate", workflowPath, jobName)
+			continue
+		}
+		lanes[context] = append(lanes[context], licensedLane{
+			workflowPath: workflowPath,
+			job:          jobName,
+			aggregate:    aggregateName,
+		})
+	}
+}
+
+// licensedLane names the aggregate that gates one licensed lane.
+type licensedLane struct {
+	workflowPath string
+	job          string
+	aggregate    string
+}
+
+// auditDuplicateLaneContexts refuses a required context that two aggregate jobs
+// report. One aggregate job that enforces several lanes fails when any lane
+// fails, which is the reviewed shape. Two jobs share a verdict instead, so a
+// failed lane can hide behind the other job's pass.
+func (a *unityPolicyAnalyzer) auditDuplicateLaneContexts(lanes map[string][]licensedLane) {
+	for _, contextLanes := range lanes {
+		aggregates := make(map[string]bool, len(contextLanes))
+		for _, lane := range contextLanes {
+			aggregates[lane.workflowPath+"\x00"+lane.aggregate] = true
+		}
+		if len(aggregates) < 2 {
+			continue
+		}
+		for _, lane := range contextLanes {
+			a.analyzer.add("duplicate-licensed-aggregate-context", lane.workflowPath, lane.job)
+		}
+	}
+}
+
+// mergeGateReachable reports whether a pull request or merge group trigger of
+// this workflow can start for a protected branch. Only such a lane can fail a
+// required check, so only its context must be a required merge check. A
+// dispatch-, schedule-, or push-only lane publishes its own run verdict and
+// holds no merge gate. A pull request target run holds no licensed lane,
+// because the reviewed trigger shape says such a job is excluded. A malformed
+// trigger proves nothing, so it keeps the rule.
+func mergeGateReachable(workflow *yaml.Node, protectedBranches map[string]bool) bool {
+	configs, err := pullRequestEventConfigs(workflow)
+	if err != nil {
+		return true
+	}
+	for _, config := range configs {
+		switch config.name {
+		case "pull_request":
+			if config.config == nil || config.config.Kind != yaml.MappingNode {
+				return true
+			}
+			allow := mappingValue(config.config, "branches")
+			deny := mappingValue(config.config, "branches-ignore")
+			if (allow == nil && deny == nil) ||
+				triggerMayReachProtectedBranches(allow, deny, protectedBranches) {
+				return true
+			}
+		case "merge_group":
+			if mergeGroupTriggerEligible(config.config, protectedBranches) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// triggerMayReachProtectedBranches proves a pull request trigger can still start
+// for a protected branch. A pattern that is not a plain branch name can match
+// one, because the GitHub filter language reads `*`, `?`, `[]`, `{}`, and `+` as
+// operators. Only an allow list of exact unprotected names, or a deny list that
+// names every protected branch, proves the trigger cannot.
+func triggerMayReachProtectedBranches(
+	allow, deny *yaml.Node,
+	protectedBranches map[string]bool,
+) bool {
+	if allow != nil && deny != nil {
+		return true
+	}
+	if allow != nil {
+		patterns, err := scalarPatterns(allow)
+		if err != nil {
+			return true
+		}
+		for _, pattern := range patterns {
+			if protectedBranches[pattern] || !literalBranchName(pattern) {
+				return true
+			}
+		}
+		return false
+	}
+	patterns, err := scalarPatterns(deny)
+	if err != nil {
+		return true
+	}
+	remaining := make(map[string]bool, len(protectedBranches))
+	for branch := range protectedBranches {
+		remaining[branch] = true
+	}
+	for _, pattern := range patterns {
+		if !literalBranchName(pattern) {
+			return true
+		}
+		delete(remaining, pattern)
+	}
+	return len(remaining) > 0
+}
+
+// literalBranchName reports whether a branch filter entry is a plain branch
+// name, so an exact membership test covers it.
+func literalBranchName(pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+	for _, char := range pattern {
+		switch {
+		case char >= 'a' && char <= 'z',
+			char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9',
+			char == '-', char == '_', char == '.', char == '/':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // auditIndependentCoverage reports the preflight and aggregate verdicts. They
