@@ -612,6 +612,9 @@ report-build-lock:
         operation: status
 ```
 
+`Ambiguous-Interactive/DoxReloaded` runs this shape in `build-deploy.yml` as
+`report-build-lock`, pinned to v1.18.1. It is the first consumer to adopt it.
+
 `last-reaper-at` costs one Actions read of this repository. A caller token can
 read that history only when the token has Actions read on this repository, so a
 consumer token does not help: `status` then reads anonymously, and GitHub's
