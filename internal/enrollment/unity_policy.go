@@ -5244,7 +5244,6 @@ func (a *unityPolicyAnalyzer) hasAggregate(
 								licensedJobNode,
 								licensedJob,
 								preflight,
-								requiredPreflights,
 							)) ||
 						(always && a.typedValidationGateEnforces(
 							workflow,
@@ -6356,7 +6355,6 @@ func trustedSkipAggregateEnvironment(
 func selectedLaneAggregateEnforces(
 	workflow, job, step, licensedJobNode *yaml.Node,
 	licensedJob, preflightJob string,
-	requiredPreflights map[string]bool,
 ) bool {
 	steps := sequenceValues(mappingValue(job, "steps"))
 	if !conditionIsSafeAlways(mappingValue(job, "if")) ||
@@ -6371,32 +6369,17 @@ func selectedLaneAggregateEnforces(
 		return false
 	}
 	env := mappingValue(step, "env")
-	extras := map[string]bool{
-		"LANE_SELECTED":              true,
-		"SECONDARY_PREFLIGHT_RESULT": true,
-	}
-	secondary := mappingValue(env, "SECONDARY_PREFLIGHT_RESULT")
-	if secondary == nil {
-		if !trustedSkipAggregateEnvironment(env, licensedJob, preflightJob, extras) {
-			return false
-		}
-	} else {
-		primaryJob := needsResultReference(mappingValue(env, "RUNNER_PREFLIGHT_RESULT"))
-		secondaryJob := needsResultReference(secondary)
-		if primaryJob == "" || secondaryJob == "" || primaryJob == secondaryJob ||
-			!requiredPreflights[primaryJob] || secondaryJob == licensedJob ||
-			(primaryJob != preflightJob && secondaryJob != preflightJob) ||
-			!needsAny(job, map[string]bool{primaryJob: true}) ||
-			!needsAny(job, map[string]bool{secondaryJob: true}) ||
-			!trustedSkipAggregateEnvironment(env, licensedJob, primaryJob, extras) {
-			return false
-		}
-	}
-	if !selectionWithinLaneGuard(
-		mappingValue(env, "LANE_SELECTED"),
-		licensedJobNode,
-		job,
-	) {
+	if !trustedSkipAggregateEnvironment(
+		env,
+		licensedJob,
+		preflightJob,
+		map[string]bool{"LANE_SELECTED": true},
+	) ||
+		!selectionWithinLaneGuard(
+			mappingValue(env, "LANE_SELECTED"),
+			licensedJobNode,
+			job,
+		) {
 		return false
 	}
 	run := mappingValue(step, "run")
@@ -6424,27 +6407,6 @@ func selectedLaneAggregateEnforces(
 		`echo "LANE_SELECTED must be true or false." >&2`,
 		"false",
 		"fi",
-	}
-	if secondary != nil {
-		expected = []string{
-			"set -euo pipefail",
-			`if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then`,
-			`test "${RUNNER_PREFLIGHT_RESULT}" = skipped`,
-			`test "${SECONDARY_PREFLIGHT_RESULT}" = skipped`,
-			`test "${UNITY_TESTS_RESULT}" = skipped`,
-			`elif [ "${LANE_SELECTED}" = "true" ]; then`,
-			`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
-			`test "${SECONDARY_PREFLIGHT_RESULT}" = success`,
-			`test "${UNITY_TESTS_RESULT}" = success`,
-			`elif [ "${LANE_SELECTED}" = "false" ]; then`,
-			`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
-			`test "${SECONDARY_PREFLIGHT_RESULT}" = skipped`,
-			`test "${UNITY_TESTS_RESULT}" = skipped`,
-			"else",
-			`echo "LANE_SELECTED must be true or false." >&2`,
-			"false",
-			"fi",
-		}
 	}
 	if len(lines) != len(expected) {
 		return false

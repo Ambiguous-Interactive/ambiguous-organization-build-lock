@@ -2913,57 +2913,6 @@ func TestUnityEnrollmentAcceptsCallerSelectedLaneAggregate(t *testing.T) {
 	}
 }
 
-func TestUnityEnrollmentAcceptsSelectedLaneWithASecondPreflight(t *testing.T) {
-	aggregate := `  lane-gate:
-    if: ${{ always() }}
-    needs: [preflight, secondary-preflight, unity]
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        env:
-          RUNNER_PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          SECONDARY_PREFLIGHT_RESULT: ${{ needs.secondary-preflight.result }}
-          UNITY_TESTS_RESULT: ${{ needs.unity.result }}
-          LANE_SELECTED: ${{ inputs['run-lane'] == true }}
-          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-          DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' }}
-        run: |
-          set -euo pipefail
-          if [ "${FORK_PR}" = "true" ] || [ "${DEPENDABOT_PR}" = "true" ]; then
-            test "${RUNNER_PREFLIGHT_RESULT}" = skipped
-            test "${SECONDARY_PREFLIGHT_RESULT}" = skipped
-            test "${UNITY_TESTS_RESULT}" = skipped
-          elif [ "${LANE_SELECTED}" = "true" ]; then
-            test "${RUNNER_PREFLIGHT_RESULT}" = success
-            test "${SECONDARY_PREFLIGHT_RESULT}" = success
-            test "${UNITY_TESTS_RESULT}" = success
-          elif [ "${LANE_SELECTED}" = "false" ]; then
-            test "${RUNNER_PREFLIGHT_RESULT}" = success
-            test "${SECONDARY_PREFLIGHT_RESULT}" = skipped
-            test "${UNITY_TESTS_RESULT}" = skipped
-          else
-            echo "LANE_SELECTED must be true or false." >&2
-            false
-          fi
-`
-	workflow := dispatchLaneWorkflow(aggregate)
-	workflow = strings.Replace(
-		workflow,
-		"  unity:\n    needs: preflight\n",
-		"  secondary-preflight:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: "+preflightActionRef+"\n  unity:\n    needs: [preflight, secondary-preflight]\n",
-		1,
-	)
-	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
-		".github/workflows/dispatch.yml": workflow,
-	}), unityAuditPolicy())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Findings) != 0 {
-		t.Fatalf("second preflight produced findings: %#v", result.Findings)
-	}
-}
-
 func TestUnityEnrollmentAcceptsCallerSelectedLaneOffAnotherWorkflowEvent(t *testing.T) {
 	workflow := strings.Replace(
 		unityWorkflow(
