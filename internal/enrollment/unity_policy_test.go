@@ -2840,7 +2840,7 @@ func TestUnityEnrollmentRejectsTrustedSkipAggregateMutations(t *testing.T) {
 	}
 }
 
-func dispatchLaneWorkflow(licensedCondition, aggregate string) string {
+func dispatchLaneWorkflow(aggregate string) string {
 	return `name: Dispatch
 on:
   workflow_dispatch:
@@ -2858,7 +2858,7 @@ jobs:
       - uses: ` + preflightActionRef + `
   unity:
     needs: preflight
-    if: ` + licensedCondition + `
+    if: ${{ inputs['run-lane'] == true }}
     runs-on: [self-hosted, Windows]
     strategy:
       fail-fast: false
@@ -2891,6 +2891,7 @@ func selectedLaneAggregate(selection string) string {
             test "${UNITY_TESTS_RESULT}" = success
           elif [ "${LANE_SELECTED}" = "false" ]; then
             test "${RUNNER_PREFLIGHT_RESULT}" = success
+            test "${UNITY_TESTS_RESULT}" = skipped
           else
             echo "LANE_SELECTED must be true or false." >&2
             false
@@ -2901,7 +2902,6 @@ func selectedLaneAggregate(selection string) string {
 func TestUnityEnrollmentAcceptsCallerSelectedLaneAggregate(t *testing.T) {
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/dispatch.yml": dispatchLaneWorkflow(
-			"${{ inputs['run-lane'] == true }}",
 			selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
 		),
 	}), unityAuditPolicy())
@@ -3189,7 +3189,6 @@ func TestUnityEnrollmentRejectsCallerSelectedLaneAggregateMutations(t *testing.T
 		},
 	}
 	base := dispatchLaneWorkflow(
-		"${{ inputs['run-lane'] == true }}",
 		selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
 	)
 	for _, testCase := range tests {
@@ -3214,7 +3213,6 @@ func TestUnityEnrollmentRefusesARequiredCallerSelectedLaneContext(t *testing.T) 
 	}
 	result, err := AnalyzeUnityEnrollment(unityFixture(map[string]string{
 		".github/workflows/dispatch.yml": dispatchLaneWorkflow(
-			"${{ inputs['run-lane'] == true }}",
 			selectedLaneAggregate("${{ inputs['run-lane'] == true }}"),
 		),
 	}), policy)

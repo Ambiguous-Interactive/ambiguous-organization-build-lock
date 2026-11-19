@@ -6386,7 +6386,7 @@ func selectedLaneAggregateEnforces(
 	if run == nil || run.Kind != yaml.ScalarNode {
 		return false
 	}
-	lines := make([]string, 0, 13)
+	lines := make([]string, 0, 17)
 	for _, line := range strings.Split(run.Value, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			lines = append(lines, line)
@@ -6402,6 +6402,7 @@ func selectedLaneAggregateEnforces(
 		`test "${UNITY_TESTS_RESULT}" = success`,
 		`elif [ "${LANE_SELECTED}" = "false" ]; then`,
 		`test "${RUNNER_PREFLIGHT_RESULT}" = success`,
+		`test "${UNITY_TESTS_RESULT}" = skipped`,
 		"else",
 		`echo "LANE_SELECTED must be true or false." >&2`,
 		"false",
