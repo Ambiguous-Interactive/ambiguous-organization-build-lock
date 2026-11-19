@@ -26,8 +26,8 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 - Linter compatibility (#335): the pinned linter still fails to build against
   YAML v4.0.0, which no longer exports `yaml.ParserError`. Move the dependency
   only after a linter release supports the newer API.
-- Merge queue adoption (#379): v1.18.1 publishes an approved pin. Repin
-  DoxReloaded, add `merge_group`, and enable the queue after the owner
-  authorizes it.
-- Status adoption (#390): v1.18.1 publishes an approved pin. A consumer adopts
-  the reporting step outside every licensed job.
+- Merge queue adoption (#379): DoxReloaded already runs the queue, so each
+  entry runs the unlicensed gates only and a tree Unity never tested can merge.
+  The fix needs a required-context decision first: `merge-queue.yml` and
+  `build-deploy.yml` would both report `CI Success`. A licensed queue entry is
+  a new paid path, so the owner decides it.
