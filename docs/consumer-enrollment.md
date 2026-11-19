@@ -480,7 +480,9 @@ touches a Dependabot pull request.
    facts, so a freed seat with an unwritten lock record does not read like a
    held seat. The gate is the last step in the job. Redaction, artifact
    upload, and every other trailing step run before the central return,
-   because a step after the gate would make the reported state stale.
+   because a step after the gate would make the reported state stale. A moved
+   step that runs under `always()` also adds `!cancelled()`, so a cancelled run
+   reaches the return instead of spending its cancellation window on artifacts.
    Supplemental evidence is classified but
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
