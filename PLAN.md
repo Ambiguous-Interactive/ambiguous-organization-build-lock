@@ -6,8 +6,9 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
 
 - Credential scope (#51): the owner keeps both Apps installed org-wide. The
   remaining work is the org-secret repository scope and the permission probe.
-- Enrollment drift (#113): 11 DxMessaging shape findings and eight expired
-  unity-builder and unity-helpers exceptions remain.
+- Enrollment drift (#113): eight expired unity-builder and unity-helpers
+  exceptions await an owner re-review. DxMessaging#794 fixes the eleven
+  DxMessaging shape findings.
 - Seat attribution (#223): use Unity portal evidence to determine whether peer
   activation can invalidate an incumbent seat.
 - Shared-seat capacity (#83): prove independent returnable identities and both
@@ -30,6 +31,3 @@ Open work only. Maintenance rules: [task-driven development](.llm/skills/task-dr
   authorizes it.
 - Status adoption (#390): v1.18.1 publishes an approved pin. A consumer adopts
   the reporting step outside every licensed job.
-- Private callee reads (#408): the audit reads callee workflows anonymously.
-  Decide whether the reader App covers a private callee, or keep the reviewed
-  public-callee rule.
