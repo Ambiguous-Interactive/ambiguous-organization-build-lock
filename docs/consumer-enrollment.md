@@ -404,10 +404,13 @@ touches a Dependabot pull request.
    Its version must exactly match the central return version; the only dynamic
    form is the reviewed static `matrix.unity-version` axis used by both actions.
    The only permitted preceding step is the approved immutable, exact-input
-   current-PR-head guard. Workflow-, job-, and editor-action `env` mappings are
-   absent because inherited values can preload the Node runtime before the
-   immutable action begins. The optional current-head guard, editor action, and
-   acquire omit `if`, preserving GitHub's implicit `success()` chain;
+   current-PR-head guard, and that guard has a timeout of two minutes or less.
+   A lane with no current-head guard, such as a dispatch or schedule lane,
+   starts with the editor gate. Workflow-, job-, and editor-action `env`
+   mappings are absent because inherited values can preload the Node runtime
+   before the immutable action begins. The optional current-head guard, editor
+   action, and acquire omit `if`, preserving GitHub's implicit `success()`
+   chain;
    `always()` is prohibited on this prefix. Any `if` there is refused, because
    a conditional step cannot prove that chain; the guard reports current
    without an API call when no pull request is in scope, so a push or scheduled
@@ -475,7 +478,10 @@ touches a Dependabot pull request.
    `return-log-truncated` stays reserved for a completed read whose capture was
    incomplete. The final cleanup gate states the seat and the lock as separate
    facts, so a freed seat with an unwritten lock record does not read like a
-   held seat. Supplemental evidence is classified but
+   held seat. The gate is the last step in the job. Redaction, artifact
+   upload, and every other trailing step run before the central return,
+   because a step after the gate would make the reported state stale.
+   Supplemental evidence is classified but
    is not deletion-owned by the central classifier; its producer must retain a
    separately bounded stale-evidence policy without changing the terminal
    return/classifier/release/gate suffix.
@@ -795,7 +801,7 @@ edits.
 | `missing-runner-preflight` | Add the hosted registration preflight and make the licensed job depend on it. See item 2. |
 | `missing-typed-release` | Add the typed central release step. See item 7. |
 | `missing-unity-aggregate` | Emit the exact-shape hosted aggregate that covers the licensed job. See item 10 and the exact static shape note. |
-| `missing-unity-editor-check` | Invoke the pinned `ensure-unity-editor` action with the exact inputs in the reviewed prefix: in new or edited workflows only the current-PR-head guard may precede it. See item 3. |
+| `missing-unity-editor-check` | Invoke the pinned `ensure-unity-editor` action with the exact inputs in the reviewed prefix: in new or edited workflows only a current-PR-head guard with a timeout of two minutes or less may precede it. See item 3. |
 | `missing-unity-return` | Run the pinned central `return-unity-license` action. See item 7. |
 | `mutable-acquire-ref` | Pin acquire to a full 40-character commit SHA. |
 | `mutable-action-ref` | Pin every remote action to a reviewed full commit SHA. See item 1. |
@@ -818,7 +824,7 @@ edits.
 | `unrequired-licensed-aggregate` | Require the aggregate context that covers this licensed lane on the default branch. See item 10. |
 | `unresolved-reusable-workflow` | Pin a public reusable workflow at an immutable commit, keep no repository-local action inside it, and pass it no Unity or lock secret. See item 7. |
 | `unreviewed-unity-reference` | Complete the reviewed exception or authorization for the licensed reference. |
-| `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix. See item 7. |
+| `unsafe-central-return-suffix` | Keep the exact return, classifier, release, and gate suffix, and keep the gate as the last step. Move trailing redaction or upload steps before the return. See item 7. |
 | `unsafe-hosted-unity-runner` | Run licensed work on the self-hosted fleet with literal labels. See item 2. |
 | `unsafe-job-queue` | Remove the job concurrency group, or set literal `cancel-in-progress: true` on it. See item 11. |
 | `unsafe-job-container` | Run licensed work directly on the self-hosted runner, not in a container. See item 6. |
