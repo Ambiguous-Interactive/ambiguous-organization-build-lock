@@ -67,6 +67,10 @@ Central #417, merged at `9a0ccb59d5`:
 - The finding-code rows name both rules.
 - `/.policy-consumers/` is ignored, because it is a generated audit workspace.
 
+Issue #408 is closed with option 2: the audit keeps the anonymous public-callee
+read. Every enrolled caller is public today, and options 1 and 3 would change
+the trust boundary, so neither proceeds without an owner decision.
+
 DxMessaging #794, merged at `573dea2d8ca2`:
 
 - Three head guards move from three minutes to two.
