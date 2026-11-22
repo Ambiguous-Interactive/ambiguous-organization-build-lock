@@ -49,13 +49,18 @@ lock-aware perimeter. It retains this required baseline:
 - `Ambiguous-Interactive/unity-builder` <!-- enrollment-baseline -->
 - `Ambiguous-Interactive/unity-helpers` <!-- enrollment-baseline -->
 
+The registry also includes `Ambiguous-Interactive/DxTerminal` on `master`.
+Its reviewed context is `Unity CI Success`. Confirm the licensed canary and
+seat cleanup before enforcing this context on the consumer branch.
+
 Enrollment changes are reviewed policy changes, not automatic consequences of
 organization ownership. Run the secretless `Request Unity repository
 onboarding` workflow from `main`; its trusted consumer verifies the requested
 repository metadata and opens a registry-only pull request. Review the retained
-metadata evidence before merging. The continuous audit evaluates the new
-repository's workflows after the policy reaches `main` and reports any drift in
-the central issue. Follow [Consumer Enrollment](consumer-enrollment.md) for the
+metadata evidence, add the matching merge-policy expectation, and set the same
+required contexts in both files before merging. The continuous audit checks the
+new consumer after the policy reaches `main` and reports drift in the central
+issue. Follow [Consumer Enrollment](consumer-enrollment.md) for the
 consumer-side rollout.
 
 ## Continuous enrollment audit
