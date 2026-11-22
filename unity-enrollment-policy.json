@@ -82,7 +82,10 @@
       "defaultBranch": "master",
       "fork": false,
       "allowWorkflowDispatch": true,
-      "allowSchedule": true
+      "allowSchedule": true,
+      "requiredContexts": [
+        "Unity CI Success"
+      ]
     },
     {
       "repository": "Ambiguous-Interactive/IshoBoy",
