@@ -2,34 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxTerminal:45137740488:unity-tests:6000.5.2f1-package",
-    "repository": "Ambiguous-Interactive/DxTerminal",
-    "workflow": "Unity Tests",
+    "holderId": "Ambiguous-Interactive/unity-helpers:45129301448:unity-tests:6000.5.2f1",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Compatibility",
     "job": "unity-tests",
-    "runId": "45137740488",
+    "runId": "45129301448",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxTerminal/actions/runs/45137740488",
-    "queuedAt": "2026-11-23T08:20:34.658Z",
-    "acquiredAt": "2026-11-23T08:20:37.369Z",
-    "expiresAt": "2026-11-23T12:20:37.369Z",
-    "runnerId": "ELI-MACHINE",
-    "jobId": "137568181060"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/45129301448",
+    "queuedAt": "2026-11-23T08:21:13.535Z",
+    "acquiredAt": "2026-11-23T08:21:15.379Z",
+    "expiresAt": "2026-11-23T12:21:15.379Z",
+    "runnerId": "DAD-MACHINE",
+    "jobId": "137541104297"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxTerminal:45137740488:unity-tests:6000.5.2f1-package",
-      "repository": "Ambiguous-Interactive/DxTerminal",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "45137740488",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxTerminal/actions/runs/45137740488",
-      "queuedAt": "2026-11-23T08:20:34.658Z",
-      "acquiredAt": "2026-11-23T08:20:37.369Z",
-      "expiresAt": "2026-11-23T12:20:37.369Z",
-      "runnerId": "ELI-MACHINE",
-      "jobId": "137568181060"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:45129301448:unity-tests:6000.5.2f1",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -46,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "ca1362ab-3897-4cfd-9608-25120e1f19ea",
+      "holderId": "Ambiguous-Interactive/DxTerminal:45137740488:unity-tests:6000.5.2f1-package",
+      "repository": "Ambiguous-Interactive/DxTerminal",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "45137740488",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxTerminal/actions/runs/45137740488",
+      "runnerId": "ELI-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-11-23T08:22:03.607Z",
+      "availableAt": "2026-11-23T08:22:04.607Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-11-23T08:21:15.379Z"
+  "updatedAt": "2026-11-23T08:22:03.607Z"
 }
