@@ -2,32 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/IshoBoy:45335500806:build:isho-playtest",
-    "repository": "Ambiguous-Interactive/IshoBoy",
-    "workflow": "Playtest Build",
-    "job": "build",
-    "runId": "45335500806",
+    "holderId": "Ambiguous-Interactive/unity-helpers:45335167175:unity-tests:6000.6.0f1",
+    "repository": "Ambiguous-Interactive/unity-helpers",
+    "workflow": "Unity Tests",
+    "job": "unity-tests",
+    "runId": "45335167175",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/45335500806",
-    "queuedAt": "2026-11-24T05:46:16.646Z",
-    "acquiredAt": "2026-11-24T05:46:18.177Z",
-    "expiresAt": "2026-11-24T09:46:18.177Z",
-    "runnerId": "DAD-MACHINE"
+    "runUrl": "https://github.com/Ambiguous-Interactive/unity-helpers/actions/runs/45335167175",
+    "queuedAt": "2026-11-24T05:46:41.060Z",
+    "acquiredAt": "2026-11-24T05:46:42.630Z",
+    "expiresAt": "2026-11-24T09:46:42.630Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "138245589877"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/IshoBoy:45335500806:build:isho-playtest",
-      "repository": "Ambiguous-Interactive/IshoBoy",
-      "workflow": "Playtest Build",
-      "job": "build",
-      "runId": "45335500806",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/45335500806",
-      "queuedAt": "2026-11-24T05:46:16.646Z",
-      "acquiredAt": "2026-11-24T05:46:18.177Z",
-      "expiresAt": "2026-11-24T09:46:18.177Z",
-      "runnerId": "DAD-MACHINE"
-    },
     {
       "holderId": "Ambiguous-Interactive/unity-helpers:45335167175:unity-tests:6000.6.0f1",
       "repository": "Ambiguous-Interactive/unity-helpers",
@@ -44,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "f3540a59-b07a-42e2-963a-7083bbdf8272",
+      "holderId": "Ambiguous-Interactive/IshoBoy:45335500806:build:isho-playtest",
+      "repository": "Ambiguous-Interactive/IshoBoy",
+      "workflow": "Playtest Build",
+      "job": "build",
+      "runId": "45335500806",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/45335500806",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-11-24T05:48:24.225Z",
+      "availableAt": "2026-11-24T05:48:25.225Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-11-24T05:46:42.630Z"
+  "updatedAt": "2026-11-24T05:48:24.225Z"
 }
