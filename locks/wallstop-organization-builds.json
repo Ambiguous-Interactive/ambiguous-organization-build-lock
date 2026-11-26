@@ -2,34 +2,20 @@
   "schemaVersion": 5,
   "lock": "wallstop-organization-builds",
   "holder": {
-    "holderId": "Ambiguous-Interactive/DxAudio:45900585081:unity-tests:6000.5.2f1-editmode",
-    "repository": "Ambiguous-Interactive/DxAudio",
-    "workflow": "Unity Tests",
-    "job": "unity-tests",
-    "runId": "45900585081",
+    "holderId": "Ambiguous-Interactive/IshoBoy:45901887753:unity-validation:isho-ci",
+    "repository": "Ambiguous-Interactive/IshoBoy",
+    "workflow": "Unity CI Validation",
+    "job": "unity-validation",
+    "runId": "45901887753",
     "runAttempt": "1",
-    "runUrl": "https://github.com/Ambiguous-Interactive/DxAudio/actions/runs/45900585081",
-    "queuedAt": "2026-11-26T21:53:04.472Z",
-    "acquiredAt": "2026-11-26T21:53:07.036Z",
-    "expiresAt": "2026-11-27T01:53:07.036Z",
-    "runnerId": "DAD-MACHINE",
-    "jobId": "140185128826"
+    "runUrl": "https://github.com/Ambiguous-Interactive/IshoBoy/actions/runs/45901887753",
+    "queuedAt": "2026-11-26T22:03:59.036Z",
+    "acquiredAt": "2026-11-26T22:04:00.646Z",
+    "expiresAt": "2026-11-27T02:04:00.646Z",
+    "runnerId": "ELI-MACHINE",
+    "jobId": "140189541612"
   },
   "holders": [
-    {
-      "holderId": "Ambiguous-Interactive/DxAudio:45900585081:unity-tests:6000.5.2f1-editmode",
-      "repository": "Ambiguous-Interactive/DxAudio",
-      "workflow": "Unity Tests",
-      "job": "unity-tests",
-      "runId": "45900585081",
-      "runAttempt": "1",
-      "runUrl": "https://github.com/Ambiguous-Interactive/DxAudio/actions/runs/45900585081",
-      "queuedAt": "2026-11-26T21:53:04.472Z",
-      "acquiredAt": "2026-11-26T21:53:07.036Z",
-      "expiresAt": "2026-11-27T01:53:07.036Z",
-      "runnerId": "DAD-MACHINE",
-      "jobId": "140185128826"
-    },
     {
       "holderId": "Ambiguous-Interactive/IshoBoy:45901887753:unity-validation:isho-ci",
       "repository": "Ambiguous-Interactive/IshoBoy",
@@ -46,7 +32,23 @@
     }
   ],
   "queue": [],
-  "reservations": [],
+  "reservations": [
+    {
+      "reservationId": "4ea54e96-7ac3-4494-9b73-cffee0fa64ab",
+      "holderId": "Ambiguous-Interactive/DxAudio:45900585081:unity-tests:6000.5.2f1-editmode",
+      "repository": "Ambiguous-Interactive/DxAudio",
+      "workflow": "Unity Tests",
+      "job": "unity-tests",
+      "runId": "45900585081",
+      "runAttempt": "1",
+      "runUrl": "https://github.com/Ambiguous-Interactive/DxAudio/actions/runs/45900585081",
+      "runnerId": "DAD-MACHINE",
+      "state": "cooldown",
+      "reason": "cleanup-confirmed",
+      "createdAt": "2026-11-26T22:05:42.454Z",
+      "availableAt": "2026-11-26T22:05:43.454Z"
+    }
+  ],
   "activeIncident": null,
-  "updatedAt": "2026-11-26T22:04:00.647Z"
+  "updatedAt": "2026-11-26T22:05:42.454Z"
 }
